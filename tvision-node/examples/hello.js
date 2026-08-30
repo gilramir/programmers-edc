@@ -45,9 +45,9 @@ tv.run({
 
       // The original threw the answer away. We can do better -- this is the
       // whole point of the exercise: a TVision dialog result, in JavaScript.
-      tv.log('answer:', answer);
-      if (answer && answer !== 'cancel') {
-        tv.messageBox(`You said you feel ${answer}.`);
+      tv.log('answer:', answer.cmd);
+      if (answer.cmd && answer.cmd !== 'cancel') {
+        tv.messageBox(`You said you feel ${answer.cmd}.`);
       }
     }
   },

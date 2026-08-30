@@ -2,7 +2,7 @@
   "targets": [
     {
       "target_name": "tvision",
-      "sources": [ "src/tvnode.cc" ],
+      "sources": [ "src/app.cc", "src/views.cc" ],
       "include_dirs": [
         "<!@(node -p \"require('node-addon-api').include_dir\")",
         "../tvision/include"

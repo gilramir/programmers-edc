@@ -13,7 +13,7 @@ next to these directories.
 |---|---|---|
 | **0** | Does a Node addon built here load, and can it reach a system library? | done |
 | **1** | `hello.cpp` as a Node app, with the menus and dialog described in JS | done |
-| **2** | Something the size of `tvision/examples/`, on a non-blocking event pump | next |
+| **2** | A larger demo on a non-blocking event pump, with addressable views | done |
 | **3** | Gren on top, through ports | designed, not built |
 
 See [FINDINGS.md](FINDINGS.md) for what we learned doing it, including the
@@ -24,11 +24,15 @@ things that were not what we expected.
 ```
 devbox.json        node 22, gren, cmake, ncurses (with its dev output)
 m0-load-test/      milestone 0: a two-function addon that calls into ncursesw
-tvision-node/      milestone 1: the actual binding
-  src/tvnode.cc      the glue
+tvision-node/      the binding
+  src/tvnode.h       shared declarations, widgets, the id registry
   src/keys.h         "Alt-X" -> TVision key codes
-  examples/hello.js  hello.cpp, with the C++ moved to JS
-  test/drive.py      drives the TUI through a pty and asserts on the screen
+  src/app.cc         application, event pump, module entry
+  src/views.cc       widgets, the id registry, mutation
+  examples/hello.js  hello.cpp, with the C++ moved to JS (blocking)
+  examples/demo.js   a clock and a directory browser driven by Node (pumped)
+  test/harness.py    pty driver + a small terminal emulator
+  test/drive*.py     type at the app, assert on what it drew
 build-tvision/     libtvision.a, built PIC (generated)
 ```
 
@@ -40,8 +44,18 @@ toolchain that will load it (see FINDINGS.md).
 ```sh
 devbox run build    # libtvision.a (PIC) + the addon
 devbox run test     # pty-driven checks, no terminal needed
-devbox run hello    # the actual app, in your terminal
+devbox run hello    # milestone 1, in your terminal
+devbox run demo     # milestone 2, in your terminal
 ```
 
 In `hello`: `Alt-G` or the Hello menu opens the greeting, `Tab` moves between
-buttons, `Space` presses one (`Enter` does not — see FINDINGS), `Alt-X` quits.
+buttons, `Space` presses one, `Alt-X` quits.
+
+In `demo`: `Alt-C` opens a clock painted by `setInterval`, `Alt-D` a directory
+listing produced by `await fs.readdir()`; `Space` on an entry stats it
+asynchronously, `../` walks up. `Alt-G` opens a *modal* dialog — watch the
+clock stop dead while it is up, then start again when you dismiss it. That
+freeze is the honest limitation milestone 3 has to design around.
+
+`Enter` does not press buttons or select list items in Turbo Vision; `Space`
+does. See FINDINGS.

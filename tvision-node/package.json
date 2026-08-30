@@ -2,12 +2,13 @@
   "name": "tvision-node",
   "version": "0.0.1",
   "private": true,
-  "description": "Turbo Vision (magiblot/tvision) bound to Node through N-API. Experiment, milestone 1.",
+  "description": "Turbo Vision (magiblot/tvision) bound to Node through N-API. Experiment, milestones 1-2.",
   "main": "index.js",
   "scripts": {
     "build": "node-gyp rebuild",
     "hello": "node examples/hello.js",
-    "test": "python3 test/drive.py"
+    "demo": "node examples/demo.js",
+    "test": "python3 test/drive.py && python3 test/drive_demo.py"
   },
   "dependencies": {
     "node-addon-api": "^8.5.0"

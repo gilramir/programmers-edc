@@ -95,28 +95,82 @@ itself came from C++) → JS.
 The addon refuses to start when stdin/stdout are not a terminal, rather than
 scribbling escape codes into a pipe.
 
-## Still open, for milestone 2
+## Milestone 2 — the pump
 
-Milestone 1 is the **blocking** design: `tv.run()` calls
-`TApplication::run()` and Node's event loop is starved until the app quits. The
-pieces for the pumped version are all present and were checked before any of
-this was written:
+`tv.run()` is still there and still blocks. `tv.start()` + `tv.step()` is the
+pumped form, and everything predicted about it held:
 
-- `TProgram::eventTimeoutMs` (`include/tvision/app.h:296`) is a public static;
-  set it to `0` and `getEvent` stops blocking.
-- `TGroup::execute()` (`source/tvision/tgroup.cpp:173`) is four lines, and
-  `TGroup::endState` is public (`include/tvision/views.h:919`), so one iteration
-  can be hoisted into a `step()` driven by a libuv timer.
-- The repaint survives it: `THardwareInfo::waitForEvents` flushes the screen
-  *before* polling (`source/platform/hardware.cpp:105-113`), which is on the path
-  even at timeout 0.
-- `TEventQueue::wakeUp()` (`source/tvision/tevent.cpp:461`) exists for
-  cross-thread wakes, if the pump should become event-driven rather than timed.
+- `TProgram::eventTimeoutMs = 0` makes `getEvent` non-blocking.
+- One iteration of `TGroup::execute()` transplants cleanly, outer
+  `valid(endState)` loop included, because `endState` is public.
+- The display still repaints, because `THardwareInfo::waitForEvents` flushes
+  *before* polling and that is on the path even at timeout 0.
 
-The wart to design around: `execView` starts a *nested* blocking loop, so a modal
-dialog opened from a JS callback stalls Node until it is dismissed. Milestone 1
-does this and does not care. Milestone 3 cannot, which points at non-modal
-dialogs delivering their result by callback.
+The pump itself lives in `index.js`, in about fifteen lines: call `step()`, and
+if it handled anything come straight back via `setImmediate`, otherwise
+`setTimeout(…, 8)`. Busy under a paste or a held-down key, nearly free when
+idle. `step()` drains up to 64 events per call rather than one, or input would
+be rationed at the timer's rate.
+
+Node stays completely alive: the demo's clock is a plain `setInterval`, and its
+directory listing is `await fs.readdir()` writing back into a window. The test
+asserts both by watching the screen change on its own.
+
+### Modal dialogs freeze Node, and the test says so
+
+`execView` starts a *nested* `TGroup::execute()` inside TVision, which the pump
+knows nothing about. Open the demo's `File > Go to` and the clock stops dead
+until you dismiss it.
+
+This is asserted rather than hidden — `drive_demo.py` checks that the tick
+counter does *not* move while the dialog is up, and does move again afterwards.
+If milestone 3 makes dialogs non-modal, that check fails loudly and tells the
+next person the constraint is gone.
+
+### Ids, and the dangling pointer they invite
+
+Views are addressable by string id (`setText`, `setItems`, `getValue`,
+`setValue`, `focus`, `close`, `exists`) because milestone 3 needs to patch a
+tree in place. The hazard is obvious in hindsight: TVision destroys a window's
+children along with it, and the user can close a window from its frame without
+telling anyone. `JsWindow::~JsWindow` is the single place that catches every
+one of those paths, and it drops the window and every id inside it. `exists()`
+is therefore a normal thing to call, not a paranoid one — an `await` is more
+than long enough for a window to disappear.
+
+### Two bugs worth remembering
+
+**A `std::initializer_list` returned from a lambda is a dangling pointer.** The
+first version of the dispatch helper built its arguments in a lambda returning
+`std::initializer_list<napi_value>`; the backing array dies at the return, and
+the addon segfaulted the moment a menu item was chosen. The tests caught it
+immediately; a `std::vector` fixed it.
+
+**A handle scope per dispatch is not optional under `run()`.** Because the
+blocking form never returns to Node, every string handed to a JS callback would
+otherwise accumulate for the entire life of the application. `Napi::HandleScope`
+in the dispatch functions bounds it.
+
+### `Enter` is not the key you think it is, twice
+
+`TListViewer` selects on **Space**, not Enter (`tlstview.cpp`) — Enter is not in
+its key switch at all. Exactly the same shape as the `TButton` surprise from
+milestone 1. In Turbo Vision, Enter means "the default action of this dialog",
+never "activate what is focused".
+
+### Testing needed a terminal emulator
+
+The pty harness originally grepped the whole output stream for text. That works
+for "did this window ever appear" and is useless for "what does this counter say
+now", because **TVision repaints only the cells that changed** — a counter going
+from 11 to 12 emits a cursor move and two digits, and a naive scrape still sees
+`ticks: 1`. Worse, it produces convincing lies: unchanged spaces are skipped, so
+`10 entries, read while the UI ran` arrives as `10 entries,readwhiletheUIran`.
+
+`test/harness.py` now keeps an 80x25 grid and replays the stream through a
+small emulator (cursor addressing, relative moves, erases; escape sequences
+parsed just well enough to skip). `app.screen()` is history, `app.render()` is
+the screen. The checks that matter use `render()`.
 
 ## Milestone 3 — Gren, from reading the compiler output
 
@@ -139,8 +193,13 @@ JS diffs it against the previous tree and makes imperative addon calls; events
 come back over an incoming port as messages. Gren never calls C++ synchronously,
 so the blocking-loop problem disappears entirely.
 
-**This is a constraint on milestone 2**: views need stable string ids and
-in-place mutation (`setText(id, ...)`), not just construction. If the API can
-only create-and-forget, the diff layer has to tear down and rebuild windows on
-every model change, which will fight TVision's retained focus and keyboard
-state. Cheap now, expensive later.
+**This was the constraint on milestone 2**, and it is now satisfied: views have
+stable string ids and mutate in place, so a diff layer can patch rather than
+rebuild.
+
+What is left in the way is modality. `tv.dialog()` blocks Node, which a
+port-based Gren app cannot tolerate — a `Cmd` that never returns to the runtime
+is a deadlock, not a dialog. Milestone 3 needs dialogs inserted non-modally
+with their result delivered as a message, which the `JsWindow` non-modal path
+already supports; what is missing is a `dialog()` that does not call
+`execView`.

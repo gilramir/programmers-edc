@@ -28,8 +28,11 @@
       "hello": [
         "cd tvision-node && node examples/hello.js"
       ],
+      "demo": [
+        "cd tvision-node && node examples/demo.js"
+      ],
       "test": [
-        "cd tvision-node && python3 test/drive.py"
+        "cd tvision-node && python3 test/drive.py && python3 test/drive_demo.py"
       ]
     }
   }
