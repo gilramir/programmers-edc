@@ -7,8 +7,10 @@ omits a branch, or the patcher ignores a type, and the widget silently does not
 appear or silently stops updating. Nothing in any one language can catch that,
 so this walks all four and compares them.
 
-It also checks the event names in both directions, the callbacks the runtime
-hands the binding, and the protocol version on both sides of the port.
+It also checks the event names in both directions, the messages the port
+carries in both directions, the callbacks the runtime hands the binding, the
+binding's exported surface against the part of it the protocol can reach, and
+the protocol version on both sides.
 
 Exits non-zero on a mismatch. Types the binding supports but the Gren API does
 not expose yet are reported as coverage, not as errors -- that list is the
@@ -119,7 +121,36 @@ def js_event_kinds(src):
 
 
 def gren_outbound_kinds(src):
-    return set(re.findall(r'"type", value = Encode\.string "(\w+)"', src)) - {"render"} | {"render"}
+    """{kind: True} for every message a `ports.toJs` call site can send.
+
+    Anchored on the call site rather than on the string literal: every view in
+    `encodeView` also has a `"type"` key, and a list that mixed the two would
+    have to be pruned by hand -- which is how `doubleClickDelay` stayed out of
+    this check for four protocol versions. The kind is the first `"type"` key
+    inside the message object, so a site that has none is reported rather than
+    skipped.
+    """
+    kinds = set()
+    blind = 0
+    for site in re.finditer(r"ports\.toJs\b", src):
+        tail = src[site.end():site.end() + 400]
+        kind = re.search(r'\{ key = "type", value = Encode\.string "(\w+)" \}', tail)
+        if kind:
+            kinds.add(kind.group(1))
+        else:
+            blind += 1
+    return kinds, blind
+
+
+def js_binding_exports(src):
+    """The names `require('tvision-node')` hands out."""
+    block = re.search(r"module\.exports = \{(.*?)\n\};", src, re.S)
+    return set(re.findall(r"^  (\w+)[,:]", block.group(1), re.M)) if block else set()
+
+
+def js_binding_calls(src):
+    """The binding functions the Gren runtime actually calls."""
+    return set(re.findall(r"\btv\.(\w+)\(", src))
 
 
 def js_outbound_kinds(src):
@@ -187,11 +218,38 @@ def main():
     for kind in gren_events - js_events:
         notes.append(f"Tui decodes event '{kind}' that the runtime never sends")
 
-    # 6. Outbound messages.
-    gren_out = gren_outbound_kinds(tui_gren) & {"render", "dialog", "quit", "setEnabled"}
+    # 6. Outbound messages, both directions.
+    gren_out, blind_sites = gren_outbound_kinds(tui_gren)
     js_out = js_outbound_kinds(tui_js)
+    require(gren_out, "could not find any ports.toJs call site in Tui.gren")
+    require(not blind_sites,
+            f"{blind_sites} ports.toJs call site(s) in Tui.gren send a message whose "
+            f"`type` this file cannot read -- it is sending something unchecked")
     for kind in gren_out - js_out:
-        problems.append(f"Tui sends '{kind}' but the runtime's switch ignores it")
+        problems.append(f"Tui sends '{kind}' but the runtime's switch ignores it "
+                        f"-- it falls through `default` and nothing happens")
+    for kind in js_out - gren_out:
+        notes.append(f"the runtime handles message '{kind}' that Tui never sends")
+
+    # 6b. The protocol is the only way into the binding, so an exported
+    #     function no message reaches is a capability no Gren program can use.
+    #     This is the check that was missing: #10 below compares *view types*,
+    #     and nothing compared the twenty functions index.js exports against
+    #     the handful the runtime calls. screenSize() and focus() sat there,
+    #     implemented and unreachable, across eleven examples and four
+    #     protocol versions, and every layer was individually consistent.
+    exported = js_binding_exports(index_js)
+    called = js_binding_calls(tui_js) | js_binding_calls(diff_js)
+    require(exported, "could not find module.exports in tvision-node/index.js")
+    require(called, "could not find any tv.* call in the runtime")
+    # `log` is for the runtime's own debugging -- the terminal belongs to
+    # TVision, so console.log() draws garbage -- and is not a Gren capability.
+    for name in sorted(called - exported):
+        problems.append(f"the runtime calls tv.{name}(), which index.js does not "
+                        f"export -- it would throw the first time it ran")
+    for name in sorted(exported - called - {"log"}):
+        notes.append(f"the binding exports {name}(), and no message in the protocol "
+                     f"reaches it -- no Gren program can ask for it")
 
     # 7. Callbacks. A name the binding does not know is not an error anywhere:
     #    the addon ignores the extra key, the event simply never arrives, and

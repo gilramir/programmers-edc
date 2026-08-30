@@ -1404,3 +1404,63 @@ validators together with the cluster state they need, `TMultiCheckBoxes`, and
 a view on the application. `examples/README.md` has each with what it would
 take, and — as usefully — a list of the five things that look like gaps and are
 not.
+
+## Teaching the checker to see the protocol
+
+### The gap-finder had a gap, and it found a fifth thing on the first run
+
+The previous section ends by naming the reason `screenSize` and `focus` stayed
+invisible: `check_consistency.py` compares *view types* across the four layers
+and nothing compared the binding's exported functions against the messages the
+protocol can carry. Writing that check took twenty lines and immediately
+reported one more than the two it was written to catch.
+
+The check is the whole protocol boundary stated once: the port is the only way
+into the binding, so a function `index.js` exports that no runtime call site
+reaches is a capability no Gren program can use, however finished it is on both
+sides of it. Four names came back:
+
+  - `focus()` and `screenSize()` — gaps (3) and (1), already written up;
+  - `messageBox()` — gap (5), already written up;
+  - **`getValue()`, which was not on the list at all.**
+
+`getValue(id)` returns the text of a live input line, the highlighted row of a
+list box, the bits of a check box cluster or the selected radio button
+(`views.cc:683`) — from an *ordinary window*, not a dialog. Gap (8) says values
+are collected when a dialog is answered and at no other moment, "so a check box
+ticked in an ordinary window is invisible until something asks", and files that
+under things the API cannot do. It can. The C++ has been able to answer that
+question since the clusters were wrapped; there has never been a way to put it.
+The gap is one message wide, not a feature.
+
+That is the second time in this project that the thing worth having was the
+statement of an invariant rather than the fix: the built-in command names
+(above) were the first. Both are the same shape — two lists that must agree,
+in two languages, with nothing but silence when they don't.
+
+### The check that was there was checking four of five messages
+
+Check 6 compares the messages Gren sends against the `switch` that receives
+them, and it had a hardcoded whitelist:
+
+```python
+gren_out = gren_outbound_kinds(tui_gren) & {"render", "dialog", "quit", "setEnabled"}
+```
+
+The whitelist was there for a real reason. `gren_outbound_kinds` searched the
+file for `"type", value = Encode.string "..."`, and every branch of
+`encodeView` has one of those, so the raw list was thirteen view types plus
+five messages and had to be pruned. Pruning it by hand meant the check silently
+stopped covering `doubleClickDelay` the moment protocol 4 added it — four
+protocol versions ago, and nothing said so, because a whitelist that is missing
+an entry checks fewer things and still passes.
+
+Anchoring the extractor on the `ports.toJs` call site instead of on the string
+literal removes the need for the list: there are five call sites, the message
+kind is the first `"type"` key in each, and a site whose kind cannot be read is
+now a failure rather than a silent omission. The reverse direction is a note —
+a `case` the runtime handles that Gren never sends is dead code, not a bug.
+
+Both halves of this are the same lesson, and it is the one that keeps
+recurring here: a consistency check that enumerates what to look at will drift
+out of date exactly as quietly as the thing it is checking. Derive the list.

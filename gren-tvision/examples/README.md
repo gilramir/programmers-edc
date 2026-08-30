@@ -436,6 +436,12 @@ excludes `evMouseWheel` (`views.h`), so a wheel event goes to whatever has
 Ten, in the order I would attack them. Each says what it would take, because
 "not done", "not decided" and "not needed" are three different problems.
 
+Four of them are now reported by `tools/check_consistency.py` on every run,
+which is where the fourth came from: the port is the only way into the binding,
+so an exported function no runtime call site reaches is a capability no Gren
+program can use. It names `focus`, `screenSize`, `messageBox` and `getValue`.
+When a gap below is closed, its note disappears on its own.
+
 The first two are one design with two symptoms, and they are the only gaps on
 this list that touch *every* program written with the API rather than one kind
 of program.
@@ -528,6 +534,18 @@ data entry happens in modal forms — so it has not been in the way, but it is
 the same hole the `Focused` event filled for list boxes. Fill it once, in both
 directions, and validation becomes something the model does with the value it
 now has.
+
+**The read half of that is smaller than it looks, and this paragraph used to
+have it wrong.** `tv.getValue(id)` already returns the text of a live input
+line, the highlighted row of a list box, the bits of a check box cluster or the
+selected radio button (`views.cc:683`), from an ordinary window and not a
+dialog. It has never been reachable: like `screenSize` and `focus`, there is no
+message that carries it. So "the model cannot see a check box that was ticked"
+is one message wide, not a feature — and the design question that remains is
+only whether the model *asks* (a query, which this protocol has never had) or
+is *told* (a `Changed` event, which is the shape `Focused` already set). The
+keystroke-level half — what a validator needs — is the part that is genuinely
+missing.
 
 **9. `TMultiCheckBoxes`.** A cluster whose items have more than two states.
 Small, rarely wanted, and a hole in an area the API otherwise covers
