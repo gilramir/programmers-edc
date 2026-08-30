@@ -1,0 +1,264 @@
+port module Main exposing (main)
+
+{-| tvision's palette example (`tvision/examples/palette`), in Gren -- and the
+one port where the original's whole subject disappears in translation.
+
+`palette.cpp` is an essay on how a Turbo Vision view gets its colours. A view
+asks for colour *1*; its own palette turns that into an index into the window's
+palette; the window's palette turns that into an index into the application's;
+the application's palette holds the byte the terminal finally receives. Three
+layers of indirection, three parallel palettes for colour, black-and-white and
+monochrome displays, and a comment explaining that the strings are `#define`s
+so that the compiler will concatenate them.
+
+    #define cpTestView   "\x9\xA\xB\xC\xD\xE"
+    #define cpTestWindow "\x88\x89\x8A\x8B\x8C\x8D"
+    #define cpTestAppC   "\x3E\x2D\x72\x5F\x68\x4E"
+
+The six lines below are what those three lines resolve to. In Gren a
+[`Span`](Tui#Span) names its colour and there is nothing in between, so the
+essay becomes a table -- and the original's last line, the one whose comment
+says it "bypasses the palettes", is now indistinguishable from the six above
+it, because there are no palettes to bypass.
+
+That is a real trade and it is worth being clear about which way it goes. The
+indirection existed so that one edit to the application's palette could restyle
+every view in the program at once; say the colour and you give that up. What
+you get back is that the colour is in the model, where the same `if` that
+decides *what* to draw can decide what colour to draw it -- which is how the
+calendar marks today and the puzzle shows a tile out of place, and neither of
+those is a palette question.
+
+The window at the bottom is the middle road: spans that name no colour follow
+whatever the window's palette gives them, which is still how nearly every
+canvas in these examples paints.
+
+-}
+
+import Array exposing (Array)
+import Init
+import Json.Decode as Decode
+import Json.Encode as Encode
+import Node
+import String
+import Tui exposing (Event(..), Hue(..), MenuItem(..), View(..))
+
+
+-- PORTS
+
+
+port tuiOut : Encode.Value -> Cmd msg
+
+
+port tuiIn : (Decode.Value -> msg) -> Sub msg
+
+
+tui : Tui.Ports Msg
+tui =
+    { toJs = tuiOut, fromJs = tuiIn }
+
+
+-- MODEL
+
+
+type alias Model =
+    { showing : Bool
+    , showingPlain : Bool
+    }
+
+
+type Msg
+    = FromTui Event
+
+
+init : Node.Environment -> Init.Task { model : Model, command : Cmd Msg }
+init _ =
+    Node.startProgram
+        { model = { showing = True, showingPlain = True }, command = Cmd.none }
+
+
+-- THE COLOURS
+--
+-- What the three palettes in palette.cpp add up to, byte for byte. The C++
+-- reaches these through cpTestView -> cpTestWindow -> cpTestAppC; here they
+-- are just the answer.
+
+
+type alias Entry =
+    { index : String, attr : String, fg : Hue, bg : Hue }
+
+
+entries : Array Entry
+entries =
+    [ { index = "01", attr = "3E", fg = Yellow, bg = Cyan }
+    , { index = "02", attr = "2D", fg = LightMagenta, bg = Green }
+    , { index = "03", attr = "72", fg = Green, bg = LightGray }
+    , { index = "04", attr = "5F", fg = White, bg = Magenta }
+    , { index = "05", attr = "68", fg = DarkGray, bg = Brown }
+    , { index = "06", attr = "4E", fg = Yellow, bg = Red }
+    ]
+
+
+-- UPDATE
+
+
+update : Msg -> Model -> { model : Model, command : Cmd Msg }
+update msg model =
+    when msg is
+        FromTui (Command "about") ->
+            { model = model, command = Tui.dialog tui aboutDialog }
+
+        FromTui (Command "palette") ->
+            { model = { model | showing = True, showingPlain = True }, command = Cmd.none }
+
+        FromTui (WindowClosed "paletteWin") ->
+            { model = { model | showing = False }, command = Cmd.none }
+
+        FromTui (WindowClosed "plainWin") ->
+            { model = { model | showingPlain = False }, command = Cmd.none }
+
+        FromTui _ ->
+            { model = model, command = Cmd.none }
+
+
+{-| The original's About box, which is a `TStaticText` full of `\003` centring
+markers and a default OK button.
+-}
+aboutDialog : Tui.DialogSpec
+aboutDialog =
+    { id = "about"
+    , title = "About"
+    , rect = { x1 = 16, y1 = 5, x2 = 63, y2 = 18 }
+    , views =
+        [ Tui.StaticText
+            { id = "aboutText"
+            , rect = { x1 = 2, y1 = 1, x2 = 45, y2 = 9 }
+            , text = "\n\u{0003}PALETTE EXAMPLE\n \n\u{0003}A Turbo Vision Demo\n \n\u{0003}written by\n \n\u{0003}Borland C++ Tech Support\n"
+            }
+        , Tui.Button
+            { id = "aboutOk"
+            , rect = { x1 = 18, y1 = 10, x2 = 29, y2 = 12 }
+            , title = "OK"
+            , cmd = "ok"
+            , isDefault = True
+            , takesFocus = True
+            }
+        ]
+    }
+
+
+-- VIEW
+
+
+view : Model -> Tui.Ui
+view model =
+    { menuBar =
+        [ SubMenu
+            { title = "~P~alette"
+            , key = "Alt-P"
+            , items =
+                [ Item { title = "~A~bout...", cmd = "about", key = "Alt-A", shortcut = "Alt-A" }
+                , Item { title = "~P~alette", cmd = "palette", key = "Alt-P", shortcut = "Alt-P" }
+                , Tui.Separator
+                , Item { title = "E~x~it", cmd = "quit", key = "Alt-X", shortcut = "Alt-X" }
+                ]
+            }
+        ]
+    , statusLine =
+        [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
+        , { text = "~Alt-P~ Palette", key = "Alt-P", cmd = "palette" }
+        , { text = "", key = "F10", cmd = "menu" }
+        ]
+    , windows =
+        (if model.showing then
+            [ paletteWindow ]
+
+         else
+            []
+        )
+            ++ (if model.showingPlain then
+                    [ plainWindow ]
+
+                else
+                    []
+               )
+    }
+
+
+{-| The original's window, 42 by 11, one line per palette entry.
+-}
+paletteWindow : Tui.Window
+paletteWindow =
+    { id = "paletteWin"
+    , title = "Colours, said out loud"
+    , rect = { x1 = 4, y1 = 1, x2 = 46, y2 = 12 }
+    , views =
+        [ Canvas
+            { id = "colours"
+            , rect = { x1 = 2, y1 = 1, x2 = 40, y2 = 9 }
+            , lines = Array.map entryLine entries ++ [ bypass ]
+            , cursor = Nothing
+            }
+        ]
+    }
+
+
+entryLine : Entry -> Array Tui.Span
+entryLine entry =
+    [ Tui.ink entry.fg
+        (" This line uses index "
+            ++ entry.index
+            ++ ", colour is "
+            ++ entry.attr
+            ++ " "
+        )
+        |> Tui.on entry.bg
+    ]
+
+
+{-| `palette.cpp`'s last line writes attribute 5 -- magenta on black --
+straight into the draw buffer, and its comment says it "bypasses the palettes".
+Here every line does.
+-}
+bypass : Array Tui.Span
+bypass =
+    [ Tui.ink Magenta "   This line bypasses the palettes!    " |> Tui.on Black ]
+
+
+{-| ...and this is what a canvas looks like when it says nothing about colour:
+it takes the window's, which is what you want everywhere the colour is not the
+point.
+-}
+plainWindow : Tui.Window
+plainWindow =
+    { id = "plainWin"
+    , title = "Saying nothing"
+    , rect = { x1 = 4, y1 = 13, x2 = 46, y2 = 18 }
+    , views =
+        [ Canvas
+            { id = "plain"
+            , rect = { x1 = 2, y1 = 1, x2 = 40, y2 = 4 }
+            , lines =
+                Array.map Tui.line
+                    [ " A span that names no colour follows"
+                    , " the window, which is how a canvas keeps"
+                    , " looking like the rest of the program."
+                    ]
+            , cursor = Nothing
+            }
+        ]
+    }
+
+
+-- PROGRAM
+
+
+main : Tui.Program Model Msg
+main =
+    Tui.defineProgram tui
+        { init = init
+        , update = update
+        , subscriptions = \_ -> Sub.none
+        , view = view
+        , onEvent = FromTui
+        }

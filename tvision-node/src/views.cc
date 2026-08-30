@@ -362,8 +362,17 @@ TView *buildItems(const Napi::Env &env, JsWindow *win, const Napi::Value &value,
             {
             ushort cmd = g_commands.intern(getString(it, "cmd", "cancel"));
             ushort flags = getBool(it, "default") ? bfDefault : bfNormal;
-            made = new TButton(getRect(env, it, "button"),
-                               getString(it, "title").c_str(), cmd, flags);
+            TButton *button = new TButton(getRect(env, it, "button"),
+                                          getString(it, "title").c_str(), cmd,
+                                          flags);
+            // A keypad -- tvdemo's calculator, a toolbar -- wants buttons that
+            // can be pressed but never hold the caret, because something else
+            // in the window is reading the keyboard. That is exactly what the
+            // C++ calculator does to its twenty buttons, and clearing
+            // ofSelectable is how.
+            if (!getBool(it, "focusable", true))
+                button->options &= ~ofSelectable;
+            made = button;
             }
         else if (type == "inputLine")
             {

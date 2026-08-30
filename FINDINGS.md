@@ -837,3 +837,66 @@ the square, so a tile carries its colour as it slides. The checkerboard is
 therefore a picture of how scrambled the board is, and a solved board drops
 back to one colour -- which is the only announcement `puzzle.cpp` makes that
 you have won, and the thing the test asserts to prove it did.
+
+### Porting the calculator: a button that cannot be focused
+
+`TCalculator`'s constructor makes twenty buttons and then, for every one of
+them, says
+
+    tv->options &= ~ofSelectable;
+
+There is no comment. The reason is two lines further down: the window's other
+child is `TCalcDisplay`, a `TView` that reads the keyboard, and a keypad whose
+buttons could take focus would eat every digit typed at it -- `7` would move
+the caret to the button captioned 7 rather than reaching the display.
+
+`Button` therefore grew `takesFocus`, which is the first field added to the
+Gren API for a reason that is invisible until you try to use two kinds of input
+in one window. It is not a calculator-shaped need: a toolbar wants it, and so
+does anything where the window has a canvas doing the reading.
+
+The display itself is a canvas, which is why it can be selectable, and it is
+painted green on black -- the original uses palette entry 1, and this is the
+first place where saying the colour outright is simply nicer than looking it
+up.
+
+`calcKey()` transcribes almost exactly. The one place it does not is
+`setDisplay`, which formats a `double` with `ostrstream`'s default six
+significant digits; Gren's `String.fromFloat` is not that, so the port shows
+integers as integers and falls back to `fromFloat` otherwise. The rest --
+including the detail that an operator key *finishes the pending operation
+before recording itself*, which is what makes `2 + 3 + 4 =` come out as 9 --
+is the original's state machine unchanged.
+
+### Porting the palette example: the subject does not survive translation
+
+`tvision/examples/palette` is an essay about how a view gets its colour. A view
+asks for colour 1; its palette turns that into an index into the window's
+palette; the window's turns that into an index into the application's; the
+application's holds the byte the terminal receives. Three levels, three
+parallel palettes for colour, black-and-white and monochrome displays, and a
+comment explaining that the tables are `#define`s so the compiler will
+concatenate them.
+
+    #define cpTestView   "\x9\xA\xB\xC\xD\xE"
+    #define cpTestWindow "\x88\x89\x8A\x8B\x8C\x8D"
+    #define cpTestAppC   "\x3E\x2D\x72\x5F\x68\x4E"
+
+In Gren a span names its colour and there is nothing in between, so the essay
+becomes a six-row table holding what those three lines resolve to. The
+original's last line -- the one whose comment says it "bypasses the palettes"
+-- ends up indistinguishable from the six above it, because there are none to
+bypass.
+
+That is a real trade and the port says so rather than claiming a win. The
+indirection exists so that one edit to the application's palette restyles every
+view in the program; naming the colour gives that up. What comes back is that
+the colour is in the model, where the same branch that decides *what* to draw
+decides what colour to draw it -- which is how the calendar marks today and the
+puzzle shows a tile out of place, and neither of those is a question a palette
+can answer. A canvas that names no colour still follows the window, which is
+what the example's second window is for and what nearly every other canvas in
+these examples does.
+
+`drive_palette.py` asserts the six attributes byte for byte, which is the only
+way to test a port whose subject was the machinery it removed.

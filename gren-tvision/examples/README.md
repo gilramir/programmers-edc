@@ -17,6 +17,8 @@ Build them all with `../build.sh`, run one with `../run.sh <name>`.
 | `ascii` | `tvision/examples/tvdemo` (ascii.cpp) | the canvas, from Gren: a view the model paints itself, and a cursor to select with |
 | `calendar` | `tvision/examples/tvdemo` (calendar.cpp) | colour on a canvas, as spans; and today as a field, because `Time.now` is a task |
 | `puzzle` | `tvision/examples/tvdemo` (puzzle.cpp) | nothing in the API -- but the random seed had to move into the model, which is what let a test win the game |
+| `calc` | `tvision/examples/tvdemo` (calc.cpp) | `takesFocus` on a button: a keypad that can be pressed but never holds the caret |
+| `palette` | `tvision/examples/palette` | nothing -- it is the example whose entire subject the port removes, and the write-up says what that costs |
 
 ## What mmenu changed
 
@@ -121,6 +123,35 @@ function of a seed and a depth; `--seed=` and `--scramble=` follow for free,
 and `drive_puzzle.py` reproduces the shuffle in Python, searches for the answer
 and **wins the game** -- which is not a test the original could have.
 
+## What the calculator changed
+
+`TCalculator` makes twenty buttons and clears `ofSelectable` on every one of
+them, with no comment. The reason is the window's other child: `TCalcDisplay`
+reads the keyboard, and a keypad whose buttons could take focus would eat every
+digit typed at it -- `7` would move the caret to the button captioned 7.
+
+So `Button` grew `takesFocus`. It is the first field added here for a reason
+that is invisible until a window has two kinds of input in it, and it is not
+calculator-shaped: a toolbar wants the same thing, and so does anything with a
+canvas doing the reading.
+
+## What the palette example changed
+
+Nothing, and that is the point worth writing down.
+
+`palette.cpp` is an essay on Turbo Vision's three levels of palette
+indirection. A `Span` names its colour outright, so the essay collapses into a
+six-row table of what those three levels resolve to, and the original's last
+line -- the one that "bypasses the palettes" -- becomes indistinguishable from
+the six above it.
+
+The port says what that costs rather than claiming a win. The indirection
+exists so one edit restyles every view in the program; naming the colour gives
+that up. What comes back is that the colour is in the model, next to the branch
+that decides what to draw -- which is how the calendar marks today and the
+puzzle shows a tile out of place, and neither of those is a question a palette
+can answer.
+
 ## The C++ examples, triaged
 
 `tvision/examples/` has eight entries. Two of them are not Turbo Vision
@@ -130,7 +161,7 @@ applications at all, and one of them is really eight applications.
 |---|---|---|
 | `hello` | **done** | — |
 | `mmenu` | **done** | it was not about nested menus at all — see above |
-| `palette` | cheap | per-view palette selection; the example is really an essay on how Turbo Vision palettes work |
+| `palette` | **done** | `examples/palette`; the essay it is written to explain has no Gren equivalent — see above |
 | `tvdemo` | split it up | see below |
 | `tvforms` | **done** (the UI half) | see above. Its other half is `.rsc` resource streaming — `opstream`/`ipstream` serialising views to disk — which has no Gren meaning |
 | `tvdir` | needs a new widget | `TOutline`, a tree view, plus `TChDirDialog` |
@@ -145,7 +176,7 @@ applications at all, and one of them is really eight applications.
 | ASCII chart | **done** — `examples/ascii`; it wanted a cursor, see above |
 | calendar | **done** — `examples/calendar`; it wanted colour, see above |
 | puzzle | **done** — `examples/puzzle` |
-| calculator | canvas + buttons |
+| calculator | **done** — `examples/calc`; it wanted `takesFocus`, see above |
 | event viewer | canvas |
 | mouse settings | a scroll bar as a first-class view; the clusters it wants exist now |
 | colours | `TColorDialog` — wrap as a command that answers with the chosen palette |

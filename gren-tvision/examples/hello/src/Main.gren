@@ -78,10 +78,10 @@ greetingBox =
         , rect = { x1 = 25, y1 = 5, x2 = 55, y2 = 16 }
         , views =
             [ StaticText { id = "how", rect = { x1 = 3, y1 = 5, x2 = 15, y2 = 6 }, text = "How are you?" }
-            , Button { id = "terrific", rect = { x1 = 16, y1 = 2, x2 = 28, y2 = 4 }, title = "Terrific", cmd = "terrific", isDefault = False }
-            , Button { id = "fine", rect = { x1 = 16, y1 = 4, x2 = 28, y2 = 6 }, title = "Ok", cmd = "fine", isDefault = False }
-            , Button { id = "lousy", rect = { x1 = 16, y1 = 6, x2 = 28, y2 = 8 }, title = "Lousy", cmd = "lousy", isDefault = False }
-            , Button { id = "cancel", rect = { x1 = 16, y1 = 8, x2 = 28, y2 = 10 }, title = "Cancel", cmd = "cancel", isDefault = False }
+            , Button { id = "terrific", rect = { x1 = 16, y1 = 2, x2 = 28, y2 = 4 }, title = "Terrific", cmd = "terrific", isDefault = False, takesFocus = True }
+            , Button { id = "fine", rect = { x1 = 16, y1 = 4, x2 = 28, y2 = 6 }, title = "Ok", cmd = "fine", isDefault = False, takesFocus = True }
+            , Button { id = "lousy", rect = { x1 = 16, y1 = 6, x2 = 28, y2 = 8 }, title = "Lousy", cmd = "lousy", isDefault = False, takesFocus = True }
+            , Button { id = "cancel", rect = { x1 = 16, y1 = 8, x2 = 28, y2 = 10 }, title = "Cancel", cmd = "cancel", isDefault = False, takesFocus = True }
             ]
         }
 

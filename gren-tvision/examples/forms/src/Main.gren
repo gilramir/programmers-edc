@@ -330,8 +330,8 @@ formDialog title record =
             , Label { id = "kindLabel", rect = { x1 = 11, y1 = 10, x2 = 19, y2 = 11 }, text = "~T~ype", for = "kind" }
             , RadioButtons { id = "gender", rect = { x1 = 26, y1 = 11, x2 = 38, y2 = 13 }, items = genderLabels, selected = record.gender }
             , Label { id = "genderLabel", rect = { x1 = 26, y1 = 10, x2 = 34, y2 = 11 }, text = "~G~ender", for = "gender" }
-            , Button { id = "save", rect = { x1 = 13, y1 = 14, x2 = 25, y2 = 16 }, title = "~S~ave", cmd = "save", isDefault = True }
-            , Button { id = "cancel", rect = { x1 = 27, y1 = 14, x2 = 39, y2 = 16 }, title = "Cancel", cmd = "cancel", isDefault = False }
+            , Button { id = "save", rect = { x1 = 13, y1 = 14, x2 = 25, y2 = 16 }, title = "~S~ave", cmd = "save", isDefault = True, takesFocus = True }
+            , Button { id = "cancel", rect = { x1 = 27, y1 = 14, x2 = 39, y2 = 16 }, title = "Cancel", cmd = "cancel", isDefault = False, takesFocus = True }
             ]
         }
 
@@ -400,9 +400,9 @@ listWindow model =
         -- After the list box, not before it: a label names a view that has to
         -- exist already.
         , Label { id = "keysLabel", rect = { x1 = 2, y1 = 1, x2 = 12, y2 = 2 }, text = "~K~eys", for = "keys" }
-        , Button { id = "editButton", rect = { x1 = 30, y1 = 2, x2 = 42, y2 = 4 }, title = "~E~dit", cmd = "edit", isDefault = True }
-        , Button { id = "newButton", rect = { x1 = 30, y1 = 4, x2 = 42, y2 = 6 }, title = "~N~ew", cmd = "new", isDefault = False }
-        , Button { id = "deleteButton", rect = { x1 = 30, y1 = 6, x2 = 42, y2 = 8 }, title = "~D~elete", cmd = "delete", isDefault = False }
+        , Button { id = "editButton", rect = { x1 = 30, y1 = 2, x2 = 42, y2 = 4 }, title = "~E~dit", cmd = "edit", isDefault = True, takesFocus = True }
+        , Button { id = "newButton", rect = { x1 = 30, y1 = 4, x2 = 42, y2 = 6 }, title = "~N~ew", cmd = "new", isDefault = False, takesFocus = True }
+        , Button { id = "deleteButton", rect = { x1 = 30, y1 = 6, x2 = 42, y2 = 8 }, title = "~D~elete", cmd = "delete", isDefault = False, takesFocus = True }
         ]
     }
 

@@ -1,0 +1,461 @@
+port module Main exposing (main)
+
+{-| tvdemo's calculator (`tvision/examples/tvdemo/calc.cpp`), in Gren.
+
+Twenty buttons and a display. The buttons are the interesting part: the C++
+constructor makes each one and then says
+
+    tv->options &= ~ofSelectable;
+
+so that the keypad can be clicked but never holds the caret -- because the
+display view is reading the keyboard, and a keypad that took focus would
+swallow every digit you typed into Tab-navigation. Nothing in the Gren API
+could say that, so `Button` grew `takesFocus`, and this example is the reason.
+
+The display is a `Canvas`: the one view in the window that *is* selectable, so
+it keeps focus and every keystroke arrives as a `KeyPressed` event. Painting it
+in green on black is a small liberty -- the original uses palette entry 1 --
+and it is there because a canvas can now say so.
+
+Everything else is `calcKey()` transcribed. The state machine is the
+original's, including the detail that an operator key applies the *pending*
+operation before recording itself, which is what makes `2 + 3 + 4 =` work.
+
+-}
+
+import Array exposing (Array)
+import Init
+import Json.Decode as Decode
+import Json.Encode as Encode
+import Math
+import Node
+import String
+import Tui exposing (Event(..), Hue(..), MenuItem(..), View(..))
+
+
+-- PORTS
+
+
+port tuiOut : Encode.Value -> Cmd msg
+
+
+port tuiIn : (Decode.Value -> msg) -> Sub msg
+
+
+tui : Tui.Ports Msg
+tui =
+    { toJs = tuiOut, fromJs = tuiIn }
+
+
+-- MODEL
+
+
+{-| `csFirst` means the display holds a result rather than something being
+typed, so the next digit starts a new number.
+-}
+type Status
+    = First
+    | Valid
+    | Error
+
+
+type alias Model =
+    { status : Status
+    , number : String
+    , negative : Bool
+    , operator : String
+    , operand : Float
+    , open : Bool
+    }
+
+
+type Msg
+    = FromTui Event
+
+
+init : Node.Environment -> Init.Task { model : Model, command : Cmd Msg }
+init _ =
+    Node.startProgram
+        { model = { open = True } |> cleared
+        , command = Cmd.none
+        }
+
+
+cleared : { a | open : Bool } -> Model
+cleared model =
+    { status = First
+    , number = "0"
+    , negative = False
+    , operator = "="
+    , operand = 0
+    , open = model.open
+    }
+
+
+displayed : Model -> Float
+displayed model =
+    String.toFloat model.number
+        |> Maybe.withDefault 0
+        |> (\it ->
+                if model.negative then
+                    -it
+
+                else
+                    it
+           )
+
+
+-- THE KEYPAD
+
+
+{-| The original's `keyChar`, four to a row. `\x1B` and `\xF1` were code page
+437's arrow and plus-minus; here they are the Unicode characters that mean the
+same thing.
+-}
+keypad : Array String
+keypad =
+    [ "C"
+    , "←"
+    , "%"
+    , "±"
+    , "7"
+    , "8"
+    , "9"
+    , "/"
+    , "4"
+    , "5"
+    , "6"
+    , "*"
+    , "1"
+    , "2"
+    , "3"
+    , "-"
+    , "0"
+    , "."
+    , "="
+    , "+"
+    ]
+
+
+{-| Every route into the calculator ends here: a button's command, a keystroke,
+`Enter`, `Backspace`. Naming them the same thing on both sides is what keeps
+`update` down to one branch.
+-}
+press : String -> Model -> Model
+press key model =
+    if model.status == Error && key /= "C" then
+        model
+
+    else if isDigit key then
+        let
+            started =
+                checkFirst model
+        in
+        if String.count started.number >= 15 then
+            started
+
+        else if started.number == "0" then
+            { started | number = key }
+
+        else
+            { started | number = started.number ++ key }
+
+    else
+        when key is
+            "." ->
+                let
+                    started =
+                        checkFirst model
+                in
+                if String.contains "." started.number then
+                    started
+
+                else
+                    { started | number = started.number ++ "." }
+
+            "←" ->
+                let
+                    started =
+                        checkFirst model
+                in
+                if String.count started.number <= 1 then
+                    { started | number = "0" }
+
+                else
+                    { started | number = String.dropLast 1 started.number }
+
+            "±" ->
+                { model | negative = not model.negative }
+
+            "C" ->
+                cleared model
+
+            _ ->
+                if isOperator key then
+                    applyPending key model
+
+                else
+                    model
+
+
+isDigit : String -> Bool
+isDigit key =
+    String.count key == 1 && String.contains key "0123456789"
+
+
+isOperator : String -> Bool
+isOperator key =
+    Array.member key [ "+", "-", "*", "/", "=", "%" ]
+
+
+{-| A number typed after a result replaces it rather than extending it.
+-}
+checkFirst : Model -> Model
+checkFirst model =
+    if model.status == First then
+        { model | status = Valid, number = "0", negative = False }
+
+    else
+        model
+
+
+{-| The heart of `calcKey`: an operator key finishes the operation that was
+already pending and then becomes the pending one itself.
+-}
+applyPending : String -> Model -> Model
+applyPending key model =
+    let
+        settled =
+            if model.status /= Valid then
+                model
+
+            else
+                let
+                    right =
+                        if key == "%" then
+                            if model.operator == "+" || model.operator == "-" then
+                                model.operand * displayed model / 100
+
+                            else
+                                displayed model / 100
+
+                        else
+                            displayed model
+                in
+                when model.operator is
+                    "+" ->
+                        showing (model.operand + right) { model | status = First }
+
+                    "-" ->
+                        showing (model.operand - right) { model | status = First }
+
+                    "*" ->
+                        showing (model.operand * right) { model | status = First }
+
+                    "/" ->
+                        if right == 0 then
+                            { model | status = Error, number = "Error", negative = False }
+
+                        else
+                            showing (model.operand / right) { model | status = First }
+
+                    _ ->
+                        { model | status = First }
+    in
+    if settled.status == Error then
+        settled
+
+    else
+        { settled | operator = key, operand = displayed settled }
+
+
+{-| The sign lives beside the digits rather than in them, exactly as
+`TCalcDisplay` keeps it, because that is what makes `±` a one-field change.
+-}
+showing : Float -> Model -> Model
+showing value model =
+    let
+        magnitude =
+            Math.abs value
+
+        body =
+            if magnitude == toFloat (Math.truncate magnitude) && magnitude < 1.0e15 then
+                String.fromInt (Math.truncate magnitude)
+
+            else
+                String.fromFloat magnitude
+    in
+    if String.count body > 25 then
+        { model | status = Error, number = "Error", negative = False }
+
+    else
+        { model | number = body, negative = value < 0 }
+
+
+-- UPDATE
+
+
+update : Msg -> Model -> { model : Model, command : Cmd Msg }
+update msg model =
+    when msg is
+        FromTui event ->
+            { model = handleEvent event model, command = Cmd.none }
+
+
+handleEvent : Event -> Model -> Model
+handleEvent event model =
+    when event is
+        Command "calc" ->
+            { model | open = True }
+
+        Command name ->
+            when String.popFirst name is
+                Just _ ->
+                    if String.startsWith "key:" name then
+                        press (String.dropFirst 4 name) model
+
+                    else
+                        model
+
+                Nothing ->
+                    model
+
+        -- The display is the only selectable view in the window, so it holds
+        -- the caret and every keystroke lands here.
+        KeyPressed pressed ->
+            press (named pressed.key) model
+
+        WindowClosed "calcWin" ->
+            { model | open = False }
+
+        _ ->
+            model
+
+
+{-| Keyboard spellings of the keys that have a button. `Enter` is `=`, which is
+what the original does with keycode 13.
+-}
+named : String -> String
+named key =
+    when key is
+        "Enter" ->
+            "="
+
+        "Backspace" ->
+            "←"
+
+        "Esc" ->
+            "←"
+
+        "_" ->
+            "±"
+
+        "c" ->
+            "C"
+
+        other ->
+            other
+
+
+-- VIEW
+
+
+view : Model -> Tui.Ui
+view model =
+    { menuBar =
+        [ SubMenu
+            { title = "~C~alculator"
+            , key = "Alt-C"
+            , items =
+                [ Item { title = "~S~how", cmd = "calc", key = "Alt-S", shortcut = "Alt-S" }
+                , Tui.Separator
+                , Item { title = "E~x~it", cmd = "quit", key = "Alt-X", shortcut = "Alt-X" }
+                ]
+            }
+        ]
+    , statusLine =
+        [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
+        , { text = "~Alt-S~ Calculator", key = "Alt-S", cmd = "calc" }
+        , { text = "Type at it, or click the keys", key = "", cmd = "" }
+        , { text = "", key = "F10", cmd = "menu" }
+        ]
+    , windows =
+        if model.open then
+            [ calculatorWindow model ]
+
+        else
+            []
+    }
+
+
+calculatorWindow : Model -> Tui.Window
+calculatorWindow model =
+    { id = "calcWin"
+    , title = "Calculator"
+    , rect = { x1 = 5, y1 = 3, x2 = 29, y2 = 18 }
+    -- The display comes first so that it, and not a button, is what the
+    -- window focuses when it opens.
+    , views =
+        Array.pushFirst
+            (Canvas
+                { id = "display"
+                , rect = { x1 = 3, y1 = 2, x2 = 21, y2 = 3 }
+                , lines = [ [ Tui.ink LightGreen (readout model) |> Tui.on Black ] ]
+                , cursor = Nothing
+                }
+            )
+            (Array.indexedMap keypadButton keypad)
+    }
+
+
+{-| Right-aligned in eighteen columns, with the sign in the column before the
+digits -- which is where `TCalcDisplay::draw` puts it.
+-}
+readout : Model -> String
+readout model =
+    String.padLeft 18
+        ' '
+        ((if model.negative then
+            "-"
+
+          else
+            " "
+         )
+            ++ model.number
+            ++ " "
+        )
+
+
+keypadButton : Int -> String -> Tui.View
+keypadButton index title =
+    let
+        x =
+            Math.modBy 4 index * 5 + 2
+
+        y =
+            index // 4 * 2 + 4
+    in
+    Button
+        { id = "key" ++ String.fromInt index
+        , rect = { x1 = x, y1 = y, x2 = x + 5, y2 = y + 2 }
+        , title = title
+        , cmd = "key:" ++ title
+        , isDefault = False
+        -- The whole reason this field exists. Twenty focusable buttons would
+        -- take the caret away from the display and eat every digit typed.
+        , takesFocus = False
+        }
+
+
+-- PROGRAM
+
+
+main : Tui.Program Model Msg
+main =
+    Tui.defineProgram tui
+        { init = init
+        , update = update
+        , subscriptions = \_ -> Sub.none
+        , view = view
+        , onEvent = FromTui
+        }

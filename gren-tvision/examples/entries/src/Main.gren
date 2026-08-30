@@ -161,8 +161,8 @@ addDialog =
         , views =
             [ StaticText { id = "prompt", rect = { x1 = 3, y1 = 2, x2 = 44, y2 = 3 }, text = "New entry:" }
             , InputLine { id = "entry", rect = { x1 = 3, y1 = 3, x2 = 44, y2 = 4 }, maxLen = 40, value = "" }
-            , Button { id = "ok", rect = { x1 = 10, y1 = 5, x2 = 22, y2 = 7 }, title = "~O~K", cmd = "ok", isDefault = True }
-            , Button { id = "cancel", rect = { x1 = 26, y1 = 5, x2 = 38, y2 = 7 }, title = "Cancel", cmd = "cancel", isDefault = False }
+            , Button { id = "ok", rect = { x1 = 10, y1 = 5, x2 = 22, y2 = 7 }, title = "~O~K", cmd = "ok", isDefault = True, takesFocus = True }
+            , Button { id = "cancel", rect = { x1 = 26, y1 = 5, x2 = 38, y2 = 7 }, title = "Cancel", cmd = "cancel", isDefault = False, takesFocus = True }
             ]
         }
 
@@ -252,6 +252,7 @@ listWindow model =
             , title = "~A~dd..."
             , cmd = "add"
             , isDefault = False
+            , takesFocus = True
             }
         ]
     }
