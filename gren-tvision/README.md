@@ -77,7 +77,19 @@ whole of it.
 ./run.sh entries
 ./run.sh forms
 ./run.sh ascii
+./run.sh calendar
+./run.sh puzzle
+./run.sh calc
+./run.sh palette
+./run.sh mouse
+./run.sh dir        # takes a path
+./run.sh demo
+./run.sh viewer     # takes a path
 ```
+
+Every one of them is a port of a `tvision/examples/` program, and each was
+chosen because it forced something into the API. `examples/README.md` says what
+each one forced.
 
 They build against this working copy rather than a published version — each
 example's `gren.json` lists `"../../src"` as a source directory, which is how

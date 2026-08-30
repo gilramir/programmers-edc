@@ -16,6 +16,7 @@ next to these directories.
 | **2** | A larger demo on a non-blocking event pump, with addressable views | done |
 | **2.5** | Modal dialogs that do not stop Node, and more ported demos | done |
 | **3** | Gren on top, through ports | done |
+| **4** | Every C++ example ported, one at a time, each forcing an API change | done except `tvedit` |
 
 See [FINDINGS.md](FINDINGS.md) for what we learned doing it, including the
 things that were not what we expected.
@@ -40,8 +41,9 @@ tvision-node/      the binding
 gren-tvision/      the Gren package: gilramir/gren-tvision
   src/Tui.gren       Ui types, encoders, the program wrapper. Pure Gren.
   examples/          one directory per example, each its own application
-                     hello, mmenu, entries, forms, ascii -- and a README that
-                     is the plan of record for what gets ported next
+                     hello, mmenu, entries, forms, ascii, calendar, puzzle,
+                     calc, palette, mouse, dir, demo, viewer -- and a README
+                     that is the plan of record for what gets ported next
   test/              a pty driver per example
 gren-tvision-runtime/  the npm half: the diff layer + the `gren-tui` bin
   diff.js            one UI description -> calls on the binding (unit tested)
@@ -108,8 +110,21 @@ the eight rows of code page 437 come out of a Gren array and the selected cell
 is `cursor = Just { x, y }` on the canvas. Arrows and Home/End move it, any
 printable key jumps to that character, and a click lands where you clicked.
 
+The rest of the Gren examples are every remaining C++ one:
+
+| | |
+|---|---|
+| `gren -- calendar` | tvdemo's calendar. Up/Down change the month; today is the one thing on the canvas painted in a colour of its own |
+| `gren -- puzzle` | tvdemo's sliding puzzle. `--seed=` and `--scramble=` make the board a pure function of two numbers, which is how the test wins the game |
+| `gren -- calc` | tvdemo's calculator. Type at it or click the keys — the keypad can be pressed but never holds the caret |
+| `gren -- palette` | tvision's palette example, whose entire subject the port removes |
+| `gren -- mouse` | tvdemo's mouse dialog. The scroll bar sets the double-click delay; double-click the strip to feel where the boundary is |
+| `gren -- dir` | tvdir. A directory tree with no tree widget: the rows are a fold over the model |
+| `gren -- demo` | tvdemo's shell. `Windows ▸ Tile` and `Cascade` are Turbo Vision's; the event viewer lists what crosses the port |
+| `gren -- viewer` | tvdemo's file viewer, with both scroll bars. Takes a path |
+
 [`gren-tvision/examples/README.md`](gren-tvision/examples/README.md) is the plan
-of record for what gets ported next and what API each one needs.
+of record: what each port forced into the API, and what is left.
 
 `Enter` does not press buttons, select list items, or tick check boxes in Turbo
 Vision; `Space` does. See FINDINGS.
