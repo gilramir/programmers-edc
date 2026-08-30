@@ -143,6 +143,7 @@ module.exports = {
   // out. See the note on JsEditor in tvnode.h.
   setEditorText: addon.setEditorText,
   readEditor: addon.readEditor,
+  searchEditor: addon.searchEditor,
   setLines: addon.setLines,
   setTitle: addon.setTitle,
   setCursor: addon.setCursor,

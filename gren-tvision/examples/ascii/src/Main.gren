@@ -217,6 +217,9 @@ handleEvent event model =
         Edited _ ->
             model
 
+        Searched _ ->
+            model
+
         EditorText _ ->
             model
 

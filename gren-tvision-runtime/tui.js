@@ -14,7 +14,7 @@ const { createDiffer } = require('./diff');
 // Bumped in lockstep with Tui.protocolVersion on the Gren side. A Gren package
 // and an npm package version independently, and they will skew; refusing an
 // unknown version beats rendering nothing and leaving the author to guess.
-const PROTOCOL = 13;
+const PROTOCOL = 14;
 
 /**
  * Drive a compiled Gren program's UI.
@@ -195,6 +195,25 @@ function run(grenModule, options = {}) {
         const text = tv.readEditor(message.id);
         if (text !== null && text !== undefined) {
           send({ type: 'editorText', id: message.id, text });
+        }
+        break;
+      }
+
+      // Find and replace. A Cmd answered by a Msg, the same shape readEditor
+      // has and for the same reason: the model already had to put up a dialog
+      // to get the search string, so the answer belongs in `update` beside the
+      // dialog's.
+      case 'searchEditor': {
+        const matches = tv.searchEditor(message.id, {
+          what: message.what,
+          replace: message.replace,
+          replacement: message.replacement,
+          matchCase: message.matchCase,
+          wholeWords: message.wholeWords,
+          all: message.all,
+        });
+        if (matches !== null && matches !== undefined) {
+          send({ type: 'searched', id: message.id, matches });
         }
         break;
       }

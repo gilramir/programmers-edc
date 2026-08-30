@@ -19,6 +19,7 @@ module Tui exposing
     , defineProgram
     , dialog
     , fileDialog
+    , findInEditor
     , fixed
     , flag
     , flags
@@ -37,6 +38,7 @@ module Tui exposing
     , popupMenu
     , quit
     , readEditor
+    , replaceInEditor
     , setDoubleClickDelay
     , setEditorText
     , setEnabled
@@ -181,7 +183,7 @@ its own is a pull-down, and one without is a command sitting on the bar.
 @docs MenuItem, StatusItem, PopupItem, popupMenu
 @docs Event, Value, DialogSpec
 @docs dialog, quit, setEnabled, setDoubleClickDelay, focus
-@docs setEditorText, readEditor
+@docs setEditorText, readEditor, findInEditor, replaceInEditor
 @docs messageBox, MessageButton, okButtons, okCancelButtons, yesNoButtons, yesNoCancelButtons
 @docs fileDialog
 @docs text, number, flag, flags, marks
@@ -242,11 +244,12 @@ what `TClockView` has always been and this had no way to say. Version 13
 added the [`Editor`](#View) view with [`setEditorText`](#setEditorText),
 [`readEditor`](#readEditor) and the [`Edited`](#Event) and
 [`EditorText`](#Event) events -- the first view whose contents do not travel
-with the render.
+with the render. Version 14 added [`findInEditor`](#findInEditor),
+[`replaceInEditor`](#replaceInEditor) and the [`Searched`](#Event) event.
 -}
 protocolVersion : Int
 protocolVersion =
-    13
+    14
 
 
 -- GEOMETRY
@@ -521,8 +524,10 @@ type alias Window =
 
     Two things a menu entry cannot do on its own, both for the same reason:
     they need something only the model has. Saving needs a file, and writing
-    one is a `Task`. Searching needs a string, and asking for one is a dialog.
-    Both are commands the model handles and answers with a `Cmd` of its own.
+    one is a `Task` — so the model handles the command and answers with
+    [`readEditor`](#readEditor). Searching needs a string, and asking for one
+    is a dialog — so the model handles that command and answers with
+    [`findInEditor`](#findInEditor).
 
 `Grows` is the odd one, and the only constructor here that is not a widget: it
 wraps another view to say which of its edges follow the window when the window
@@ -761,6 +766,10 @@ type alias StatusItem =
   - `EditorText` -- the answer to [`readEditor`](#readEditor), and the only
     event that carries a document. Ask for one when you are about to write it
     to a file.
+  - `Searched` -- the answer to [`findInEditor`](#findInEditor) and
+    [`replaceInEditor`](#replaceInEditor). `matches` is how many were acted on:
+    `0` or `1` for a find, however many were replaced otherwise. `0` is how a
+    program says "not found" in its own words.
   - `DialogClosed` -- a [`dialog`](#dialog) was dismissed. `cmd` is the button
     that closed it (`"cancel"` if it was cancelled or closed from its frame),
     and `values` holds every field in it -- read them with [`text`](#text),
@@ -780,6 +789,7 @@ type Event
     | Changed { id : String, value : Value }
     | Edited { id : String, isModified : Bool, line : Int, column : Int }
     | EditorText { id : String, text : String }
+    | Searched { id : String, matches : Int }
     | DialogClosed { id : String, cmd : String, values : Decode.Value }
     | WindowClosed String
     | Unknown String
@@ -1307,6 +1317,140 @@ readEditor ports id =
             [ { key = "type", value = Encode.string "readEditor" }
             , { key = "id", value = Encode.string id }
             ]
+
+
+{-| Find the next occurrence of a string in an [`Editor`](#View), searching
+forward from the caret and selecting what it finds. The answer arrives as a
+[`Searched`](#Event) event carrying `0` or `1`.
+
+    Command "find" ->
+        { model = model
+        , command = Tui.dialog tui (findDialog model)
+        }
+
+    DialogClosed closed ->
+        if closed.id == "find" && closed.cmd == "ok" then
+            { model = model
+            , command =
+                Tui.findInEditor tui "body"
+                    { what = Tui.text "what" closed.values
+                    , matchCase = Tui.flag "how" 0 closed.values
+                    , wholeWords = Tui.flag "how" 1 closed.values
+                    }
+            }
+
+        else
+            ...
+
+**Searching is two steps, and that is the shape rather than an omission.** A
+search needs a string, asking for one is a dialog, and a dialog here is a `Cmd`
+producing a `Msg` — so the program asks, and then it searches. It is the same
+two steps `fileDialog` makes of Change Dir, one level down.
+
+Turbo Vision's `cmFind` is not offered as a built-in command name for exactly
+this reason: `TEditor::find` begins by asking `editorDialog` for the string,
+and `editorDialog` is deliberately inert here because every prompt it raises is
+a message box, which is a nested event loop.
+
+Searching again is this same command issued a second time — keep what was
+searched for in the model. Turbo Vision's own `Ctrl-L` also works and is not
+told anything, because this leaves `TEditor`'s static search string set to
+whatever was last asked for.
+-}
+findInEditor :
+    Ports msg
+    -> String
+    -> { what : String, matchCase : Bool, wholeWords : Bool }
+    -> Cmd msg
+findInEditor ports id spec =
+    ports.toJs <|
+        Encode.object
+            (Array.pushFirst
+                { key = "type", value = Encode.string "searchEditor" } <|
+                searchFields id
+                    { what = spec.what
+                    , replace = False
+                    , replacement = ""
+                    , matchCase = spec.matchCase
+                    , wholeWords = spec.wholeWords
+                    , all = False
+                    }
+            )
+
+
+{-| Find and replace in an [`Editor`](#View). The answer is a
+[`Searched`](#Event) event carrying how many were replaced.
+
+`all = False` replaces the next match after the caret. `all = True` replaces
+every match in the **document**, starting from the top — which is what the word
+means, and is a small divergence from Turbo Vision: its own Replace All runs
+from the caret, so it quietly depends on where the caret happens to be and
+replaces nothing at all after a search that ran off the end.
+
+    Tui.replaceInEditor tui "body"
+        { what = "colour"
+        , replacement = "color"
+        , matchCase = True
+        , wholeWords = True
+        , all = True
+        }
+
+Turbo Vision asks before each replacement when `efPromptOnReplace` is set, and
+that is not offered: the prompt is a message box, and a program that wants to
+ask can search one match at a time and put up its own.
+-}
+replaceInEditor :
+    Ports msg
+    -> String
+    ->
+        { what : String
+        , replacement : String
+        , matchCase : Bool
+        , wholeWords : Bool
+        , all : Bool
+        }
+    -> Cmd msg
+replaceInEditor ports id spec =
+    ports.toJs <|
+        Encode.object
+            (Array.pushFirst
+                { key = "type", value = Encode.string "searchEditor" } <|
+                searchFields id
+                    { what = spec.what
+                    , replace = True
+                    , replacement = spec.replacement
+                    , matchCase = spec.matchCase
+                    , wholeWords = spec.wholeWords
+                    , all = spec.all
+                    }
+            )
+
+
+{-| Everything but the `type`, which stays at the two call sites above. The
+consistency check reads the kind of an outbound message out of the call site
+itself rather than out of a string literal somewhere, so a helper that hid the
+type would be sending something unchecked -- and it says so.
+-}
+searchFields :
+    String
+    ->
+        { what : String
+        , replace : Bool
+        , replacement : String
+        , matchCase : Bool
+        , wholeWords : Bool
+        , all : Bool
+        }
+    -> Array { key : String, value : Encode.Value }
+searchFields id spec =
+    [ { key = "id", value = Encode.string id }
+    , { key = "what", value = Encode.string spec.what }
+    , { key = "replace", value = Encode.bool spec.replace }
+    , { key = "replacement", value = Encode.string spec.replacement }
+    , { key = "matchCase", value = Encode.bool spec.matchCase }
+    , { key = "wholeWords", value = Encode.bool spec.wholeWords }
+    , { key = "all", value = Encode.bool spec.all }
+    ]
 
 
 {-| Quit. Any open dialog is cancelled on the way out, and the process exits
@@ -1904,6 +2048,12 @@ eventDecoder =
                             (\id body -> EditorText { id = id, text = body })
                             (Decode.field "id" Decode.string)
                             (Decode.field "text" Decode.string)
+
+                    "searched" ->
+                        Decode.map2
+                            (\id count -> Searched { id = id, matches = count })
+                            (Decode.field "id" Decode.string)
+                            (Decode.field "matches" Decode.int)
 
                     "scroll" ->
                         Decode.map2

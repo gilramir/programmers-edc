@@ -26,8 +26,9 @@ Everything else is ordinary. Cut, Copy, Paste, Undo and Select all are built-in
 command names, so those menu entries never pass through `update` at all. Save
 is not one, because writing a file is a `Task` and therefore this program's
 job -- and neither is Find, for the same shape of reason: a search needs a
-string, and asking for one is a dialog only the model can put up. The Search
-menu is the next piece of work.
+string, and asking for one is a dialog only the model can put up. So the Search
+menu is three commands that arrive here, three dialogs, and three `Cmd`s
+answered by a `Searched` event.
 
 Run it on a file: `run.sh edit path/to/file`, or with no argument on a scratch
 buffer.
@@ -73,7 +74,19 @@ type alias Model =
     , line : Int
     , column : Int
     , status : String
+    -- What Find last asked for. Search again is this program re-issuing it,
+    -- because the search string is a thing only the model has.
+    , search : Maybe Search
     , desk : { cols : Int, rows : Int }
+    }
+
+
+type alias Search =
+    { what : String
+    , replacement : String
+    , replace : Bool
+    , matchCase : Bool
+    , wholeWords : Bool
     }
 
 
@@ -101,6 +114,7 @@ init env =
                 , modified = False
                 , line = 0
                 , column = 0
+                , search = Nothing
                 , status =
                     when wanted is
                         Just _ ->
@@ -206,11 +220,214 @@ handleEvent event model =
                 Nothing ->
                     { model = { model | status = "no file name" }, command = Cmd.none }
 
+        -- Searching is two steps for the same reason saving is: it needs
+        -- something only this program can get. Saving needs a file and writing
+        -- one is a Task; searching needs a string and asking for one is a
+        -- dialog. So `"find"` is not a built-in command name -- it arrives
+        -- here, opens a dialog, and the answer becomes a Cmd.
+        Command "find" ->
+            { model = model
+            , command = Tui.dialog tui (searchDialog model False)
+            }
+
+        Command "replace" ->
+            { model = model
+            , command = Tui.dialog tui (searchDialog model True)
+            }
+
+        -- And search again is this program issuing the same command twice.
+        -- Turbo Vision's own Ctrl-L works too and is not told anything: the
+        -- binding leaves TEditor's static search string set to whatever was
+        -- last asked for.
+        Command "searchAgain" ->
+            when model.search is
+                Just again ->
+                    { model = model, command = runSearch again }
+
+                Nothing ->
+                    { model = { model | status = "nothing to search for" }
+                    , command = Cmd.none
+                    }
+
+        DialogClosed closed ->
+            if closed.cmd /= "ok" then
+                { model = model, command = Cmd.none }
+
+            else
+                let
+                    asked =
+                        { what = Tui.text "what" closed.values
+                        , replacement = Tui.text "replacement" closed.values
+                        , replace = closed.id == "replace"
+                        , matchCase = Tui.flag "how" 0 closed.values
+                        , wholeWords = Tui.flag "how" 1 closed.values
+                        }
+                in
+                if asked.what == "" then
+                    { model = model, command = Cmd.none }
+
+                else
+                    { model = { model | search = Just asked }
+                    , command = runSearch asked
+                    }
+
+        Searched it ->
+            { model =
+                { model
+                    | status =
+                        if it.matches == 0 then
+                            "not found"
+
+                        else if
+                            (model.search
+                                |> Maybe.map .replace
+                                |> Maybe.withDefault False
+                            )
+                        then
+                            String.fromInt it.matches ++ " replaced"
+
+                        else
+                            "found"
+                }
+            , command = Cmd.none
+            }
+
         Resized size ->
             { model = { model | desk = size }, command = Cmd.none }
 
         _ ->
             { model = model, command = Cmd.none }
+
+
+runSearch : Search -> Cmd Msg
+runSearch it =
+    if it.replace then
+        Tui.replaceInEditor tui
+            "body"
+            { what = it.what
+            , replacement = it.replacement
+            , matchCase = it.matchCase
+            , wholeWords = it.wholeWords
+            , all = True
+            }
+
+    else
+        Tui.findInEditor tui
+            "body"
+            { what = it.what
+            , matchCase = it.matchCase
+            , wholeWords = it.wholeWords
+            }
+
+
+{-| One dialog for both, because Replace is Find with one more field. Four
+button names close a modal and this spends two of them.
+-}
+searchDialog : Model -> Bool -> Tui.DialogSpec
+searchDialog model replace =
+    let
+        previous =
+            model.search
+                |> Maybe.withDefault
+                    { what = ""
+                    , replacement = ""
+                    , replace = replace
+                    , matchCase = False
+                    , wholeWords = False
+                    }
+
+        height =
+            if replace then
+                13
+
+            else
+                11
+
+        left =
+            max 0 ((model.desk.cols - 46) // 2)
+
+        top =
+            max 0 ((model.desk.rows - height) // 2)
+
+        replacementRow =
+            [ Tui.InputLine
+                { id = "replacement"
+                , rect = { x1 = 12, y1 = 4, x2 = 43, y2 = 5 }
+                , maxLen = 80
+                , value = previous.replacement
+                , allowed = Nothing
+                }
+            , Tui.Label
+                { id = "replacementLabel"
+                , rect = { x1 = 2, y1 = 4, x2 = 11, y2 = 5 }
+                , text = "~W~ith"
+                , for = "replacement"
+                }
+            ]
+    in
+    { id =
+        if replace then
+            "replace"
+
+        else
+            "find"
+    , title =
+        if replace then
+            "Replace"
+
+        else
+            "Find"
+    , rect = { x1 = left, y1 = top, x2 = left + 46, y2 = top + height }
+    , views =
+        [ Tui.InputLine
+            { id = "what"
+            , rect = { x1 = 12, y1 = 2, x2 = 43, y2 = 3 }
+            , maxLen = 80
+            , value = previous.what
+            , allowed = Nothing
+            }
+        , Tui.Label
+            { id = "whatLabel"
+            , rect = { x1 = 2, y1 = 2, x2 = 11, y2 = 3 }
+            , text = "~T~ext"
+            , for = "what"
+            }
+        ]
+            ++ (if replace then
+                    replacementRow
+
+                else
+                    []
+               )
+            ++ [ Tui.CheckBoxes
+                    { id = "how"
+                    , rect =
+                        { x1 = 12
+                        , y1 = height - 6
+                        , x2 = 43
+                        , y2 = height - 4
+                        }
+                    , items = [ "~C~ase sensitive", "Whole w~o~rds only" ]
+                    , checked = [ previous.matchCase, previous.wholeWords ]
+                    }
+               , Tui.Button
+                    { id = "ok"
+                    , rect = { x1 = 8, y1 = height - 3, x2 = 20, y2 = height - 1 }
+                    , title = "~O~K"
+                    , cmd = "ok"
+                    , isDefault = True
+                    , takesFocus = True
+                    }
+               , Tui.Button
+                    { id = "cancel"
+                    , rect = { x1 = 24, y1 = height - 3, x2 = 36, y2 = height - 1 }
+                    , title = "Cancel"
+                    , cmd = "cancel"
+                    , isDefault = False
+                    , takesFocus = True
+                    }
+               ]
+    }
 
 
 name : Path -> String
@@ -250,10 +467,22 @@ view model =
                 , Item { title = "Select ~a~ll", cmd = "editor.selectAll", key = "", shortcut = "Ctrl-A" }
                 ]
             }
+        -- These three are *not* built-in names, and that is the point: each
+        -- one needs a string this program has to ask for.
+        , SubMenu
+            { title = "~S~earch"
+            , key = "Alt-S"
+            , items =
+                [ Item { title = "~F~ind...", cmd = "find", key = "", shortcut = "" }
+                , Item { title = "~R~eplace...", cmd = "replace", key = "", shortcut = "" }
+                , Item { title = "~S~earch again", cmd = "searchAgain", key = "F7", shortcut = "F7" }
+                ]
+            }
         ]
     , statusLine =
         [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
         , { text = "~F2~ Save", key = "F2", cmd = "save" }
+        , { text = "~F7~ Again", key = "F7", cmd = "searchAgain" }
         , { text = "", key = "F10", cmd = "menu" }
         ]
     , windows = [ editorWindow model ]

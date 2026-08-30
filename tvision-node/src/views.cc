@@ -456,6 +456,58 @@ std::string JsEditor::getWholeText()
     return out;
 }
 
+int JsEditor::searchAndReplace(const std::string &what, bool replace,
+                               const std::string &replacement, bool matchCase,
+                               bool wholeWords, bool all)
+{
+    if (what.empty())
+        return 0;
+
+    ushort opts = 0;
+    if (matchCase)
+        opts |= efCaseSensitive;
+    if (wholeWords)
+        opts |= efWholeWordsOnly;
+
+    // Ctrl-L is TEditor's own Search again and reads these three statics, so
+    // a search issued from the model leaves the keyboard shortcut working on
+    // the same terms. efPromptOnReplace is deliberately not among the flags:
+    // the prompt is editorDialog(edReplacePrompt), which is inert, and a loop
+    // that asked would therefore stop at the first match.
+    strnzcpy(findStr, what.c_str(), sizeof(findStr));
+    strnzcpy(replaceStr, replacement.c_str(), sizeof(replaceStr));
+    editorFlags = (ushort) (opts | (replace ? efDoReplace : 0) |
+                            (all ? efReplaceAll : 0));
+
+    // "All" means the document, not the rest of it. TEditor's own
+    // doSearchReplace runs from the caret either way, which makes Replace All
+    // quietly depend on where the caret happens to be -- and after a search
+    // that ran off the end, that is nothing at all. Everything else here
+    // searches forward from the caret, which is what Find should do.
+    if (replace && all)
+        setCurPtr(0, 0);
+
+    // search() runs forward from the caret and leaves it at the *end* of the
+    // match it selected (setSelect with curStart false), so a repeat finds the
+    // next one and a replace cannot match what it just inserted.
+    int matches = 0;
+    while (search(findStr, opts) == True)
+        {
+        ++matches;
+        if (!replace)
+            break;
+        lock();
+        insertText(replacement.data(), (uint) replacement.size(), False);
+        trackCursor(False);
+        unlock();
+        if (!all)
+            break;
+        }
+
+    noteEditIfChanged();
+    return matches;
+}
+
 void JsEditor::noteEditIfChanged()
 {
     bool nowModified = modified == True;
@@ -1273,6 +1325,30 @@ static Napi::Value ReadEditor(const Napi::CallbackInfo &info)
     return Napi::String::New(env, ((JsEditor *) ref->view)->getWholeText());
 }
 
+// tv.searchEditor(id, {what, replace, replacement, matchCase, wholeWords, all})
+// -- find or replace, returning how many matches were acted on.
+//
+// A number rather than a notification, because the caller is the runtime and
+// it turns the number into an event. Nothing here is asked and answered inside
+// the model's update: the Cmd goes out and a `Searched` event comes back.
+static Napi::Value SearchEditor(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    ViewRef *ref = g_views.find(info[0].ToString().Utf8Value());
+    if (ref == nullptr || ref->kind != "editor" || !info[1].IsObject())
+        return env.Null();
+
+    Napi::Object spec = info[1].As<Napi::Object>();
+    int matches = ((JsEditor *) ref->view)
+                      ->searchAndReplace(getString(spec, "what"),
+                                         getBool(spec, "replace"),
+                                         getString(spec, "replacement"),
+                                         getBool(spec, "matchCase"),
+                                         getBool(spec, "wholeWords"),
+                                         getBool(spec, "all"));
+    return Napi::Number::New(env, matches);
+}
+
 // tv.setScroll(id, value, min, max, pageStep, arrowStep) -- the whole of a
 // scroll bar at once, because TScrollBar clamps the value against the range
 // and setting the two separately can land the thumb somewhere neither side
@@ -1434,6 +1510,7 @@ void registerViewApi(Napi::Env env, Napi::Object exports)
     exports.Set("setItems", Napi::Function::New(env, SetItems));
     exports.Set("setEditorText", Napi::Function::New(env, SetEditorText));
     exports.Set("readEditor", Napi::Function::New(env, ReadEditor));
+    exports.Set("searchEditor", Napi::Function::New(env, SearchEditor));
     exports.Set("getValue", Napi::Function::New(env, GetValue));
     exports.Set("setBounds", Napi::Function::New(env, SetBounds));
     exports.Set("setValue", Napi::Function::New(env, SetValue));

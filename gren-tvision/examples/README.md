@@ -23,7 +23,7 @@ Build them all with `../build.sh`, run one with `../run.sh <name>`.
 | `dir` | `tvision/examples/tvdir` | no widget at all — but it found a real bug in the diff, moved a list box's scroll bar, and is the first example to use the file system; later `Tui.fileDialog`, which finished the port, and the `History` on its field |
 | `demo` | `tvision/examples/tvdemo` (the shell) | real windows: zoom, resize, tile and cascade, which every window had silently been unable to do — and later the first `Tui.messageBox`, which is its About box with fifteen lines taken out, `popupMenu`, whose right-click menu is three commands it already had, and `Ui.overlays`, which is where its clock finally belongs |
 | `viewer` | `tvision/examples/tvdemo` (fileview.cpp) | nothing — `TScroller` went the way of `TOutline`; but it is the first horizontal scroll bar doing its own job |
-| `edit` | `tvision/examples/tvedit` | the editor: the first view whose contents do not travel with the render, and the first time the state is not the model's |
+| `edit` | `tvision/examples/tvedit` | the editor: the first view whose contents do not travel with the render, and the first time the state is not the model's — plus find and replace, where a command needs a string only the program can ask for |
 | `watch` | *(ours)* | not a port: a subscription from outside the program, several children at once, and a run that can be killed. It found a name the binding was silently swallowing |
 
 ## What mmenu changed
@@ -434,9 +434,22 @@ Two are absent for one reason: each needs something only the model has. There
 is no `"editor.save"` because writing a file is a `Task`, and no
 `"editor.find"` because `cmFind` does nothing without a search string —
 `TEditor` asks for one through `editorDialog`, which is disabled here because
-every prompt it raises is a `messageBox`, which is an `execView`. Search is
-therefore the model asking a question and then issuing a command, the shape
-`dir`'s Change Dir already has, and it is the next piece of work.
+every prompt it raises is a `messageBox`, which is an `execView`.
+
+So the Search menu is three commands that arrive in `update`, three dialogs,
+and three `Cmd`s answered by a [`Searched`](#Event) event —
+[`findInEditor`](#findInEditor) and [`replaceInEditor`](#replaceInEditor),
+protocol 14. **That two-step shape has now happened four times**: `dir`'s
+Change Dir (list, then show), `edit`'s Save (read, then write), `entries`'
+Clear (ask, then throw away), and this. The rule behind all four is one rule —
+when a command needs something only the model can produce, it is a command the
+model handles and answers with a `Cmd` of its own, and a built-in name is for
+the ones that need nothing.
+
+One deliberate divergence, in FINDINGS: `all = True` replaces every match in
+the *document* rather than from the caret, because Turbo Vision's Replace All
+replaces nothing at all after a search that ran off the end, and that is not
+what the word means.
 
 Two more things worth knowing, both in FINDINGS. `TEditor::setBufSize` does
 not grow the buffer — that is `TFileEditor`'s override and is most of what

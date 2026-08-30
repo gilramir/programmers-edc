@@ -269,6 +269,9 @@ handleEvent event model =
         Edited _ ->
             { model = model, command = Cmd.none }
 
+        Searched _ ->
+            { model = model, command = Cmd.none }
+
         EditorText _ ->
             { model = model, command = Cmd.none }
 

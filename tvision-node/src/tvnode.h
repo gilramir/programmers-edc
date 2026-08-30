@@ -627,6 +627,21 @@ public:
     bool setText(const std::string &text);
     std::string getWholeText();
 
+    // Find, or find-and-replace, from the caret forward. Returns how many
+    // matches were acted on: 0 or 1 for a find, however many were replaced
+    // otherwise.
+    //
+    // TEditor has cmFind and cmReplace of its own and they are not used,
+    // because both begin by asking editorDialog for a search string and
+    // editorDialog is deliberately inert here -- every prompt it raises is a
+    // messageBox, which is an execView. The model already has the string by
+    // the time this is called, so what is left is TEditor::search(), which is
+    // public, and the replace loop out of doSearchReplace() with the
+    // per-occurrence prompt taken out of it.
+    int searchAndReplace(const std::string &what, bool replace,
+                         const std::string &replacement, bool matchCase,
+                         bool wholeWords, bool all);
+
 private:
     // Queued only when something the model would notice actually changed --
     // an arrow key that moves the caret within a line reports, one that runs

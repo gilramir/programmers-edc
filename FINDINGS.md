@@ -2540,8 +2540,45 @@ And there is no `"editor.find"` because `cmFind` does nothing without a search
 string. `TEditor::find()` asks for one through `editorDialog`, which is
 disabled here and for a good reason — every prompt it raises is a `messageBox`,
 which is an `execView`. So a search is the model asking a question and then
-issuing a command, the shape `dir`'s Change Dir already has. That is the next
-piece of work; the six names above are the ones that work on their own.
+issuing a command, the shape `dir`'s Change Dir already has.
+
+### Searching is two steps, and the two-step shape has now happened four times
+
+`Tui.findInEditor` and `Tui.replaceInEditor` are `Cmd`s answered by a
+`Searched` event carrying how many matches were acted on. The model puts up its
+own dialog, reads the string out of the answer, and issues the command; there
+is nothing in the API for "search" that does not begin with the program asking
+a question.
+
+That is the same shape as `dir`'s Change Dir (list, then show), `edit`'s own
+Save (read the editor, then write the file), and `entries`' Clear (ask, then
+throw away). Four times now, and the rule behind all four is the same: **when
+a command needs something only the model can produce — a path, a file, a
+string, a yes — it is a command the model handles and answers with a `Cmd` of
+its own.** Built-in command names are for the ones that need nothing.
+
+None of `TEditor`'s own search machinery is used except the part that
+searches. `find()`, `replace()` and `doSearchReplace()` all begin or end in
+`editorDialog`, so what is left is `TEditor::search()` — which is public,
+returns whether it hit, runs forward from the caret, and leaves the caret at
+the *end* of the match it selected, so repeating it walks the document and a
+replacement can never match itself. The replace loop is four lines out of
+`doSearchReplace` with the per-occurrence prompt removed, because the prompt is
+`editorDialog(edReplacePrompt)` and an inert one returns `cmCancel`, which
+would stop the loop at the first match.
+
+**One deliberate divergence.** `all = True` replaces every match in the
+*document*, starting from the top. Turbo Vision's Replace All runs from the
+caret, which makes it quietly depend on where the caret happens to be — and
+after a Search again that ran off the end, "replace all" replaces nothing at
+all. That is not what the word means. It cost one `setCurPtr(0, 0)`.
+
+Turbo Vision's own `Ctrl-L` keeps working and is never told anything, because
+the binding leaves `TEditor::findStr`, `replaceStr` and `editorFlags` set to
+whatever the model last asked for. Search again in the menu is the *program*
+issuing the same command a second time, which is what lets it say "not found"
+in its own words; `Ctrl-L` does the same thing silently, which is Borland's
+behaviour and is fine.
 
 ### And the reserved vocabulary reached its ceiling
 

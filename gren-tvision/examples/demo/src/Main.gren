@@ -251,6 +251,9 @@ describe event =
         EditorText it ->
             "EditorText " ++ it.id ++ " (" ++ String.fromInt (String.count it.text) ++ " chars)"
 
+        Searched it ->
+            "Searched " ++ it.id ++ " = " ++ String.fromInt it.matches
+
         Unknown what ->
             "Unknown " ++ what
 

@@ -12,10 +12,11 @@ crosses the port twice per file, in through `setEditorText` and out through
 `readEditor`, and what arrives in between is an `Edited` event carrying three
 numbers.
 
-So the checks come in three groups. That the editing works at all; that the
+So the checks come in four groups. That the editing works at all; that the
 caret and the modified flag reach the model on every keystroke while the
-document does not; and that a render cannot overwrite what the user typed,
-because there is nothing in the render to overwrite it with.
+document does not; that a render cannot overwrite what the user typed, because
+there is nothing in the render to overwrite it with; and that searching is two
+steps, because a search needs a string and asking for one is a dialog.
 """
 
 import os
@@ -65,7 +66,7 @@ def main():
     work = tempfile.mkdtemp(prefix="tvedit-")
     try:
         target = os.path.join(work, "note.txt")
-        open(target, "w").write("alpha\nbeta\ngamma\n")
+        open(target, "w").write("alpha\nbeta\ngamma\nalpha\n")
 
         env = dict(os.environ, TERM="xterm-256color")
         app = Pty(node_argv(RUNTIME, "main.js", target), env, cwd=EXAMPLE)
@@ -117,7 +118,7 @@ def main():
         #    EditorText.
         app.send(F2, settle=1.5)
         check("F2 wrote the document to disk",
-              open(target).read() == "alpha\nXYZbeta\ngamma\n",
+              open(target).read() == "alpha\nXYZbeta\ngamma\nalpha\n",
               repr(open(target).read()))
         check("and the modified marker cleared",
               "*" not in title(app), title(app))
@@ -130,8 +131,8 @@ def main():
         app.send(CTRL_END, settle=0.5)
         app.send(SHIFT_INS, settle=0.8)         # paste it at the end
         check("copy and paste work on the editor's own clipboard",
-              body(app, 4) == ["alpha", "XYZbeta", "gamma", "alpha"],
-              str(body(app, 4)))
+              body(app, 5) == ["alpha", "XYZbeta", "gamma", "alpha", "alpha"],
+              str(body(app, 5)))
 
         # Undo from the Edit menu. `"undo"` is a built-in command name, so it
         # reaches the editor without the model handling it at all -- the same
@@ -139,8 +140,60 @@ def main():
         app.send(b"\x1be", settle=0.8)
         app.send(b"\r", settle=1.0)
         check("Undo from the menu never passed through the model",
-              body(app, 4) == ["alpha", "XYZbeta", "gamma", ""],
-              str(body(app, 4)))
+              body(app, 5) == ["alpha", "XYZbeta", "gamma", "alpha", ""],
+              str(body(app, 5)))
+
+        # 6. Search, which is two steps for the same reason saving is: it needs
+        #    something only the model has. Saving needs a file and writing one
+        #    is a Task; searching needs a string and asking for one is a
+        #    dialog. So "find" is not a built-in command name -- Turbo Vision's
+        #    cmFind would ask editorDialog for the string, and editorDialog is
+        #    deliberately inert here because every prompt it raises is a
+        #    message box, which is a nested event loop.
+        #
+        #    Start from a known document rather than whatever the clipboard
+        #    left behind.
+        app.send(b"\x1b[1;5H", settle=0.5)      # Ctrl-Home, back to the top
+        app.send(b"\x1bs", settle=0.8)
+        check("the Search menu opened",
+              "Find" in app.render() and "Search again" in app.render(),
+              app.render())
+        app.send(b"\r", settle=1.2)
+        check("Find is a dialog the program put up, not Turbo Vision's",
+              "Case sensitive" in app.render() and "Whole words only" in app.render(),
+              app.render())
+        app.send(b"alpha", settle=0.5)
+        app.send(b"\r", settle=1.2)
+        check("and the answer came back as an event the model acted on",
+              "found" in caption(app) and caption(app).startswith("1:6"),
+              caption(app))
+
+        # Search again is the program issuing the same command twice, because
+        # the search string is a thing only it has.
+        app.send(b"\x1b[18~", settle=1.2)
+        check("Search again ran the same search from where the caret is",
+              caption(app).startswith("4:6"), caption(app))
+        app.send(b"\x1b[18~", settle=1.2)
+        check("and says so in the program's own words when there are no more",
+              "not found" in caption(app), caption(app))
+
+        # Replace all means the *document*, which is a small divergence from
+        # Turbo Vision: its own runs from the caret, so after the search above
+        # ran off the end it would replace nothing.
+        app.send(b"\x1bs", settle=0.8)
+        app.send(b"\x1b[B", settle=0.4)
+        app.send(b"\r", settle=1.2)
+        check("Replace is the same dialog with one more field",
+              "With" in app.render(), app.render())
+        app.send(b"alpha", settle=0.4)
+        app.send(b"\t", settle=0.4)
+        app.send(b"OMEGA", settle=0.4)
+        app.send(b"\r", settle=1.5)
+        check("Replace all replaced every match in the document",
+              body(app, 5) == ["OMEGA", "XYZbeta", "gamma", "OMEGA", ""],
+              str(body(app, 5)))
+        check("and reported how many",
+              "2 replaced" in caption(app), caption(app))
 
         app.send(b"\x1bx", settle=1.0)
         code = app.wait(timeout=6)
