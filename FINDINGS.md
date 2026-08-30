@@ -1346,3 +1346,61 @@ surroundings, not for the ordinary case.
 `drive_watch.py` asserts on the two colour codes directly. Nothing else on
 screen would show the difference, which is the same reason `drive_calendar.py`
 has to.
+
+## Walking the whole widget set, once
+
+`examples/README.md` had five coverage gaps written down. Enumerating every
+`TView` subclass in `tvision/include/tvision/*.h` and checking each against the
+four layers turned five into ten, and turned two guesses into facts.
+
+The widget set itself is finished. Every stock control a Turbo Vision program
+is normally assembled from is in `Ui`, five more were left out for reasons
+already written up, and `Canvas` covers the rest. That was the expected answer
+and it is not the interesting part.
+
+### Two things that were assumed and are not true
+
+**The mouse wheel already works, and nothing here made it.** `TScrollBar` puts
+`evMouseWheel` in its own event mask (`tscrlbar.cpp:57`), so a wheel turn
+scrolls the bar and reaches the model as an ordinary `Scrolled`. Driving
+`examples/viewer` with SGR wheel codes moves it fifteen lines. Grepping the
+binding for "wheel" finds nothing and suggests the opposite, which is the
+argument for running the thing rather than reading it. One inherited caveat:
+`positionalEvents` excludes `evMouseWheel` (`views.h:199`), so a wheel event
+goes to the focused view rather than the one under the pointer.
+
+**No program written with this API knows how big its terminal is.** Every
+example hardcodes 80x25 — `dir` stops at column 78, `watch` divides an assumed
+23-row desktop by the number of jobs. In a 120x40 terminal Turbo Vision uses
+the whole screen and the windows sit in an 80x23 box in the corner with fifteen
+rows of empty desktop below them.
+
+`screenSize()` has been in the binding since milestone 2. What is missing is a
+way to ask: the Gren-to-runtime protocol is five messages — `render`,
+`dialog`, `setEnabled`, `doubleClickDelay`, `quit` — and there is no sixth.
+`tv.focus(id)` is unreachable for exactly the same reason.
+
+That is worth more than the two features it costs. **The gap was invisible
+because the check that exists to find gaps only looks at view types.**
+`check_consistency.py`'s last pass reports "the binding supports X, the Gren
+API does not expose it yet" for every *widget* the C++ builder knows and the
+encoder does not. Nothing compares the binding's twenty exported functions
+against the five messages the protocol can carry, so `screenSize` and `focus`
+sat there being supported and unreachable for eleven examples.
+
+### The shape of what is left
+
+Ten gaps, and only the first two are about every program rather than one kind
+of program: **the terminal's size, and views that grow with their window.**
+They look like separate items and they are one design decision — both ask the
+model to know a number that Turbo Vision owns. The answer worth trying is that
+a `Rect` stops being the only way to place a view, and a declarative
+`fill`/`fixed` layout says intent instead of coordinates, which the runtime
+resolves against whatever size the window actually has. Then neither the model
+nor the C++ has to tell the other a number, and both symptoms go at once.
+
+The rest are ordinary: `focus`, a message box, `THistory`, `TMenuPopup`,
+validators together with the cluster state they need, `TMultiCheckBoxes`, and
+a view on the application. `examples/README.md` has each with what it would
+take, and — as usefully — a list of the five things that look like gaps and are
+not.

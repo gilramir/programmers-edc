@@ -392,6 +392,9 @@ first move is an opaque editor view that owns its buffer, reports changes as
 events, and takes `setText`/`getText` commands — less pure, and it can be
 tightened later if the naive version turns out to be fast enough.
 
+Two things learned since this paragraph was written narrow it considerably;
+they are at the end, under **And what is not a gap**.
+
 **The help system.** `THelpFile` reads a binary format produced by `tvhc`.
 Porting the compiler buys nothing a Gren program wants; help screens are just
 windows.
@@ -404,16 +407,83 @@ the help system. `tvhc` and `avscolor` are not Turbo Vision applications.
 `tvedit` is the one left, and it is a milestone rather than a port — see the
 note above. Nothing else in the list is blocked on it.
 
+### The widget set is complete; what is left is not widgets
+
+Every `TView` subclass in `tvision/include/tvision/*.h` has been walked against
+the four layers, and the stock controls are all there: `TStaticText`, `TLabel`,
+`TButton`, `TInputLine`, `TCluster` with `TCheckBoxes` and `TRadioButtons`,
+`TListViewer` with `TListBox`, `TScrollBar`, `TMenuBar`/`TMenuBox`/`TSubMenu`,
+`TStatusLine`, `TWindow`/`TDialog`/`TFrame`, and the
+`TGroup`/`TProgram`/`TApplication`/`TDeskTop` scaffolding underneath. `Canvas`
+is the escape hatch for anything the set does not have.
+
+Five more were left out on purpose and each has its reason written up above:
+`TScroller` (`viewer`), `TOutlineViewer` and `TOutline` (`dir`), the
+`TCollection` family and `opstream` resource streaming (`tvforms`), the three
+levels of palette indirection (`palette`), and `TTerminal`/`TTextDevice` —
+which is the C++ scrolling output view, and which `watch` replaced with a
+canvas and a model for the same reason `TScroller` went.
+
+**And the mouse wheel already works**, which is worth knowing because nothing
+here does anything to make it. `TScrollBar` puts `evMouseWheel` in its own
+event mask, so a wheel turn scrolls the bar and arrives in the model as an
+ordinary `Scrolled`. One caveat inherited from Turbo Vision: `positionalEvents`
+excludes `evMouseWheel` (`views.h`), so a wheel event goes to whatever has
+*focus* rather than to whatever is under the pointer.
+
 ### The coverage gaps left
 
-Five, in the order they are likely to be missed. Each says what it would take,
-because "not done" and "not decided" are different problems.
+Ten, in the order I would attack them. Each says what it would take, because
+"not done", "not decided" and "not needed" are three different problems.
 
-**The standard file and directory dialogs.** `TFileDialog` and `TChDirDialog`
-(`stddlg.h`) are how a Turbo Vision program asks for a path, and there is no
-way to ask for one here — which is why `examples/dir` and `examples/viewer`
-both take theirs on the command line, and why `tvdir`'s Change Dir half is the
-one part of it not ported.
+The first two are one design with two symptoms, and they are the only gaps on
+this list that touch *every* program written with the API rather than one kind
+of program.
+
+**1. The model does not know how big the terminal is.** Every example here
+hardcodes 80x25 — `dir` stops its window at column 78, `watch` divides an
+assumed 23-row desktop by the number of jobs. Run any of them in a 120x40
+terminal and Turbo Vision uses the whole screen while the windows sit in an
+80x23 box in the corner with fifteen rows of empty desktop below them.
+
+The binding has had `screenSize()` since milestone 2 and Gren cannot call it:
+the Gren-to-runtime protocol is five messages (`render`, `dialog`,
+`setEnabled`, `doubleClickDelay`, `quit`) and there is no sixth. Nor is there a
+resize event, so a terminal that changes size mid-run is never mentioned to the
+model either.
+
+What it would take is a decision rather than plumbing. The size could arrive in
+`init` and again as an event, which is the smallest change and makes every
+`view` function do arithmetic. Or rectangles could stop being absolute — see
+the next one.
+
+**2. Child views do not grow with their window.** A window can be zoomed,
+resized and tiled, and the views inside it keep the rectangles the model gave
+them, so a tiled window shows a clipped canvas rather than a stretched one.
+
+This has been called deliberate, on the grounds that growing a view would put
+its size somewhere the model cannot see. That reasoning is sound and the
+conclusion is probably wrong, because it is the same problem as the one above:
+both are asking the model to know a number that Turbo Vision owns. The
+alternative worth considering is that a `Rect` stops being the only way to
+place a view — a declarative `fill`/`fixed` layout describes intent rather than
+coordinates, the runtime resolves it against whatever size the window actually
+is, and nobody has to be told a number. That would close both gaps at once and
+is a prerequisite for anything editor-shaped.
+
+**3. The model cannot move focus.** `tv.focus(id)` is in the binding and, like
+`screenSize`, has no message to carry it. So a program can decide who gets
+focus when a window opens — the order of `views` does that — and can never
+change its mind: no "put the caret in the field the error was in", no "raise
+that window". `ListBox`'s `focused` field is a different thing; it moves a
+highlight, not the caret. This one is plumbing rather than design, and it is
+the cheapest item on the list.
+
+**4. The standard file and directory dialogs.** `TFileDialog` and
+`TChDirDialog` (`stddlg.h`) are how a Turbo Vision program asks for a path, and
+there is no way to ask for one here — which is why `examples/dir` and
+`examples/viewer` both take theirs on the command line, and why `tvdir`'s
+Change Dir half is the one part of it not ported.
 
 The interesting thing is that neither looks like a class worth wrapping.
 `TFileDialog` *is* a `TDialog` full of stock controls — an input line, two
@@ -421,34 +491,82 @@ buttons, a history — around a `TFileList`, which is a `TSortedListBox` over
 `FileSystem.listDirectory`. Following `TOutline` and `TScroller`, the answer is
 probably a dialog the model builds and a helper that produces its `views`,
 shipped in the package rather than in the binding. That is a design decision
-nobody has made yet, not a missing widget.
+nobody has made yet, not a missing widget. It wants (6) first, for the history.
 
-**Validators on input lines.** `TValidator` and its five subclasses vet a field
-*as it is typed* — `TFilterValidator` rejects a keystroke outright,
-`TRangeValidator` and `TPXPictureValidator` check on the way out. The model
-cannot do the first of those, because it is never told about a keystroke that
-reached an input line. This is the same hole as the cluster one below and wants
-the same kind of answer.
+**5. A message box.** `tv.messageBox()` exists in the JavaScript binding, built
+there rather than in C++ because Turbo Vision's own `messageBox()` calls
+`execView` — the nested loop milestone 2.5 removed. Gren cannot reach it. A
+message box *is* a dialog, so nothing is impossible, but every program will
+write the same fifteen lines. The same package-helper shape as (4), and small
+enough to be the thing that establishes it.
 
-**A view on the application rather than the desktop.** `TClockView` and
+**6. `THistory` — the drop-down beside an input line.** `THistory`,
+`THistoryViewer` and `THistoryWindow` are the stock control that remembers what
+was typed into a field before, and it is in every `TFileDialog`. It is a real
+widget with real state, and the state is a list of strings the model would
+rather own — which makes it the same question `TOutline` answered, one size
+down: is this a widget to wrap, or a `ListBox` in a small window plus a field
+on the model?
+
+**7. `TMenuPopup` — context menus.** Right-click menus. The menu machinery is
+all there; what is missing is the way to open one at a point in response to a
+click. `TEditor::initContextMenu` returns one, so this is a soft prerequisite
+for the editor.
+
+**8. Validators on input lines, and clusters that hold unseen state.** Two
+faces of one hole, which is why they are together now.
+
+`TValidator` and its five subclasses vet a field *as it is typed* —
+`TFilterValidator` rejects a keystroke outright, `TRangeValidator` and
+`TPXPictureValidator` check on the way out. The model cannot do the first,
+because it is never told about a keystroke that reached an input line.
+
+And `forms` walked up to the other side: values are collected when a *dialog*
+is answered and at no other moment, so a check box ticked in an ordinary window
+is invisible until something asks. Turbo Vision programs are shaped that way —
+data entry happens in modal forms — so it has not been in the way, but it is
+the same hole the `Focused` event filled for list boxes. Fill it once, in both
+directions, and validation becomes something the model does with the value it
+now has.
+
+**9. `TMultiCheckBoxes`.** A cluster whose items have more than two states.
+Small, rarely wanted, and a hole in an area the API otherwise covers
+completely. Listed so it stops being a surprise.
+
+**10. A view on the application rather than the desktop.** `TClockView` and
 `THeapView` sit beside the desktop, not on it, and `Ui` has a menu bar, a
 status line and windows with nothing in between. `examples/demo` puts its clock
 in the status line instead, which works and rebuilds the status line every
-second. FINDINGS has the note; it is why Borland made the clock a view.
+second; `watch` puts its counters there for the same reason. FINDINGS has the
+note; it is why Borland made the clock a view.
 
-**Child views do not grow with their window.** A window can be zoomed, resized
-and tiled, and the views inside it keep the rectangles the model gave them, so
-a tiled window shows a clipped canvas rather than a stretched one. Deliberate
-so far: growing a view would put its size somewhere the model cannot see.
-Whether that stays deliberate is worth revisiting for anything editor-shaped.
+### And what is not a gap
 
-**A cluster or an input line in a plain window holds state the model never
-sees.** `forms` walked right up to this one. Values are collected when a
-*dialog* is answered and at no other moment, so a check box ticked in an
-ordinary window is invisible until something asks. Turbo Vision programs are
-shaped that way — data entry happens in modal forms — so it has not been in the
-way, but it is the same hole the `Focused` event filled for list boxes, and
-clusters will want the same treatment.
+Said plainly, so nobody spends a day on one of these.
+
+**The `TColorDialog` family** — `TColorSelector`, `TColorDisplay`,
+`TColorGroupList`, `TColorItemList`, `TMonoSelector` — is an editor for the
+palette indirection, and `examples/palette` argues at length that the
+indirection has no Gren equivalent. A colour dialog here is a form, and what it
+sets is a field, which is what `examples/demo` already does with five radio
+buttons.
+
+**`TParamText`** is `printf` for a static text. String interpolation is the
+model's job by construction.
+
+**The help system.** `THelpFile` reads a binary format produced by `tvhc`.
+Porting the compiler buys nothing a Gren program wants; help screens are
+windows.
+
+**`TEditor` and its family** — `TFileEditor`, `TEditWindow`, `TMemo`,
+`TIndicator` — are a milestone rather than a gap, and the note above says what
+it would take. Two things learned since that note was written: wrap `TEditor`
+rather than `TFileEditor`, because the file half is already a `Task` in Gren
+and `editorDialog` is a replaceable function pointer, so it drags in neither
+`TFileDialog` nor `.rsc`; and `TEditor` sets `growMode = gfGrowHiX | gfGrowHiY`
+in its constructor (`teditor1.cpp:193`), so it wants gap (2) settled first.
+`TMemo` is the cheap way in: a multi-line field in a form, collected when the
+dialog is answered, which keeps the model-owns-the-state invariant intact.
 
 The Gren-only example is done: `watch`, written up above. It is the answer to
 "what does this have that Borland's did not", and the answer turned out to be
