@@ -71,10 +71,27 @@ def row_of(screen, text):
 
 
 def bottom_of_list(screen):
-    """The screen row of the list window's bottom frame."""
+    """The screen row of the list window's bottom frame.
+
+    The leftmost window on the screen, so it is the one whose bottom-left
+    corner is the first thing on its row -- which stays true when it is zoomed
+    and starts at column zero rather than column one.
+    """
     rows = screen.split("\n")
-    return max((i for i, l in enumerate(rows) if len(l) > 2 and l[1] in "└╚"),
+    return max((i for i, l in enumerate(rows) if l.lstrip("░ ")[:1] in ("└", "╚")),
                default=-1)
+
+
+def zoom_box(screen, title):
+    """(col, row) of the zoom box on a window's frame, 0-based.
+
+    Turbo Vision only draws it on the *active* window, so the window has to
+    have been brought forward first.
+    """
+    for row, line in enumerate(screen.split("\n")):
+        if title in line and "[↑]" in line:
+            return (line.index("[↑]"), row)
+    return None
 
 
 def resizes(check):
@@ -112,14 +129,19 @@ def resizes(check):
         check("and the new height too", bottom_of_list(at120) == 32,
               f"bottom {bottom_of_list(at120)}")
 
-        # The gap this does *not* close, recorded rather than tolerated: the
-        # window grew and the views inside it did not, because every child view
-        # is built with growMode = 0. The window's bottom frame moved from row
-        # 22 to row 32 and the button it contains did not move at all.
-        check("the views inside did not grow with it -- gap (2), still open",
-              row_of(at120, "Add...") == row_of(at100, "Add..."),
-              f"the button moved from {row_of(at100, 'Add...')} "
-              f"to {row_of(at120, 'Add...')}")
+        # And the views inside followed, which is a second mechanism and not the
+        # same one: the model gave these a `Grows`, the differ resized the
+        # window in place instead of rebuilding it, and TGroup::changeBounds
+        # moved the edges that were told to follow. Rebuild the window instead
+        # and every child comes back at the rectangle the model wrote down.
+        off_foot = lambda s: bottom_of_list(s) - row_of(s, "Add...")
+        check("a pinned button stayed the same distance off the window's foot",
+              off_foot(at120) == off_foot(at100) == 2,
+              f"{off_foot(at100)} rows at 100x30, {off_foot(at120)} at 120x40")
+        check("and the list box stretched into the space above it",
+              row_of(at120, "Selected:") - row_of(at100, "Selected:") == 10,
+              f"the caption moved {row_of(at120, 'Selected:') - row_of(at100, 'Selected:')} "
+              f"rows for a window that grew 10")
 
         # And shrinking is the same event with smaller numbers.
         app.resize(80, 25)
@@ -127,8 +149,10 @@ def resizes(check):
         check("shrinking it back gives the 80-column layout exactly",
               corners(at80).get("list_right") == 45
               and corners(at80).get("clock_right") == 78
-              and bottom_of_list(at80) == 17,
-              f"corners {corners(at80)} bottom {bottom_of_list(at80)}")
+              and bottom_of_list(at80) == 17
+              and row_of(at80, "Add...") == 15,
+              f"corners {corners(at80)} bottom {bottom_of_list(at80)} "
+              f"button {row_of(at80, 'Add...')}")
 
         app.send(b"\x1bx", settle=1.0)
         check("exit code 0 after three sizes", app.wait(timeout=6) == 0)
@@ -225,6 +249,33 @@ def main():
           active(raised, "Entries (4)"), "the list did not come forward")
     check("and the window it came forward over went quiet",
           active(raised, "Gren") is False)
+
+    # 8. The other half of the same mechanism, and the half the model is not
+    #    involved in at all. Clicking the frame's zoom box is Turbo Vision's
+    #    own command: it never reaches the model, so every rectangle the model
+    #    goes on sending is the one it was already sending and the differ has
+    #    nothing to do. What moves the views inside is TGroup::changeBounds
+    #    resolving the growMode each of them was given.
+    box = zoom_box(raised, "Entries (")
+    check("the active window's frame has a zoom box", box is not None, raised)
+    app.click(box[0] + 2, box[1] + 1, settle=1.2)
+    zoomed = app.render()
+    check("the zoom box filled the desktop with it", bottom_of_list(zoomed) == 23,
+          f"bottom frame at row {bottom_of_list(zoomed)}")
+    check("the list box stretched with the window",
+          row_of(zoomed, "Selected:") == 20,
+          f"the caption is on row {row_of(zoomed, 'Selected:')}")
+    check("and the button rode the bottom edge down",
+          bottom_of_list(zoomed) - row_of(zoomed, "Add...") == 2,
+          f"button on {row_of(zoomed, 'Add...')}, frame on {bottom_of_list(zoomed)}")
+
+    # The clock guarantees a render a second, and none of them knows the window
+    # was zoomed. If the differ compared rectangles against the screen rather
+    # than against the last spec it applied, this is where it would snap back.
+    app.pump(2.0)
+    check("and the renders that keep arriving do not undo it",
+          bottom_of_list(app.render()) == 23,
+          f"bottom frame back at row {bottom_of_list(app.render())}")
 
     app.send(b"\x1bx", settle=1.0)
     code = app.wait(timeout=6)

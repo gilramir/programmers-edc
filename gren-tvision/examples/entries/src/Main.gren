@@ -267,11 +267,9 @@ clockWindow model =
     }
 
 
-{-| And this one takes whatever the panel left, in both directions.
-
-The views inside it do not follow, which is the next gap along and is visible
-the moment the terminal is anything other than 80x25: the window grows and the
-list box in it stays the size the model gave it.
+{-| And this one takes whatever the panel left, in both directions -- and the
+views inside it follow, which is a separate question from the window's own size
+and answered separately, by `Grows`.
 -}
 listWindow : Model -> Tui.Window
 listWindow model =
@@ -283,25 +281,47 @@ listWindow model =
         , x2 = model.desk.cols - 34
         , y2 = model.desk.rows - 6
         }
+    -- The rectangles below are the layout at the size the window starts at,
+    -- and the `Grows` wrappers are what keeps them right at every other size.
+    -- Nothing here recomputes them: Turbo Vision moves the edges that were
+    -- told to follow, in TGroup::changeBounds, whether the window changed size
+    -- because the terminal did or because the user dragged its corner -- and
+    -- the model is not told about the second one at all.
     , views =
-        [ ListBox
-            { id = "entries"
-            , rect = { x1 = 2, y1 = 1, x2 = 43, y2 = 11 }
-            , items = model.items
-            , focused = 0
+        [ Grows
+            { grow = Tui.stretch
+            , view =
+                ListBox
+                    { id = "entries"
+                    , rect = { x1 = 2, y1 = 1, x2 = 43, y2 = 11 }
+                    , items = model.items
+                    , focused = 0
+                    }
             }
-        , StaticText
-            { id = "selection"
-            , rect = { x1 = 2, y1 = 12, x2 = 43, y2 = 13 }
-            , text = "Selected: " ++ model.selected
+        -- Both vertical edges follow, so this keeps its one-row height and
+        -- stays the same distance off the bottom; the right edge follows too,
+        -- so it stays as wide as the window.
+        , Grows
+            { grow = { left = False, top = True, right = True, bottom = True }
+            , view =
+                StaticText
+                    { id = "selection"
+                    , rect = { x1 = 2, y1 = 12, x2 = 43, y2 = 13 }
+                    , text = "Selected: " ++ model.selected
+                    }
             }
-        , Button
-            { id = "addButton"
-            , rect = { x1 = 2, y1 = 13, x2 = 16, y2 = 15 }
-            , title = "~A~dd..."
-            , cmd = "add"
-            , isDefault = False
-            , takesFocus = True
+        -- A button keeps its size, so only the vertical pair moves.
+        , Grows
+            { grow = Tui.pinBottom
+            , view =
+                Button
+                    { id = "addButton"
+                    , rect = { x1 = 2, y1 = 13, x2 = 16, y2 = 15 }
+                    , title = "~A~dd..."
+                    , cmd = "add"
+                    , isDefault = False
+                    , takesFocus = True
+                    }
             }
         ]
     }

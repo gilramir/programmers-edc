@@ -354,6 +354,34 @@ static TSItem *makeItemChain(const Napi::Env &env, const Napi::Value &value,
 /*  Building a window's contents                                      */
 /* ------------------------------------------------------------------ */
 
+// The optional `grow` field a Grows wrapper puts on a view, as TView::growMode.
+//
+// Absent means zero, which is what every view built before protocol 7 had and
+// is "keep my rectangle exactly". gfGrowRel is deliberately not offered: it
+// rescales an edge to the same *fraction* of the owner, which is what a window
+// on the desktop wants -- beWindow() sets it already -- and which inside a
+// window turns a two-line static text into a proportion of the window height.
+static uchar growModeOf(const Napi::Object &it)
+{
+    if (!it.Has("grow"))
+        return 0;
+    Napi::Value value = it.Get("grow");
+    if (!value.IsObject())
+        return 0;
+
+    Napi::Object grow = value.As<Napi::Object>();
+    uchar mode = 0;
+    if (getBool(grow, "left"))
+        mode |= gfGrowLoX;
+    if (getBool(grow, "top"))
+        mode |= gfGrowLoY;
+    if (getBool(grow, "right"))
+        mode |= gfGrowHiX;
+    if (getBool(grow, "bottom"))
+        mode |= gfGrowHiY;
+    return mode;
+}
+
 TView *buildItems(const Napi::Env &env, JsWindow *win, const Napi::Value &value,
                   const std::string &windowId)
 {
@@ -499,6 +527,10 @@ TView *buildItems(const Napi::Env &env, JsWindow *win, const Napi::Value &value,
             {
             throw Napi::Error::New(env, "tvision: unknown item type '" + type + "'");
             }
+
+        // Before insert, and after the constructor: JsCanvas and friends set
+        // growMode themselves, and this is the model overriding them.
+        made->growMode = growModeOf(it);
 
         win->insert(made);
         if (firstSelectable == nullptr && (made->options & ofSelectable) != 0)
@@ -804,6 +836,42 @@ static Napi::Value Focus(const Napi::CallbackInfo &info)
     return Napi::Boolean::New(env, false);
 }
 
+// tv.setBounds(id, rect) -- move and resize a window where it stands.
+//
+// The alternative, and what the differ used to do, is to close the window and
+// build it again at the new rectangle. That works and throws away everything
+// the window was holding: which view had the caret, where the list was
+// scrolled, which row was highlighted. It also skips the one thing that makes
+// growMode mean anything, because TGroup::changeBounds -- which is where every
+// child's edges are recomputed -- only runs on a window that already exists.
+//
+// TView::locate is the call the frame's own resize handle makes: it clamps to
+// sizeLimits, calls changeBounds, and repaints whatever the window uncovered.
+static Napi::Value SetBounds(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    JsWindow *win = g_views.findWindow(info[0].ToString().Utf8Value());
+    if (win == nullptr)
+        return Napi::Boolean::New(env, false);
+
+    if (!info[1].IsArray())
+        throw Napi::Error::New(env, "tvision: setBounds needs a rect: "
+                                    "[x1, y1, x2, y2]");
+    Napi::Array a = info[1].As<Napi::Array>();
+    if (a.Length() != 4)
+        throw Napi::Error::New(env, "tvision: setBounds rect must have exactly "
+                                    "4 numbers");
+
+    // Desktop coordinates, the same as the rect tv.window() was given: locate
+    // works in the owner's coordinates and the owner is the desktop.
+    TRect bounds(a.Get(0u).ToNumber().Int32Value(),
+                 a.Get(1u).ToNumber().Int32Value(),
+                 a.Get(2u).ToNumber().Int32Value(),
+                 a.Get(3u).ToNumber().Int32Value());
+    win->locate(bounds);
+    return Napi::Boolean::New(env, true);
+}
+
 // tv.close(id) -- close a window, as its close box would.
 static Napi::Value Close(const Napi::CallbackInfo &info)
 {
@@ -869,6 +937,7 @@ void registerViewApi(Napi::Env env, Napi::Object exports)
     exports.Set("setText", Napi::Function::New(env, SetText));
     exports.Set("setItems", Napi::Function::New(env, SetItems));
     exports.Set("getValue", Napi::Function::New(env, GetValue));
+    exports.Set("setBounds", Napi::Function::New(env, SetBounds));
     exports.Set("setValue", Napi::Function::New(env, SetValue));
     exports.Set("exists", Napi::Function::New(env, Exists));
     exports.Set("focus", Napi::Function::New(env, Focus));

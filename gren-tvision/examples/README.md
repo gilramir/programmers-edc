@@ -12,7 +12,7 @@ Build them all with `../build.sh`, run one with `../run.sh <name>`.
 |---|---|---|
 | `hello` | `tvision/hello.cpp` | menus, status line, modal dialog as a `Cmd`, dialog result as a `Msg` |
 | `mmenu` | `tvision/examples/mmenu` | a menu bar that changes at runtime, and menu bar entries that are commands rather than pull-downs |
-| `entries` | *(ours)* | list boxes, `Time.every` behind a modal dialog, `WindowClosed`, mutable window titles — and later `Tui.focus`, because "show me that window" is the thing a description of the UI cannot say, and `Resized`, because it is the first example that does not assume 80x25 |
+| `entries` | *(ours)* | list boxes, `Time.every` behind a modal dialog, `WindowClosed`, mutable window titles — and later `Tui.focus`, because "show me that window" is the thing a description of the UI cannot say, `Resized`, because it is the first example that does not assume 80x25, and `Grows`, because a window that grows and a list box that does not is worse than neither |
 | `forms` | `tvision/examples/tvforms` | check boxes, radio buttons, labels, and a list box highlight the model can both read and move |
 | `ascii` | `tvision/examples/tvdemo` (ascii.cpp) | the canvas, from Gren: a view the model paints itself, and a cursor to select with |
 | `calendar` | `tvision/examples/tvdemo` (calendar.cpp) | colour on a canvas, as spans; and today as a field, because `Time.now` is a task |
@@ -433,7 +433,7 @@ excludes `evMouseWheel` (`views.h`), so a wheel event goes to whatever has
 
 ### The coverage gaps left
 
-Ten, in the order they were listed, two of them now closed. Each says what it
+Ten, in the order they were listed, three of them now closed. Each says what it
 would take, because "not done", "not decided" and "not needed" are three
 different problems.
 
@@ -444,10 +444,10 @@ reaches is a capability no Gren program can use. It named `focus` and
 `screenSize` too; protocol 5 carried the first and protocol 6 superseded the
 second, and both notes went away without the check being touched.
 
-The first two were listed here as one design with two symptoms. They are not:
-closing the first showed that the second's mechanism already exists upstream
-and is switched off. Both still touch *every* program written with the API
-rather than one kind of program, which is why they are first.
+The first two were listed here as one design with two symptoms. They were two,
+and neither needed the new layout language this list proposed: the first is an
+event, and the second is `growMode`, which Turbo Vision has always had and
+which nothing here was switching on.
 
 **1. ~~The model does not know how big the terminal is.~~ Done — the
 [`Resized`](#Event) event, protocol 6.** It carries the **desktop's** size, not
@@ -465,26 +465,37 @@ stopping its window at column 78 and `watch` dividing an assumed 23-row desktop
 are now ordinary bugs with an ordinary fix, rather than things the API could
 not express.
 
-**2. Child views do not grow with their window** — and the answer is smaller
-than this entry used to claim. Two things are now measured rather than assumed:
+**2. ~~Child views do not grow with their window.~~ Done — [`Grows`](#View),
+protocol 7.** It never needed a `fill`/`fixed` layout invented for it, which is
+what this entry used to say: Turbo Vision already has the declarative layout.
+`growMode` is one integer per view and `TGroup::changeBounds` resolves it.
 
-  - **Windows already grow with the terminal.** `beWindow()` has always set
-    `growMode = gfGrowAll | gfGrowRel`, so `TGroup::changeBounds` rescales
-    every window proportionally when the screen changes. Nobody had written
-    that down.
-  - **Their contents do not, by construction.** `JsCanvas` and every other
-    child view is built with `growMode = 0`. Driving `examples/entries` from
-    100x30 to 120x40 moves the list window's bottom frame from screen row 22 to
-    row 32 and leaves its Add button on row 15. `drive_entries.py` checks
-    exactly that, so the gap is recorded rather than merely known.
+A view opts in by being wrapped — `Grows { grow = Tui.stretch, view = ... }` —
+so a view that does not care says nothing, which is most of them. `Grow` is
+four booleans, one per edge, with `stretch`, `pinRight`, `pinBottom` and the
+rest named for the combinations worth naming.
 
-So this is **not** the same design decision as (1), which is what this list
-used to say, and it does not need a `fill`/`fixed` layout invented for it.
-Turbo Vision already has the declarative layout: `growMode` is one integer per
-view — `gfGrowLoX`, `gfGrowLoY`, `gfGrowHiX`, `gfGrowHiY`, `gfGrowRel` — and
-the resolving is `TGroup::changeBounds`, which runs already. What is left is to
-decide how a `View` says it, and to pass it through the four layers. It is
-still the prerequisite for anything editor-shaped, because `TEditor` sets
+Two things had to be found out on the way, and the second is the one worth
+knowing:
+
+  - **Windows have always grown with the terminal.** `beWindow()` sets
+    `growMode = gfGrowAll | gfGrowRel`, so every window is rescaled
+    proportionally when the screen changes. Nobody had written that down.
+  - **Wrapping the views changed nothing until the differ stopped rebuilding
+    them.** `sameShape` treated a window's rectangle as structural, so a model
+    laying out against the terminal size closed and rebuilt the window on
+    every resize — and `changeBounds`, the only thing that resolves `growMode`,
+    never ran. A window's rectangle is now patched with `tv.setBounds`, exactly
+    as its title already was, which also stops a resize from throwing away the
+    caret, the scroll position and the list highlight.
+
+`drive_entries.py` checks both paths, because they are different mechanisms
+with the same picture: the terminal resizing, where the model is told and
+re-lays-out, and the frame's zoom box, which is Turbo Vision's own command and
+never reaches the model at all. The second is the case this entry was written
+about, and it is the one where `growMode` is the only mechanism there is.
+
+This was the prerequisite for anything editor-shaped: `TEditor` sets
 `gfGrowHiX | gfGrowHiY` in its own constructor.
 
 **3. ~~The model cannot move focus.~~ Done — `Tui.focus`, protocol 5.** It was
@@ -591,7 +602,9 @@ it would take. Two things learned since that note was written: wrap `TEditor`
 rather than `TFileEditor`, because the file half is already a `Task` in Gren
 and `editorDialog` is a replaceable function pointer, so it drags in neither
 `TFileDialog` nor `.rsc`; and `TEditor` sets `growMode = gfGrowHiX | gfGrowHiY`
-in its constructor (`teditor1.cpp:193`), so it wants gap (2) settled first.
+in its constructor (`teditor1.cpp:193`), which wanted gap (2) settled first
+and now is: an editor view would wrap itself in `Grows Tui.stretch` like
+anything else.
 `TMemo` is the cheap way in: a multi-line field in a form, collected when the
 dialog is answered, which keeps the model-owns-the-state invariant intact.
 

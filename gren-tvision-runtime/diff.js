@@ -29,9 +29,14 @@ function skeleton(view) {
   return JSON.stringify(copy);
 }
 
+// A window's *rectangle* is not structural, for the same reason its title is
+// not: there is a call that changes it in place. It used to be, and rebuilding
+// a window to move it threw away the caret, the scroll position and the list
+// highlight -- and skipped TGroup::changeBounds, which is the only thing that
+// resolves a child view's growMode. A view's own rect is still structural:
+// nothing can move one of those but a rebuild.
 function sameShape(before, after) {
   if (!before) return false;
-  if (JSON.stringify(before.rect) !== JSON.stringify(after.rect)) return false;
   if (before.items.length !== after.items.length) return false;
   return before.items.every((view, i) => skeleton(view) === skeleton(after.items[i]));
 }
@@ -159,6 +164,11 @@ function createDiffer(tv, onClosed = () => {}) {
             } else {
               const before = current.get(window.id);
               if (before.title !== window.title) tv.setTitle(window.id, window.title);
+              // Before the contents, so that a view which grew with the window
+              // is written at the size it has now.
+              if (JSON.stringify(before.rect) !== JSON.stringify(window.rect)) {
+                tv.setBounds(window.id, window.rect);
+              }
               window.items.forEach((view, i) => patchView(before.items[i], view));
             }
           }

@@ -1,6 +1,7 @@
 module Tui exposing
     ( DialogSpec
     , Event(..)
+    , Grow
     , Hue(..)
     , MenuItem(..)
     , Ports
@@ -14,6 +15,7 @@ module Tui exposing
     , Window
     , defineProgram
     , dialog
+    , fixed
     , flag
     , flags
     , focus
@@ -21,10 +23,15 @@ module Tui exposing
     , line
     , number
     , on
+    , pinBottom
+    , pinRight
     , plain
     , quit
     , setDoubleClickDelay
     , setEnabled
+    , stretch
+    , stretchHeight
+    , stretchWidth
     , text
     )
 
@@ -156,6 +163,7 @@ its own is a pull-down, and one without is a command sitting on the bar.
 @docs Ports
 @docs Program, ProgramConfiguration, defineProgram
 @docs Ui, Window, View, Rect
+@docs Grow, fixed, stretch, stretchWidth, stretchHeight, pinRight, pinBottom
 @docs Span, Hue, line, plain, ink, on
 @docs MenuItem, StatusItem
 @docs Event, DialogSpec
@@ -201,11 +209,13 @@ canvas. Version 5 added [`focus`](#focus), which is the first message this
 protocol has carried that names a view rather than describing the whole UI.
 Version 6 added the [`Resized`](#Event) event, which is how a program finds
 out how big the terminal is -- the first thing the model is told that it did
-not ask for and cannot cause.
+not ask for and cannot cause. Version 7 added [`Grows`](#View), which puts a
+`grow` field on the view it wraps: an older runtime would pass it to a binding
+that ignores unknown fields, and the view would silently not move.
 -}
 protocolVersion : Int
 protocolVersion =
-    6
+    7
 
 
 -- GEOMETRY
@@ -221,6 +231,78 @@ whose frame takes up row and column zero, so the usable area starts at 1.
 -}
 type alias Rect =
     { x1 : Int, y1 : Int, x2 : Int, y2 : Int }
+
+
+{-| Which of a view's four edges follow its window when the window changes
+size.
+
+A window can be zoomed, resized, tiled, or carried along when the terminal
+itself changes size, and by default the views inside it keep the rectangle the
+model gave them -- so a window that got taller shows the same list box with
+empty space underneath it. This is how a view says otherwise.
+
+It is Turbo Vision's own `growMode`, one flag per edge, and Turbo Vision does
+the arithmetic in `TGroup::changeBounds`. An edge that follows moves by
+whatever the window moved; an edge that does not stays where it is. Which
+means the interesting combinations are about *pairs*:
+
+  - **right and bottom** -- the view stretches, keeping its top-left corner.
+    That is [`stretch`](#stretch), and it is what a list box or a canvas
+    filling a window wants.
+  - **top and bottom** (or **left and right**) -- both edges move together, so
+    the view keeps its size and slides. That is [`pinBottom`](#pinBottom) and
+    [`pinRight`](#pinRight): a row of buttons that stays at the foot of the
+    window however tall it gets.
+
+Nothing has to say any of this. A view with no [`Grows`](#View) around it does
+not move, which is what every view did before this existed.
+-}
+type alias Grow =
+    { left : Bool, top : Bool, right : Bool, bottom : Bool }
+
+
+{-| No edge follows: keep the rectangle exactly. The default, and only worth
+naming when a model chooses a `Grow` at runtime.
+-}
+fixed : Grow
+fixed =
+    { left = False, top = False, right = False, bottom = False }
+
+
+{-| Right and bottom follow, so the view grows and shrinks with the window
+while its top-left corner stays put.
+-}
+stretch : Grow
+stretch =
+    { left = False, top = False, right = True, bottom = True }
+
+
+{-| Only the right edge follows: as wide as the window, as tall as it was. -}
+stretchWidth : Grow
+stretchWidth =
+    { left = False, top = False, right = True, bottom = False }
+
+
+{-| Only the bottom edge follows: as tall as the window, as wide as it was. -}
+stretchHeight : Grow
+stretchHeight =
+    { left = False, top = False, right = False, bottom = True }
+
+
+{-| Both horizontal edges follow, so the view keeps its width and stays the
+same distance from the window's right-hand edge.
+-}
+pinRight : Grow
+pinRight =
+    { left = True, top = False, right = True, bottom = False }
+
+
+{-| Both vertical edges follow, so the view keeps its height and stays the same
+distance from the foot of the window.
+-}
+pinBottom : Grow
+pinBottom =
+    { left = False, top = True, right = False, bottom = True }
 
 
 -- VIEWS
@@ -304,6 +386,21 @@ type alias Window =
     canvas that is only there to be looked at or clicked should say `False` or
     it will trap the caret. Clicks still arrive either way.
 
+`Grows` is the odd one, and the only constructor here that is not a widget: it
+wraps another view to say which of its edges follow the window when the window
+changes size. See [`Grow`](#Grow).
+
+    Grows
+        { grow = Tui.stretch
+        , view = ListBox { id = "entries", rect = ..., items = ..., focused = 0 }
+        }
+
+It is opt-in because most views do not want it, and a wrapper rather than a
+field on all nine records so that a view that does not care says nothing at
+all. It takes a record because a Gren variant takes at most one argument, which
+is also what makes it look like every other constructor here. It encodes as a field on the view it wraps, so nothing downstream has a
+`Grows` to handle. Wrapping a wrapper is legal and the outer one wins.
+
 The first control in the list gets focus when the window opens -- the first
 that *can* take it, so a row of `takesFocus = False` buttons is skipped. Turbo
 Vision itself focuses the *last* one added, which in a list written top to
@@ -326,6 +423,7 @@ type View
     | ScrollBar { id : String, rect : Rect, value : Int, min : Int, max : Int, pageStep : Int, arrowStep : Int }
     | Label { id : String, rect : Rect, text : String, for : String }
     | Canvas { id : String, rect : Rect, lines : Array (Array Span), cursor : Maybe { x : Int, y : Int }, takesFocus : Bool }
+    | Grows { grow : Grow, view : View }
 
 
 {-| A run of characters on a [`Canvas`](#View) line, painted in one colour.
@@ -795,99 +893,122 @@ encodeWindow window =
 encodeView : View -> Encode.Value
 encodeView view =
     when view is
-        StaticText v ->
+        Grows v ->
+            Encode.object (encodeViewFields v.view ++ growFields v.grow)
+
+        _ ->
+            Encode.object (encodeViewFields view)
+
+
+growFields : Grow -> Array { key : String, value : Encode.Value }
+growFields mode =
+    [ { key = "grow"
+      , value =
             Encode.object
-                [ { key = "type", value = Encode.string "staticText" }
-                , { key = "id", value = Encode.string v.id }
-                , { key = "rect", value = encodeRect v.rect }
-                , { key = "text", value = Encode.string v.text }
+                [ { key = "left", value = Encode.bool mode.left }
+                , { key = "top", value = Encode.bool mode.top }
+                , { key = "right", value = Encode.bool mode.right }
+                , { key = "bottom", value = Encode.bool mode.bottom }
                 ]
+      }
+    ]
+
+
+{-| The fields of one view, without any `grow` wrapped around it. Split out so
+that the wrapper contributes its field in one place rather than in nine.
+-}
+encodeViewFields : View -> Array { key : String, value : Encode.Value }
+encodeViewFields view =
+    when view is
+        -- Wrapping a wrapper: the outer one has already contributed its field,
+        -- so this only has to get past it to the view underneath.
+        Grows v ->
+            encodeViewFields v.view
+
+        StaticText v ->
+            [ { key = "type", value = Encode.string "staticText" }
+            , { key = "id", value = Encode.string v.id }
+            , { key = "rect", value = encodeRect v.rect }
+            , { key = "text", value = Encode.string v.text }
+            ]
 
         Button v ->
-            Encode.object
-                [ { key = "type", value = Encode.string "button" }
-                , { key = "id", value = Encode.string v.id }
-                , { key = "rect", value = encodeRect v.rect }
-                , { key = "title", value = Encode.string v.title }
-                , { key = "cmd", value = Encode.string v.cmd }
-                , { key = "default", value = Encode.bool v.isDefault }
-                , { key = "focusable", value = Encode.bool v.takesFocus }
-                ]
+            [ { key = "type", value = Encode.string "button" }
+            , { key = "id", value = Encode.string v.id }
+            , { key = "rect", value = encodeRect v.rect }
+            , { key = "title", value = Encode.string v.title }
+            , { key = "cmd", value = Encode.string v.cmd }
+            , { key = "default", value = Encode.bool v.isDefault }
+            , { key = "focusable", value = Encode.bool v.takesFocus }
+            ]
 
         InputLine v ->
-            Encode.object
-                [ { key = "type", value = Encode.string "inputLine" }
-                , { key = "id", value = Encode.string v.id }
-                , { key = "rect", value = encodeRect v.rect }
-                , { key = "maxLen", value = Encode.int v.maxLen }
-                , { key = "value", value = Encode.string v.value }
-                ]
+            [ { key = "type", value = Encode.string "inputLine" }
+            , { key = "id", value = Encode.string v.id }
+            , { key = "rect", value = encodeRect v.rect }
+            , { key = "maxLen", value = Encode.int v.maxLen }
+            , { key = "value", value = Encode.string v.value }
+            ]
 
         ListBox v ->
-            Encode.object
-                [ { key = "type", value = Encode.string "listBox" }
-                , { key = "id", value = Encode.string v.id }
-                , { key = "rect", value = encodeRect v.rect }
-                , { key = "items", value = Encode.array Encode.string v.items }
-                , { key = "focused", value = Encode.int v.focused }
-                ]
+            [ { key = "type", value = Encode.string "listBox" }
+            , { key = "id", value = Encode.string v.id }
+            , { key = "rect", value = encodeRect v.rect }
+            , { key = "items", value = Encode.array Encode.string v.items }
+            , { key = "focused", value = Encode.int v.focused }
+            ]
 
         CheckBoxes v ->
-            Encode.object
-                [ { key = "type", value = Encode.string "checkBoxes" }
-                , { key = "id", value = Encode.string v.id }
-                , { key = "rect", value = encodeRect v.rect }
-                , { key = "items", value = Encode.array Encode.string v.items }
-                , { key = "value", value = Encode.array Encode.bool v.checked }
-                ]
+            [ { key = "type", value = Encode.string "checkBoxes" }
+            , { key = "id", value = Encode.string v.id }
+            , { key = "rect", value = encodeRect v.rect }
+            , { key = "items", value = Encode.array Encode.string v.items }
+            , { key = "value", value = Encode.array Encode.bool v.checked }
+            ]
 
         RadioButtons v ->
-            Encode.object
-                [ { key = "type", value = Encode.string "radioButtons" }
-                , { key = "id", value = Encode.string v.id }
-                , { key = "rect", value = encodeRect v.rect }
-                , { key = "items", value = Encode.array Encode.string v.items }
-                , { key = "value", value = Encode.int v.selected }
-                ]
+            [ { key = "type", value = Encode.string "radioButtons" }
+            , { key = "id", value = Encode.string v.id }
+            , { key = "rect", value = encodeRect v.rect }
+            , { key = "items", value = Encode.array Encode.string v.items }
+            , { key = "value", value = Encode.int v.selected }
+            ]
 
         ScrollBar v ->
-            Encode.object
-                [ { key = "type", value = Encode.string "scrollBar" }
-                , { key = "id", value = Encode.string v.id }
-                , { key = "rect", value = encodeRect v.rect }
-                , { key = "value", value = Encode.int v.value }
-                , { key = "min", value = Encode.int v.min }
-                , { key = "max", value = Encode.int v.max }
-                , { key = "pageStep", value = Encode.int v.pageStep }
-                , { key = "arrowStep", value = Encode.int v.arrowStep }
-                ]
+            [ { key = "type", value = Encode.string "scrollBar" }
+            , { key = "id", value = Encode.string v.id }
+            , { key = "rect", value = encodeRect v.rect }
+            , { key = "value", value = Encode.int v.value }
+            , { key = "min", value = Encode.int v.min }
+            , { key = "max", value = Encode.int v.max }
+            , { key = "pageStep", value = Encode.int v.pageStep }
+            , { key = "arrowStep", value = Encode.int v.arrowStep }
+            ]
 
         Label v ->
-            Encode.object
-                [ { key = "type", value = Encode.string "label" }
-                , { key = "id", value = Encode.string v.id }
-                , { key = "rect", value = encodeRect v.rect }
-                , { key = "text", value = Encode.string v.text }
-                , { key = "for", value = Encode.string v.for }
-                ]
+            [ { key = "type", value = Encode.string "label" }
+            , { key = "id", value = Encode.string v.id }
+            , { key = "rect", value = encodeRect v.rect }
+            , { key = "text", value = Encode.string v.text }
+            , { key = "for", value = Encode.string v.for }
+            ]
 
         Canvas v ->
-            Encode.object
-                [ { key = "type", value = Encode.string "canvas" }
-                , { key = "id", value = Encode.string v.id }
-                , { key = "rect", value = encodeRect v.rect }
-                , { key = "lines", value = Encode.array (Encode.array encodeSpan) v.lines }
-                , { key = "selectable", value = Encode.bool v.takesFocus }
-                , { key = "cursorAt"
-                  , value =
-                        when v.cursor is
-                            Just at ->
-                                Encode.array Encode.int [ at.x, at.y ]
+            [ { key = "type", value = Encode.string "canvas" }
+            , { key = "id", value = Encode.string v.id }
+            , { key = "rect", value = encodeRect v.rect }
+            , { key = "lines", value = Encode.array (Encode.array encodeSpan) v.lines }
+            , { key = "selectable", value = Encode.bool v.takesFocus }
+            , { key = "cursorAt"
+              , value =
+                    when v.cursor is
+                        Just at ->
+                            Encode.array Encode.int [ at.x, at.y ]
 
-                            Nothing ->
-                                Encode.null
-                  }
-                ]
+                        Nothing ->
+                            Encode.null
+              }
+            ]
 
 
 {-| A span with no colour is sent as `{text}` alone, so a canvas that never

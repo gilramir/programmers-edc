@@ -28,6 +28,7 @@ function fakeTv(initiallyOpen = []) {
       calls.push(['close', id]);
     },
     setTitle: (id, title) => calls.push(['setTitle', id, title]),
+    setBounds: (id, rect) => calls.push(['setBounds', id, rect]),
     setText: (id, text) => calls.push(['setText', id, text]),
     setValue: (id, value) => calls.push(['setValue', id, value]),
     setItems: (id, items) => calls.push(['setItems', id, items]),
@@ -96,8 +97,36 @@ test('a structural change rebuilds the window', () => {
   const differ = createDiffer(tv);
   differ.apply([win()]);
   tv.calls.length = 0;
-  differ.apply([win({ rect: [1, 1, 50, 10] })]);
+  differ.apply([win({ items: [{ ...win().items[0], id: 'other' }] })]);
   assert.deepEqual(tv.calls, [['close', 'w'], ['window', 'w']]);
+});
+
+test('a resized window is moved in place, not rebuilt', () => {
+  // Rebuilding it would throw away the caret, the scroll position and the
+  // list highlight -- and would skip TGroup::changeBounds, which is the only
+  // thing that resolves a child view's growMode. A model that lays out
+  // against the terminal size sends a new rectangle on every resize, so this
+  // is the common case rather than the rare one.
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  differ.apply([win()]);
+  tv.calls.length = 0;
+  differ.apply([win({ rect: [1, 1, 50, 10] })]);
+  assert.deepEqual(tv.calls, [['setBounds', 'w', [1, 1, 50, 10]]]);
+});
+
+test('a window the model leaves where it was is not moved', () => {
+  // The other half, and the one that lets Tile and Cascade survive: Turbo
+  // Vision moves windows without telling anyone, and the model goes on
+  // sending the rectangle it started with. Comparing against the last spec
+  // applied rather than against the screen is what keeps that from snapping
+  // the window back on the next render.
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  differ.apply([win()]);
+  tv.calls.length = 0;
+  differ.apply([win()]);
+  assert.deepEqual(tv.calls, []);
 });
 
 test('an input line is written only when the model changed it', () => {
@@ -267,6 +296,7 @@ test('our own closes are not reported as the user closing a window', () => {
 test('sameShape ignores the mutable fields and nothing else', () => {
   const a = win();
   assert.equal(sameShape(a, win({ title: 'other' })), true, 'title is patchable');
+  assert.equal(sameShape(a, win({ rect: [1, 1, 50, 10] })), true, 'a rect is patchable');
   assert.equal(
     sameShape(a, win({ items: [{ ...a.items[0], text: 'other' }] })),
     true,

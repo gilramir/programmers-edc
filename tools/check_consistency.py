@@ -49,9 +49,19 @@ def gren_view_variants(src):
     return re.findall(r"^\s*[=|]\s*(\w+)", block.group(1), re.M)
 
 
+# `Grows` is the one constructor of `View` that is not a widget: it wraps
+# another view to say which of its edges follow the window, and encodes as a
+# `grow` field on the view it wraps rather than as a wire type of its own. It
+# therefore has no branch in the four-layer walk and never will. Naming it here
+# rather than loosening the walk is what keeps the walk exact for the other
+# nine -- and check 2b below verifies that the wrapper really is plumbed, so
+# this line is an exemption rather than a hole.
+WRAPPER_VARIANTS = {"Grows"}
+
+
 def gren_encoder_types(src):
-    """{constructor: wire type string} from encodeView's branches."""
-    block = re.search(r"encodeView view =\n(.*?)\n\n\nencodeMenu", src, re.S)
+    """{constructor: wire type string} from encodeViewFields' branches."""
+    block = re.search(r"encodeViewFields view =\n(.*?)(?=\n\n\n\S)", src, re.S)
     if not block:
         return {}
     out = {}
@@ -189,7 +199,26 @@ def main():
 
     # 1. Every Gren constructor is encoded.
     for name in variants:
-        require(name in encoded, f"View.{name} has no branch in encodeView")
+        if name in WRAPPER_VARIANTS:
+            continue
+        require(name in encoded, f"View.{name} has no branch in encodeViewFields")
+
+    # 2b. The wrapper, whose exemption above is only worth having if both ends
+    #     of it are really there: Tui has to encode through it, and the builder
+    #     has to read the field it produces. Miss either and every `Grows` in
+    #     every program is silently ignored -- which is the exact failure this
+    #     file exists for, and the one the exemption would otherwise hide.
+    for name in sorted(WRAPPER_VARIANTS & set(variants)):
+        require(re.search(rf"\n        {name} v ->\n            encodeViewFields",
+                          tui_gren),
+                f"View.{name} is exempt from the type walk but encodeViewFields "
+                f"has no branch that unwraps it -- every {name} would encode as "
+                f"nothing")
+    require(re.search(r'growFields mode =.*?"grow"', tui_gren, re.S),
+            "Tui does not encode a 'grow' field, so Grows carries nothing")
+    require('it.Has("grow")' in views_cc,
+            "views.cc never reads the 'grow' field -- a Grows would encode "
+            "correctly and change nothing on screen")
 
     # 2. Everything Gren emits, the binding can build.
     for name, wire in encoded.items():

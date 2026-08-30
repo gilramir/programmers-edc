@@ -1657,3 +1657,96 @@ terminal ever had, which everything written before a resize fits in, and then
 cropped to the current size. The crop is not cosmetic: without it a terminal
 that *shrank* still showed what it drew when it was bigger, because TVision
 only repaints inside the current size and the old cells were still in the grid.
+
+## Closing gap 2: views that grow with their window
+
+The entry above narrowed this to a sentence: `growMode` already exists, Turbo
+Vision already resolves it in `TGroup::changeBounds`, and every view here is
+built with it set to zero. So the work was to decide how a `View` says it, and
+then to find out why saying it changed nothing.
+
+### An opt-in wrapper, because most views do not want one
+
+The obvious shape is a `grow` field on all nine view records. That is uniform,
+and it costs forty-nine literals across fourteen examples plus a `grow = fixed`
+on every static text in every trivial program, forever. The alternative is a
+constructor that wraps another view:
+
+```gren
+Grows
+    { grow = Tui.stretch
+    , view = ListBox { id = "entries", rect = ..., items = ..., focused = 0 }
+    }
+```
+
+Nothing that does not care says anything, which is the right default because
+most views genuinely do not care. It encodes as a `grow` field on the view it
+wraps, so the runtime and the C++ never see a `Grows` at all — the differ
+treats it as one more structural field, and `buildItems` reads it in one place
+before `insert`.
+
+Gren caps a variant at one argument, so it takes a record. That turned out to
+read better than the two-argument version it replaced: every other constructor
+of `View` takes a record too.
+
+`Grow` itself is four booleans, one per edge, named `left`/`top`/`right`/
+`bottom` rather than `gfGrowLoX` and friends, with `stretch`, `pinRight`,
+`pinBottom`, `stretchWidth`, `stretchHeight` and `fixed` for the combinations
+worth naming. `gfGrowRel` is deliberately not offered: rescaling an edge to the
+same *fraction* of its owner is what a window on the desktop wants, and inside
+a window it turns a one-row caption into a proportion of the window's height.
+
+### The exemption that had to earn itself
+
+`Grows` is the first constructor of `View` with no wire type, so
+`check_consistency.py`'s four-layer walk had to be told about it — and an
+exemption is exactly the kind of thing that quietly turns a check into
+decoration. So it comes with a check of its own: that `encodeViewFields` really
+has a branch unwrapping it, that `Tui` really emits a `grow` field, and that
+`views.cc` really reads one. Break any of the three and the walk fails by name.
+Verified by breaking each, which is the only way to know a check works.
+
+### And then it did nothing, because the window was being rebuilt
+
+Wrapping the views, rebuilding, resizing the terminal from 100x30 to 120x40:
+the window grew and the button stayed exactly where it was, as if nothing had
+been added at all.
+
+`sameShape` compared the window's rectangle, so a model that lays out against
+the terminal size sends a new rectangle on every resize and the differ **closed
+the window and built it again**. Every child is then constructed fresh at the
+rectangle the model wrote down, and `changeBounds` — the only thing that
+resolves `growMode` — never runs at all. `growMode` is a rule about a window
+that changes size, and rebuilding is not changing size.
+
+So a window's rectangle stopped being structural, exactly as its title already
+had. `tv.setBounds(id, rect)` calls `TView::locate`, which is what the frame's
+own resize handle calls: it clamps to `sizeLimits`, calls `changeBounds`, and
+repaints what the window uncovered. Rebuilding was also throwing away which
+view had the caret, where a list was scrolled and which row was highlighted, on
+every resize; that is now a patch and they survive.
+
+The half of `sameShape` that had to stay is the half that makes Tile and
+Cascade work: the comparison is against *the spec last applied*, not against
+the screen. Turbo Vision moves windows without telling anyone, the model goes
+on sending the rectangle it started with, the two match, and nothing is sent.
+That invariant is what `examples/demo` exists to protect, and there is now a
+unit test for it beside the new one rather than only a pty test.
+
+### Two paths, and only one of them involves the model
+
+`drive_entries` checks both, because they are genuinely different mechanisms
+that happen to produce the same picture:
+
+  - **the terminal resized** — the model is told, re-lays-out, sends new
+    rectangles, the differ resizes the windows in place, and `changeBounds`
+    moves the children. The model is in the loop.
+  - **the frame's zoom box clicked** — Turbo Vision's own command. It never
+    reaches the model, so every rectangle the model goes on sending is the one
+    it was already sending and the differ has nothing to do. `growMode` is the
+    *only* mechanism here, and it is the case gap (2) was actually written
+    about: "a tiled window shows a clipped canvas rather than a stretched one".
+
+The second is the better test for exactly that reason, and it is also the one
+that proves the first invariant still holds: the clock guarantees a render a
+second, and none of them undoes the zoom.

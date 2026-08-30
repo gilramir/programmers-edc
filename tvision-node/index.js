@@ -140,6 +140,7 @@ module.exports = {
   setCursor: addon.setCursor,
   setScroll: addon.setScroll,
   setEnabled: addon.setEnabled,
+  setBounds: addon.setBounds,
 
   // The menu bar and status line start as configuration and can then be
   // replaced outright -- Turbo Vision keeps them in swappable members.
