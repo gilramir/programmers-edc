@@ -34,6 +34,7 @@
 #define Uses_TStatusItem
 #define Uses_TStatusLine
 #define Uses_TSubMenu
+#define Uses_TFrame
 #define Uses_TWindow
 #include <tvision/tv.h>
 
@@ -226,6 +227,12 @@ public:
     virtual void handleEvent(TEvent &event) override;
 
     std::string windowId;
+
+    // Dialogs report their outcome by resolving a promise, so they must not
+    // also fire onClose. Plain windows must: the user can close one from its
+    // frame, and a declarative layer that does not hear about it will keep
+    // believing the window is open.
+    bool reportClose = true;
 };
 
 /* ------------------------------------------------------------------ */
@@ -314,6 +321,14 @@ extern bool g_running;
 void dispatchCommand(const std::string &name);
 void dispatchSelect(const std::string &id, int index, const std::string &text);
 void dispatchKey(const std::string &id, const std::string &key);
+
+// Queued, not dispatched. ~JsWindow runs deep inside TVision -- from
+// TWindow::close(), from the desktop's own destructor -- and calling into JS
+// there hands the application a window that is half gone: the id still
+// resolves, so a declarative layer reacting to the notification can call
+// close() on it a second time. The pump drains the queue between events, where
+// nothing is mid-destruction.
+void noteWindowClosed(const std::string &id);
 void dispatchClick(const std::string &id, int x, int y);
 
 /* ------------------------------------------------------------------ */
@@ -328,10 +343,19 @@ TKey getKey(const Napi::Env &env, const Napi::Object &o, const char *key,
             const std::string &where);
 TRect getRect(const Napi::Env &env, const Napi::Object &o, const char *where);
 
-// Fills a window from a JS `items` array. Returns nothing; ids are registered
-// against windowId so closing the window forgets them all.
-void buildItems(const Napi::Env &env, JsWindow *win, const Napi::Value &items,
-                const std::string &windowId);
+// Fills a window from a JS `items` array; ids are registered against windowId
+// so closing the window forgets them all. Returns the first view that can take
+// focus, in declaration order -- see applyInitialFocus.
+TView *buildItems(const Napi::Env &env, JsWindow *win, const Napi::Value &items,
+                  const std::string &windowId);
+
+// Turbo Vision focuses the *last* view inserted, because insert() prepends and
+// the first in z-order wins. In a list written top to bottom that is the last
+// thing you wrote -- the Cancel button -- so a dialog opens with the caret
+// nowhere near the field the user is going to type in. A declarative API
+// should not inherit an artifact of insertion order, so the first focusable
+// view in the list gets focus instead, and `focus: "<id>"` overrides it.
+void applyInitialFocus(const Napi::Object &spec, TView *firstSelectable);
 
 // Values of every addressable input inside a window, as {id: value}.
 Napi::Object collectValues(const Napi::Env &env, const std::string &windowId);

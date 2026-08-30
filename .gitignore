@@ -5,3 +5,6 @@ node_modules/
 build/
 .devbox/
 build/asan.*
+gren-tvision/.gren/
+gren-tvision/gren_packages/
+gren-tvision/main.js

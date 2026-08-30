@@ -1,0 +1,469 @@
+port module Tui exposing
+    ( Program, ProgramConfiguration, defineProgram
+    , Ui, Window, View(..), Rect
+    , Menu, MenuItem(..), StatusItem
+    , Event(..), DialogSpec
+    , dialog, quit, setEnabled
+    , flag, number, text
+    )
+
+{-| Turbo Vision, as the Elm architecture.
+
+The bargain is the same one `elm/browser` makes with the DOM. You write
+
+    view : Model -> Ui
+
+and hand back a description of what should be on screen. This module encodes it
+as JSON and sends it over a port; the JavaScript on the other side diffs it
+against what is already there and calls into the native binding to patch the
+difference. Events come back the same way and arrive as messages.
+
+Nothing here calls C++, and nothing here blocks. That is the whole reason the
+binding had to grow a non-blocking event pump and modal dialogs that do not
+stop Node: a `Cmd` that never returns to the runtime is a deadlock, not a
+dialog.
+
+## What is *not* in the view
+
+The menu bar and the status line are configuration, not view. Turbo Vision
+builds both inside the `TApplication` constructor, from static callbacks with
+no user-data channel, so they exist before there is a first model to render and
+cannot be swapped afterwards. `setEnabled` is how a command changes state at
+runtime.
+
+@docs Program, ProgramConfiguration, defineProgram
+@docs Ui, Window, View, Rect
+@docs Menu, MenuItem, StatusItem
+@docs Event, DialogSpec
+@docs dialog, quit, setEnabled
+@docs flag, number, text
+
+-}
+
+import Array exposing (Array)
+import Init
+import Json.Decode as Decode
+import Json.Encode as Encode
+import Node
+import Task
+
+
+
+-- PORTS
+
+
+port tuiOut : Encode.Value -> Cmd msg
+
+
+port tuiIn : (Decode.Value -> msg) -> Sub msg
+
+
+
+-- GEOMETRY
+
+
+{-| A rectangle in character cells, in the order Turbo Vision takes them.
+Inside a window the origin is the window's own top-left corner, and the frame
+occupies row and column zero.
+-}
+type alias Rect =
+    { x1 : Int, y1 : Int, x2 : Int, y2 : Int }
+
+
+
+-- VIEWS
+
+
+{-| Everything that should be on screen right now.
+-}
+type alias Ui =
+    { windows : Array Window }
+
+
+{-| A window, addressed by a stable id. Keep the id stable across renders: it
+is what lets the diff patch a window in place instead of tearing it down, and
+tearing it down loses focus and scroll position.
+-}
+type alias Window =
+    { id : String
+    , title : String
+    , rect : Rect
+    , views : Array View
+    }
+
+
+{-| The controls. `Canvas` is the interesting one: it paints whatever lines it
+is given, so a Gren program can render content the stock widgets cannot
+express -- which is what tvdemo's ASCII chart and calendar are.
+-}
+type View
+    = StaticText { id : String, rect : Rect, text : String }
+    | Button { id : String, rect : Rect, title : String, cmd : String, isDefault : Bool }
+    | InputLine { id : String, rect : Rect, maxLen : Int, value : String }
+    | ListBox { id : String, rect : Rect, items : Array String }
+    | Canvas { id : String, rect : Rect, lines : Array String }
+
+
+
+-- MENUS
+
+
+{-| One pull-down on the menu bar.
+-}
+type alias Menu =
+    { title : String, key : String, items : Array MenuItem }
+
+
+{-| Menu entries nest: an entry with entries of its own is a submenu.
+-}
+type MenuItem
+    = Item { title : String, cmd : String, key : String, shortcut : String }
+    | Separator
+    | SubMenu { title : String, key : String, items : Array MenuItem }
+
+
+{-| One entry on the status line. Its key works everywhere, including over an
+open modal dialog -- Turbo Vision gives the status line every keystroke first.
+-}
+type alias StatusItem =
+    { text : String, key : String, cmd : String }
+
+
+
+-- EVENTS
+
+
+{-| What the terminal did.
+-}
+type Event
+    = Command String
+    | Selected { id : String, index : Int, text : String }
+    | KeyPressed { id : String, key : String }
+    | Clicked { id : String, x : Int, y : Int }
+    | DialogClosed { id : String, cmd : String, values : Decode.Value }
+    | WindowClosed String
+    | Unknown String
+
+
+
+-- COMMANDS
+
+
+{-| A modal dialog. It takes all the input until it is dismissed, and answers
+with a `DialogClosed` event carrying the button that closed it and the value of
+every field in it.
+-}
+type alias DialogSpec =
+    { id : String
+    , title : String
+    , rect : Rect
+    , views : Array View
+    }
+
+
+{-| Open one.
+-}
+dialog : DialogSpec -> Cmd msg
+dialog spec =
+    tuiOut <|
+        Encode.object
+            [ { key = "type", value = Encode.string "dialog" }
+            , { key = "spec"
+              , value =
+                    Encode.object
+                        [ { key = "id", value = Encode.string spec.id }
+                        , { key = "title", value = Encode.string spec.title }
+                        , { key = "rect", value = encodeRect spec.rect }
+                        , { key = "items", value = Encode.array encodeView spec.views }
+                        ]
+              }
+            ]
+
+
+{-| Quit the application. Any open dialog is cancelled on the way out.
+-}
+quit : Cmd msg
+quit =
+    tuiOut (Encode.object [ { key = "type", value = Encode.string "quit" } ])
+
+
+{-| Grey a command out, everywhere it appears, or bring it back.
+-}
+setEnabled : String -> Bool -> Cmd msg
+setEnabled command on =
+    tuiOut <|
+        Encode.object
+            [ { key = "type", value = Encode.string "setEnabled" }
+            , { key = "cmd", value = Encode.string command }
+            , { key = "on", value = Encode.bool on }
+            ]
+
+
+
+-- READING DIALOG VALUES
+
+
+{-| The text a field held when the dialog closed.
+-}
+text : String -> Decode.Value -> String
+text field values =
+    Decode.decodeValue (Decode.field field Decode.string) values
+        |> Result.withDefault ""
+
+
+{-| The number a field held -- a list box's selection, a radio group's index.
+-}
+number : String -> Decode.Value -> Int
+number field values =
+    Decode.decodeValue (Decode.field field Decode.int) values
+        |> Result.withDefault 0
+
+
+{-| Whether a check box was ticked.
+-}
+flag : String -> Int -> Decode.Value -> Bool
+flag field index values =
+    Decode.decodeValue (Decode.field field (Decode.array Decode.bool)) values
+        |> Result.withDefault []
+        |> Array.get index
+        |> Maybe.withDefault False
+
+
+
+-- PROGRAM
+
+
+{-| -}
+type alias Program model msg =
+    Node.Program model msg
+
+
+{-| Like `Node.defineProgram`, plus a `view` and the two static pieces of
+Turbo Vision furniture.
+-}
+type alias ProgramConfiguration model msg =
+    { init : Node.Environment -> Init.Task { model : model, command : Cmd msg }
+    , update : msg -> model -> { model : model, command : Cmd msg }
+    , subscriptions : model -> Sub msg
+    , view : model -> Ui
+    , menuBar : Array Menu
+    , statusLine : Array StatusItem
+    , onEvent : Event -> msg
+    }
+
+
+{-| Wire it all together. The view is rendered once at startup and again after
+every update -- the whole description, every time. Working out what actually
+changed is the JavaScript side's job, exactly as a virtual DOM does it.
+-}
+defineProgram : ProgramConfiguration model msg -> Program model msg
+defineProgram config =
+    Node.defineProgram
+        { init =
+            \env ->
+                Init.await (config.init env) <|
+                    \started ->
+                        Node.startProgram
+                            { model = started.model
+                            , command =
+                                Cmd.batch
+                                    [ started.command
+                                    , render config started.model
+                                    ]
+                            }
+        , update =
+            \msg model ->
+                let
+                    stepped =
+                        config.update msg model
+                in
+                { model = stepped.model
+                , command =
+                    Cmd.batch
+                        [ stepped.command
+                        , render config stepped.model
+                        ]
+                }
+        , subscriptions =
+            \model ->
+                Sub.batch
+                    [ config.subscriptions model
+                    , tuiIn (decodeEvent >> config.onEvent)
+                    ]
+        }
+
+
+render : ProgramConfiguration model msg -> model -> Cmd msg
+render config model =
+    let
+        ui =
+            config.view model
+    in
+    tuiOut <|
+        Encode.object
+            [ { key = "type", value = Encode.string "render" }
+            , { key = "menuBar", value = Encode.array encodeMenu config.menuBar }
+            , { key = "statusLine", value = Encode.array encodeStatusItem config.statusLine }
+            , { key = "windows", value = Encode.array encodeWindow ui.windows }
+            ]
+
+
+
+-- ENCODERS
+
+
+encodeRect : Rect -> Encode.Value
+encodeRect r =
+    Encode.array Encode.int [ r.x1, r.y1, r.x2, r.y2 ]
+
+
+encodeWindow : Window -> Encode.Value
+encodeWindow window =
+    Encode.object
+        [ { key = "id", value = Encode.string window.id }
+        , { key = "title", value = Encode.string window.title }
+        , { key = "rect", value = encodeRect window.rect }
+        , { key = "items", value = Encode.array encodeView window.views }
+        ]
+
+
+encodeView : View -> Encode.Value
+encodeView view =
+    when view is
+        StaticText v ->
+            Encode.object
+                [ { key = "type", value = Encode.string "staticText" }
+                , { key = "id", value = Encode.string v.id }
+                , { key = "rect", value = encodeRect v.rect }
+                , { key = "text", value = Encode.string v.text }
+                ]
+
+        Button v ->
+            Encode.object
+                [ { key = "type", value = Encode.string "button" }
+                , { key = "id", value = Encode.string v.id }
+                , { key = "rect", value = encodeRect v.rect }
+                , { key = "title", value = Encode.string v.title }
+                , { key = "cmd", value = Encode.string v.cmd }
+                , { key = "default", value = Encode.bool v.isDefault }
+                ]
+
+        InputLine v ->
+            Encode.object
+                [ { key = "type", value = Encode.string "inputLine" }
+                , { key = "id", value = Encode.string v.id }
+                , { key = "rect", value = encodeRect v.rect }
+                , { key = "maxLen", value = Encode.int v.maxLen }
+                , { key = "value", value = Encode.string v.value }
+                ]
+
+        ListBox v ->
+            Encode.object
+                [ { key = "type", value = Encode.string "listBox" }
+                , { key = "id", value = Encode.string v.id }
+                , { key = "rect", value = encodeRect v.rect }
+                , { key = "items", value = Encode.array Encode.string v.items }
+                ]
+
+        Canvas v ->
+            Encode.object
+                [ { key = "type", value = Encode.string "canvas" }
+                , { key = "id", value = Encode.string v.id }
+                , { key = "rect", value = encodeRect v.rect }
+                , { key = "lines", value = Encode.array Encode.string v.lines }
+                , { key = "selectable", value = Encode.bool True }
+                ]
+
+
+encodeMenu : Menu -> Encode.Value
+encodeMenu menu =
+    Encode.object
+        [ { key = "title", value = Encode.string menu.title }
+        , { key = "key", value = Encode.string menu.key }
+        , { key = "items", value = Encode.array encodeMenuItem menu.items }
+        ]
+
+
+encodeMenuItem : MenuItem -> Encode.Value
+encodeMenuItem item =
+    when item is
+        Separator ->
+            Encode.object [ { key = "separator", value = Encode.bool True } ]
+
+        Item i ->
+            Encode.object
+                [ { key = "title", value = Encode.string i.title }
+                , { key = "cmd", value = Encode.string i.cmd }
+                , { key = "key", value = Encode.string i.key }
+                , { key = "shortcut", value = Encode.string i.shortcut }
+                ]
+
+        SubMenu s ->
+            Encode.object
+                [ { key = "title", value = Encode.string s.title }
+                , { key = "key", value = Encode.string s.key }
+                , { key = "items", value = Encode.array encodeMenuItem s.items }
+                ]
+
+
+encodeStatusItem : StatusItem -> Encode.Value
+encodeStatusItem item =
+    Encode.object
+        [ { key = "text", value = Encode.string item.text }
+        , { key = "key", value = Encode.string item.key }
+        , { key = "cmd", value = Encode.string item.cmd }
+        ]
+
+
+
+-- DECODING EVENTS
+
+
+decodeEvent : Decode.Value -> Event
+decodeEvent raw =
+    Decode.decodeValue eventDecoder raw
+        |> Result.withDefault (Unknown "undecodable event")
+
+
+eventDecoder : Decode.Decoder Event
+eventDecoder =
+    Decode.field "type" Decode.string
+        |> Decode.andThen
+            (\kind ->
+                when kind is
+                    "command" ->
+                        Decode.map Command (Decode.field "cmd" Decode.string)
+
+                    "select" ->
+                        Decode.map3
+                            (\id index body -> Selected { id = id, index = index, text = body })
+                            (Decode.field "id" Decode.string)
+                            (Decode.field "index" Decode.int)
+                            (Decode.field "text" Decode.string)
+
+                    "key" ->
+                        Decode.map2
+                            (\id key -> KeyPressed { id = id, key = key })
+                            (Decode.field "id" Decode.string)
+                            (Decode.field "key" Decode.string)
+
+                    "click" ->
+                        Decode.map3
+                            (\id x y -> Clicked { id = id, x = x, y = y })
+                            (Decode.field "id" Decode.string)
+                            (Decode.field "x" Decode.int)
+                            (Decode.field "y" Decode.int)
+
+                    "dialogClosed" ->
+                        Decode.map3
+                            (\id command values -> DialogClosed { id = id, cmd = command, values = values })
+                            (Decode.field "id" Decode.string)
+                            (Decode.field "cmd" Decode.string)
+                            (Decode.field "values" Decode.value)
+
+                    "windowClosed" ->
+                        Decode.map WindowClosed (Decode.field "id" Decode.string)
+
+                    other ->
+                        Decode.succeed (Unknown other)
+            )

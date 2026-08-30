@@ -48,6 +48,7 @@ function start(config) {
     onSelect: guard(config.onSelect),
     onKey: guard(config.onKey),
     onClick: guard(config.onClick),
+    onClose: guard(config.onClose),
   });
 
   const report = (err) => {
@@ -132,6 +133,7 @@ module.exports = {
   setText: addon.setText,
   setItems: addon.setItems,
   setLines: addon.setLines,
+  setTitle: addon.setTitle,
   setCursor: addon.setCursor,
   setEnabled: addon.setEnabled,
   getValue: addon.getValue,

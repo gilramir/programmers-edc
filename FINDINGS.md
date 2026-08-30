@@ -380,34 +380,108 @@ rounds of confused test failures; and interning an empty command name was
 handing out a real user command, so a status line hint with no `cmd` would have
 delivered stray `onCommand('')` calls.
 
-## Milestone 3 — Gren, from reading the compiler output
+## Milestone 3 — Gren
 
-Checked against a compiled Gren 0.6 node app rather than from memory:
+It works. `gren-tvision/src/Main.gren` is a Turbo Vision application written in
+Gren: a model, a `view : Model -> Ui`, and an `update`. Nothing in it knows
+that C++ exists.
 
-- Gren still ships the Elm port machinery — `_Platform_outgoingPort` and
-  `_Platform_incomingPort` are both in the output. **Ports exist.**
-- But a `node`-platform build ends with
-  `_Platform_export({'Main':{'init':...}}); this.Gren.Main.init({});` — it
-  self-initializes and **throws the handle away**, so there is nothing to call
-  `.ports.foo.subscribe()` on. A wrapper that strips that last line and calls
-  `require('./main.js').Gren.Main.init({})` itself would work; whether the
-  compiler offers something cleaner is unverified.
-- Third-party kernel code is almost certainly disallowed (inherited from Elm),
-  so "a Gren package that calls the addon directly" is out. Ports it is.
+```
+Gren (pure)                        tui.js                      the binding
+  view : Model -> Ui   --JSON-->   diff vs last render  ---->   tv.window / setText / …
+  update : Msg -> …    <--JSON--   events               <----   onCommand / onKey / onClose
+```
 
-The shape to aim at is the Elm one: Gren's `view` produces a declarative tree
-(windows, dialogs, buttons — each with a stable id), JSON over an outgoing port,
-JS diffs it against the previous tree and makes imperative addon calls; events
-come back over an incoming port as messages. Gren never calls C++ synchronously,
-so the blocking-loop problem disappears entirely.
+### Correction: ports need no hack at all
 
-**This was the constraint on milestone 2**, and it is now satisfied: views have
-stable string ids and mutate in place, so a diff layer can patch rather than
-rebuild.
+The earlier note here said a Gren node program self-initializes and throws away
+the handle, so reaching its ports would need a wrapper that strips the last
+line. That was read off `gren-format/app`, which is the **executable** output
+form. It is not the only one:
 
-What is left in the way is modality. `tv.dialog()` blocks Node, which a
-port-based Gren app cannot tolerate — a `Cmd` that never returns to the runtime
-is a deadlock, not a dialog. Milestone 3 needs dialogs inserted non-modally
-with their result delivered as a message, which the `JsWindow` non-modal path
-already supports; what is missing is a `dialog()` that does not call
-`execView`.
+```
+gren make Main                  → shebang + `this.Gren.Main.init({})`, runs itself
+gren make Main --output=main.js → a plain CommonJS module, runs nothing
+```
+
+The second exports `Gren.Main.init`, and
+
+```js
+const app = require('./main.js').Gren.Main.init({});
+app.ports.tuiOut.subscribe(…);
+app.ports.tuiIn.send(…);
+```
+
+is all there is to it. Commands sent from `init` arrive after `init()` returns,
+so subscribing afterwards does not miss them. No wrapper, no stripping, no
+kernel code.
+
+### The menu bar is configuration, not view
+
+`TProgInit` calls `initMenuBar` and `initStatusLine` from inside the
+`TApplication` constructor, so they exist before there is a first model to
+render and cannot be swapped afterwards. They are fields of the program, not
+part of `view`. `Tui.setEnabled` is how a command changes at runtime, which is
+the only part of a menu Turbo Vision will let you move.
+
+### Turbo Vision focuses the last view; a list wants the first
+
+`insert()` prepends, so the first view in z-order -- the *last* one written --
+takes focus. In a declarative list written top to bottom that is the Cancel
+button, so a dialog opened with the caret nowhere near the field the user was
+about to type into. The first Gren dialog silently swallowed everything typed
+into it.
+
+The binding now focuses the first focusable view in declaration order, with
+`focus: "<id>"` to override. It is a deliberate divergence: an artifact of
+insertion order is not something a declarative API should inherit.
+
+### A window title has to be mutable
+
+`Entries (3)` becoming `Entries (4)` is an ordinary model change, and the first
+diff treated the title as structural: close the window, build a new one. That
+loses focus, z-order and scroll position on every update -- precisely what a
+diff layer exists to prevent. `tv.setTitle` patches it in place, and the title
+came out of the shape comparison.
+
+### Notifying from a destructor hands JavaScript a corpse
+
+`onClose` was dispatched from `~JsWindow`, which runs deep inside TVision --
+from `TWindow::close()`, from the desktop's own destructor. At that moment the
+window is half gone but its id still resolves, so the declarative layer,
+reacting to "this window closed", called `close()` on it a second time and the
+process aborted.
+
+Closes are now *queued* and drained by the pump between events, where nothing
+is mid-destruction.
+
+That fix immediately broke its own suppression, in an instructive way. The glue
+sets a flag while it deliberately closes a window, so it can ignore the
+resulting notification instead of telling Gren the user did it. A synchronous
+flag works for a synchronous callback and is useless for a queued one -- the
+notification now arrives after the flag is cleared. It is a per-id set now.
+
+### An input line's value is compared against the model, never the screen
+
+The user types into a field; the model does not know. If the diff compared the
+model's value with what is on screen it would write the model back on every
+render and eat their keystrokes. It compares the *previous description* with
+the *next description* instead, so an input line is only ever written when the
+model actually changed it. This is the same trick controlled inputs use in Elm
+and React, and it is not optional.
+
+### Smaller things
+
+The first click on an inactive window is spent activating it, so a test that
+clicks a list row and expects that row to be focused is wrong about half the
+time. Window rectangles are **desktop** coordinates -- y=0 is the row under the
+menu bar, not the top of the screen -- which matters as soon as you are aiming
+a mouse click at a close box.
+
+### What is left
+
+`Tui` covers static text, buttons, input lines, list boxes and canvases. Check
+boxes, radio buttons and nested submenus exist in the binding but are not in
+the Gren types yet; adding them is a matter of another variant and another
+encoder, with no unknowns left in the way.
+

@@ -1,0 +1,262 @@
+module Main exposing (main)
+
+{-| Milestone 3: a Turbo Vision application written in Gren.
+
+Nothing in this file knows that C++ exists. It is a model, a view returning a
+description of some windows, and an update that responds to messages -- the
+same shape as any Elm-architecture program. `Tui` sends the description over a
+port; the JavaScript in `tui.js` diffs it and drives the native binding.
+
+The clock is here on purpose. It is driven by `Time.every`, a perfectly
+ordinary subscription, and it keeps ticking while a modal dialog is open --
+which is the thing milestone 2.5 went to some trouble to make true.
+-}
+
+import Array exposing (Array)
+import Init
+import Node
+import String
+import Task
+import Time
+import Tui exposing (Event(..), MenuItem(..), View(..))
+
+
+
+-- MODEL
+
+
+type alias Model =
+    { items : Array String
+    , selected : String
+    , ticks : Int
+    , now : Time.Posix
+    , listOpen : Bool
+    }
+
+
+type Msg
+    = Tick Time.Posix
+    | FromTui Event
+
+
+
+-- INIT
+
+
+init : Node.Environment -> Init.Task { model : Model, command : Cmd Msg }
+init _ =
+    Node.startProgram
+        { model =
+            { items = [ "Turbo Vision", "Borland", "Gren" ]
+            , selected = "(nothing selected)"
+            , ticks = 0
+            , now = Time.millisToPosix 0
+            , listOpen = True
+            }
+        , command = Cmd.none
+        }
+
+
+
+-- UPDATE
+
+
+update : Msg -> Model -> { model : Model, command : Cmd Msg }
+update msg model =
+    when msg is
+        Tick posix ->
+            { model = { model | now = posix, ticks = model.ticks + 1 }
+            , command = Cmd.none
+            }
+
+        FromTui event ->
+            handleEvent event model
+
+
+handleEvent : Event -> Model -> { model : Model, command : Cmd Msg }
+handleEvent event model =
+    when event is
+        Command "add" ->
+            { model = model, command = addDialog }
+
+        Command "clear" ->
+            { model = { model | items = [], selected = "(nothing selected)" }
+            , command = Tui.setEnabled "clear" False
+            }
+
+        Command "list" ->
+            { model = { model | listOpen = True }, command = Cmd.none }
+
+        Command _ ->
+            { model = model, command = Cmd.none }
+
+        Selected selection ->
+            { model = { model | selected = selection.text }, command = Cmd.none }
+
+        KeyPressed _ ->
+            { model = model, command = Cmd.none }
+
+        Clicked _ ->
+            { model = model, command = Cmd.none }
+
+        -- The dialog's result arrives as a message, the way any Cmd's does.
+        DialogClosed closed ->
+            if closed.cmd == "ok" then
+                let
+                    entry =
+                        String.trim (Tui.text "entry" closed.values)
+                in
+                if String.isEmpty entry then
+                    { model = model, command = Cmd.none }
+
+                else
+                    { model = { model | items = Array.pushLast entry model.items }
+                    , command = Tui.setEnabled "clear" True
+                    }
+
+            else
+                { model = model, command = Cmd.none }
+
+        -- The user closed a window from its frame. Without this the model
+        -- would go on believing the window is open, and the next render would
+        -- put it straight back.
+        WindowClosed "list" ->
+            { model = { model | listOpen = False }, command = Cmd.none }
+
+        WindowClosed _ ->
+            { model = model, command = Cmd.none }
+
+        Unknown _ ->
+            { model = model, command = Cmd.none }
+
+
+addDialog : Cmd Msg
+addDialog =
+    Tui.dialog
+        { id = "addDialog"
+        , title = "Add an entry"
+        , rect = { x1 = 16, y1 = 7, x2 = 64, y2 = 15 }
+        , views =
+            [ StaticText { id = "prompt", rect = { x1 = 3, y1 = 2, x2 = 44, y2 = 3 }, text = "New entry:" }
+            , InputLine { id = "entry", rect = { x1 = 3, y1 = 3, x2 = 44, y2 = 4 }, maxLen = 40, value = "" }
+            , Button { id = "ok", rect = { x1 = 10, y1 = 5, x2 = 22, y2 = 7 }, title = "~O~K", cmd = "ok", isDefault = True }
+            , Button { id = "cancel", rect = { x1 = 26, y1 = 5, x2 = 38, y2 = 7 }, title = "Cancel", cmd = "cancel", isDefault = False }
+            ]
+        }
+
+
+
+-- VIEW
+
+
+view : Model -> Tui.Ui
+view model =
+    { windows =
+        Array.append
+            [ clockWindow model ]
+            (if model.listOpen then
+                [ listWindow model ]
+
+             else
+                []
+            )
+    }
+
+
+clockWindow : Model -> Tui.Window
+clockWindow model =
+    { id = "clock"
+    , title = "Gren"
+    , rect = { x1 = 48, y1 = 1, x2 = 79, y2 = 9 }
+    , views =
+        [ StaticText
+            { id = "clockTime"
+            , rect = { x1 = 2, y1 = 1, x2 = 29, y2 = 2 }
+            , text = "UTC " ++ clock model.now
+            }
+        , StaticText
+            { id = "clockTicks"
+            , rect = { x1 = 2, y1 = 2, x2 = 29, y2 = 3 }
+            , text = "ticks: " ++ String.fromInt model.ticks
+            }
+        , StaticText
+            { id = "clockNote"
+            , rect = { x1 = 2, y1 = 4, x2 = 29, y2 = 7 }
+            , text = "A Time.every subscription. It keeps running while a dialog is open."
+            }
+        ]
+    }
+
+
+listWindow : Model -> Tui.Window
+listWindow model =
+    { id = "list"
+    , title = "Entries (" ++ String.fromInt (Array.length model.items) ++ ")"
+    , rect = { x1 = 1, y1 = 1, x2 = 46, y2 = 17 }
+    , views =
+        [ ListBox
+            { id = "entries"
+            , rect = { x1 = 2, y1 = 1, x2 = 41, y2 = 11 }
+            , items = model.items
+            }
+        , StaticText
+            { id = "selection"
+            , rect = { x1 = 2, y1 = 12, x2 = 43, y2 = 13 }
+            , text = "Selected: " ++ model.selected
+            }
+        , Button
+            { id = "addButton"
+            , rect = { x1 = 2, y1 = 13, x2 = 16, y2 = 15 }
+            , title = "~A~dd..."
+            , cmd = "add"
+            , isDefault = False
+            }
+        ]
+    }
+
+
+clock : Time.Posix -> String
+clock posix =
+    let
+        pad n =
+            String.padLeft 2 '0' (String.fromInt n)
+    in
+    pad (Time.toHour Time.utc posix)
+        ++ ":"
+        ++ pad (Time.toMinute Time.utc posix)
+        ++ ":"
+        ++ pad (Time.toSecond Time.utc posix)
+
+
+
+-- PROGRAM
+
+
+main : Tui.Program Model Msg
+main =
+    Tui.defineProgram
+        { init = init
+        , update = update
+        , subscriptions = \_ -> Time.every 1000 Tick
+        , view = view
+        , onEvent = FromTui
+        , menuBar =
+            [ { title = "~E~ntries"
+              , key = "Alt-E"
+              , items =
+                    [ Item { title = "~A~dd...", cmd = "add", key = "Alt-A", shortcut = "Alt-A" }
+                    , Item { title = "~L~ist window", cmd = "list", key = "Alt-L", shortcut = "Alt-L" }
+                    , Separator
+                    , Item { title = "~C~lear", cmd = "clear", key = "", shortcut = "" }
+                    , Separator
+                    , Item { title = "E~x~it", cmd = "quit", key = "Alt-X", shortcut = "Alt-X" }
+                    ]
+              }
+            ]
+        , statusLine =
+            [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
+            , { text = "~Alt-A~ Add", key = "Alt-A", cmd = "add" }
+            , { text = "~Alt-L~ List", key = "Alt-L", cmd = "list" }
+            , { text = "", key = "F10", cmd = "menu" }
+            ]
+        }

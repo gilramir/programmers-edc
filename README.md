@@ -15,7 +15,7 @@ next to these directories.
 | **1** | `hello.cpp` as a Node app, with the menus and dialog described in JS | done |
 | **2** | A larger demo on a non-blocking event pump, with addressable views | done |
 | **2.5** | Modal dialogs that do not stop Node, and more ported demos | done |
-| **3** | Gren on top, through ports | designed, not built |
+| **3** | Gren on top, through ports | done |
 
 See [FINDINGS.md](FINDINGS.md) for what we learned doing it, including the
 things that were not what we expected.
@@ -37,6 +37,11 @@ tvision-node/      the binding
   test/harness.py    pty driver + a small terminal emulator
   test/drive*.py     type at the app, assert on what it drew
   test/asan.sh       run node with AddressSanitizer preloaded
+gren-tvision/      milestone 3: the same idea, in Gren
+  src/Tui.gren       Ui types, encoders, ports, the program wrapper
+  src/Main.gren      an application: model, view, update. No C++ in sight.
+  tui.js             the diff layer between a port and the binding
+  test/drive_gren.py end-to-end, from Gren model to terminal and back
 build-tvision/     libtvision.a, built PIC (generated)
 ```
 
@@ -53,6 +58,7 @@ devbox run hello    # each of these runs one example in your terminal
 devbox run demo
 devbox run ascii
 devbox run form
+devbox run gren     # milestone 3: compiles the Gren program, then runs it
 ```
 
 In `hello`: `Alt-G` or the Hello menu opens the greeting, `Tab` moves between
@@ -71,6 +77,10 @@ is painted from a JS array of strings.
 In `form`: `Alt-N` opens a record form with check boxes and radio buttons;
 `File ▸ Samples ▸ More` is a submenu inside a submenu; `List records` and
 `Clear` are greyed out until there is something to list.
+
+In `gren`: `Alt-A` adds an entry through a modal dialog, the clock is a
+`Time.every` subscription, and closing the entries window tells the Gren model
+so it stays closed until `Alt-L` puts it back.
 
 `Enter` does not press buttons, select list items, or tick check boxes in Turbo
 Vision; `Space` does. See FINDINGS.

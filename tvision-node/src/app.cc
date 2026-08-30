@@ -83,6 +83,14 @@ Napi::FunctionReference g_onCommand;
 Napi::FunctionReference g_onSelect;
 Napi::FunctionReference g_onKey;
 Napi::FunctionReference g_onClick;
+Napi::FunctionReference g_onClose;
+
+// Windows are destroyed wholesale when the application goes away; that is not
+// news anyone needs, and calling into JS from inside the teardown would be a
+// poor idea besides.
+bool g_shuttingDown = false;
+
+std::vector<std::string> g_closedWindows;
 
 // Set while a JS callback is throwing, so we can unwind the TVision loop and
 // rethrow into JS once the terminal has been restored.
@@ -381,6 +389,31 @@ void dispatchKey(const std::string &id, const std::string &key)
     callJs(g_onKey, {Napi::String::New(env, id), Napi::String::New(env, key)});
 }
 
+void noteWindowClosed(const std::string &id)
+{
+    if (g_onClose.IsEmpty() || g_shuttingDown)
+        return;
+    g_closedWindows.push_back(id);
+}
+
+// Drained by the pump, between events.
+static void flushClosedWindows()
+{
+    if (g_closedWindows.empty() || g_onClose.IsEmpty() || g_hasPendingError)
+        {
+        g_closedWindows.clear();
+        return;
+        }
+
+    std::vector<std::string> closed;
+    closed.swap(g_closedWindows);
+
+    Napi::Env env = g_onClose.Env();
+    Napi::HandleScope scope(env);
+    for (const std::string &id : closed)
+        callJs(g_onClose, {Napi::String::New(env, id)});
+}
+
 void dispatchClick(const std::string &id, int x, int y)
 {
     if (g_onClick.IsEmpty() || g_hasPendingError)
@@ -493,7 +526,8 @@ static void prepare(const Napi::Env &env, const Napi::Value &value)
     for (auto &binding : {std::make_pair("onCommand", &g_onCommand),
                           std::make_pair("onSelect", &g_onSelect),
                           std::make_pair("onKey", &g_onKey),
-                          std::make_pair("onClick", &g_onClick)})
+                          std::make_pair("onClick", &g_onClick),
+                          std::make_pair("onClose", &g_onClose)})
         {
         if (!config.Has(binding.first))
             continue;
@@ -515,9 +549,12 @@ static void teardown(const Napi::Env &env)
     for (auto it = g_modals.rbegin(); it != g_modals.rend(); ++it)
         (*it)->deferred.Resolve(modalResult(env, (*it)->id, 0));
     g_modals.clear();
+    g_closedWindows.clear();
     TheTopView = nullptr;
 
+    g_shuttingDown = true;
     g_app.reset();          // the destructor gives the terminal back
+    g_shuttingDown = false;
     g_running = false;
     g_quitRequested = false;
     g_views.clear();
@@ -525,6 +562,7 @@ static void teardown(const Napi::Env &env)
     g_onSelect.Reset();
     g_onKey.Reset();
     g_onClick.Reset();
+    g_onClose.Reset();
     g_config = AppConfig();
 }
 
@@ -608,6 +646,9 @@ static Napi::Value Step(const Napi::CallbackInfo &info)
         if (event.what != evNothing)
             target->eventError(event);
 
+        // Safe point: whatever this event destroyed is fully gone by now.
+        flushClosedWindows();
+
         // The outer half of TGroup::execute(): a command the target considers
         // valid ends it. For the application that means quitting; for a modal
         // dialog it means the dialog is done.
@@ -628,6 +669,7 @@ static Napi::Value Step(const Napi::CallbackInfo &info)
         }
 
     g_inStep = false;
+    flushClosedWindows();
 
     if (finished || g_hasPendingError)
         {
@@ -680,12 +722,14 @@ static Napi::Value Dialog(const Napi::CallbackInfo &info)
 
     JsWindow *d = new JsWindow(getRect(env, spec, "dialog"),
                                getString(spec, "title").c_str(), id);
+    d->reportClose = false;   // the promise is the dialog's outcome
     session->view = d;
     g_views.addWindow(id, d);
 
+    TView *firstSelectable = nullptr;
     try
         {
-        buildItems(env, d, spec.Get("items"), id);
+        firstSelectable = buildItems(env, d, spec.Get("items"), id);
         }
     catch (...)
         {
@@ -695,6 +739,7 @@ static Napi::Value Dialog(const Napi::CallbackInfo &info)
         }
 
     beginModal(*session);
+    applyInitialFocus(spec, firstSelectable);
     Napi::Promise promise = session->deferred.Promise();
     g_modals.push_back(std::move(session));
     return promise;

@@ -108,7 +108,10 @@ JsWindow::~JsWindow()
     // The user can close a window from its frame, and TVision destroys the
     // children with it. This is the only place that reliably runs in every
     // one of those paths.
+    // Unregister before notifying, so nothing can look this window up again.
     g_views.forgetWindow(windowId);
+    if (reportClose)
+        noteWindowClosed(windowId);
 }
 
 void JsWindow::handleEvent(TEvent &event)
@@ -252,11 +255,12 @@ static TSItem *makeItemChain(const Napi::Env &env, const Napi::Value &value,
 /*  Building a window's contents                                      */
 /* ------------------------------------------------------------------ */
 
-void buildItems(const Napi::Env &env, JsWindow *win, const Napi::Value &value,
-                const std::string &windowId)
+TView *buildItems(const Napi::Env &env, JsWindow *win, const Napi::Value &value,
+                  const std::string &windowId)
 {
+    TView *firstSelectable = nullptr;
     if (value.IsUndefined() || value.IsNull())
-        return;
+        return firstSelectable;
     if (!value.IsArray())
         throw Napi::Error::New(env, "tvision: items must be an array");
 
@@ -355,9 +359,28 @@ void buildItems(const Napi::Env &env, JsWindow *win, const Napi::Value &value,
             }
 
         win->insert(made);
+        if (firstSelectable == nullptr && (made->options & ofSelectable) != 0)
+            firstSelectable = made;
         if (!id.empty())
             g_views.addView(id, made, type, windowId);
         }
+
+    return firstSelectable;
+}
+
+void applyInitialFocus(const Napi::Object &spec, TView *firstSelectable)
+{
+    std::string wanted = getString(spec, "focus");
+    if (!wanted.empty())
+        {
+        if (ViewRef *ref = g_views.find(wanted))
+            {
+            ref->view->focus();
+            return;
+            }
+        }
+    if (firstSelectable != nullptr)
+        firstSelectable->focus();
 }
 
 Napi::Object collectValues(const Napi::Env &env, const std::string &windowId)
@@ -421,9 +444,10 @@ static Napi::Value Window(const Napi::CallbackInfo &info)
                                  getString(spec, "title").c_str(), id);
     g_views.addWindow(id, win);
 
+    TView *firstSelectable = nullptr;
     try
         {
-        buildItems(env, win, spec.Get("items"), id);
+        firstSelectable = buildItems(env, win, spec.Get("items"), id);
         }
     catch (...)
         {
@@ -433,6 +457,7 @@ static Napi::Value Window(const Napi::CallbackInfo &info)
         }
 
     TProgram::deskTop->insert(win);
+    applyInitialFocus(spec, firstSelectable);
     return Napi::String::New(env, id);
 }
 
@@ -445,6 +470,26 @@ static Napi::Value SetText(const Napi::CallbackInfo &info)
         return Napi::Boolean::New(env, false);
 
     ((JsStaticText *) ref->view)->setText(info[1].ToString().Utf8Value());
+    return Napi::Boolean::New(env, true);
+}
+
+// tv.setTitle(id, text) -- a window's title, in place.
+//
+// Worth having rather than rebuilding: a title that shows a count changes on
+// every update, and tearing a window down to change it loses focus and
+// z-order -- the exact thing a declarative layer exists to avoid.
+static Napi::Value SetTitle(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    JsWindow *win = g_views.findWindow(info[0].ToString().Utf8Value());
+    if (win == nullptr)
+        return Napi::Boolean::New(env, false);
+
+    // Same ownership rules as TStaticText's text: newStr in, delete[] out.
+    delete[] (char *) win->title;
+    win->title = newStr(info[1].ToString().Utf8Value().c_str());
+    if (win->frame != nullptr)
+        win->frame->drawView();
     return Napi::Boolean::New(env, true);
 }
 
@@ -596,6 +641,7 @@ static Napi::Value SetEnabled(const Napi::CallbackInfo &info)
 void registerViewApi(Napi::Env env, Napi::Object exports)
 {
     exports.Set("setLines", Napi::Function::New(env, SetLines));
+    exports.Set("setTitle", Napi::Function::New(env, SetTitle));
     exports.Set("setCursor", Napi::Function::New(env, SetCursor));
     exports.Set("setEnabled", Napi::Function::New(env, SetEnabled));
     exports.Set("window", Napi::Function::New(env, Window));
