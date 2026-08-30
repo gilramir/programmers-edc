@@ -198,6 +198,7 @@ paletteWindow =
             , rect = { x1 = 2, y1 = 1, x2 = 40, y2 = 9 }
             , lines = Array.map entryLine entries ++ [ bypass ]
             , cursor = Nothing
+            , takesFocus = False
             }
         ]
     }
@@ -245,6 +246,7 @@ plainWindow =
                     , " looking like the rest of the program."
                     ]
             , cursor = Nothing
+            , takesFocus = False
             }
         ]
     }

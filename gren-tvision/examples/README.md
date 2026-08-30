@@ -19,6 +19,7 @@ Build them all with `../build.sh`, run one with `../run.sh <name>`.
 | `puzzle` | `tvision/examples/tvdemo` (puzzle.cpp) | nothing in the API -- but the random seed had to move into the model, which is what let a test win the game |
 | `calc` | `tvision/examples/tvdemo` (calc.cpp) | `takesFocus` on a button: a keypad that can be pressed but never holds the caret |
 | `palette` | `tvision/examples/palette` | nothing -- it is the example whose entire subject the port removes, and the write-up says what that costs |
+| `mouse` | `tvision/examples/tvdemo` (mousedlg.cpp) | the scroll bar as a view of its own, `isDouble` on a click, `setDoubleClickDelay`, and `takesFocus` on a canvas |
 
 ## What mmenu changed
 
@@ -152,6 +153,32 @@ that decides what to draw -- which is how the calendar marks today and the
 puzzle shows a tile out of place, and neither of those is a question a palette
 can answer.
 
+## What the mouse dialog changed
+
+Three things, and the third was a surprise.
+
+**A scroll bar the model owns.** A list box has always made one for itself, but
+nothing could put one in a window and ask what it says. `ScrollBar` is a view
+now, reporting a `Scrolled` event however it moves. Which way it points is not
+a field: `TScrollBar` decides from its own rectangle, and a second way to say
+the same thing would only be a way for the two to disagree.
+
+**A click that knows it is the second one.** `TClickTester` reacts to
+`meDoubleClick`, so `Clicked` grew `isDouble`, and `setDoubleClickDelay` is the
+command that makes the dialog mean anything.
+
+**`takesFocus` was not a button thing.** The tester strip is a canvas, a canvas
+is selectable, and a selected canvas consumes every key it is given -- `Tab`
+included -- so the scroll bar underneath it could not be reached from the
+keyboard at all. `Canvas` has `takesFocus` too now, and it earns more there
+than on a button.
+
+One thing worth knowing before writing anything else with a scroll bar in it:
+**magiblot's does not page on a click.** Borland's steps by `pgStep` when you
+click past the thumb; this one takes the thumb to the pointer. `pageStep` is
+reached only from the keyboard, and on a horizontal bar that is `Ctrl-Left` and
+`Ctrl-Right`.
+
 ## The C++ examples, triaged
 
 `tvision/examples/` has eight entries. Two of them are not Turbo Vision
@@ -178,7 +205,7 @@ applications at all, and one of them is really eight applications.
 | puzzle | **done** — `examples/puzzle` |
 | calculator | **done** — `examples/calc`; it wanted `takesFocus`, see above |
 | event viewer | canvas |
-| mouse settings | a scroll bar as a first-class view; the clusters it wants exist now |
+| mouse settings | **done** — `examples/mouse`; it wanted the scroll bar, see above |
 | colours | `TColorDialog` — wrap as a command that answers with the chosen palette |
 | tile / cascade | `cmTile` and `cmCascade` are built-in command names already |
 | help | `.hlp` files compiled by `tvhc`. Reimplementing help as ordinary windows from the model is a better use of the time than porting a binary format |
@@ -199,9 +226,8 @@ windows.
 
 ## After that
 
-When the C++ examples run out, the coverage gaps left are roughly: scroll bars
-as first-class views, `TOutline`, the standard file and directory dialogs,
-per-view palettes, and validators on input lines.
+When the C++ examples run out, the coverage gaps left are roughly: `TOutline`,
+the standard file and directory dialogs, and validators on input lines.
 
 One gap is worth naming on its own, because `forms` walked right up to it: **a
 cluster or an input line in a plain window holds state the model never sees.**

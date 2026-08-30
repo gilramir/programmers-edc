@@ -14,7 +14,7 @@ const { createDiffer } = require('./diff');
 // Bumped in lockstep with Tui.protocolVersion on the Gren side. A Gren package
 // and an npm package version independently, and they will skew; refusing an
 // unknown version beats rendering nothing and leaving the author to guess.
-const PROTOCOL = 3;
+const PROTOCOL = 4;
 
 /**
  * Drive a compiled Gren program's UI.
@@ -81,8 +81,10 @@ function run(grenModule, options = {}) {
             onCommand: (cmd) => send({ type: 'command', cmd }),
             onSelect: (id, index, text) => send({ type: 'select', id, index, text }),
             onFocus: (id, index, text) => send({ type: 'focus', id, index, text }),
+            onScroll: (id, value) => send({ type: 'scroll', id, value }),
             onKey: (id, key) => send({ type: 'key', id, key }),
-            onClick: (id, x, y) => send({ type: 'click', id, x, y }),
+            onClick: (id, x, y, doubled) =>
+              send({ type: 'click', id, x, y, doubled: !!doubled }),
             onClose: (id) => differ.windowClosed(id),
             onExit: () => process.exit(0),
             onError: (err) => {
@@ -113,6 +115,10 @@ function run(grenModule, options = {}) {
 
       case 'setEnabled':
         tv.setEnabled(message.cmd, message.on);
+        break;
+
+      case 'doubleClickDelay':
+        tv.doubleClickDelay(message.ticks);
         break;
 
       case 'quit':

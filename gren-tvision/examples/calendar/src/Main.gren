@@ -346,6 +346,7 @@ calendarWindow showing today =
             , rect = { x1 = 1, y1 = 1, x2 = 21, y2 = 9 }
             , lines = [ header showing, weekdayNames ] ++ weeks showing today
             , cursor = Nothing
+            , takesFocus = True
             }
         ]
     }

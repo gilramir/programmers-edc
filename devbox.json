@@ -64,7 +64,8 @@
         "(cd gren-tvision && python3 test/drive_calendar.py)",
         "(cd gren-tvision && python3 test/drive_puzzle.py)",
         "(cd gren-tvision && python3 test/drive_calc.py)",
-        "(cd gren-tvision && python3 test/drive_palette.py)"
+        "(cd gren-tvision && python3 test/drive_palette.py)",
+        "(cd gren-tvision && python3 test/drive_mouse.py)"
       ],
       "test:asan": [
         "(cd tvision-node && TVNODE_ASAN=1 npx node-gyp rebuild)",
@@ -83,6 +84,7 @@
         "(cd gren-tvision && TVNODE_ASAN=1 python3 test/drive_puzzle.py)",
         "(cd gren-tvision && TVNODE_ASAN=1 python3 test/drive_calc.py)",
         "(cd gren-tvision && TVNODE_ASAN=1 python3 test/drive_palette.py)",
+        "(cd gren-tvision && TVNODE_ASAN=1 python3 test/drive_mouse.py)",
         "(cd tvision-node && npx node-gyp rebuild)"
       ],
       "check": [

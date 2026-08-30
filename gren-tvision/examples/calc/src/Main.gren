@@ -402,6 +402,7 @@ calculatorWindow model =
                 , rect = { x1 = 3, y1 = 2, x2 = 21, y2 = 3 }
                 , lines = [ [ Tui.ink LightGreen (readout model) |> Tui.on Black ] ]
                 , cursor = Nothing
+                , takesFocus = True
                 }
             )
             (Array.indexedMap keypadButton keypad)

@@ -33,6 +33,7 @@ function fakeTv(initiallyOpen = []) {
     setItems: (id, items) => calls.push(['setItems', id, items]),
     setLines: (id, lines) => calls.push(['setLines', id, lines]),
     setCursor: (id, x, y, visible) => calls.push(['setCursor', id, x, y, visible]),
+    setScroll: (...args) => calls.push(['setScroll', ...args]),
   };
 }
 
@@ -312,4 +313,49 @@ test('a changed menu bar is replaced, and only it', () => {
 
   differ.chrome([{ title: 'Two' }], [{ text: 'other', key: '', cmd: '' }]);
   assert.deepEqual(calls, [['setMenuBar', 'Two'], ['setStatusLine']]);
+});
+
+
+// A scroll bar's value and its range are one thing to TScrollBar, which clamps
+// the first against the second. Setting them separately can put the thumb
+// somewhere neither side asked for, so the diff has to know when to send both.
+
+const bar = (over = {}) => ({
+  type: 'scrollBar',
+  id: 's',
+  rect: [3, 4, 30, 5],
+  value: 8,
+  min: 1,
+  max: 20,
+  pageStep: 4,
+  arrowStep: 1,
+  ...over,
+});
+
+test('a scroll bar the model moves is patched, not rebuilt', () => {
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  differ.apply([win({ items: [bar()] })]);
+  tv.calls.length = 0;
+  differ.apply([win({ items: [bar({ value: 12 })] })]);
+  assert.deepEqual(tv.calls, [['setValue', 's', 12]]);
+});
+
+test('a scroll bar the model leaves alone is left alone', () => {
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  differ.apply([win({ items: [bar()] })]);
+  tv.calls.length = 0;
+  differ.apply([win({ items: [bar()] })]);
+  assert.deepEqual(tv.calls, []);
+});
+
+test('a changed range sends the value with it, in one call', () => {
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  differ.apply([win({ items: [bar()] })]);
+  tv.calls.length = 0;
+  differ.apply([win({ items: [bar({ value: 40, max: 100 })] })]);
+  assert.deepEqual(tv.calls, [['setScroll', 's', 40, 1, 100, 4, 1]],
+    'value and range separately would let TScrollBar clamp one against the other');
 });

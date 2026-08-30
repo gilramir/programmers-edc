@@ -47,6 +47,7 @@ function start(config) {
     onCommand: guard(config.onCommand),
     onSelect: guard(config.onSelect),
     onFocus: guard(config.onFocus),
+    onScroll: guard(config.onScroll),
     onKey: guard(config.onKey),
     onClick: guard(config.onClick),
     onClose: guard(config.onClose),
@@ -136,6 +137,7 @@ module.exports = {
   setLines: addon.setLines,
   setTitle: addon.setTitle,
   setCursor: addon.setCursor,
+  setScroll: addon.setScroll,
   setEnabled: addon.setEnabled,
 
   // The menu bar and status line start as configuration and can then be
@@ -151,5 +153,6 @@ module.exports = {
   messageBox,
 
   screenSize: addon.screenSize,
+  doubleClickDelay: addon.doubleClickDelay,
   log,
 };

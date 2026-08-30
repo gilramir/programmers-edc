@@ -18,6 +18,7 @@
 #define Uses_TDeskTop
 #define Uses_TDialog
 #define Uses_TEvent
+#define Uses_TEventQueue
 #define Uses_TInputLine
 #define Uses_TKeys
 #define Uses_TLabel
@@ -200,6 +201,32 @@ private:
     std::vector<CanvasLine> lines;
     std::string viewId;
     int colorIndex;
+};
+
+// A scroll bar the model owns, rather than the one a list box makes for itself.
+//
+// TScrollBar announces a change by broadcasting cmScrollBarChanged to its
+// owner from scrollDraw(), which is how tvdemo's mouse dialog watches the
+// double-click delay. Overriding scrollDraw() is the same trick one level
+// down, and it catches every route the value can move by -- arrows, paging, a
+// drag on the thumb, or the keyboard.
+//
+// Whether the bar is horizontal or vertical is not a field: TScrollBar decides
+// from its own rectangle, one column wide being vertical.
+class JsScrollBar : public TScrollBar {
+public:
+    JsScrollBar(const TRect &bounds, std::string id) noexcept
+        : TScrollBar(bounds), viewId(std::move(id))
+    {
+        // Not selectable by default -- the one a list box owns should not be
+        // in the tab order. One the model asked for by id should be.
+        options |= ofSelectable;
+    }
+
+    virtual void scrollDraw() override;
+
+private:
+    std::string viewId;
 };
 
 // TCluster keeps its state in a protected `value`, so reading and writing a
@@ -403,6 +430,11 @@ void dispatchKey(const std::string &id, const std::string &key);
 // the diff while it is halfway through building a window.
 void noteFocused(const std::string &id, int index, const std::string &text);
 
+// Queued for the same reason, and more urgently: setValue() calls scrollDraw()
+// directly, so a render that moves a scroll bar would call back into JS from
+// inside the diff.
+void noteScrolled(const std::string &id, int value);
+
 // Queued, not dispatched. ~JsWindow runs deep inside TVision -- from
 // TWindow::close(), from the desktop's own destructor -- and calling into JS
 // there hands the application a window that is half gone: the id still
@@ -410,7 +442,10 @@ void noteFocused(const std::string &id, int index, const std::string &text);
 // close() on it a second time. The pump drains the queue between events, where
 // nothing is mid-destruction.
 void noteWindowClosed(const std::string &id);
-void dispatchClick(const std::string &id, int x, int y);
+// `doubled` is TVision's meDoubleClick: the second click of a pair, which the
+// first click has already been reported for. tvdemo's mouse dialog exists to
+// let you feel where the boundary between the two is.
+void dispatchClick(const std::string &id, int x, int y, bool doubled);
 
 /* ------------------------------------------------------------------ */
 /*  Reading JS values                                                 */

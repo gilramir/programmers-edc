@@ -123,7 +123,8 @@ void JsCanvas::handleEvent(TEvent &event)
     else if (event.what == evMouseDown)
         {
         TPoint spot = makeLocal(event.mouse.where);
-        dispatchClick(viewId, spot.x, spot.y);
+        dispatchClick(viewId, spot.x, spot.y,
+                      (event.mouse.eventFlags & meDoubleClick) != 0);
         clearEvent(event);
         }
 }
@@ -132,6 +133,12 @@ void JsCanvas::setLines(std::vector<CanvasLine> newLines)
 {
     lines = std::move(newLines);
     drawView();
+}
+
+void JsScrollBar::scrollDraw()
+{
+    TScrollBar::scrollDraw();
+    noteScrolled(viewId, value);
 }
 
 void JsCanvas::setCursorAt(int x, int y, bool visible)
@@ -428,6 +435,20 @@ TView *buildItems(const Napi::Env &env, JsWindow *win, const Napi::Value &value,
                 canvas->options |= ofFramed;
             made = canvas;
             }
+        else if (type == "scrollBar")
+            {
+            if (id.empty())
+                throw Napi::Error::New(env, "tvision: a scrollBar needs an id");
+            JsScrollBar *bar =
+                new JsScrollBar(getRect(env, it, "scrollBar"), id);
+            // setParams in one go: TScrollBar clamps the value against the
+            // range, so setting them separately can leave the thumb somewhere
+            // neither side asked for.
+            bar->setParams(getInt(it, "value", 0), getInt(it, "min", 0),
+                           getInt(it, "max", 100), getInt(it, "pageStep", 10),
+                           getInt(it, "arrowStep", 1));
+            made = bar;
+            }
         else if (type == "checkBoxes")
             {
             uint32_t count = 0;
@@ -531,6 +552,8 @@ Napi::Object collectValues(const Napi::Env &env, const std::string &windowId)
         else if (ref->kind == "radioButtons")
             out.Set(id, Napi::Number::New(env,
                                           ((JsRadioButtons *) ref->view)->selected()));
+        else if (ref->kind == "scrollBar")
+            out.Set(id, Napi::Number::New(env, ((JsScrollBar *) ref->view)->value));
         }
     return out;
 }
@@ -687,7 +710,32 @@ static Napi::Value SetValue(const Napi::CallbackInfo &info)
             ->setSelected((uint32_t) info[1].ToNumber().Uint32Value());
         return Napi::Boolean::New(env, true);
         }
+    if (ref->kind == "scrollBar")
+        {
+        ((JsScrollBar *) ref->view)->setValue(info[1].ToNumber().Int32Value());
+        return Napi::Boolean::New(env, true);
+        }
     return Napi::Boolean::New(env, false);
+}
+
+// tv.setScroll(id, value, min, max, pageStep, arrowStep) -- the whole of a
+// scroll bar at once, because TScrollBar clamps the value against the range
+// and setting the two separately can land the thumb somewhere neither side
+// asked for.
+static Napi::Value SetScroll(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    ViewRef *ref = g_views.find(info[0].ToString().Utf8Value());
+    if (ref == nullptr || ref->kind != "scrollBar")
+        return Napi::Boolean::New(env, false);
+
+    ((JsScrollBar *) ref->view)
+        ->setParams(info[1].ToNumber().Int32Value(),
+                    info[2].ToNumber().Int32Value(),
+                    info[3].ToNumber().Int32Value(),
+                    info[4].ToNumber().Int32Value(),
+                    info[5].ToNumber().Int32Value());
+    return Napi::Boolean::New(env, true);
 }
 
 // tv.exists(id) -- ids go away on their own when a window closes, so asking is
@@ -777,6 +825,7 @@ void registerViewApi(Napi::Env env, Napi::Object exports)
     exports.Set("setLines", Napi::Function::New(env, SetLines));
     exports.Set("setTitle", Napi::Function::New(env, SetTitle));
     exports.Set("setCursor", Napi::Function::New(env, SetCursor));
+    exports.Set("setScroll", Napi::Function::New(env, SetScroll));
     exports.Set("setEnabled", Napi::Function::New(env, SetEnabled));
     exports.Set("window", Napi::Function::New(env, Window));
     exports.Set("setText", Napi::Function::New(env, SetText));

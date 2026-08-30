@@ -201,6 +201,9 @@ handleEvent event model =
         WindowClosed _ ->
             model
 
+        Scrolled _ ->
+            model
+
         Unknown _ ->
             model
 
@@ -247,6 +250,7 @@ chartWindow model =
             , rect = { x1 = 2, y1 = 1, x2 = 2 + columns, y2 = 1 + rows }
             , lines = Array.map Tui.line chart
             , cursor = Just { x = model.x, y = model.y }
+            , takesFocus = True
             }
         , StaticText
             { id = "report"

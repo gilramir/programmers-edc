@@ -20,6 +20,7 @@ const MUTABLE = {
   canvas: ['lines', 'cursorAt'],
   checkBoxes: ['value'],
   radioButtons: ['value'],
+  scrollBar: ['value', 'min', 'max', 'pageStep', 'arrowStep'],
 };
 
 function skeleton(view) {
@@ -99,6 +100,21 @@ function createDiffer(tv, onClosed = () => {}) {
         break;
       case 'radioButtons':
         if (before.value !== after.value) tv.setValue(after.id, after.value);
+        break;
+      case 'scrollBar':
+        // The range and the value go together or not at all: TScrollBar clamps
+        // one against the other, so setting them one at a time can land the
+        // thumb somewhere neither side asked for.
+        if (
+          before.min !== after.min ||
+          before.max !== after.max ||
+          before.pageStep !== after.pageStep ||
+          before.arrowStep !== after.arrowStep
+        ) {
+          tv.setScroll(after.id, after.value, after.min, after.max, after.pageStep, after.arrowStep);
+        } else if (before.value !== after.value) {
+          tv.setValue(after.id, after.value);
+        }
         break;
       default:
         break;

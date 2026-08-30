@@ -900,3 +900,67 @@ these examples does.
 
 `drive_palette.py` asserts the six attributes byte for byte, which is the only
 way to test a port whose subject was the machinery it removed.
+
+### Porting the mouse dialog: a scroll bar, and what a click on one does
+
+`mousedlg.cpp` is a dialog with a scroll bar in it. That is a smaller sentence
+than it sounds: a list box has always made a scroll bar for itself, but there
+was no way for a Gren program to put one in a window and ask what it says. So
+`ScrollBar` is a view now, with `value`, `min`, `max`, `pageStep` and
+`arrowStep`, and a `Scrolled` event whichever way it moves.
+
+`JsScrollBar` overrides `scrollDraw()`, which `TScrollBar` calls from every
+path the value can change by -- arrows, the keyboard, a drag on the thumb. It
+has to be queued rather than dispatched, more urgently than `focusItem` did:
+`setValue()` calls `scrollDraw()` synchronously, so a render that moves a
+scroll bar would call back into JavaScript from inside the diff. The queue also
+collapses: a drag calls `scrollDraw()` for every cell the thumb passes, and
+only the last position is worth a render.
+
+**Which way it points is not a field.** `TScrollBar`'s constructor decides from
+its own rectangle -- one column wide is vertical -- and an `orientation` field
+next to a rectangle that already says the same thing would only give the two a
+way to disagree.
+
+**magiblot's scroll bar does not page on a click.** Borland's steps by `pgStep`
+when you click past the thumb; this one takes the thumb straight to the pointer
+and drags it from there (`tscrlbar.cpp`, the `default:` branch of the
+`evMouseDown` switch). `pageStep` is reached only from the keyboard, and on a
+*horizontal* bar that is `Ctrl-Left` and `Ctrl-Right` rather than PgUp and
+PgDn. Both are in `drive_mouse.py`, because both are the kind of thing that
+looks like a bug in the binding when it is not.
+
+### `takesFocus` was not a button thing
+
+The calculator needed non-focusable buttons. The mouse dialog needed the same
+thing one view over, and finding out was instant: the tester strip is a canvas,
+a canvas is selectable, a selected canvas consumes **every** key it is given --
+`Tab` included -- so the scroll bar underneath it could not be reached from the
+keyboard at all.
+
+`Canvas` therefore has `takesFocus` too, and the field earns more there than it
+does on a button: a canvas that is only there to be looked at, or clicked, will
+otherwise trap the caret. Clicks reach a canvas either way, because
+`JsCanvas::handleEvent` handles `evMouseDown` regardless of focus and only the
+keyboard mask depends on `ofSelectable`.
+
+Two of the canvases already written wanted `False` in hindsight -- the palette
+example paints two pictures and reads nothing.
+
+### Two clicks, and the setting that decides they are one
+
+`TClickTester` reacts to `meDoubleClick`, so `Clicked` grew `isDouble`. The
+first click of a pair still arrives on its own a moment earlier, which is not a
+wart to hide: it is exactly what the dialog is demonstrating.
+
+`TEventQueue::doubleDelay` is a static counted in the original PC timer's
+1/18.2-second ticks, so `Tui.setDoubleClickDelay` is a command rather than part
+of the view -- there is nowhere in a window for it to live.
+
+The test that proves the setting is real turned out to need a note of its own.
+Two mouse reports written back to back into a pty are read back to back, and
+TVision timestamps a mouse event when it *reads* it -- so a gap that exists in
+the byte stream does not exist as far as the library is concerned. The driver
+pumps between the two presses, which is what makes 0.35 seconds a real 0.35
+seconds: comfortably inside a 20-tick delay and outside a 1-tick one, which is
+the whole demonstration.

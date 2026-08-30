@@ -387,6 +387,7 @@ puzzleWindow model =
             , rect = { x1 = 1, y1 = 1, x2 = 19, y2 = 5 }
             , lines = Array.map (row model) (Array.range 0 3)
             , cursor = Nothing
+            , takesFocus = True
             }
         ]
     }

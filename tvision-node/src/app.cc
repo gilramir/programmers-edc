@@ -79,6 +79,7 @@ AppConfig g_config;
 Napi::FunctionReference g_onCommand;
 Napi::FunctionReference g_onSelect;
 Napi::FunctionReference g_onFocus;
+Napi::FunctionReference g_onScroll;
 Napi::FunctionReference g_onKey;
 Napi::FunctionReference g_onClick;
 Napi::FunctionReference g_onClose;
@@ -97,6 +98,13 @@ struct FocusNote {
 };
 
 std::vector<FocusNote> g_focusNotes;
+
+struct ScrollNote {
+    std::string id;
+    int value;
+};
+
+std::vector<ScrollNote> g_scrollNotes;
 
 // node-gyp compiles with -fno-rtti, so there is no dynamic_cast to recover
 // these from TProgram::menuBar / statusLine. We made them; we keep them.
@@ -434,6 +442,41 @@ static void flushFocused()
                           });
 }
 
+void noteScrolled(const std::string &id, int value)
+{
+    if (g_onScroll.IsEmpty() || g_shuttingDown)
+        return;
+    // Only the last position matters. A drag on the thumb calls scrollDraw()
+    // for every cell it passes, and a model that re-rendered on each of those
+    // would be redrawing the window a dozen times per gesture.
+    for (ScrollNote &note : g_scrollNotes)
+        if (note.id == id)
+            {
+            note.value = value;
+            return;
+            }
+    g_scrollNotes.push_back({id, value});
+}
+
+// Drained by the pump, between events.
+static void flushScrolled()
+{
+    if (g_scrollNotes.empty() || g_onScroll.IsEmpty() || g_hasPendingError)
+        {
+        g_scrollNotes.clear();
+        return;
+        }
+
+    std::vector<ScrollNote> notes;
+    notes.swap(g_scrollNotes);
+
+    Napi::Env env = g_onScroll.Env();
+    Napi::HandleScope scope(env);
+    for (const ScrollNote &note : notes)
+        callJs(g_onScroll, {Napi::String::New(env, note.id),
+                            Napi::Number::New(env, note.value)});
+}
+
 void noteWindowClosed(const std::string &id)
 {
     if (g_onClose.IsEmpty() || g_shuttingDown)
@@ -459,7 +502,7 @@ static void flushClosedWindows()
         callJs(g_onClose, {Napi::String::New(env, id)});
 }
 
-void dispatchClick(const std::string &id, int x, int y)
+void dispatchClick(const std::string &id, int x, int y, bool doubled)
 {
     if (g_onClick.IsEmpty() || g_hasPendingError)
         return;
@@ -467,7 +510,8 @@ void dispatchClick(const std::string &id, int x, int y)
     Napi::Env env = g_onClick.Env();
     Napi::HandleScope scope(env);
     callJs(g_onClick, {Napi::String::New(env, id), Napi::Number::New(env, x),
-                       Napi::Number::New(env, y)});
+                       Napi::Number::New(env, y),
+                       Napi::Boolean::New(env, doubled)});
 }
 
 /* ------------------------------------------------------------------ */
@@ -573,6 +617,7 @@ static void prepare(const Napi::Env &env, const Napi::Value &value)
     for (auto &binding : {std::make_pair("onCommand", &g_onCommand),
                           std::make_pair("onSelect", &g_onSelect),
                           std::make_pair("onFocus", &g_onFocus),
+                          std::make_pair("onScroll", &g_onScroll),
                           std::make_pair("onKey", &g_onKey),
                           std::make_pair("onClick", &g_onClick),
                           std::make_pair("onClose", &g_onClose)})
@@ -599,6 +644,7 @@ static void teardown(const Napi::Env &env)
     g_modals.clear();
     g_closedWindows.clear();
     g_focusNotes.clear();
+    g_scrollNotes.clear();
     TheTopView = nullptr;
 
     g_shuttingDown = true;
@@ -612,6 +658,7 @@ static void teardown(const Napi::Env &env)
     g_onCommand.Reset();
     g_onSelect.Reset();
     g_onFocus.Reset();
+    g_onScroll.Reset();
     g_onKey.Reset();
     g_onClick.Reset();
     g_onClose.Reset();
@@ -703,6 +750,7 @@ static Napi::Value Step(const Napi::CallbackInfo &info)
         // drained here rather than where they were filled, so that a callback
         // cannot re-enter TVision in the middle of handling an event.
         flushFocused();
+        flushScrolled();
         flushClosedWindows();
 
         // The outer half of TGroup::execute(): a command the target considers
@@ -726,6 +774,7 @@ static Napi::Value Step(const Napi::CallbackInfo &info)
 
     g_inStep = false;
     flushFocused();
+    flushScrolled();
     flushClosedWindows();
 
     if (finished || g_hasPendingError)
@@ -866,8 +915,25 @@ static Napi::Value ScreenSize(const Napi::CallbackInfo &info)
     return out;
 }
 
+// tv.doubleClickDelay(ticks?) -- read, or set, how long TVision will wait
+// before deciding two clicks were two clicks. The unit is 1/18.2 of a second,
+// which is the original PC timer tick and what TEventQueue::doubleDelay has
+// always been counted in. tvdemo's mouse dialog exists to change exactly this.
+static Napi::Value DoubleClickDelay(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    if (info.Length() > 0 && info[0].IsNumber())
+        {
+        int ticks = info[0].ToNumber().Int32Value();
+        if (ticks > 0)
+            TEventQueue::doubleDelay = (ushort) ticks;
+        }
+    return Napi::Number::New(env, TEventQueue::doubleDelay);
+}
+
 static Napi::Object Init(Napi::Env env, Napi::Object exports)
 {
+    exports.Set("doubleClickDelay", Napi::Function::New(env, DoubleClickDelay));
     exports.Set("start", Napi::Function::New(env, Start));
     exports.Set("step", Napi::Function::New(env, Step));
     exports.Set("dialog", Napi::Function::New(env, Dialog));

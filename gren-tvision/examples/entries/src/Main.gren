@@ -148,6 +148,9 @@ handleEvent event model =
         WindowClosed _ ->
             { model = model, command = Cmd.none }
 
+        Scrolled _ ->
+            { model = model, command = Cmd.none }
+
         Unknown _ ->
             { model = model, command = Cmd.none }
 
