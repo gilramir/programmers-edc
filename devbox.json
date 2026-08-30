@@ -1,0 +1,36 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.18.0/.schema/devbox.schema.json",
+  "packages": {
+    "nodejs": "22",
+    "gren": "0.6",
+    "cmake": "latest",
+    "pkg-config": "latest",
+    "ncurses": {
+      "version": "latest",
+      "outputs": [
+        "out",
+        "dev"
+      ]
+    }
+  },
+  "shell": {
+    "scripts": {
+      "m0": [
+        "cd m0-load-test && ./run.sh"
+      ],
+      "lib": [
+        "tvision-node/scripts/build-tvision.sh"
+      ],
+      "build": [
+        "tvision-node/scripts/build-tvision.sh",
+        "cd tvision-node && npm install --no-audit --no-fund && npx node-gyp rebuild"
+      ],
+      "hello": [
+        "cd tvision-node && node examples/hello.js"
+      ],
+      "test": [
+        "cd tvision-node && python3 test/drive.py"
+      ]
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "m0-load-test",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Milestone 0: does a .node addon built with the SYSTEM toolchain load in devbox's nix-provided node 22, and can it call into a system shared library (ncursesw)?",
+  "main": "test.js",
+  "scripts": {
+    "build": "node-gyp rebuild",
+    "test": "node test.js"
+  },
+  "dependencies": {
+    "node-addon-api": "^8.5.0"
+  },
+  "devDependencies": {
+    "node-gyp": "^11.0.0"
+  }
+}

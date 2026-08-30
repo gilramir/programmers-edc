@@ -1,1 +1,6 @@
 tvision/
+build-tvision/
+build-tvision.log
+node_modules/
+build/
+.devbox/
