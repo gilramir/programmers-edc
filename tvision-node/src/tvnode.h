@@ -422,7 +422,7 @@ public:
     virtual void handleEvent(TEvent &event) override;
 
     // The marks are kept here and the base class is given none, which is a
-    // workaround for a bug in Turbo Vision rather than a preference:
+    // workaround for magiblot/tvision#230 rather than a preference:
     // TMultiCheckBoxes copies its `states` string with newStr() -- `new
     // char[]` -- and its destructor frees it with plain `delete`
     // (tmulchkb.cpp:62). AddressSanitizer stops the process over the

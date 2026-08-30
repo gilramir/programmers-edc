@@ -2359,6 +2359,17 @@ that a program using the library normally never reaches, which is why they have
 survived; `TMultiCheckBoxes`' is in an ordinary destructor, which is why this
 was the one to fire.
 
+Reported as
+[magiblot/tvision#230](https://github.com/magiblot/tvision/issues/230), with
+all seven and a one-line fix for each.
+
+**The workaround stays anyway.** The local `tvision/` checkout carries the fix
+on a branch, and `test:asan` is green with or without it -- but `tvision/` is
+gitignored, so anyone building this repo gets upstream `master`, and a
+`JsMultiCheckBoxes` that only works against a patched library would be a worse
+kind of bug than the one it fixes. It comes out when the fix lands upstream and
+the checkout this repo builds against has it.
+
 The workaround is in the subclass, and there is no other place for it:
 `tvision/` is an upstream checkout this repo does not own. `JsMultiCheckBoxes`
 passes a **null** `states` to the base -- `newStr(nullptr)` returns 0, so the

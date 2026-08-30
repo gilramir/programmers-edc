@@ -730,8 +730,12 @@ string with `newStr()` — `new char[]` — and frees it with plain `delete`
 (`tmulchkb.cpp:62`). ASAN does not warn about an alloc/dealloc mismatch, it
 stops the process, so the first `test:asan` run failed at every check after the
 dialog was closed while `test` stayed green throughout. The same shape turns up
-in six more places in the library; FINDINGS lists them. The subclass passes a
-null `states` and draws the marks itself.
+in six more places in the library; FINDINGS lists them, and all seven are
+reported as
+[#230](https://github.com/magiblot/tvision/issues/230). The subclass passes a
+null `states` and draws the marks itself, and goes on doing so until the fix
+lands upstream — `tvision/` is gitignored, so a fresh checkout does not have
+it.
 
 **10. ~~A view on the application rather than the desktop.~~ Done —
 [`Ui.overlays`](#Ui), protocol 12.** `TClockView` and `THeapView` are inserted
