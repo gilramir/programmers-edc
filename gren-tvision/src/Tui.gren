@@ -261,7 +261,11 @@ type alias Window =
     for the same reason.
   - `InputLine` -- a text field. `value` is written to the field only when it
     changes *in the model*, so it never overwrites what the user is typing.
-  - `ListBox` -- gets a scroll bar of its own. Moving the highlight sends a
+  - `ListBox` -- gets a scroll bar of its own, in the single column
+    immediately to the **right** of its rectangle, so leave one. (Turbo Vision
+    puts it on the window's frame, which is right for a window that is a list
+    and nothing else and wrong for anything with two panes in it.) Moving the
+    highlight sends a
     [`Focused`](#Event) event; committing an entry (`Space`, or a double
     click) sends a [`Selected`](#Event) one. `focused` is that highlight seen
     from the other side: it is written to the list only when the model changes

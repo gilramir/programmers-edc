@@ -123,7 +123,7 @@ test('list and canvas contents are compared by value', () => {
   const tv = fakeTv();
   const differ = createDiffer(tv);
   const listed = (items) => win({
-    items: [{ type: 'listBox', id: 'l', rect: [2, 1, 30, 8], items }],
+    items: [{ type: 'listBox', id: 'l', rect: [2, 1, 30, 8], items, focused: 0 }],
   });
 
   differ.apply([listed(['a', 'b'])]);
@@ -131,7 +131,10 @@ test('list and canvas contents are compared by value', () => {
   differ.apply([listed(['a', 'b'])]);
   assert.deepEqual(tv.calls, [], 'equal arrays are not a change');
   differ.apply([listed(['a', 'b', 'c'])]);
-  assert.deepEqual(tv.calls, [['setItems', 'l', ['a', 'b', 'c']]]);
+  assert.deepEqual(tv.calls, [
+    ['setItems', 'l', ['a', 'b', 'c']],
+    ['setValue', 'l', 0],
+  ]);
 });
 
 // Clusters and the list box highlight: state the user can change behind the
@@ -358,4 +361,33 @@ test('a changed range sends the value with it, in one call', () => {
   differ.apply([win({ items: [bar({ value: 40, max: 100 })] })]);
   assert.deepEqual(tv.calls, [['setScroll', 's', 40, 1, 100, 4, 1]],
     'value and range separately would let TScrollBar clamp one against the other');
+});
+
+
+// The bug the directory tree found: a list box whose items change lands its
+// highlight on row zero, whatever the model said, and the model then hears
+// about a move it never asked for.
+
+const listWin = (items, focused) =>
+  win({ items: [{ type: 'listBox', id: 'l', rect: [2, 1, 30, 10], items, focused }] });
+
+test('a rebuilt list has its highlight put back, even when the model did not move it', () => {
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  differ.apply([listWin(['a', 'b', 'c'], 1)]);
+  tv.calls.length = 0;
+  differ.apply([listWin(['a', 'b', 'b1', 'c'], 1)]);
+  assert.deepEqual(tv.calls, [
+    ['setItems', 'l', ['a', 'b', 'b1', 'c']],
+    ['setValue', 'l', 1],
+  ], 'setItems resets the highlight to 0, so `focused` has to be re-sent');
+});
+
+test('a list whose items did not change is not re-focused', () => {
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  differ.apply([listWin(['a', 'b', 'c'], 1)]);
+  tv.calls.length = 0;
+  differ.apply([listWin(['a', 'b', 'c'], 1)]);
+  assert.deepEqual(tv.calls, []);
 });

@@ -1,0 +1,538 @@
+port module Main exposing (main)
+
+{-| tvdir (`tvision/examples/tvdir`), in Gren: a directory tree on the left, the
+files in the focused directory on the right.
+
+Two things this port expected to need and did not.
+
+**`TOutline` did not have to be wrapped.** The plan of record had this example
+down as "needs a new widget", because a tree view is a widget in C++:
+`TOutlineViewer` owns a `TNode` chain, walks it to work out which rows are
+visible, and draws the `└─` graphics itself. None of that survives contact with
+a model that re-renders. A tree here is a `type Node` and the visible rows are
+a fold over it, which a plain `ListBox` then displays -- indent, markers and
+all. It is the same shape of finding as `mmenu`, in the other direction: there
+the API said something was impossible and it was not, here it said something
+was needed and it was not.
+
+**There is no "Please Wait" window.** The C++ scans the whole drive in
+`TDirWindow`'s constructor, which blocks the event loop, so it has to put up a
+`QuickMessage` and call `TScreen::flushScreen()` by hand to get anything on the
+screen at all. `FileSystem.listDirectory` is a `Task`; nothing blocks; a
+directory is read when it is expanded and the interface stays live while it is
+read. Milestone 2 went to some trouble to make that true and this is the first
+example where it is the difference between two designs rather than a detail.
+
+What it *did* need was the file system, which no example had used before.
+`init` is a full `Init.Task`, so `FileSystem.initialize` is awaited before the
+first model exists -- which is what that field was for.
+
+The file pane is a canvas and a scroll bar, scrolled by the model. There is no
+`TScroller` here for the same reason there is no `TOutline`: what a scroller
+does is decide which slice of the content to draw, and the model already knows.
+
+Run it on a directory of your choosing: `run.sh dir` takes the first argument
+that is not a flag, and otherwise starts where you started it.
+
+-}
+
+import Array exposing (Array)
+import FileSystem
+import FileSystem.Path as Path exposing (Path)
+import Init
+import Json.Decode as Decode
+import Json.Encode as Encode
+import Math
+import Node
+import String
+import Task
+import Tui exposing (Event(..), Hue(..), MenuItem(..), View(..))
+
+
+-- PORTS
+
+
+port tuiOut : Encode.Value -> Cmd msg
+
+
+port tuiIn : (Decode.Value -> msg) -> Sub msg
+
+
+tui : Tui.Ports Msg
+tui =
+    { toJs = tuiOut, fromJs = tuiIn }
+
+
+-- MODEL
+
+
+{-| A directory in the tree. `children` is `Nothing` until it has been read,
+which is what makes the scan lazy -- and what makes it possible to open a tree
+at all without the "Please Wait" window the original needs.
+-}
+type Node
+    = Node
+        { name : String
+        , path : Path
+        , expanded : Bool
+        , children : Maybe (Array Node)
+        }
+
+
+type alias Row =
+    { depth : Int
+    , name : String
+    , path : Path
+    , expanded : Bool
+    , loaded : Bool
+    }
+
+
+type alias Model =
+    { permission : FileSystem.Permission
+    , root : Node
+    , focused : Int
+    , files : Array String
+    , fileTop : Int
+    , status : String
+    }
+
+
+type Msg
+    = Listed { path : Path, entries : Array { path : Path, entityType : FileSystem.EntityType } }
+    | Failed { path : Path, error : FileSystem.Error }
+    | Started Path
+    | FromTui Event
+
+
+-- INIT
+
+
+init : Node.Environment -> Init.Task { model : Model, command : Cmd Msg }
+init env =
+    -- The reason `init` is an Init.Task rather than a plain value: a
+    -- subsystem has to be initialised before there is a model to speak of.
+    Init.await FileSystem.initialize <| \permission ->
+        Node.startProgram
+            { model =
+                { permission = permission
+                , root = Node { name = "", path = Path.empty, expanded = True, children = Nothing }
+                , focused = 0
+                , files = []
+                , fileTop = 0
+                , status = "reading..."
+                }
+            , command =
+                when startingPath env.args is
+                    Just given ->
+                        Task.perform Started (Task.succeed given)
+
+                    Nothing ->
+                        Task.perform Started
+                            (FileSystem.currentWorkingDirectory permission)
+            }
+
+
+{-| The first argument that is not a flag, as a path. Everything before it
+belongs to node and to the runtime.
+-}
+startingPath : Array String -> Maybe Path
+startingPath args =
+    args
+        |> Array.dropFirst 3
+        |> Array.findFirst (\arg -> not (String.startsWith "-" arg))
+        |> Maybe.map (\found -> Path.fromPosixString found.value)
+
+
+{-| The root row shows the last component of the starting path -- the whole
+thing is in the window's title, and a tree column is twenty-odd characters
+wide.
+-}
+rootName : Path -> String
+rootName path =
+    when Path.filenameWithExtension path is
+        "" ->
+            Path.toPosixString path
+
+        name ->
+            name
+
+
+-- READING
+
+
+list : Model -> Path -> Cmd Msg
+list model path =
+    FileSystem.listDirectory model.permission path
+        |> Task.attempt
+            (\result ->
+                when result is
+                    Ok entries ->
+                        Listed { path = path, entries = entries }
+
+                    Err error ->
+                        Failed { path = path, error = error }
+            )
+
+
+-- THE TREE
+
+
+{-| The visible rows, in order: a depth-first walk that stops at anything not
+expanded. This is the whole of what `TOutlineViewer` exists to do.
+-}
+rowsOf : Node -> Array Row
+rowsOf node =
+    walk 0 node
+
+
+walk : Int -> Node -> Array Row
+walk depth (Node it) =
+    let
+        here =
+            [ { depth = depth
+              , name = it.name
+              , path = it.path
+              , expanded = it.expanded
+              , loaded = it.children /= Nothing
+              }
+            ]
+    in
+    if it.expanded then
+        when it.children is
+            Just children ->
+                Array.foldl (\child rows -> rows ++ walk (depth + 1) child) here children
+
+            Nothing ->
+                here
+
+    else
+        here
+
+
+{-| Replace the node at `path`, wherever it is in the tree. Paths are unique,
+so this needs no cursor and no parent pointers -- which is the other half of
+why `TNode`'s doubly-walked chain has no equivalent here.
+-}
+mapNode : Path -> (Node -> Node) -> Node -> Node
+mapNode path change (Node it) =
+    if it.path == path then
+        change (Node it)
+
+    else
+        Node
+            { it | children = Maybe.map (Array.map (mapNode path change)) it.children }
+
+
+findNode : Path -> Node -> Maybe Node
+findNode path (Node it) =
+    if it.path == path then
+        Just (Node it)
+
+    else
+        it.children
+            |> Maybe.withDefault []
+            |> Array.foldl
+                (\child found ->
+                    when found is
+                        Just _ ->
+                            found
+
+                        Nothing ->
+                            findNode path child
+                )
+                Nothing
+
+
+rowAt : Model -> Int -> Maybe Row
+rowAt model index =
+    Array.get index (rowsOf model.root)
+
+
+-- UPDATE
+
+
+update : Msg -> Model -> { model : Model, command : Cmd Msg }
+update msg model =
+    when msg is
+        Started path ->
+            let
+                started =
+                    { model
+                        | root =
+                            Node
+                                { name = rootName path
+                                , path = path
+                                , expanded = True
+                                , children = Nothing
+                                }
+                        , status = "reading " ++ Path.toPosixString path
+                    }
+            in
+            { model = started, command = list started path }
+
+        Listed answer ->
+            let
+                -- listDirectory answers with the entries' names, not their
+                -- full paths, so each one has to be put back underneath the
+                -- directory it came from before it means anything to the next
+                -- listing. `append` reads backwards on purpose: it is the
+                -- pipeline-shaped one, `child |> Path.append parent`.
+                directories =
+                    answer.entries
+                        |> Array.keepIf (\entry -> entry.entityType == FileSystem.Directory)
+                        |> Array.map
+                            (\entry ->
+                                Node
+                                    { name = Path.filenameWithExtension entry.path
+                                    , path = Path.append entry.path answer.path
+                                    , expanded = False
+                                    , children = Nothing
+                                    }
+                            )
+                        |> sortNodes
+
+                files =
+                    answer.entries
+                        |> Array.keepIf (\entry -> entry.entityType /= FileSystem.Directory)
+                        |> Array.map (\entry -> Path.filenameWithExtension entry.path)
+                        |> Array.sort
+
+                filled =
+                    { model
+                        | root =
+                            mapNode answer.path
+                                (\(Node it) -> Node { it | children = Just directories })
+                                model.root
+                        , status = Path.toPosixString answer.path
+                    }
+            in
+            -- The listing answers both halves at once: the directories go into
+            -- the tree, and the files into the pane -- but only if this is
+            -- still the directory the highlight is on, because two expansions
+            -- can be in flight and the second must not be overwritten by the
+            -- first arriving late.
+            { model =
+                when rowAt filled filled.focused is
+                    Just row ->
+                        if row.path == answer.path then
+                            { filled | files = files, fileTop = 0 }
+
+                        else
+                            filled
+
+                    Nothing ->
+                        filled
+            , command = Cmd.none
+            }
+
+        Failed answer ->
+            { model =
+                { model
+                    | root =
+                        mapNode answer.path
+                            (\(Node it) -> Node { it | children = Just [], expanded = False })
+                            model.root
+                    , files = []
+                    , status = FileSystem.errorToString answer.error
+                }
+            , command = Cmd.none
+            }
+
+        FromTui event ->
+            handleEvent event model
+
+
+sortNodes : Array Node -> Array Node
+sortNodes nodes =
+    Array.sortBy (\(Node it) -> it.name) nodes
+
+
+handleEvent : Event -> Model -> { model : Model, command : Cmd Msg }
+handleEvent event model =
+    when event is
+        -- Walking the tree loads whatever the highlight lands on, which is
+        -- what fills the file pane. Nothing blocks while it does.
+        Focused it ->
+            let
+                moved =
+                    { model | focused = it.index }
+            in
+            when rowAt moved it.index is
+                Just row ->
+                    { model = { moved | status = Path.toPosixString row.path }
+                    , command = list moved row.path
+                    }
+
+                Nothing ->
+                    { model = moved, command = Cmd.none }
+
+        Selected it ->
+            toggle it.index model
+
+        Command "toggle" ->
+            toggle model.focused model
+
+        Command "up" ->
+            scrollFiles -1 model
+
+        Command "down" ->
+            scrollFiles 1 model
+
+        Scrolled bar ->
+            { model = { model | fileTop = bar.value }, command = Cmd.none }
+
+        KeyPressed _ ->
+            { model = model, command = Cmd.none }
+
+        _ ->
+            { model = model, command = Cmd.none }
+
+
+{-| Expand or collapse, reading the directory the first time it is opened.
+-}
+toggle : Int -> Model -> { model : Model, command : Cmd Msg }
+toggle index model =
+    when rowAt model index is
+        Nothing ->
+            { model = model, command = Cmd.none }
+
+        Just row ->
+            let
+                flipped =
+                    { model
+                        | root =
+                            mapNode row.path
+                                (\(Node it) -> Node { it | expanded = not it.expanded })
+                                model.root
+                        , focused = index
+                    }
+            in
+            { model = flipped
+            , command =
+                if row.loaded then
+                    Cmd.none
+
+                else
+                    list flipped row.path
+            }
+
+
+scrollFiles : Int -> Model -> { model : Model, command : Cmd Msg }
+scrollFiles by model =
+    { model | fileTop = clamp 0 (max 0 (Array.length model.files - paneHeight)) (model.fileTop + by) }
+        |> (\it -> { model = it, command = Cmd.none })
+
+
+-- VIEW
+
+
+paneHeight : Int
+paneHeight =
+    14
+
+
+view : Model -> Tui.Ui
+view model =
+    { menuBar =
+        [ SubMenu
+            { title = "~D~irectory"
+            , key = "Alt-D"
+            , items =
+                [ Item { title = "~E~xpand or collapse", cmd = "toggle", key = "Alt-E", shortcut = "Alt-E" }
+                , Tui.Separator
+                , Item { title = "E~x~it", cmd = "quit", key = "Alt-X", shortcut = "Alt-X" }
+                ]
+            }
+        ]
+    , statusLine =
+        [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
+        , { text = "~Alt-E~ Expand", key = "Alt-E", cmd = "toggle" }
+        , { text = "Space opens a directory", key = "", cmd = "" }
+        , { text = "", key = "F10", cmd = "menu" }
+        ]
+    , windows = [ dirWindow model ]
+    }
+
+
+dirWindow : Model -> Tui.Window
+dirWindow model =
+    { id = "dirWin"
+    , title = model.status
+    , rect = { x1 = 1, y1 = 1, x2 = 78, y2 = 21 }
+    , views =
+        [ Tui.ListBox
+            { id = "tree"
+            , rect = { x1 = 2, y1 = 1, x2 = 25, y2 = 1 + paneHeight }
+            , items = Array.map label (rowsOf model.root)
+            , focused = model.focused
+            }
+        , Canvas
+            { id = "files"
+            , rect = { x1 = 30, y1 = 1, x2 = 74, y2 = 1 + paneHeight }
+            , lines = paneLines model
+            , cursor = Nothing
+            , takesFocus = False
+            }
+        , Tui.ScrollBar
+            { id = "fileScroll"
+            , rect = { x1 = 74, y1 = 1, x2 = 75, y2 = 1 + paneHeight }
+            , value = model.fileTop
+            , min = 0
+            , max = max 0 (Array.length model.files - paneHeight)
+            , pageStep = paneHeight
+            , arrowStep = 1
+            }
+        , Tui.StaticText
+            { id = "count"
+            , rect = { x1 = 30, y1 = 2 + paneHeight, x2 = 74, y2 = 3 + paneHeight }
+            , text = String.fromInt (Array.length model.files) ++ " files"
+            }
+        ]
+    }
+
+
+{-| One tree row: indent, a marker, and the name. `TOutlineViewer` draws this
+with `└─` box graphics off a `TNode` chain; here it is a string.
+-}
+label : Row -> String
+label row =
+    String.repeat row.depth "  "
+        ++ (if row.expanded then
+                "▾ "
+
+            else
+                "▸ "
+           )
+        ++ (if String.isEmpty row.name then
+                "/"
+
+            else
+                row.name
+           )
+
+
+paneLines : Model -> Array (Array Tui.Span)
+paneLines model =
+    if Array.isEmpty model.files then
+        [ Tui.line "  <no files>" ]
+
+    else
+        model.files
+            |> Array.dropFirst model.fileTop
+            |> Array.takeFirst paneHeight
+            |> Array.map (\name -> Tui.line ("  " ++ name))
+
+
+-- PROGRAM
+
+
+main : Tui.Program Model Msg
+main =
+    Tui.defineProgram tui
+        { init = init
+        , update = update
+        , subscriptions = \_ -> Sub.none
+        , view = view
+        , onEvent = FromTui
+        }

@@ -162,6 +162,10 @@ public:
 private:
     std::vector<std::string> items;
     std::string viewId;
+
+    // setItems() has to move the highlight to row zero before it can be put
+    // where the caller wants it. That intermediate position is not news.
+    bool quiet = false;
 };
 
 // One run of characters on a canvas line, painted in one colour.

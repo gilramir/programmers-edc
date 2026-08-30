@@ -20,6 +20,7 @@ Build them all with `../build.sh`, run one with `../run.sh <name>`.
 | `calc` | `tvision/examples/tvdemo` (calc.cpp) | `takesFocus` on a button: a keypad that can be pressed but never holds the caret |
 | `palette` | `tvision/examples/palette` | nothing -- it is the example whose entire subject the port removes, and the write-up says what that costs |
 | `mouse` | `tvision/examples/tvdemo` (mousedlg.cpp) | the scroll bar as a view of its own, `isDouble` on a click, `setDoubleClickDelay`, and `takesFocus` on a canvas |
+| `dir` | `tvision/examples/tvdir` | no widget at all — but it found a real bug in the diff, moved a list box's scroll bar, and is the first example to use the file system |
 
 ## What mmenu changed
 
@@ -179,6 +180,44 @@ click past the thumb; this one takes the thumb to the pointer. `pageStep` is
 reached only from the keyboard, and on a horizontal bar that is `Ctrl-Left` and
 `Ctrl-Right`.
 
+## What tvdir changed
+
+This entry said "needs a new widget: `TOutline`". It does not, and that was
+settled in about ten minutes.
+
+A tree view is a widget in C++ because it has to be: `TOutlineViewer` owns a
+`TNode` chain, works out which rows are visible, draws the box graphics, and
+keeps an index into a list only it can compute. A model that re-renders owns
+the structure already — the tree is a `type Node` and the visible rows are a
+fold over it, which a plain `ListBox` then displays with its scrolling and its
+highlight. `TScroller` went the same way, and for the same reason: what a
+scroller does is decide which slice to draw, and the model knows.
+
+Same shape as `mmenu`, in the other direction. There the documentation said
+something was impossible and it was not; here it said something was needed and
+it was not.
+
+**It found a real bug.** Expanding a branch collapsed the whole tree.
+`setItems` puts a list box's highlight back on row zero, so `diff.js` re-sent
+`focused` afterwards — but only when `focused` had *changed*, and expanding a
+branch changes the items and leaves the highlight where it is. The list sat on
+row zero, reported that as a move, and the model believed it. `focused` is now
+re-sent whenever the items changed, and `setItems` no longer reports the
+intermediate zero it has to pass through. `FINDINGS.md` has the long version;
+the short one is that the tvforms port wrote this hazard down and it took a
+tree to produce a case that hit it.
+
+**And it moved a scroll bar.** `TWindow::standardScrollBar` puts a list's bar
+on the window frame, which is right for a window that is a list and nothing
+else and wrong for two panes side by side. A list box's scroll bar now occupies
+the column immediately to the right of the list, so leave one.
+
+There is no "Please Wait" window, either. The original scans the whole drive in
+a constructor and has to put one up; `FileSystem.listDirectory` is a task, a
+directory is read when it is opened, and nothing blocks. It is also the first
+example to use the file system, which is what `init` being a full `Init.Task`
+was for.
+
 ## The C++ examples, triaged
 
 `tvision/examples/` has eight entries. Two of them are not Turbo Vision
@@ -191,7 +230,7 @@ applications at all, and one of them is really eight applications.
 | `palette` | **done** | `examples/palette`; the essay it is written to explain has no Gren equivalent — see above |
 | `tvdemo` | split it up | see below |
 | `tvforms` | **done** (the UI half) | see above. Its other half is `.rsc` resource streaming — `opstream`/`ipstream` serialising views to disk — which has no Gren meaning |
-| `tvdir` | needs a new widget | `TOutline`, a tree view, plus `TChDirDialog` |
+| `tvdir` | **done** | `examples/dir` — and it turned out to need no new widget at all; see above |
 | `tvedit` | a milestone of its own | `TEditor`/`TFileEditor`: a stateful text buffer with undo and clipboard. See the note below |
 | `tvhc` | **no** | a command-line help *compiler*, not a TUI |
 | `avscolor` | **no** | an AviSynth plugin |
@@ -226,8 +265,8 @@ windows.
 
 ## After that
 
-When the C++ examples run out, the coverage gaps left are roughly: `TOutline`,
-the standard file and directory dialogs, and validators on input lines.
+When the C++ examples run out, the coverage gaps left are roughly: the
+standard file and directory dialogs, and validators on input lines.
 
 One gap is worth naming on its own, because `forms` walked right up to it: **a
 cluster or an input line in a plain window holds state the model never sees.**

@@ -240,7 +240,7 @@ listWindow model =
     , views =
         [ ListBox
             { id = "entries"
-            , rect = { x1 = 2, y1 = 1, x2 = 41, y2 = 11 }
+            , rect = { x1 = 2, y1 = 1, x2 = 43, y2 = 11 }
             , items = model.items
             , focused = 0
             }

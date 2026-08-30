@@ -964,3 +964,101 @@ the byte stream does not exist as far as the library is concerned. The driver
 pumps between the two presses, which is what makes 0.35 seconds a real 0.35
 seconds: comfortably inside a 20-tick delay and outside a 1-tick one, which is
 the whole demonstration.
+
+### Porting tvdir: the widget that did not need wrapping
+
+`gren-tvision/examples/README.md` had tvdir down as "needs a new widget:
+`TOutline`". It does not, and finding that out took about ten minutes.
+
+A tree view is a widget in C++ because it has to be. `TOutlineViewer` owns a
+`TNode` chain, walks it to work out which rows are currently visible, draws the
+`└─` graphics, and keeps a `foc` index into a list that only it can compute --
+`TDirOutline` even has to define `getParent` by searching the whole tree,
+because a `TNode` has no parent pointer. All of that is machinery for deciding
+what to draw from a structure the view owns.
+
+A model that re-renders owns the structure already. The tree is
+
+    type Node = Node { name : String, path : Path, expanded : Bool, children : Maybe (Array Node) }
+
+and the visible rows are a fold over it. A plain `ListBox` shows them, indent
+and markers included, and it brings the scrolling and the highlight with it.
+`getParent` has no equivalent because paths are unique: `mapNode path change`
+finds the node and replaces it without a cursor or a parent pointer.
+
+This is the same shape of finding as `mmenu`, in the other direction. There the
+documentation said something was impossible and it was not; here it said
+something was needed and it was not. Both were only settled by writing the
+port.
+
+`TScroller` went the same way for the same reason: what a scroller does is
+decide which slice of the content to draw, and the model already knows.
+
+### The "Please Wait" window is an artifact of blocking
+
+`TDirWindow`'s constructor scans the entire drive before it returns, so nothing
+can be on screen while it happens. The original's answer is a `QuickMessage`
+window, a `TParamText` updated per directory, and a hand-written
+`TScreen::flushScreen()` to force the terminal to catch up.
+
+`FileSystem.listDirectory` is a `Task`. A directory is read when it is opened,
+nothing blocks, and there is no wait window because there is nothing to wait
+for. Milestone 2 went to some trouble to make that true and this is the first
+example where it is the difference between two designs rather than a detail.
+
+It is also the first example to use the file system at all, which is what `init`
+being a full `Init.Task` was for: `FileSystem.initialize` is awaited before
+there is a model.
+
+One thing that has to be got right and is easy to miss: `listDirectory` answers
+with the entries' *names*, not their paths, so each one has to be put back
+underneath the directory it came from before it means anything to the next
+listing.
+
+### The bug the tree found: a rebuilt list forgets its highlight
+
+Expanding a branch collapsed the whole tree instead. The cause is worth the
+space, because the comment explaining it was already in `diff.js` and the code
+next to it did not implement it.
+
+`TListViewer::setItems` puts the highlight back on row zero -- it has to; the
+old position may be past the end of the new list. `diff.js` therefore re-sent
+`focused` after `setItems`, but only when `focused` had *changed*:
+
+    if (before.focused !== after.focused) tv.setValue(after.id, after.focused);
+
+Expanding a branch changes the items and leaves the highlight where it is. So
+`focused` was 1 before and 1 after, no `setValue` went out, the list sat on row
+zero, and -- because a list box reports where its highlight lands -- it told the
+model the highlight had moved to zero. The model believed it, listed the root
+again, and the render that followed collapsed the branch that had just been
+opened.
+
+Two changes, and both are needed:
+
+  - `focused` is re-sent whenever the items changed, not only when the model
+    moved it. A `focused` that did not change is still one the list no longer
+    agrees with.
+  - `JsListBox::setItems` no longer reports its own `focusItem(0)`. That
+    position is an artifact of rebuilding rather than something that happened,
+    the caller always follows `setItems` with the position it actually wants,
+    and *that* is reported. Announcing the intermediate zero tells a model its
+    highlight moved somewhere it was never going to stay -- and a model that
+    acts on where the highlight is, by opening a directory say, acts on the
+    wrong one.
+
+The tvforms port wrote down exactly this hazard and did not hit it, because
+there the model always moved `focused` when the list changed. It took a tree to
+produce the case where the items change and the highlight does not.
+
+### A list box's scroll bar belongs beside the list
+
+`TWindow::standardScrollBar` puts it on the window's frame, which is right for a
+Turbo Vision window that is a list and nothing else -- and every Borland
+example is one. A directory tree beside a file pane is not, and the tree's
+scroll bar came out on the far side of the files.
+
+The binding now makes the bar itself, in the single column immediately to the
+right of the list's own rectangle. That is a rule an author can lay out
+against, it is local to the list, and it costs the two existing examples two
+columns of width to keep the bar exactly where it was.

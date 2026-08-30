@@ -68,15 +68,20 @@ function createDiffer(tv, onClosed = () => {}) {
       case 'inputLine':
         if (before.value !== after.value) tv.setValue(after.id, after.value);
         break;
-      case 'listBox':
-        if (JSON.stringify(before.items) !== JSON.stringify(after.items)) {
-          tv.setItems(after.id, after.items);
+      case 'listBox': {
+        const rebuilt = JSON.stringify(before.items) !== JSON.stringify(after.items);
+        if (rebuilt) tv.setItems(after.id, after.items);
+        // After setItems, and *whenever* it ran -- not only when the model
+        // moved the highlight. Rebuilding a list puts the highlight back on
+        // row zero no matter where it was, so a `focused` that did not change
+        // is still a `focused` the list no longer agrees with. Leaving it out
+        // is how a tree collapses itself the moment you expand a branch: the
+        // model says 1, the list says 0, and the list is the one that reports.
+        if (rebuilt || before.focused !== after.focused) {
+          tv.setValue(after.id, after.focused);
         }
-        // After setItems, because rebuilding a list puts the highlight back on
-        // the first row: a model that means to keep it somewhere else has to
-        // get the last word.
-        if (before.focused !== after.focused) tv.setValue(after.id, after.focused);
         break;
+      }
       case 'canvas':
         if (JSON.stringify(before.lines) !== JSON.stringify(after.lines)) {
           tv.setLines(after.id, after.lines);

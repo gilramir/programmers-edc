@@ -39,7 +39,7 @@ void JsListBox::selectItem(short item)
 void JsListBox::focusItem(short item)
 {
     TListViewer::focusItem(item);
-    if (item >= 0 && (size_t) item < items.size())
+    if (!quiet && item >= 0 && (size_t) item < items.size())
         noteFocused(viewId, item, items[item]);
 }
 
@@ -48,7 +48,18 @@ void JsListBox::setItems(std::vector<std::string> newItems)
     items = std::move(newItems);
     setRange((short) items.size());
     if (!items.empty())
-        focusItem(0);   // reported too: the highlight really did move
+        {
+        // Silently. The highlight really does land on row zero here, but that
+        // is an artifact of rebuilding rather than anything that happened: the
+        // caller always follows setItems with the position it actually wants,
+        // and *that* is reported. Announcing the intermediate zero tells the
+        // model its highlight moved somewhere it was never going to stay, and
+        // a model that acts on where the highlight is -- opening a directory,
+        // say -- acts on the wrong one.
+        quiet = true;
+        focusItem(0);
+        quiet = false;
+        }
     drawView();
 }
 
@@ -408,9 +419,24 @@ TView *buildItems(const Napi::Env &env, JsWindow *win, const Napi::Value &value,
             {
             if (id.empty())
                 throw Napi::Error::New(env, "tvision: a listBox needs an id");
-            TScrollBar *sb = win->standardScrollBar(sbVertical | sbHandleKeyboard);
-            JsListBox *list =
-                new JsListBox(getRect(env, it, "listBox"), sb, id);
+            // Beside the list, not on the window's frame.
+            //
+            // TWindow::standardScrollBar() puts it on the frame, which is
+            // right for a Turbo Vision window that is a list and nothing else
+            // and wrong for anything with two panes in it -- a directory tree
+            // beside a file pane ends up with its scroll bar over on the far
+            // side of the files. Here the bar occupies the single column
+            // immediately to the right of the list's own rectangle, which is
+            // a rule an author can lay out against.
+            TRect listRect = getRect(env, it, "listBox");
+            TScrollBar *sb = new TScrollBar(
+                TRect(listRect.b.x, listRect.a.y, listRect.b.x + 1, listRect.b.y));
+            // What standardScrollBar(sbHandleKeyboard) actually sets: the bar
+            // sees keystrokes the focused list did not want, which is how
+            // PgUp and PgDn reach it.
+            sb->options |= ofPostProcess;
+            win->insert(sb);
+            JsListBox *list = new JsListBox(listRect, sb, id);
             if (it.Has("items"))
                 list->setItems(getStringArray(it.Get("items")));
             if (it.Has("focused"))
