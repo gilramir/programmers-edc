@@ -163,6 +163,21 @@ private:
     std::string viewId;
 };
 
+// One run of characters on a canvas line, painted in one colour.
+//
+// `fg` and `bg` are the sixteen BIOS colours, or -1 for "whatever this view's
+// palette says". Half of one is meaningful on its own: a span that names a
+// foreground and leaves the background at -1 keeps the window's own
+// background, which is how a calendar marks today without picking a colour
+// scheme.
+struct CanvasSpan {
+    std::string text;
+    int fg = -1;
+    int bg = -1;
+};
+
+using CanvasLine = std::vector<CanvasSpan>;
+
 // A view whose contents come from JavaScript.
 //
 // tvdemo's TTable and TCalendarView are plain TView subclasses that implement
@@ -178,11 +193,11 @@ public:
     virtual void draw() override;
     virtual void handleEvent(TEvent &event) override;
 
-    void setLines(std::vector<std::string> newLines);
+    void setLines(std::vector<CanvasLine> newLines);
     void setCursorAt(int x, int y, bool visible);
 
 private:
-    std::vector<std::string> lines;
+    std::vector<CanvasLine> lines;
     std::string viewId;
     int colorIndex;
 };
@@ -408,6 +423,13 @@ int getInt(const Napi::Object &o, const char *key, int dflt);
 TKey getKey(const Napi::Env &env, const Napi::Object &o, const char *key,
             const std::string &where);
 TRect getRect(const Napi::Env &env, const Napi::Object &o, const char *where);
+
+// A canvas's `lines`. Each entry is either a plain string -- the whole line in
+// the view's own colour -- or an array of {text, fg, bg} spans. The string
+// form is not a shortcut bolted on afterwards: it is what every canvas looked
+// like before colour existed, and keeping it means a canvas that does not care
+// about colour never has to mention it.
+std::vector<CanvasLine> getCanvasLines(const Napi::Value &v);
 
 // Fills a window from a JS `items` array; ids are registered against windowId
 // so closing the window forgets them all. Returns the first view that can take

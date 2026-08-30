@@ -728,3 +728,112 @@ nothing has needed it yet -- but it is the same hole `Focused` just filled for
 list boxes. `gren-tvision/examples/README.md` tracks that along with what each
 remaining C++ example would force into the API.
 
+
+## Porting the rest of tvdemo
+
+### A canvas had one colour, and three examples needed two
+
+The chart came out the same colour all over because that is all a canvas could
+be: `JsCanvas::draw()` took `getColor(colorIndex)` once and moved every string
+into the buffer with it. Nothing had complained, because the ASCII chart really
+is one colour.
+
+The next three examples are all colour. `calendar.cpp` draws today with
+`getColor(7)` and the rest of the month with `getColor(6)`; `puzzle.cpp` keeps
+two attributes in an array and indexes it per tile; `palette.cpp` is an essay
+about nothing else. So a canvas line stopped being a string and became an array
+of spans:
+
+```gren
+type alias Span =
+    { text : String, fg : Maybe Hue, bg : Maybe Hue }
+```
+
+Three things about that shape were decided by the C++ rather than by taste.
+
+**The two halves are separate.** Turbo Vision's `TColorAttr` has a foreground
+and a background and they are set independently, and the useful case really is
+one of them: today on a calendar is `getColor(7)` on whatever the window is
+already using. A `Maybe { fg, bg }` would have forced every highlight to name a
+background it has no opinion about, which is how a view stops matching the rest
+of the program when someone changes the theme.
+
+**A span with no colour has to encode to what a string encoded to.** The
+runtime diffs canvas lines by comparing their JSON, so a `plain` span emits
+`{"text": "..."}` and nothing more; had it emitted `{"text":..,"fg":null,..}`
+every canvas in every existing example would have repainted on every render and
+the diff would still have said it was doing nothing.
+
+**The column has to come from `moveStr`, not from the string.** Spans are laid
+down left to right and the next one starts where the last one ended -- which is
+not its length. magiblot's Turbo Vision draws Unicode: `╣` is one cell and
+three bytes. `TDrawBuffer::moveStr` returns the number of *cells* it wrote,
+which is the only number that is right.
+
+The binding accepts a bare string in place of an array of spans, so the
+`tvision-node` examples and their tests did not have to change at all. That is
+not a courtesy: it is the shape every canvas had before colour existed, and it
+is what `Tui.line` produces.
+
+### The test harness could not see colour, so it grew eyes
+
+`Screen`, the little terminal emulator in `tvision-node/test/harness.py`,
+parsed SGR only well enough to skip it. That was fine while the only question
+was what the screen said. It is not fine for a calendar, where the entire
+visible difference between today and the twenty-ninth is the colour: the text
+is identical, there is no highlight bar, and the cursor is somewhere else.
+
+So `Screen` now keeps `(foreground, background)` per cell alongside the
+character, and `Pty.display()` hands back the whole thing -- text, cursor and
+colour together. `fg_at(col, row)` is what `drive_calendar.py` asserts on.
+
+This is the third time the harness has had to grow before a port could be
+tested (`render()` for the ticking clock, `cursor()` for the ASCII chart, now
+colour), and every time the addition was smaller than the bug it would have
+hidden.
+
+### Porting the calendar: `localtime()` in a constructor is untestable
+
+`TCalendarView`'s constructor calls `localtime()` and keeps the answer in
+`curDay`/`curMonth`/`curYear`. The view therefore *is* today. There is no
+argument to pass and no member to set: you cannot ask a `TCalendarView` what
+March 1900 looks like, which means you cannot test one at all.
+
+Gren has no clock a pure function can read, so this had to become a field, and
+`Time.here` and `Time.now` are tasks -- the answer arrives after the first
+render, not before it. The visible consequence is that the window is not on the
+desktop for one turn of the event loop. The invisible one is the whole point:
+today is data, so the calendar renders any month you hand it, and
+`drive_calendar.py` walks a year back and checks that today stops being
+highlighted when you leave its month.
+
+Two smaller things fell out. The original's leap year rule is `year % 4 == 0`,
+which is right for every year Borland expected to be run in and wrong for 1900
+and 2100; a calendar that can be pointed anywhere has to use the real rule. And
+the header's two arrows are backwards -- clicking the one that points *up*
+moves to the next month. That is faithfully reproduced, because it is what
+`calendar.cpp` does.
+
+### Porting the puzzle: the generator has to be in the model, and that is better
+
+`TPuzzleView::TPuzzleView` calls `srand(time(0))` and then makes five hundred
+random moves. The board is a C++ member reached through a seed nobody kept, so
+there is no board you can ask for, no way to know what the answer is, and no
+way for a test to win.
+
+Gren has no `rand()` to call. The generator has to be a field the shuffle
+threads through and hands back -- a Lehmer step, which is all `rand()` was
+providing -- and once it is a field the board is a pure function of a seed and
+a depth. `--seed=` and `--scramble=` are then a one-line addition rather than a
+debugging hook, `init` already receives the `Node.Environment` they come from,
+and `test/drive_puzzle.py` reproduces the shuffle in eight lines of Python,
+checks the screen agrees, breadth-first searches for the answer and plays it.
+
+Purity bought a test that the original cannot have. It is the clearest example
+so far of the trade this binding makes going the right way.
+
+The colours are the other half, and they are keyed on the *letter* rather than
+the square, so a tile carries its colour as it slides. The checkerboard is
+therefore a picture of how scrambled the board is, and a solved board drops
+back to one colour -- which is the only announcement `puzzle.cpp` makes that
+you have won, and the thing the test asserts to prove it did.

@@ -1,0 +1,459 @@
+port module Main exposing (main)
+
+{-| tvdemo's sliding puzzle (`tvision/examples/tvdemo/puzzle.cpp`), in Gren.
+
+Fifteen lettered tiles and a hole, on a `Canvas` four rows tall. Tiles come in
+two colours in a checkerboard, and the checker is keyed on the *letter* rather
+than the square, so a tile keeps its colour as it slides -- which is what makes
+the pattern break up while the puzzle is scrambled and come back together when
+it is solved.
+
+The thing this port changed is not on screen at all. `TPuzzleView`'s
+constructor calls `srand(time(0))` and then makes five hundred random moves, so
+the board is a C++ member seeded by the wall clock: there is no way to ask for
+a particular board, and therefore no way to test that the puzzle can be solved.
+Gren has no `rand()` to call, so the generator has to *be* the model -- a seed
+that the shuffle threads through and hands back. Once it is a field, the board
+is a pure function of a seed and a depth, and `--scramble=<n>` is a one-line
+addition rather than a debugging hook. `test/drive_puzzle.py` uses it to
+scramble four moves deep, work out the answer, and play it.
+
+`init` gets the `Node.Environment`, which is where the argument comes from, and
+`Time.now` supplies the seed when nobody asks for a particular one.
+
+-}
+
+import Array exposing (Array)
+import Init
+import Json.Decode as Decode
+import Json.Encode as Encode
+import Math
+import Node
+import String
+import Task
+import Time
+import Tui exposing (Event(..), Hue(..), MenuItem(..), View(..))
+
+
+-- PORTS
+
+
+port tuiOut : Encode.Value -> Cmd msg
+
+
+port tuiIn : (Decode.Value -> msg) -> Sub msg
+
+
+tui : Tui.Ports Msg
+tui =
+    { toJs = tuiOut, fromJs = tuiIn }
+
+
+-- MODEL
+
+
+{-| Sixteen squares, read left to right and top to bottom. The hole is a space.
+-}
+type alias Board =
+    Array String
+
+
+solvedBoard : Board
+solvedBoard =
+    [ "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", " " ]
+
+
+type alias Model =
+    { board : Board
+    , moves : Int
+    , solved : Bool
+    , seed : Int
+    , depth : Int
+    , open : Bool
+    }
+
+
+type Msg
+    = Seeded Int
+    | FromTui Event
+
+
+init : Node.Environment -> Init.Task { model : Model, command : Cmd Msg }
+init env =
+    Node.startProgram
+        { model =
+            { board = solvedBoard
+            , moves = 0
+            , solved = False
+            , seed = 0
+            , depth = scrambleDepth env.args
+            , open = True
+            }
+        -- The board is not scrambled until the seed arrives, so the first
+        -- render shows a solved puzzle for one turn of the event loop. The
+        -- alternative is a hidden default seed, which would make every run of
+        -- the program identical.
+        , command =
+            when flag "--seed=" env.args is
+                Just given ->
+                    Task.perform Seeded (Task.succeed given)
+
+                Nothing ->
+                    Time.now
+                        |> Task.map Time.posixToMillis
+                        |> Task.perform Seeded
+        }
+
+
+{-| `--scramble=<n>` and `--seed=<n>`, anywhere on the command line. Five
+hundred moves from a clock-derived seed is what `puzzle.cpp` does; naming
+either of them is what a C++ member seeded in a constructor cannot offer.
+-}
+scrambleDepth : Array String -> Int
+scrambleDepth args =
+    flag "--scramble=" args
+        |> Maybe.withDefault 500
+
+
+flag : String -> Array String -> Maybe Int
+flag name args =
+    args
+        |> Array.findFirst (String.startsWith name)
+        |> Maybe.andThen
+            (\found -> String.toInt (String.dropFirst (String.count name) found.value))
+
+
+-- RANDOMNESS
+--
+-- A Lehmer generator, which is the whole of what `rand()` was giving the
+-- original. It lives in the model because there is nowhere else in Gren for it
+-- to live, and that is the improvement: the board becomes a pure function of
+-- the seed.
+
+
+nextSeed : Int -> Int
+nextSeed seed =
+    Math.modBy 2147483647 (seed * 48271 + 1)
+
+
+-- MOVES
+
+
+type Direction
+    = Up
+    | Down
+    | Left
+    | Right
+
+
+holeAt : Board -> Int
+holeAt board =
+    Array.findFirst (\square -> square == " ") board
+        |> Maybe.map .index
+        |> Maybe.withDefault 15
+
+
+{-| The names are the original's and they name the tile, not the hole:
+`Down` slides the tile *above* the hole down into it.
+-}
+slide : Direction -> Model -> Model
+slide direction model =
+    let
+        hole =
+            holeAt model.board
+
+        x =
+            Math.modBy 4 hole
+
+        y =
+            hole // 4
+
+        from =
+            when direction is
+                Down ->
+                    if y > 0 then
+                        Just (hole - 4)
+
+                    else
+                        Nothing
+
+                Up ->
+                    if y < 3 then
+                        Just (hole + 4)
+
+                    else
+                        Nothing
+
+                Right ->
+                    if x > 0 then
+                        Just (hole - 1)
+
+                    else
+                        Nothing
+
+                Left ->
+                    if x < 3 then
+                        Just (hole + 1)
+
+                    else
+                        Nothing
+    in
+    when from is
+        Nothing ->
+            model
+
+        Just source ->
+            { model
+                | board =
+                    model.board
+                        |> Array.set hole (Maybe.withDefault " " (Array.get source model.board))
+                        |> Array.set source " "
+                , moves =
+                    if model.moves < 1000 then
+                        model.moves + 1
+
+                    else
+                        model.moves
+            }
+
+
+{-| A click names a square; whether it moves anything depends on where it is
+relative to the hole. The four offsets are the original's.
+-}
+clickAt : Int -> Int -> Model -> Model
+clickAt column line model =
+    let
+        offset =
+            (line * 4 + column // 3) - holeAt model.board
+    in
+    if offset == -4 then
+        slide Down model
+
+    else if offset == -1 then
+        slide Right model
+
+    else if offset == 1 then
+        slide Left model
+
+    else if offset == 4 then
+        slide Up model
+
+    else
+        model
+
+
+scramble : Model -> Model
+scramble model =
+    let
+        walk steps state =
+            if steps <= 0 then
+                state
+
+            else
+                let
+                    seed =
+                        nextSeed state.seed
+
+                    direction =
+                        when Math.modBy 4 (seed // 16) is
+                            0 ->
+                                Up
+
+                            1 ->
+                                Down
+
+                            2 ->
+                                Right
+
+                            _ ->
+                                Left
+                in
+                walk (steps - 1) (slide direction { state | seed = seed })
+    in
+    let
+        walked =
+            walk model.depth model
+    in
+    { walked | moves = 0, solved = False }
+
+
+winCheck : Model -> Model
+winCheck model =
+    { model | solved = model.board == solvedBoard }
+
+
+-- UPDATE
+
+
+update : Msg -> Model -> { model : Model, command : Cmd Msg }
+update msg model =
+    when msg is
+        Seeded seed ->
+            { model = scramble { model | seed = seed }, command = Cmd.none }
+
+        FromTui event ->
+            { model = handleEvent event model, command = Cmd.none }
+
+
+handleEvent : Event -> Model -> Model
+handleEvent event model =
+    when event is
+        Command "puzzle" ->
+            { model | open = True }
+
+        Command "new" ->
+            scramble model
+
+        Command _ ->
+            model
+
+        -- A solved puzzle takes any key or click as "again", which is what the
+        -- original does rather than offering a menu entry for it.
+        KeyPressed pressed ->
+            if model.solved then
+                scramble model
+
+            else
+                when pressed.key is
+                    "Up" ->
+                        winCheck (slide Up model)
+
+                    "Down" ->
+                        winCheck (slide Down model)
+
+                    "Left" ->
+                        winCheck (slide Left model)
+
+                    "Right" ->
+                        winCheck (slide Right model)
+
+                    _ ->
+                        model
+
+        Clicked spot ->
+            if model.solved then
+                scramble model
+
+            else
+                winCheck (clickAt spot.x spot.y model)
+
+        WindowClosed "puzzleWin" ->
+            { model | open = False }
+
+        _ ->
+            model
+
+
+-- VIEW
+
+
+view : Model -> Tui.Ui
+view model =
+    { menuBar =
+        [ SubMenu
+            { title = "~P~uzzle"
+            , key = "Alt-P"
+            , items =
+                [ Item { title = "~S~how", cmd = "puzzle", key = "Alt-S", shortcut = "Alt-S" }
+                , Item { title = "~N~ew game", cmd = "new", key = "Alt-N", shortcut = "Alt-N" }
+                , Tui.Separator
+                , Item { title = "E~x~it", cmd = "quit", key = "Alt-X", shortcut = "Alt-X" }
+                ]
+            }
+        ]
+    , statusLine =
+        [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
+        , { text = "~Alt-N~ New", key = "Alt-N", cmd = "new" }
+        , { text = "Arrows slide a tile", key = "", cmd = "" }
+        , { text = "", key = "F10", cmd = "menu" }
+        ]
+    , windows =
+        if model.open then
+            [ puzzleWindow model ]
+
+        else
+            []
+    }
+
+
+puzzleWindow : Model -> Tui.Window
+puzzleWindow model =
+    { id = "puzzleWin"
+    , title = "Puzzle"
+    , rect = { x1 = 1, y1 = 1, x2 = 21, y2 = 7 }
+    , views =
+        [ Canvas
+            { id = "board"
+            , rect = { x1 = 1, y1 = 1, x2 = 19, y2 = 5 }
+            , lines = Array.map (row model) (Array.range 0 3)
+            , cursor = Nothing
+            }
+        ]
+    }
+
+
+{-| One row of four tiles, and -- on the middle two rows, at the columns
+`puzzle.cpp` uses -- the move counter beside them.
+-}
+row : Model -> Int -> Array Tui.Span
+row model y =
+    let
+        tiles =
+            Array.map (\x -> tile model (Array.get (y * 4 + x) model.board |> Maybe.withDefault " ")) (Array.range 0 3)
+
+        beside =
+            when y is
+                1 ->
+                    [ Tui.plain " Move" ]
+
+                2 ->
+                    [ Tui.plain ("  " ++ String.fromInt model.moves) ]
+
+                _ ->
+                    []
+    in
+    tiles ++ beside
+
+
+{-| Two colours in a checkerboard over the alphabet, so a tile carries its
+colour with it. A solved board drops back to one colour, which is the only
+announcement the original makes that you have won.
+-}
+tile : Model -> String -> Tui.Span
+tile model letter =
+    let
+        body =
+            " " ++ letter ++ " "
+
+        index =
+            letterIndex letter
+    in
+    -- puzzle.cpp's `map`, which is (row + column) of the letter's position in
+    -- a solved board -- and which is why the checkerboard is a picture of how
+    -- far from solved the puzzle is.
+    if model.solved || index < 0 || Math.modBy 2 (index // 4 + Math.modBy 4 index) == 0 then
+        Tui.plain body
+
+    else
+        Tui.ink Yellow body
+
+
+letterIndex : String -> Int
+letterIndex letter =
+    Array.findFirst (\square -> square == letter) solvedBoard
+        |> Maybe.map .index
+        |> Maybe.withDefault -1
+
+
+-- PROGRAM
+
+
+main : Tui.Program Model Msg
+main =
+    Tui.defineProgram tui
+        { init = init
+        , update = update
+        , subscriptions = \_ -> Sub.none
+        , view = view
+        , onEvent = FromTui
+        }

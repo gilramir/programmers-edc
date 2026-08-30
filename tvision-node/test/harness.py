@@ -66,13 +66,17 @@ class Pty:
         """Everything ever written, escapes stripped. Good for "did X appear"."""
         return ANSI.sub(b"", self.buf).decode("utf-8", "replace")
 
-    def render(self):
-        """What the screen looks like *now*. Good for "what does X say".
+    def display(self):
+        """The screen as it stands now: text, cursor and colour together.
 
         Replay the whole stream every time: the buffers here are small and a
         stateful emulator that could drift is not worth the debugging.
         """
-        return Screen().feed(self.buf.decode("utf-8", "replace")).text()
+        return Screen().feed(self.buf.decode("utf-8", "replace"))
+
+    def render(self):
+        """What the screen looks like *now*. Good for "what does X say"."""
+        return self.display().text()
 
     def cursor(self):
         """Where the terminal's own cursor is now, as (col, row), zero-based.
@@ -81,7 +85,7 @@ class Pty:
         asks for, which for a canvas is the only way its selection shows up at
         all -- there is nothing on the screen to grep for.
         """
-        screen = Screen().feed(self.buf.decode("utf-8", "replace"))
+        screen = self.display()
         return (screen.col, screen.row)
 
     def send(self, data, settle=0.6):
@@ -175,9 +179,12 @@ class Screen:
     the byte stream for "ticks: 12" finds nothing. To watch a value change you
     have to keep an actual screen.
 
-    Handles what TVision emits: cursor addressing, relative moves, erases, and
-    text. Colour (SGR), mode changes, OSC/DCS/APC strings and the like are
-    parsed only well enough to be skipped.
+    Handles what TVision emits: cursor addressing, relative moves, erases,
+    text, and the SGR colours -- the last of those because a canvas can paint
+    a span in a colour of its own, and for something like a calendar marking
+    today, the colour is the entire visible difference. Mode changes,
+    OSC/DCS/APC strings and the like are parsed only well enough to be
+    skipped.
     """
 
     def __init__(self, cols=COLS, rows=ROWS):
@@ -186,7 +193,23 @@ class Screen:
 
     def reset(self):
         self.grid = [[" "] * self.cols for _ in range(self.rows)]
+        # Per cell, the (foreground, background) in force when it was written.
+        # None is the terminal's default, which is what SGR 39/49 restore.
+        self.attrs = [[(None, None)] * self.cols for _ in range(self.rows)]
+        self.fg = self.bg = None
         self.row = self.col = 0
+
+    def fg_at(self, col, row):
+        """The foreground colour of one cell: 30-37, 90-97, or None."""
+        return self.attrs[row][col][0]
+
+    def bg_at(self, col, row):
+        """The background colour of one cell: 40-47, 100-107, or None."""
+        return self.attrs[row][col][1]
+
+    def fg_run(self, col, row, width):
+        """The foreground colours of `width` cells, left to right."""
+        return [self.fg_at(col + i, row) for i in range(width)]
 
     def _clamp(self):
         self.row = max(0, min(self.rows - 1, self.row))
@@ -196,6 +219,7 @@ class Screen:
         if self.col >= self.cols:
             self.col = self.cols - 1
         self.grid[self.row][self.col] = ch
+        self.attrs[self.row][self.col] = (self.fg, self.bg)
         self.col += 1
         if self.col >= self.cols:
             self.col = self.cols - 1
@@ -293,7 +317,29 @@ class Screen:
                     self.grid[self.row][c] = " "
                 for r in range(self.row + 1, self.rows):
                     self.grid[r] = [" "] * self.cols
+        elif final == "m":
+            self._sgr(params)
         self._clamp()
+
+    def _sgr(self, params):
+        """Enough of Select Graphic Rendition to tell two colours apart.
+
+        TVision emits the basic and bright colour codes directly -- 30-37 and
+        90-97 for foregrounds, 40-47 and 100-107 for backgrounds -- so there is
+        no need to interpret bold as brightness. `ESC[m` with no parameters is
+        a reset, exactly like `ESC[0m`.
+        """
+        for num in [int(p) if p.isdigit() else 0 for p in (params or "0").split(";")]:
+            if num == 0:
+                self.fg = self.bg = None
+            elif 30 <= num <= 37 or 90 <= num <= 97:
+                self.fg = num
+            elif 40 <= num <= 47 or 100 <= num <= 107:
+                self.bg = num
+            elif num == 39:
+                self.fg = None
+            elif num == 49:
+                self.bg = None
 
     def text(self):
         return "\n".join("".join(row).rstrip() for row in self.grid)

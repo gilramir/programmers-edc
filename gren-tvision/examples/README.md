@@ -15,6 +15,8 @@ Build them all with `../build.sh`, run one with `../run.sh <name>`.
 | `entries` | *(ours)* | list boxes, `Time.every` behind a modal dialog, `WindowClosed`, mutable window titles |
 | `forms` | `tvision/examples/tvforms` | check boxes, radio buttons, labels, and a list box highlight the model can both read and move |
 | `ascii` | `tvision/examples/tvdemo` (ascii.cpp) | the canvas, from Gren: a view the model paints itself, and a cursor to select with |
+| `calendar` | `tvision/examples/tvdemo` (calendar.cpp) | colour on a canvas, as spans; and today as a field, because `Time.now` is a task |
+| `puzzle` | `tvision/examples/tvdemo` (puzzle.cpp) | nothing in the API -- but the random seed had to move into the model, which is what let a test win the game |
 
 ## What mmenu changed
 
@@ -85,6 +87,40 @@ no selection bar, so the only evidence of the model on screen is where the
 cursor is. `test/drive_ascii.py` asserts on that directly, which the pty
 harness can now report.
 
+## What the calendar and the puzzle changed
+
+Both needed the same thing, and it is the first API change since `ascii` that
+the binding had to make in C++: **a canvas line is an array of coloured spans
+rather than a string.**
+
+    type alias Span =
+        { text : String, fg : Maybe Hue, bg : Maybe Hue }
+
+The two halves are separate because naming one is the common case -- today on a
+calendar is a foreground on whatever the window is already using, and a
+highlight that had to name its own background would stop matching the program
+the moment anyone changed the theme. `Tui.line` makes the shape every canvas
+had before colour existed, so `ascii` changed by one word.
+
+`FINDINGS.md` has the rest of it, including why a span with no colour has to
+encode to exactly what a string used to.
+
+Beyond the API, each of these ports made the same point from a different
+direction: **state the C++ hides in a constructor has to become a field, and
+the field is worth more than the hiding was.**
+
+`TCalendarView`'s constructor calls `localtime()`, so the view *is* today and
+cannot be asked about any other month. In Gren `Time.now` is a task, so today
+becomes data that arrives after the first render -- and `drive_calendar.py` can
+walk a year back and check that today stops being highlighted when you leave
+its month.
+
+`TPuzzleView`'s constructor calls `srand(time(0))` and shuffles five hundred
+times. In Gren the generator has to live in the model, so the board is a pure
+function of a seed and a depth; `--seed=` and `--scramble=` follow for free,
+and `drive_puzzle.py` reproduces the shuffle in Python, searches for the answer
+and **wins the game** -- which is not a test the original could have.
+
 ## The C++ examples, triaged
 
 `tvision/examples/` has eight entries. Two of them are not Turbo Vision
@@ -107,8 +143,8 @@ applications at all, and one of them is really eight applications.
 | part | needs |
 |---|---|
 | ASCII chart | **done** — `examples/ascii`; it wanted a cursor, see above |
-| calendar | canvas + keys; the same shape as the chart, so it is now cheap |
-| puzzle | canvas + keys |
+| calendar | **done** — `examples/calendar`; it wanted colour, see above |
+| puzzle | **done** — `examples/puzzle` |
 | calculator | canvas + buttons |
 | event viewer | canvas |
 | mouse settings | a scroll bar as a first-class view; the clusters it wants exist now |

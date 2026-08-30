@@ -245,7 +245,7 @@ chartWindow model =
         [ Canvas
             { id = "chart"
             , rect = { x1 = 2, y1 = 1, x2 = 2 + columns, y2 = 1 + rows }
-            , lines = chart
+            , lines = Array.map Tui.line chart
             , cursor = Just { x = model.x, y = model.y }
             }
         , StaticText

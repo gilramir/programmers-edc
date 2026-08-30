@@ -1,0 +1,413 @@
+port module Main exposing (main)
+
+{-| tvdemo's calendar (`tvision/examples/tvdemo/calendar.cpp`), in Gren.
+
+A month of dates painted on a `Canvas`, with today picked out in a colour of
+its own. The original is a `TView` subclass whose `draw()` walks the weeks and
+switches attribute halfway through a row; here the row is an array of
+[`Span`](Tui#Span)s and the switch is `Tui.ink`.
+
+Two things this port made obvious that the C++ hides.
+
+**The C++ view cannot be tested, and this one can.** `TCalendarView`'s
+constructor calls `localtime()`, so the view *is* today; there is no way to ask
+it what March 1900 looks like. Gren has no clock it can read from a pure
+function, so "what day is it" has to become a field -- and once it is a field
+the calendar renders any date you hand it, today included.
+
+**Waiting for the clock is visible.** `Time.here` and `Time.now` are tasks, so
+the first render happens before either has answered. The window is simply not
+in the view until they do, which takes one turn of the event loop and is the
+honest thing to show: a calendar with no date on it would be a lie.
+
+The month arrows are faithful to the original, quirk and all: clicking the one
+that points *up* moves to the *next* month, as `calendar.cpp` does.
+
+-}
+
+import Array exposing (Array)
+import Init
+import Json.Decode as Decode
+import Json.Encode as Encode
+import Math
+import Node
+import String
+import Task
+import Time
+import Tui exposing (Event(..), Hue(..), MenuItem(..), View(..))
+
+
+-- PORTS
+
+
+port tuiOut : Encode.Value -> Cmd msg
+
+
+port tuiIn : (Decode.Value -> msg) -> Sub msg
+
+
+tui : Tui.Ports Msg
+tui =
+    { toJs = tuiOut, fromJs = tuiIn }
+
+
+-- MODEL
+
+
+type alias Date =
+    { year : Int, month : Int, day : Int }
+
+
+type alias Model =
+    { showing : Maybe { year : Int, month : Int }
+    , today : Maybe Date
+    , open : Bool
+    }
+
+
+type Msg
+    = GotToday Date
+    | FromTui Event
+
+
+init : Node.Environment -> Init.Task { model : Model, command : Cmd Msg }
+init _ =
+    Node.startProgram
+        { model = { showing = Nothing, today = Nothing, open = True }
+        -- The zone and the instant are two tasks, and both are needed before
+        -- the word "today" means anything: Time.now is UTC, and a calendar is
+        -- a local thing.
+        , command =
+            Task.map2
+                (\zone now ->
+                    { year = Time.toYear zone now
+                    , month = monthNumber (Time.toMonth zone now)
+                    , day = Time.toDay zone now
+                    }
+                )
+                Time.here
+                Time.now
+                |> Task.perform GotToday
+        }
+
+
+monthNumber : Time.Month -> Int
+monthNumber month =
+    when month is
+        Time.Jan ->
+            1
+
+        Time.Feb ->
+            2
+
+        Time.Mar ->
+            3
+
+        Time.Apr ->
+            4
+
+        Time.May ->
+            5
+
+        Time.Jun ->
+            6
+
+        Time.Jul ->
+            7
+
+        Time.Aug ->
+            8
+
+        Time.Sep ->
+            9
+
+        Time.Oct ->
+            10
+
+        Time.Nov ->
+            11
+
+        Time.Dec ->
+            12
+
+
+-- THE MONTH
+
+
+monthNames : Array String
+monthNames =
+    [ "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December" ]
+
+
+monthName : Int -> String
+monthName month =
+    Array.get (month - 1) monthNames
+        |> Maybe.withDefault "?"
+
+
+{-| The original's leap year test is `year % 4 == 0`, which is right for every
+year it was ever going to be run in and wrong for 1900 and 2100. Since this
+calendar can be pointed at any year, it uses the rule that is actually true.
+-}
+daysIn : Int -> Int -> Int
+daysIn year month =
+    when month is
+        2 ->
+            if Math.modBy 4 year == 0 && (Math.modBy 100 year /= 0 || Math.modBy 400 year == 0) then
+                29
+
+            else
+                28
+
+        4 ->
+            30
+
+        6 ->
+            30
+
+        9 ->
+            30
+
+        11 ->
+            30
+
+        _ ->
+            31
+
+
+{-| Zeller's congruence, exactly as `calendar.cpp` spells it: 0 is Sunday.
+-}
+dayOfWeek : Int -> Int -> Int -> Int
+dayOfWeek day month year =
+    let
+        shifted =
+            if month < 3 then
+                { month = month + 10, year = year - 1 }
+
+            else
+                { month = month - 2, year = year }
+
+        century =
+            shifted.year // 100
+
+        yr =
+            Math.modBy 100 shifted.year
+
+        dw =
+            Math.modBy 7
+                (((26 * shifted.month - 2) // 10)
+                    + day
+                    + yr
+                    + (yr // 4)
+                    + (century // 4)
+                    - (2 * century)
+                )
+    in
+    if dw < 0 then
+        dw + 7
+
+    else
+        dw
+
+
+step : Int -> { year : Int, month : Int } -> { year : Int, month : Int }
+step by showing =
+    let
+        moved =
+            showing.month + by
+    in
+    if moved > 12 then
+        { year = showing.year + 1, month = 1 }
+
+    else if moved < 1 then
+        { year = showing.year - 1, month = 12 }
+
+    else
+        { showing | month = moved }
+
+
+-- UPDATE
+
+
+update : Msg -> Model -> { model : Model, command : Cmd Msg }
+update msg model =
+    when msg is
+        GotToday today ->
+            { model =
+                { model
+                    | today = Just today
+                    , showing = Just { year = today.year, month = today.month }
+                }
+            , command = Cmd.none
+            }
+
+        FromTui event ->
+            { model = handleEvent event model, command = Cmd.none }
+
+
+handleEvent : Event -> Model -> Model
+handleEvent event model =
+    when event is
+        Command "calendar" ->
+            { model | open = True }
+
+        Command "today" ->
+            { model | showing = Maybe.map (\it -> { year = it.year, month = it.month }) model.today }
+
+        Command _ ->
+            model
+
+        KeyPressed pressed ->
+            when pressed.key is
+                "Down" ->
+                    shift 1 model
+
+                "+" ->
+                    shift 1 model
+
+                "Up" ->
+                    shift -1 model
+
+                "-" ->
+                    shift -1 model
+
+                _ ->
+                    model
+
+        -- The header's two arrows, at the columns calendar.cpp puts them. The
+        -- one pointing up moves forward; that is what the original does, and
+        -- it is not a typo here either.
+        Clicked spot ->
+            if spot.y /= 0 then
+                model
+
+            else if spot.x == 15 then
+                shift 1 model
+
+            else if spot.x == 18 then
+                shift -1 model
+
+            else
+                model
+
+        WindowClosed "calendarWin" ->
+            { model | open = False }
+
+        _ ->
+            model
+
+
+shift : Int -> Model -> Model
+shift by model =
+    { model | showing = Maybe.map (step by) model.showing }
+
+
+-- VIEW
+
+
+view : Model -> Tui.Ui
+view model =
+    { menuBar =
+        [ SubMenu
+            { title = "~C~alendar"
+            , key = "Alt-C"
+            , items =
+                [ Item { title = "~S~how", cmd = "calendar", key = "Alt-S", shortcut = "Alt-S" }
+                , Item { title = "~T~oday", cmd = "today", key = "Alt-T", shortcut = "Alt-T" }
+                , Tui.Separator
+                , Item { title = "E~x~it", cmd = "quit", key = "Alt-X", shortcut = "Alt-X" }
+                ]
+            }
+        ]
+    , statusLine =
+        [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
+        , { text = "~Alt-S~ Calendar", key = "Alt-S", cmd = "calendar" }
+        , { text = "Up/Down change month", key = "", cmd = "" }
+        , { text = "", key = "F10", cmd = "menu" }
+        ]
+    , windows =
+        when { open = model.open, showing = model.showing, today = model.today } is
+            { open = True, showing = Just showing, today = Just today } ->
+                [ calendarWindow showing today ]
+
+            _ ->
+                []
+    }
+
+
+calendarWindow : { year : Int, month : Int } -> Date -> Tui.Window
+calendarWindow showing today =
+    { id = "calendarWin"
+    , title = "Calendar"
+    , rect = { x1 = 1, y1 = 1, x2 = 23, y2 = 11 }
+    , views =
+        [ Canvas
+            { id = "month"
+            , rect = { x1 = 1, y1 = 1, x2 = 21, y2 = 9 }
+            , lines = [ header showing, weekdayNames ] ++ weeks showing today
+            , cursor = Nothing
+            }
+        ]
+    }
+
+
+{-| `  February 2026 ▲  ▼`, laid out on the same columns as the original so
+that a click on an arrow lands where the model expects it.
+-}
+header : { year : Int, month : Int } -> Array Tui.Span
+header showing =
+    Tui.line
+        (String.padLeft 9 ' ' (monthName showing.month)
+            ++ " "
+            ++ String.padLeft 4 ' ' (String.fromInt showing.year)
+            ++ " ▲  ▼ "
+        )
+
+
+weekdayNames : Array Tui.Span
+weekdayNames =
+    Tui.line "Su Mo Tu We Th Fr Sa"
+
+
+{-| Six rows of seven cells, each cell three columns wide. A cell outside the
+month is blank; today is the one span in the whole view that names a colour.
+-}
+weeks : { year : Int, month : Int } -> Date -> Array (Array Tui.Span)
+weeks showing today =
+    let
+        first =
+            1 - dayOfWeek 1 showing.month showing.year
+
+        last =
+            daysIn showing.year showing.month
+
+        isToday day =
+            today.year == showing.year && today.month == showing.month && today.day == day
+
+        cell day =
+            if day < 1 || day > last then
+                Tui.plain "   "
+
+            else if isToday day then
+                Tui.ink Yellow (String.padLeft 2 ' ' (String.fromInt day) ++ " ")
+
+            else
+                Tui.plain (String.padLeft 2 ' ' (String.fromInt day) ++ " ")
+    in
+    Array.map
+        (\week -> Array.map (\column -> cell (first + week * 7 + column)) (Array.range 0 6))
+        (Array.range 0 5)
+
+
+-- PROGRAM
+
+
+main : Tui.Program Model Msg
+main =
+    Tui.defineProgram tui
+        { init = init
+        , update = update
+        , subscriptions = \_ -> Sub.none
+        , view = view
+        , onEvent = FromTui
+        }

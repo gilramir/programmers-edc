@@ -1,11 +1,13 @@
 module Tui exposing
     ( DialogSpec
     , Event(..)
+    , Hue(..)
     , MenuItem(..)
     , Ports
     , Program
     , ProgramConfiguration
     , Rect
+    , Span
     , StatusItem
     , Ui
     , View(..)
@@ -14,7 +16,11 @@ module Tui exposing
     , dialog
     , flag
     , flags
+    , ink
+    , line
     , number
+    , on
+    , plain
     , quit
     , setEnabled
     , text
@@ -144,6 +150,7 @@ its own is a pull-down, and one without is a command sitting on the bar.
 @docs Ports
 @docs Program, ProgramConfiguration, defineProgram
 @docs Ui, Window, View, Rect
+@docs Span, Hue, line, plain, ink, on
 @docs MenuItem, StatusItem
 @docs Event, DialogSpec
 @docs dialog, quit, setEnabled
@@ -180,10 +187,13 @@ canvas's `cursor`. An older runtime would not have refused any of those -- it
 would have passed them to the binding and quietly rebuilt the window on every
 change instead of patching it, which is the kind of failure this number exists
 to turn into a sentence.
+
+Version 3 made a canvas line an array of coloured [`Span`](#Span)s rather than
+a string.
 -}
 protocolVersion : Int
 protocolVersion =
-    2
+    3
 
 
 -- GEOMETRY
@@ -259,9 +269,11 @@ type alias Window =
   - `Canvas` -- paints exactly the lines it is given, and sends
     [`KeyPressed`](#Event) and [`Clicked`](#Event) events while focused. This is
     the escape hatch for anything the stock controls cannot express: Turbo
-    Vision's own calendar and ASCII chart are views of this kind. `cursor` is
-    the terminal's own block cursor, in the canvas's coordinates -- the only
-    piece of a canvas that is not made of characters. `Nothing` hides it.
+    Vision's own calendar and ASCII chart are views of this kind. A line is an
+    array of coloured [`Span`](#Span)s; [`line`](#line) makes the common one,
+    which is a whole row in the window's own colour. `cursor` is the terminal's
+    own block cursor, in the canvas's coordinates -- the only piece of a canvas
+    that is not made of characters. `Nothing` hides it.
 
 The first control in the list gets focus when the window opens. Turbo Vision
 itself focuses the *last* one added, which in a list written top to bottom is
@@ -282,7 +294,94 @@ type View
     | CheckBoxes { id : String, rect : Rect, items : Array String, checked : Array Bool }
     | RadioButtons { id : String, rect : Rect, items : Array String, selected : Int }
     | Label { id : String, rect : Rect, text : String, for : String }
-    | Canvas { id : String, rect : Rect, lines : Array String, cursor : Maybe { x : Int, y : Int } }
+    | Canvas { id : String, rect : Rect, lines : Array (Array Span), cursor : Maybe { x : Int, y : Int } }
+
+
+{-| A run of characters on a [`Canvas`](#View) line, painted in one colour.
+
+`Nothing` for either half means the colour the window's palette gives this
+view, which is what you want almost everywhere -- it is how a canvas goes on
+looking like the rest of the program. Name a colour only where the point *is*
+the colour: today on a calendar, a tile that is out of place.
+
+The two halves are separate because naming one is the common case. A span with
+a foreground and no background sits on whatever the window is already using,
+so a highlight does not have to know the colour scheme it is highlighting
+against.
+
+Build them with [`plain`](#plain), [`ink`](#ink) and [`on`](#on) rather than by
+hand:
+
+    [ plain "  ", ink Yellow "31", plain " " ]
+
+-}
+type alias Span =
+    { text : String
+    , fg : Maybe Hue
+    , bg : Maybe Hue
+    }
+
+
+{-| The sixteen colours a terminal has had since 1981, which is also all that
+Turbo Vision's palettes deal in. The bottom eight are the plain ones and the
+top eight their bright counterparts; `Brown` is bright-shifted into `Yellow`,
+and `LightGray` into `White`, which is why those two names look out of place.
+-}
+type Hue
+    = Black
+    | Blue
+    | Green
+    | Cyan
+    | Red
+    | Magenta
+    | Brown
+    | LightGray
+    | DarkGray
+    | LightBlue
+    | LightGreen
+    | LightCyan
+    | LightRed
+    | LightMagenta
+    | Yellow
+    | White
+
+
+{-| A whole canvas line in the window's own colour -- the shape of nearly every
+line on nearly every canvas.
+
+    lines = Array.map Tui.line [ "Su Mo Tu We Th Fr Sa" ]
+
+-}
+line : String -> Array Span
+line body =
+    [ plain body ]
+
+
+{-| One span in the window's own colour, for the parts of a mixed line that are
+not the interesting part.
+-}
+plain : String -> Span
+plain body =
+    { text = body, fg = Nothing, bg = Nothing }
+
+
+{-| One span in a colour of your choosing, on whatever background the window is
+already using. This is the highlight: `ink Yellow "31"` marks today without
+deciding what today is sitting on.
+-}
+ink : Hue -> String -> Span
+ink hue body =
+    { text = body, fg = Just hue, bg = Nothing }
+
+
+{-| ...and put that span on a background of your choosing too.
+
+    ink Magenta "  bypasses the palette  " |> on Black
+
+-}
+on : Hue -> Span -> Span
+on hue span =
+    { span | bg = Just hue }
 
 
 -- MENUS
@@ -435,12 +534,12 @@ range Turbo Vision allows to be greyed out, and `setEnabled` has no effect on
 them.
 -}
 setEnabled : Ports msg -> String -> Bool -> Cmd msg
-setEnabled ports command on =
+setEnabled ports command enabled =
     ports.toJs <|
         Encode.object
             [ { key = "type", value = Encode.string "setEnabled" }
             , { key = "cmd", value = Encode.string command }
-            , { key = "on", value = Encode.bool on }
+            , { key = "on", value = Encode.bool enabled }
             ]
 
 
@@ -664,7 +763,7 @@ encodeView view =
                 [ { key = "type", value = Encode.string "canvas" }
                 , { key = "id", value = Encode.string v.id }
                 , { key = "rect", value = encodeRect v.rect }
-                , { key = "lines", value = Encode.array Encode.string v.lines }
+                , { key = "lines", value = Encode.array (Encode.array encodeSpan) v.lines }
                 , { key = "selectable", value = Encode.bool True }
                 , { key = "cursorAt"
                   , value =
@@ -676,6 +775,81 @@ encodeView view =
                                 Encode.null
                   }
                 ]
+
+
+{-| A span with no colour is sent as `{text}` alone, so a canvas that never
+mentions colour produces the same JSON it produced before colour existed. The
+runtime diffs these as JSON, and two shapes for one meaning would repaint every
+canvas on every render.
+-}
+encodeSpan : Span -> Encode.Value
+encodeSpan span =
+    let
+        half key hue =
+            when hue is
+                Just it ->
+                    [ { key = key, value = Encode.int (hueCode it) } ]
+
+                Nothing ->
+                    []
+    in
+    Encode.object
+        ([ { key = "text", value = Encode.string span.text } ]
+            ++ half "fg" span.fg
+            ++ half "bg" span.bg
+        )
+
+
+hueCode : Hue -> Int
+hueCode hue =
+    when hue is
+        Black ->
+            0
+
+        Blue ->
+            1
+
+        Green ->
+            2
+
+        Cyan ->
+            3
+
+        Red ->
+            4
+
+        Magenta ->
+            5
+
+        Brown ->
+            6
+
+        LightGray ->
+            7
+
+        DarkGray ->
+            8
+
+        LightBlue ->
+            9
+
+        LightGreen ->
+            10
+
+        LightCyan ->
+            11
+
+        LightRed ->
+            12
+
+        LightMagenta ->
+            13
+
+        Yellow ->
+            14
+
+        White ->
+            15
 
 
 encodeMenuItem : MenuItem -> Encode.Value

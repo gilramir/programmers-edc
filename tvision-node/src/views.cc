@@ -66,6 +66,21 @@ JsCanvas::JsCanvas(const TRect &bounds, std::string id, int aColorIndex,
         }
 }
 
+// A span's colour, resolved against the one the view's palette gives it. A
+// span that names neither half paints in the palette colour, which is what
+// every canvas did before spans existed; naming one half keeps the other.
+static TColorAttr spanColor(const CanvasSpan &span, TColorAttr base)
+{
+    if (span.fg < 0 && span.bg < 0)
+        return base;
+    TColorAttr attr = base;
+    if (span.fg >= 0)
+        attr.setForeground(TColor(TColorBIOS((uint8_t) span.fg)));
+    if (span.bg >= 0)
+        attr.setBackground(TColor(TColorBIOS((uint8_t) span.bg)));
+    return attr;
+}
+
 void JsCanvas::draw()
 {
     TDrawBuffer b;
@@ -75,7 +90,21 @@ void JsCanvas::draw()
         {
         b.moveChar(0, ' ', color, (ushort) size.x);
         if (y < (int) lines.size())
-            b.moveStr(0, TStringView(lines[y]), color);
+            {
+            // moveStr returns the number of *cells* it wrote, which is not the
+            // length of the string: magiblot's TVision draws Unicode, and a
+            // box-drawing character is one cell where its UTF-8 is three
+            // bytes. Advancing by anything else puts every span after the
+            // first in the wrong column.
+            ushort at = 0;
+            for (const CanvasSpan &span : lines[y])
+                {
+                if (at >= (ushort) size.x)
+                    break;
+                at += b.moveStr(at, TStringView(span.text),
+                                spanColor(span, color));
+                }
+            }
         writeLine(0, (short) y, (short) size.x, 1, b);
         }
 }
@@ -99,7 +128,7 @@ void JsCanvas::handleEvent(TEvent &event)
         }
 }
 
-void JsCanvas::setLines(std::vector<std::string> newLines)
+void JsCanvas::setLines(std::vector<CanvasLine> newLines)
 {
     lines = std::move(newLines);
     drawView();
@@ -213,6 +242,47 @@ static void setInputText(TInputLine *input, const std::string &text)
     strncpy(input->data, text.c_str(), input->maxLen);
     input->data[input->maxLen] = EOS;
     input->selectAll(True);
+}
+
+// Each entry is a string (the whole line, in the view's colour) or an array
+// of {text, fg, bg}. Anything else is dropped rather than thrown on: a canvas
+// is repainted on every render, and a throw here would take down the pump.
+std::vector<CanvasLine> getCanvasLines(const Napi::Value &v)
+{
+    std::vector<CanvasLine> out;
+    if (!v.IsArray())
+        return out;
+    Napi::Array rows = v.As<Napi::Array>();
+    for (uint32_t y = 0; y < rows.Length(); ++y)
+        {
+        Napi::Value row = rows.Get(y);
+        CanvasLine line;
+        if (row.IsArray())
+            {
+            Napi::Array spans = row.As<Napi::Array>();
+            for (uint32_t i = 0; i < spans.Length(); ++i)
+                {
+                Napi::Value entry = spans.Get(i);
+                if (entry.IsString())
+                    {
+                    line.push_back(CanvasSpan{entry.ToString().Utf8Value(), -1, -1});
+                    continue;
+                    }
+                if (!entry.IsObject())
+                    continue;
+                Napi::Object span = entry.As<Napi::Object>();
+                line.push_back(CanvasSpan{getString(span, "text"),
+                                          getInt(span, "fg", -1),
+                                          getInt(span, "bg", -1)});
+                }
+            }
+        else if (!row.IsUndefined() && !row.IsNull())
+            {
+            line.push_back(CanvasSpan{row.ToString().Utf8Value(), -1, -1});
+            }
+        out.push_back(std::move(line));
+        }
+    return out;
 }
 
 static std::vector<std::string> getStringArray(const Napi::Value &v)
@@ -344,7 +414,7 @@ TView *buildItems(const Napi::Env &env, JsWindow *win, const Napi::Value &value,
                              getBool(it, "selectable", true),
                              getString(it, "cursor") == "block" || at.IsArray());
             if (it.Has("lines"))
-                canvas->setLines(getStringArray(it.Get("lines")));
+                canvas->setLines(getCanvasLines(it.Get("lines")));
             if (getBool(it, "framed"))
                 canvas->options |= ofFramed;
             made = canvas;
@@ -659,7 +729,7 @@ static Napi::Value SetLines(const Napi::CallbackInfo &info)
     if (ref == nullptr || ref->kind != "canvas")
         return Napi::Boolean::New(env, false);
 
-    ((JsCanvas *) ref->view)->setLines(getStringArray(info[1]));
+    ((JsCanvas *) ref->view)->setLines(getCanvasLines(info[1]));
     return Napi::Boolean::New(env, true);
 }
 
