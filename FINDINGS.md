@@ -1156,3 +1156,27 @@ reached about `TOutline`, and it arrived faster the second time.
 What is genuinely new is a horizontal scroll bar doing the job it is named for.
 `mouse` has one as a slider; this one scrolls. They are the same view, because
 which way a scroll bar points is decided by its rectangle.
+
+### The gap nobody has decided about: asking for a path
+
+`examples/dir` and `examples/viewer` both take their path on the command line,
+and `tvdir`'s Change Dir half is the one part of it not ported, for the same
+reason: there is no way for a Gren program to ask the user for a file.
+
+`TFileDialog` and `TChDirDialog` (`stddlg.h`) are what Turbo Vision offers, and
+the notable thing is that neither looks like a class worth wrapping.
+`TFileDialog` *is* a `TDialog` full of stock controls — an input line, an OK
+and an Open button, a history list — arranged around a `TFileList`, which is a
+`TSortedListBox` over a directory listing. Every one of those pieces is already
+in the API, and `FileSystem.listDirectory` supplies the rest.
+
+So the shape of the answer is probably a helper in the *package* that builds a
+`DialogSpec`, rather than anything in the binding: `Tui.filePicker { title,
+directory, pattern }` handing back views the program passes to `Tui.dialog`,
+with the listing done by the model. That follows `TOutline` and `TScroller` --
+both of which turned out to be machinery for deciding what to draw, which a
+model that re-renders does not need.
+
+It is written down here rather than done because it is a design decision, and
+because nothing so far has needed it badly enough to decide badly. The other
+open gaps are listed at the end of `gren-tvision/examples/README.md`.

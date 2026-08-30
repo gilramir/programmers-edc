@@ -265,7 +265,7 @@ applications at all, and one of them is really eight applications.
 | `palette` | **done** | `examples/palette`; the essay it is written to explain has no Gren equivalent — see above |
 | `tvdemo` | **done** except the help system | `examples/demo` is its shell; the demos inside it are `ascii`, `calendar`, `puzzle`, `calc`, `mouse` and `viewer` |
 | `tvforms` | **done** (the UI half) | see above. Its other half is `.rsc` resource streaming — `opstream`/`ipstream` serialising views to disk — which has no Gren meaning |
-| `tvdir` | **done** | `examples/dir` — and it turned out to need no new widget at all; see above |
+| `tvdir` | **done**, less its Change Dir dialog | `examples/dir` — and it turned out to need no new widget at all; see above. `TChDirDialog` is a coverage gap, listed at the end |
 | `tvedit` | a milestone of its own | `TEditor`/`TFileEditor`: a stateful text buffer with undo and clipboard. See the note below |
 | `tvhc` | **no** | a command-line help *compiler*, not a TUI |
 | `avscolor` | **no** | an AviSynth plugin |
@@ -307,17 +307,51 @@ the help system. `tvhc` and `avscolor` are not Turbo Vision applications.
 `tvedit` is the one left, and it is a milestone rather than a port — see the
 note above. Nothing else in the list is blocked on it.
 
-The coverage gaps left are: the standard file and directory dialogs,
-validators on input lines, a view on the application rather than the desktop
-(`TClockView`'s slot), and child views that grow with their window.
+### The coverage gaps left
 
-One gap is worth naming on its own, because `forms` walked right up to it: **a
-cluster or an input line in a plain window holds state the model never sees.**
-Values are collected when a *dialog* is answered and at no other moment, so a
-check box ticked in an ordinary window is invisible until something asks. Turbo
-Vision programs are shaped that way — data entry happens in modal forms — so it
-was not in the way here, but it is the same hole the `Focused` event just
-filled for list boxes, and clusters will want the same treatment.
+Five, in the order they are likely to be missed. Each says what it would take,
+because "not done" and "not decided" are different problems.
+
+**The standard file and directory dialogs.** `TFileDialog` and `TChDirDialog`
+(`stddlg.h`) are how a Turbo Vision program asks for a path, and there is no
+way to ask for one here — which is why `examples/dir` and `examples/viewer`
+both take theirs on the command line, and why `tvdir`'s Change Dir half is the
+one part of it not ported.
+
+The interesting thing is that neither looks like a class worth wrapping.
+`TFileDialog` *is* a `TDialog` full of stock controls — an input line, two
+buttons, a history — around a `TFileList`, which is a `TSortedListBox` over
+`FileSystem.listDirectory`. Following `TOutline` and `TScroller`, the answer is
+probably a dialog the model builds and a helper that produces its `views`,
+shipped in the package rather than in the binding. That is a design decision
+nobody has made yet, not a missing widget.
+
+**Validators on input lines.** `TValidator` and its five subclasses vet a field
+*as it is typed* — `TFilterValidator` rejects a keystroke outright,
+`TRangeValidator` and `TPXPictureValidator` check on the way out. The model
+cannot do the first of those, because it is never told about a keystroke that
+reached an input line. This is the same hole as the cluster one below and wants
+the same kind of answer.
+
+**A view on the application rather than the desktop.** `TClockView` and
+`THeapView` sit beside the desktop, not on it, and `Ui` has a menu bar, a
+status line and windows with nothing in between. `examples/demo` puts its clock
+in the status line instead, which works and rebuilds the status line every
+second. FINDINGS has the note; it is why Borland made the clock a view.
+
+**Child views do not grow with their window.** A window can be zoomed, resized
+and tiled, and the views inside it keep the rectangles the model gave them, so
+a tiled window shows a clipped canvas rather than a stretched one. Deliberate
+so far: growing a view would put its size somewhere the model cannot see.
+Whether that stays deliberate is worth revisiting for anything editor-shaped.
+
+**A cluster or an input line in a plain window holds state the model never
+sees.** `forms` walked right up to this one. Values are collected when a
+*dialog* is answered and at no other moment, so a check box ticked in an
+ordinary window is invisible until something asks. Turbo Vision programs are
+shaped that way — data entry happens in modal forms — so it has not been in the
+way, but it is the same hole the `Focused` event filled for list boxes, and
+clusters will want the same treatment.
 
 Then a Gren-only example that does something the C++ examples never could — the
 obvious candidate is something asynchronous, since that is the thing this
