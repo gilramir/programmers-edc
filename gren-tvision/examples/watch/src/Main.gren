@@ -1,0 +1,772 @@
+port module Main exposing (main)
+
+{-| A watcher: point it at a directory and some commands, and it runs them
+whenever anything in there changes.
+
+    run.sh watch src 'npm test' 'npm run lint'
+
+This is the one example here that is not a port. Every other one is a C++
+program from `tvision/examples/` translated across; this one is a program the
+original could not have written, and it exists to say what the difference
+actually is.
+
+**Turbo Vision has one source of events, and it is the user.** `TProgram`'s
+loop is `getEvent`, and `getEvent` reads the keyboard and the mouse. A
+Borland-era program that wanted to know something about the world had to go and
+ask, in a function that returned when it had the answer -- which is why
+`tvdir`'s scan runs in a constructor behind a "Please Wait" window, and why
+nothing in `tvision/examples/` reacts to anything except a keystroke. Here
+`FileSystem.watchRecursive` is an ordinary `Sub`: the outside world sends this
+program messages, and they arrive next to the keyboard's on equal terms.
+
+**Several things run at once and none of them blocks.** Each command is a
+`ChildProcess.spawn`, its output is read a chunk at a time as a `Task`, and the
+interface stays live throughout -- you can scroll a failing command's output
+while the next one is still printing. Three commands stacked in three windows
+is the thing a terminal watcher cannot do: piped into one terminal their output
+interleaves into mush.
+
+**A run can be taken back.** `spawn` hands the model a `Process.Id`, and
+`Process.kill` on it kills the child -- so a change arriving while a run is
+still going kills that run and starts again, which is what a watcher has to do
+to be usable at all. The rest of this API has spent thirteen examples moving
+state out of C++ constructors and into the model; a handle on something still
+running is the same move, applied to a thing Turbo Vision never had.
+
+Four details are worth knowing before writing anything like it.
+
+**A child must be piped, never `Integrated`.** `ChildProcess.Connection` has
+four settings, and the friendly-sounding one shares this process's stdin,
+stdout and stderr -- which Turbo Vision is holding in raw mode and repainting.
+A single `echo` from a child then paints straight over the desktop. `External`
+is the only one that is safe here, and it is the one that hands over the
+streams anyway.
+
+**Editors do not save a file once.** A save is typically a write, a rename and
+a chmod, so inotify reports a burst and an undebounced watcher runs the
+commands three or four times per save. The fix is a generation counter: a
+change bumps it and schedules a `Process.sleep`, and the sleep starts a run
+only if the generation it was scheduled with is still the current one.
+
+**A killed child goes on talking for a moment.** Kill is not instantaneous and
+the pipe still has bytes in it, so output from the run that was abandoned
+arrives after the run that replaced it has started. Every job therefore carries
+the number of the run its child belongs to, and a chunk, an exit or a process
+id tagged with any other number is dropped. `dir` has the same hazard in one
+line -- two directory listings in flight, and the late one must not overwrite
+the recent one -- and this is that shape at full size.
+
+**A scroll bar the model moves and the user moves needs a rule.** Output
+arriving should scroll the pane down; a user who has scrolled up to read
+something does not want it snatched away. The rule every log viewer settles on
+is the one here: follow the bottom until the user leaves it, and follow again
+when they come back.
+
+-}
+
+import Array exposing (Array)
+import Bytes exposing (Bytes)
+import ChildProcess
+import FileSystem
+import FileSystem.Path as Path exposing (Path)
+import Init
+import Json.Decode as Decode
+import Json.Encode as Encode
+import Node
+import Process
+import Stream
+import String
+import Task
+import Tui exposing (Event(..), Hue(..), MenuItem(..), View(..))
+
+
+-- PORTS
+
+
+port tuiOut : Encode.Value -> Cmd msg
+
+
+port tuiIn : (Decode.Value -> msg) -> Sub msg
+
+
+tui : Tui.Ports Msg
+tui =
+    { toJs = tuiOut, fromJs = tuiIn }
+
+
+-- MODEL
+
+
+{-| What a job is doing. `Waiting` is the debounce window: a change has been
+seen and the run has not started, because another change may still be coming.
+-}
+type State
+    = Idle
+    | Waiting
+    | Running
+    | Finished Int
+    | Cancelled
+
+
+type alias Job =
+    { command : String
+    , state : State
+    , lines : Array String
+    , top : Int
+    -- Whether the pane is pinned to the bottom. True until the user scrolls
+    -- away from it, true again when they scroll back.
+    , follow : Bool
+    -- The child, while there is one. This is what `Process.kill` needs, and
+    -- holding it is the whole of what makes a run cancellable.
+    , child : Maybe Process.Id
+    -- Which run that child belongs to. Anything arriving for an older one is
+    -- from a child that has been killed and has not noticed yet.
+    , run : Int
+    -- Its window has been closed. The job is not removed from the array: ids
+    -- and rectangles are derived from the index, and shuffling them up would
+    -- rebuild every window below the one that went.
+    , closed : Bool
+    }
+
+
+type alias Model =
+    { fs : FileSystem.Permission
+    , proc : ChildProcess.Permission
+    , dir : Path
+    , jobs : Array Job
+    -- Which shell runs a command. `--shell=bash` picks one off `PATH`
+    -- instead of `/bin/sh`, which is what the test needs under ASAN; see
+    -- `test/drive_watch.py`.
+    , shell : ChildProcess.Shell
+    -- How many rows of output a pane shows. Fixed for the life of the
+    -- program, because the layout is.
+    , rows : Int
+    -- Bumped by every change seen on disk. A scheduled run carries the
+    -- generation it was scheduled with and gives up if that is no longer the
+    -- current one, which is the debounce.
+    , generation : Int
+    , changes : Int
+    , runs : Int
+    }
+
+
+type Msg
+    = Changed
+    | Settled Int
+    | Spawned { job : Int, run : Int, processId : Process.Id, streams : ChildProcess.StreamIO }
+    | Chunk { job : Int, run : Int, stream : Stream.Readable Bytes, result : Result Stream.Error String }
+    | Exited { job : Int, run : Int, code : Int }
+    | Killed
+    | FromTui Event
+
+
+-- INIT
+
+
+init : Node.Environment -> Init.Task { model : Model, command : Cmd Msg }
+init env =
+    Init.await FileSystem.initialize <| \fs ->
+    Init.await ChildProcess.initialize <| \proc ->
+        let
+            args =
+                arguments env.args
+        in
+        Node.startProgram
+            { model =
+                { fs = fs
+                , proc = proc
+                , dir = args.dir
+                , jobs = Array.map newJob args.commands
+                , shell = args.shell
+                , rows = paneRows (Array.length args.commands)
+                , generation = 0
+                , changes = 0
+                , runs = 0
+                }
+            , command = Cmd.none
+            }
+
+
+newJob : String -> Job
+newJob command =
+    { command = command
+    , state = Idle
+    , lines = []
+    , top = 0
+    , follow = True
+    , child = Nothing
+    , run = 0
+    , closed = False
+    }
+
+
+{-| `watch <dir> [command...]`. Everything before the first argument that is
+not a flag belongs to node and to the runtime, as it does in `dir` and
+`viewer`.
+
+With no command at all it runs `ls -la`, so that `run.sh watch` on its own
+still shows the point: edit a file in the directory and the listing redraws
+itself.
+
+`--shell=<name>` runs the commands in a named shell rather than the system's
+`/bin/sh`.
+
+-}
+arguments : Array String -> { dir : Path, commands : Array String, shell : ChildProcess.Shell }
+arguments args =
+    let
+        rest =
+            Array.dropFirst 3 args
+
+        given =
+            Array.keepIf (\arg -> not (String.startsWith "-" arg)) rest
+    in
+    { shell =
+        rest
+            |> Array.findFirst (\arg -> String.startsWith "--shell=" arg)
+            |> Maybe.map (\found -> ChildProcess.CustomShell (String.dropFirst 8 found.value))
+            |> Maybe.withDefault ChildProcess.DefaultShell
+    , dir =
+        Array.first given
+            |> Maybe.map Path.fromPosixString
+            |> Maybe.withDefault (Path.fromPosixString ".")
+    , commands =
+        when Array.dropFirst 1 given is
+            [] ->
+                [ "ls -la" ]
+
+            commands ->
+                commands
+    }
+
+
+-- UPDATE
+
+
+update : Msg -> Model -> { model : Model, command : Cmd Msg }
+update msg model =
+    when msg is
+        -- Something moved on disk. Bump the generation, say so in every job's
+        -- title, and schedule the run for a moment from now.
+        Changed ->
+            let
+                generation =
+                    model.generation + 1
+            in
+            { model =
+                { model
+                    | generation = generation
+                    , changes = model.changes + 1
+                    , jobs = Array.map (\job -> { job | state = Waiting }) model.jobs
+                }
+            , command =
+                Process.sleep debounceMs
+                    |> Task.perform (\_ -> Settled generation)
+            }
+
+        -- The debounce expired. If nothing else has happened since, run.
+        Settled generation ->
+            if generation /= model.generation then
+                { model = model, command = Cmd.none }
+
+            else
+                runAll model
+
+        Spawned started ->
+            if stale model started.job started.run then
+                { model = model, command = Cmd.none }
+
+            else
+                { model =
+                    updateJob started.job
+                        (\job -> { job | child = Just started.processId, state = Running })
+                        model
+                , command =
+                    Cmd.batch
+                        [ readFrom started started.streams.output
+                        , readFrom started started.streams.error
+                        ]
+                }
+
+        -- One chunk of output. Asking again is what keeps the stream coming;
+        -- an error means it closed, and there is nothing left to ask for.
+        Chunk arrived ->
+            when arrived.result is
+                Ok chunk ->
+                    if stale model arrived.job arrived.run then
+                        { model = model, command = Cmd.none }
+
+                    else
+                        { model = updateJob arrived.job (append model.rows chunk) model
+                        , command = readFrom arrived arrived.stream
+                        }
+
+                Err _ ->
+                    { model = model, command = Cmd.none }
+
+        Exited ended ->
+            if stale model ended.job ended.run then
+                { model = model, command = Cmd.none }
+
+            else
+                { model =
+                    updateJob ended.job
+                        (\job ->
+                            { job
+                                | child = Nothing
+                                , state =
+                                    if job.state == Cancelled then
+                                        Cancelled
+
+                                    else
+                                        Finished ended.code
+                            }
+                        )
+                        model
+                , command = Cmd.none
+                }
+
+        Killed ->
+            { model = model, command = Cmd.none }
+
+        FromTui event ->
+            handleEvent event model
+
+
+debounceMs : Float
+debounceMs =
+    120
+
+
+{-| Whether something that has just arrived belongs to a run that has since
+been replaced.
+-}
+stale : Model -> Int -> Int -> Bool
+stale model index run =
+    when Array.get index model.jobs is
+        Just job ->
+            job.run /= run
+
+        Nothing ->
+            True
+
+
+{-| Kill whatever is still running and start everything again. The kill is why
+a burst of saves leaves no queue of runs behind it: there is only ever one
+generation of children.
+-}
+runAll : Model -> { model : Model, command : Cmd Msg }
+runAll model =
+    let
+        run =
+            model.runs + 1
+
+        started =
+            { model
+                | runs = run
+                , jobs =
+                    Array.map
+                        (\job ->
+                            if job.closed then
+                                job
+
+                            else
+                                { job
+                                    | lines = []
+                                    , top = 0
+                                    , follow = True
+                                    , state = Running
+                                    , child = Nothing
+                                    , run = run
+                                }
+                        )
+                        model.jobs
+            }
+    in
+    { model = started
+    , command =
+        Cmd.batch
+            (Array.indexedMap
+                (\index job ->
+                    if job.closed then
+                        Cmd.none
+
+                    else
+                        Cmd.batch [ killing job, spawn started index run job ]
+                )
+                model.jobs
+            )
+    }
+
+
+killing : Job -> Cmd Msg
+killing job =
+    when job.child is
+        Just id ->
+            Task.perform (\_ -> Killed) (Process.kill id)
+
+        Nothing ->
+            Cmd.none
+
+
+{-| `External` is the connection that pipes the child's streams back here.
+`Integrated` would share this process's -- and this process's stdout is a
+terminal Turbo Vision has in raw mode.
+-}
+spawn : Model -> Int -> Int -> Job -> Cmd Msg
+spawn model index run job =
+    ChildProcess.spawn model.proc
+        job.command
+        []
+        { shell = model.shell
+        , workingDirectory = ChildProcess.SetWorkingDirectory (Path.toPosixString model.dir)
+        , environmentVariables = ChildProcess.InheritEnvironmentVariables
+        , runDuration = ChildProcess.NoLimit
+        , connection =
+            ChildProcess.External
+                (\it ->
+                    Spawned
+                        { job = index
+                        , run = run
+                        , processId = it.processId
+                        , streams = it.streams
+                        }
+                )
+        , onExit = \code -> Exited { job = index, run = run, code = code }
+        }
+
+
+readFrom : { a | job : Int, run : Int } -> Stream.Readable Bytes -> Cmd Msg
+readFrom it stream =
+    Stream.readBytesAsString stream
+        |> Task.attempt
+            (\result ->
+                Chunk { job = it.job, run = it.run, stream = stream, result = result }
+            )
+
+
+{-| Add a chunk of output. A chunk is whatever came off the pipe, so it is not
+a line and need not end on one: the trailing fragment is kept as the start of
+the next line rather than shown as a line of its own.
+-}
+append : Int -> String -> Job -> Job
+append rows chunk job =
+    let
+        incoming =
+            String.split "\n" (String.replace "\r" "" chunk)
+
+        joined =
+            when Array.popLast job.lines is
+                Just tail ->
+                    when Array.popFirst incoming is
+                        Just head ->
+                            Array.pushLast (tail.last ++ head.first) tail.initial
+                                ++ head.rest
+
+                        Nothing ->
+                            job.lines
+
+                Nothing ->
+                    incoming
+
+        kept =
+            if Array.length joined > scrollback then
+                Array.dropFirst (Array.length joined - scrollback) joined
+
+            else
+                joined
+    in
+    pinned rows { job | lines = kept }
+
+
+scrollback : Int
+scrollback =
+    500
+
+
+{-| Where the pane sits once the content has changed. A job that is following
+stays at the bottom; one that is not keeps the row it was on.
+-}
+pinned : Int -> Job -> Job
+pinned rows job =
+    if job.follow then
+        { job | top = bottomOf rows job }
+
+    else
+        { job | top = min job.top (bottomOf rows job) }
+
+
+bottomOf : Int -> Job -> Int
+bottomOf rows job =
+    max 0 (Array.length job.lines - rows)
+
+
+updateJob : Int -> (Job -> Job) -> Model -> Model
+updateJob index change model =
+    { model | jobs = Array.update index change model.jobs }
+
+
+handleEvent : Event -> Model -> { model : Model, command : Cmd Msg }
+handleEvent event model =
+    when event is
+        Command "run" ->
+            runAll model
+
+        Command "stop" ->
+            { model =
+                { model
+                    | jobs =
+                        Array.map
+                            (\job ->
+                                if job.child == Nothing then
+                                    job
+
+                                else
+                                    { job | state = Cancelled }
+                            )
+                            model.jobs
+                }
+            , command = Cmd.batch (Array.map killing model.jobs)
+            }
+
+        -- The user moved a pane's scroll bar. Whether the pane goes on
+        -- following the output is decided here and nowhere else: it follows
+        -- again the moment the user puts it back on the bottom.
+        Scrolled bar ->
+            when indexOfId "scroll" bar.id is
+                Just index ->
+                    { model =
+                        updateJob index
+                            (\job ->
+                                { job
+                                    | top = bar.value
+                                    , follow = bar.value >= bottomOf model.rows job
+                                }
+                            )
+                            model
+                    , command = Cmd.none
+                    }
+
+                Nothing ->
+                    { model = model, command = Cmd.none }
+
+        -- Closing a job's window stops that job. The others do not move.
+        WindowClosed id ->
+            when indexOfId "job" id is
+                Just index ->
+                    { model = updateJob index (\job -> { job | closed = True }) model
+                    , command =
+                        Array.get index model.jobs
+                            |> Maybe.map killing
+                            |> Maybe.withDefault Cmd.none
+                    }
+
+                Nothing ->
+                    { model = model, command = Cmd.none }
+
+        _ ->
+            { model = model, command = Cmd.none }
+
+
+{-| Views are addressed by id, so a per-job view carries its index in its name
+and the events have to have it read back out. `"scroll-2"` is job two's scroll
+bar.
+-}
+indexOfId : String -> String -> Maybe Int
+indexOfId prefix id =
+    if String.startsWith (prefix ++ "-") id then
+        String.dropFirst (String.count prefix + 1) id
+            |> String.toInt
+
+    else
+        Nothing
+
+
+-- SUBSCRIPTIONS
+
+
+{-| The whole difference, in one function. Turbo Vision's event loop has
+nowhere to put this: the outside world cannot reach a `TProgram` except through
+its keyboard.
+-}
+subscriptions : Model -> Sub Msg
+subscriptions model =
+    FileSystem.watchRecursive model.fs (\_ -> Changed) model.dir
+
+
+-- VIEW
+
+
+{-| The desktop is rows 0..22 of an 80x25 terminal, and the jobs share it.
+
+A rectangle is the model's only until the user moves it: `Windows ▸ Tile` and
+`Cascade` are Turbo Vision's and the model is not told about them. These are
+computed from the number of jobs, which does not change -- a closed job leaves
+its slot empty rather than moving everything below it up.
+
+-}
+frame : Int -> Int -> Tui.Rect
+frame count index =
+    let
+        height =
+            slotHeight count
+    in
+    { x1 = 0
+    , y1 = index * height
+    , x2 = 79
+    , y2 = index * height + height
+    }
+
+
+slotHeight : Int -> Int
+slotHeight count =
+    max 5 (23 // max 1 count)
+
+
+paneRows : Int -> Int
+paneRows count =
+    slotHeight count - 2
+
+
+view : Model -> Tui.Ui
+view model =
+    { menuBar =
+        [ SubMenu
+            { title = "~W~atch"
+            , key = "Alt-W"
+            , items =
+                [ Item { title = "~R~un now", cmd = "run", key = "Alt-R", shortcut = "Alt-R" }
+                , Item { title = "~C~ancel", cmd = "stop", key = "Alt-C", shortcut = "Alt-C" }
+                , Tui.Separator
+                , Item { title = "E~x~it", cmd = "quit", key = "Alt-X", shortcut = "Alt-X" }
+                ]
+            }
+        , SubMenu
+            { title = "W~i~ndows"
+            , key = ""
+            , items =
+                [ Item { title = "~T~ile", cmd = "tile", key = "", shortcut = "" }
+                , Item { title = "C~a~scade", cmd = "cascade", key = "", shortcut = "" }
+                , Item { title = "~N~ext", cmd = "next", key = "F6", shortcut = "F6" }
+                ]
+            }
+        ]
+    , statusLine =
+        [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
+        , { text = "~Alt-R~ Run", key = "Alt-R", cmd = "run" }
+        , { text = "~Alt-C~ Cancel", key = "Alt-C", cmd = "stop" }
+        , { text = summary model, key = "", cmd = "" }
+        , { text = "", key = "F10", cmd = "menu" }
+        ]
+    , windows =
+        model.jobs
+            |> Array.indexedMap (\index job -> { index = index, job = job })
+            |> Array.keepIf (\it -> not it.job.closed)
+            |> Array.map (\it -> jobWindow model it.index it.job)
+    }
+
+
+{-| The counters are in the status line for the reason the clock in
+`examples/demo` is: `Ui` has a menu bar, a status line and windows, and nowhere
+to put a view that belongs to the application rather than to the desktop.
+-}
+summary : Model -> String
+summary model =
+    String.fromInt model.changes
+        ++ " changes  "
+        ++ String.fromInt model.runs
+        ++ " runs  "
+        ++ String.fromInt (Array.length (Array.keepIf (\job -> job.state == Running) model.jobs))
+        ++ " running"
+
+
+jobWindow : Model -> Int -> Job -> Tui.Window
+jobWindow model index job =
+    { id = "job-" ++ String.fromInt index
+    , title = describe job ++ " " ++ job.command
+    , rect = frame (Array.length model.jobs) index
+    , views =
+        [ Canvas
+            { id = "out-" ++ String.fromInt index
+            , rect = { x1 = 1, y1 = 1, x2 = 76, y2 = 1 + model.rows }
+            , lines = paneLines model.rows job
+            , cursor = Nothing
+            -- A selected canvas eats every key it is given, Tab included, and
+            -- the scroll bar beside it could then not be reached at all.
+            , takesFocus = False
+            }
+        , Tui.ScrollBar
+            { id = "scroll-" ++ String.fromInt index
+            , rect = { x1 = 76, y1 = 1, x2 = 77, y2 = 1 + model.rows }
+            , value = job.top
+            , min = 0
+            , max = bottomOf model.rows job
+            , pageStep = model.rows
+            , arrowStep = 1
+            }
+        ]
+    }
+
+
+describe : Job -> String
+describe job =
+    when job.state is
+        Idle ->
+            "[idle]"
+
+        Waiting ->
+            "[waiting]"
+
+        Running ->
+            "[running]"
+
+        Finished 0 ->
+            "[ok]"
+
+        Finished code ->
+            "[exit " ++ String.fromInt code ++ "]"
+
+        Cancelled ->
+            "[cancelled]"
+
+
+{-| The slice of the output the pane is showing, in the colour its state
+deserves. Colour is the only thing that says at a glance which of four windows
+is the one that went wrong.
+-}
+paneLines : Int -> Job -> Array (Array Tui.Span)
+paneLines rows job =
+    job.lines
+        |> Array.dropFirst job.top
+        |> Array.takeFirst rows
+        |> Array.map (\text -> [ Tui.ink (hue job) (String.takeFirst 75 text) ])
+
+
+hue : Job -> Hue
+hue job =
+    when job.state is
+        Finished 0 ->
+            LightGreen
+
+        Finished _ ->
+            LightRed
+
+        Cancelled ->
+            Brown
+
+        _ ->
+            LightGray
+
+
+-- PROGRAM
+
+
+main : Tui.Program Model Msg
+main =
+    Tui.defineProgram tui
+        { init = init
+        , update = update
+        , subscriptions = subscriptions
+        , view = view
+        , onEvent = FromTui
+        }

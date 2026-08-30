@@ -224,6 +224,15 @@ def main():
         problems.append(f"Tui's docs promise the built-in command '{name}', which "
                         f"CommandRegistry does not intern -- it would be handed out "
                         f"as an ordinary user command and arrive as an event")
+    # And the other way round, which is the worse half: a name the registry
+    # takes and the docs do not mention is a name an application will pick in
+    # good faith. Turbo Vision then handles it, the model is never told, and
+    # the menu entry appears to do nothing at all. examples/watch called a
+    # command "cancel" and lost it exactly this way.
+    for name in sorted(interned - promised):
+        problems.append(f"CommandRegistry interns '{name}', which Tui's docs do not "
+                        f"list as built in -- an application that picks that name "
+                        f"gets a command Turbo Vision silently swallows")
 
     # 9. One protocol number, two languages.
     gren_protocol = re.search(r"protocolVersion =\n    (\d+)", tui_gren)

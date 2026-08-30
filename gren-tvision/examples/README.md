@@ -23,6 +23,7 @@ Build them all with `../build.sh`, run one with `../run.sh <name>`.
 | `dir` | `tvision/examples/tvdir` | no widget at all — but it found a real bug in the diff, moved a list box's scroll bar, and is the first example to use the file system |
 | `demo` | `tvision/examples/tvdemo` (the shell) | real windows: zoom, resize, tile and cascade, which every window had silently been unable to do |
 | `viewer` | `tvision/examples/tvdemo` (fileview.cpp) | nothing — `TScroller` went the way of `TOutline`; but it is the first horizontal scroll bar doing its own job |
+| `watch` | *(ours)* | not a port: a subscription from outside the program, several children at once, and a run that can be killed. It found a name the binding was silently swallowing |
 
 ## What mmenu changed
 
@@ -253,6 +254,91 @@ status item because `TClockView` is a view on the *application* and `Ui` has
 nowhere to put one; it works, at the cost of rebuilding the status line every
 second, which is precisely why Borland made it a view.
 
+## What the watcher changed
+
+`watch` is the only example here that is not a port, and it is the one that
+says what the difference is. Point it at a directory and some commands and it
+runs them when anything in there changes:
+
+    ../run.sh watch src 'npm test' 'npm run lint'
+
+Three things in it have no Turbo Vision counterpart at all, and the first is
+the whole argument.
+
+**The outside world can send this program a message.** `TProgram`'s loop is
+`getEvent`, and `getEvent` reads a keyboard and a mouse. Nothing in
+`tvision/examples/` reacts to anything else, because there is nothing else to
+react to: a Borland-era program that wanted to know something had to go and ask
+in a call that returned when it had the answer, which is exactly why `tvdir`
+scans in a constructor behind a "Please Wait" window. Here
+`FileSystem.watchRecursive` is an ordinary `Sub` and inotify events arrive next
+to the keyboard's on equal terms. `test/drive_watch.py` proves it the only way
+that means anything: **the test writes a file and the application does
+something.**
+
+**Several children run at once, and one of them can be taken back.**
+`ChildProcess.spawn` hands the model a `Process.Id`; `Process.kill` on it kills
+the child. So a change arriving mid-run kills that run and starts again, which
+is the difference between a watcher and a demo. It is also the same move this
+API has made thirteen times already — state C++ keeps somewhere the model
+cannot see becomes a field — applied to a thing Turbo Vision never had one of.
+
+**The API did not have to change, and one thing in it did.** No new view type,
+no new event: three windows, three canvases, three scroll bars. What the
+example found instead was a hole in the documentation with teeth in it.
+
+### The built-in command names are a reserved vocabulary
+
+`Tui`'s docs listed nine command names Turbo Vision handles itself. The binding
+interns fourteen. The five that were missing are `"help"`, `"ok"`, `"cancel"`,
+`"yes"` and `"no"` — and a watcher wants a command called `cancel`.
+
+The symptom is the same silence `"tile"` and `"cascade"` produced, arriving
+from the opposite direction. There it was a name the docs promised and the
+binding did not intern, so it reached the model as an ordinary event and the
+desktop sat still. Here it is a name the binding *does* intern and the docs
+never mentioned, so Turbo Vision takes it and the model is never told: the menu
+entry draws, `Alt-C` works, `cmCancel` outside a dialog does nothing, and there
+is no error anywhere to say why.
+
+`tools/check_consistency.py` compared those two lists in one direction only.
+It now compares both, which is the half that would have caught this one.
+
+### Two things a watcher has to do, which are not obvious until it does not
+
+**Editors do not save a file once.** A save is a write, a rename and a chmod,
+so inotify reports a burst and an undebounced watcher runs everything three or
+four times per keystroke. A generation counter fixes it: a change bumps it and
+schedules a `Process.sleep`, and the sleep starts a run only if its generation
+is still current. The test writes five files in a row and checks that exactly
+one run happened and all five were seen.
+
+**A killed child goes on talking.** Kill is not instant and the pipe still has
+bytes in it, so output from an abandoned run arrives after its replacement has
+started. Every job carries the number of the run its child belongs to and drops
+anything tagged with another. `dir` has the same hazard in one comment — two
+listings in flight, and the late one must not overwrite the recent one — and
+this is that shape at full size.
+
+And one that is about the API rather than about watching: **a scroll bar the
+model moves and the user moves needs a rule for who wins.** `mouse` had a bar
+the user moves; `dir` had one the model moves; this is the first with both.
+The rule is the one every log viewer arrives at — follow the bottom until the
+user leaves it, follow again when they come back — and it lives in the model,
+which is the only place that knows both numbers.
+
+### What it cost the test suite
+
+Under `test:asan` the sanitizer is preloaded with `LD_PRELOAD` and children
+inherit it, so a spawned command runs instrumented. That is mostly free, and
+once it is not: node's `shell: true` runs `/bin/sh` by name, the distribution's
+`/bin/sh` is linked against the distribution's glibc, and the preloaded
+`libasan.so` comes from the nix store and brings nix's glibc with it. Every
+child then dies before `main`. The example takes `--shell=`, the test passes
+`--shell=bash` under ASAN, and a shell off `PATH` is the toolchain's own.
+Nothing about this reaches a user; it takes an `LD_PRELOAD` from one libc and a
+program from another.
+
 ## The C++ examples, triaged
 
 `tvision/examples/` has eight entries. Two of them are not Turbo Vision
@@ -353,6 +439,7 @@ shaped that way — data entry happens in modal forms — so it has not been in 
 way, but it is the same hole the `Focused` event filled for list boxes, and
 clusters will want the same treatment.
 
-Then a Gren-only example that does something the C++ examples never could — the
-obvious candidate is something asynchronous, since that is the thing this
-binding has that Borland's never did.
+The Gren-only example is done: `watch`, written up above. It is the answer to
+"what does this have that Borland's did not", and the answer turned out to be
+three things — a subscription, several children at once, and a handle on
+something still running.

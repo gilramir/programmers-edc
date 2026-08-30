@@ -17,6 +17,7 @@ next to these directories.
 | **2.5** | Modal dialogs that do not stop Node, and more ported demos | done |
 | **3** | Gren on top, through ports | done |
 | **4** | Every C++ example ported, one at a time, each forcing an API change | done except `tvedit` |
+| **5** | A program written *for* the API rather than translated into it | done: `watch` |
 
 See [FINDINGS.md](FINDINGS.md) for what we learned doing it, including the
 things that were not what we expected.
@@ -42,8 +43,8 @@ gren-tvision/      the Gren package: gilramir/gren-tvision
   src/Tui.gren       Ui types, encoders, the program wrapper. Pure Gren.
   examples/          one directory per example, each its own application
                      hello, mmenu, entries, forms, ascii, calendar, puzzle,
-                     calc, palette, mouse, dir, demo, viewer -- and a README
-                     that is the plan of record for what gets ported next
+                     calc, palette, mouse, dir, demo, viewer, watch -- and a
+                     README that is the plan of record for what gets ported next
   test/              a pty driver per example
 gren-tvision-runtime/  the npm half: the diff layer + the `gren-tui` bin
   diff.js            one UI description -> calls on the binding (unit tested)
@@ -122,6 +123,16 @@ The rest of the Gren examples are every remaining C++ one:
 | `gren -- dir` | tvdir. A directory tree with no tree widget: the rows are a fold over the model |
 | `gren -- demo` | tvdemo's shell. `Windows ▸ Tile` and `Cascade` are Turbo Vision's; the event viewer lists what crosses the port |
 | `gren -- viewer` | tvdemo's file viewer, with both scroll bars. Takes a path |
+
+And one that is not a port at all. In `gren -- watch`: give it a directory and
+some commands, and it runs them whenever anything in there changes --
+`run.sh watch src 'npm test' 'npm run lint'`, one window per command. This is
+the example that says what the binding is for. A Turbo Vision program has one
+source of events and it is the user; `FileSystem.watchRecursive` is a `Sub`, so
+the outside world can send this one a message. The children run at once and
+none of them blocks, and a change arriving mid-run kills that run and starts
+again -- `ChildProcess.spawn` hands the model a `Process.Id`. `Alt-R` runs now,
+`Alt-C` stops.
 
 [`gren-tvision/examples/README.md`](gren-tvision/examples/README.md) is the plan
 of record: what each port forced into the API, and what is left.

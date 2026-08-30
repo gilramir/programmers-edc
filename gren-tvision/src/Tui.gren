@@ -425,8 +425,15 @@ on hue span =
 A `~` in a title marks the highlighted letter: `"~F~ile"` draws as *F*ile.
 
 Built-in command names work here too: `"quit"`, `"close"`, `"zoom"`,
-`"resize"`, `"next"`, `"prev"`, `"menu"`, `"cascade"`, `"tile"`. Turbo Vision
+`"resize"`, `"next"`, `"prev"`, `"menu"`, `"help"`, `"ok"`, `"cancel"`,
+`"yes"`, `"no"`, `"cascade"`, `"tile"`. Turbo Vision
 handles those itself and they do not arrive as events.
+
+Which makes the same list a set of names your program may not use for anything
+else. Calling a command `"cancel"` because there is a Cancel entry on the menu
+gets an entry that draws, a hotkey that works, and no event ever -- Turbo
+Vision took it, and outside a dialog `cmCancel` does nothing at all. Nothing
+reports this. Pick another name.
 -}
 type MenuItem
     = Item { title : String, cmd : String, key : String, shortcut : String }

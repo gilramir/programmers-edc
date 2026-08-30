@@ -1181,3 +1181,141 @@ model that re-renders does not need.
 It is written down here rather than done because it is a design decision, and
 because nothing so far has needed it badly enough to decide badly. The other
 open gaps are listed at the end of `gren-tvision/examples/README.md`.
+
+## The watcher: the first program here that is not a port
+
+`examples/watch` runs a set of commands whenever a directory changes. It is the
+only example in the package with no C++ original, and it exists to answer a
+question the other thirteen cannot: what does binding Turbo Vision to Gren
+provide that binding it to 1994 did not.
+
+### Turbo Vision has exactly one source of events, and it is the user
+
+`TProgram::run` is `getEvent`/`handleEvent`, and `getEvent` reads a keyboard, a
+mouse and the clock TVision keeps for double-click timing. There is no third
+thing. Nothing in `tvision/examples/` reacts to anything but a keystroke, and
+that is not an omission — a Borland-era program that wanted to know something
+about the world had to go and ask, in a call that returned when it had the
+answer. `tvdir`'s constructor scanning the drive behind a "Please Wait" window
+is what that looks like when the answer is slow.
+
+`FileSystem.watchRecursive` is an ordinary `Sub`. inotify events arrive as
+messages next to the keyboard's, on the same terms, through the same `update`.
+Nothing in the binding had to change to allow it, which is the interesting
+part: subscriptions were already there for `Time.every`, and a clock is a
+subscription whose source happens to be inside the process. Once one of them
+can come from outside, the shape of what can be built changes and the API does
+not.
+
+`test/drive_watch.py` asserts it the only way that means anything: **the test
+writes a file, and the application does something.** Every other driver in this
+repo types at the program.
+
+### The built-in command names are a reserved vocabulary
+
+The watcher wanted a command called `cancel`. It got a menu entry that drew, an
+`Alt-C` that worked, and no event, ever.
+
+`"cancel"` is one of the fourteen names `CommandRegistry::reset` interns
+(`tvnode.h`), because `cmCancel` is Turbo Vision's — and outside a modal dialog
+`cmCancel` does nothing at all. So the command was taken, handled, and dropped,
+in silence.
+
+`Tui`'s documentation listed nine of those fourteen. The five it did not
+mention were `"help"`, `"ok"`, `"cancel"`, `"yes"` and `"no"` — every one of
+them a word an application might reasonably want.
+
+This is the `"tile"` and `"cascade"` bug seen from the other side. There the
+docs promised a name the binding did not intern, so it reached the model as an
+ordinary event and the desktop sat still. Here the binding interns a name the
+docs never mentioned, so Turbo Vision swallows it and the model is never told.
+Both are invisible; both are one missing row in a table.
+
+`tools/check_consistency.py` had been comparing those two lists in one
+direction: every name the docs promise must be interned. It now checks the
+other direction too, which is the half that matters more — a promise the
+binding does not keep is a feature that does not work, but a name the binding
+takes without saying so is a trap laid for every program written against it.
+
+### A save is not one event, and a killed child does not stop at once
+
+Two things a watcher needs that are not visible until it is used.
+
+**Editors write a file three or four times.** A save is typically a write, a
+rename and a chmod; inotify reports each one. Undebounced, the commands run
+four times per keystroke. The fix is a generation counter — a change bumps it
+and schedules a `Process.sleep`, and the sleep starts a run only if its
+generation is still the current one. `drive_watch.py` writes five files in a
+row and checks that exactly one run happened and that all five were seen, which
+is the pair of assertions that pins the behaviour down: debounced, not
+throttled, and not deaf.
+
+**A killed child goes on talking for a moment.** `Process.kill` on the id
+`ChildProcess.spawn` hands back does kill it — the kernel binding's cleanup is
+`subproc.kill()` — but the pipe still holds bytes, and they arrive after the
+replacement run has started. Without a tag they land in the new run's output.
+So every job carries the number of the run its child belongs to, and a chunk,
+an exit or a process id belonging to any other run is dropped.
+
+`examples/dir` has the same hazard in one comment: two directory listings in
+flight, and the late one must not overwrite the recent one. That was a two-line
+guard on a rare case. Here it is structural, because killing the previous run
+is the normal path rather than an accident. **The Elm architecture does not
+make stale-response bugs go away; it makes them all the same bug**, and one
+that can be fixed once in the model instead of everywhere a callback fires.
+
+### A scroll bar with two owners
+
+`examples/mouse` has a scroll bar the user moves. `examples/dir` has one the
+model moves. This is the first with both: output arriving scrolls the pane
+down, and a user who has scrolled up to read a failure does not want it taken
+away.
+
+There is no rule the binding could impose here, because the two movements are
+indistinguishable by the time they reach it. The model is the only thing that
+knows whether the last move was output or a hand, so the policy lives there,
+and it is the one every log viewer converges on: follow the bottom until the
+user leaves it, follow again when they come back. One `follow : Bool` on the
+job, set in the `Scrolled` handler.
+
+Worth noting because the obvious alternative — a `stickToBottom` flag on
+`ScrollBar` — would have looked like a convenience and been a mistake. It would
+put the decision in the runtime, where the difference between the two kinds of
+movement has already been lost.
+
+### Two glibcs again, this time in a child process
+
+Milestone 0's question was whether a system-built `.node` could be loaded by
+nix's node. This is the same question, four hundred commits later, arriving
+from the other end.
+
+Under `test:asan`, `asan.sh` exports `LD_PRELOAD=<nix>/libasan.so`, and a child
+process inherits it. Node's `shell: true` runs `/bin/sh` **by name** — the
+distribution's, linked against the distribution's glibc — and the preloaded
+`libasan.so` comes out of the nix store and drags nix's glibc 2.42 in behind
+it. The system libc cannot satisfy `GLIBC_ABI_DT_X86_64_PLT`, so under ASAN
+every child died before `main` with a link error, and the failure looked
+exactly like a broken example.
+
+A shell taken off `PATH` is devbox's own and has no such problem. `watch` grew
+`--shell=`, which a watcher wants anyway, and the driver passes `--shell=bash`
+when `TVNODE_ASAN=1`. Nothing here reaches a user: it takes an `LD_PRELOAD`
+from one libc and a program from another, which only a sanitizer run inside a
+devbox shell arranges.
+
+The general form is worth keeping: **a preloaded sanitizer is inherited by
+everything you spawn**, including its `log_path`. Under `test:asan` a child of
+this program runs instrumented and writes its reports into
+`tvision-node/build/`. For the shell built-ins the test uses that is free. For
+a real command it would not be, which is a reason to keep the fixtures trivial
+rather than a reason to stop spawning.
+
+### What the watcher did not need
+
+No new view type, no new event, no change to the wire protocol. Three windows,
+three canvases, three scroll bars, and a `Sub`.
+
+That is the result worth recording. Thirteen ports were each chosen because a
+C++ example would force something, and each one did. The first program written
+for the API rather than translated into it forced nothing — the widget set was
+finished, and what it found instead was a documentation hole with teeth in it.

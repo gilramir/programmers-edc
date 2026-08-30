@@ -68,7 +68,8 @@
         "(cd gren-tvision && python3 test/drive_mouse.py)",
         "(cd gren-tvision && python3 test/drive_dir.py)",
         "(cd gren-tvision && python3 test/drive_demo.py)",
-        "(cd gren-tvision && python3 test/drive_viewer.py)"
+        "(cd gren-tvision && python3 test/drive_viewer.py)",
+        "(cd gren-tvision && python3 test/drive_watch.py)"
       ],
       "test:asan": [
         "(cd tvision-node && TVNODE_ASAN=1 npx node-gyp rebuild)",
@@ -91,6 +92,7 @@
         "(cd gren-tvision && TVNODE_ASAN=1 python3 test/drive_dir.py)",
         "(cd gren-tvision && TVNODE_ASAN=1 python3 test/drive_demo.py)",
         "(cd gren-tvision && TVNODE_ASAN=1 python3 test/drive_viewer.py)",
+        "(cd gren-tvision && TVNODE_ASAN=1 python3 test/drive_watch.py)",
         "(cd tvision-node && npx node-gyp rebuild)"
       ],
       "check": [
