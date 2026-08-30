@@ -20,7 +20,7 @@ Build them all with `../build.sh`, run one with `../run.sh <name>`.
 | `calc` | `tvision/examples/tvdemo` (calc.cpp) | `takesFocus` on a button: a keypad that can be pressed but never holds the caret |
 | `palette` | `tvision/examples/palette` | nothing -- it is the example whose entire subject the port removes, and the write-up says what that costs |
 | `mouse` | `tvision/examples/tvdemo` (mousedlg.cpp) | the scroll bar as a view of its own, `isDouble` on a click, `setDoubleClickDelay`, and `takesFocus` on a canvas |
-| `dir` | `tvision/examples/tvdir` | no widget at all — but it found a real bug in the diff, moved a list box's scroll bar, and is the first example to use the file system |
+| `dir` | `tvision/examples/tvdir` | no widget at all — but it found a real bug in the diff, moved a list box's scroll bar, and is the first example to use the file system; later `Tui.fileDialog`, which finished the port |
 | `demo` | `tvision/examples/tvdemo` (the shell) | real windows: zoom, resize, tile and cascade, which every window had silently been unable to do — and later the first `Tui.messageBox`, which is its About box with fifteen lines taken out |
 | `viewer` | `tvision/examples/tvdemo` (fileview.cpp) | nothing — `TScroller` went the way of `TOutline`; but it is the first horizontal scroll bar doing its own job |
 | `watch` | *(ours)* | not a port: a subscription from outside the program, several children at once, and a run that can be killed. It found a name the binding was silently swallowing |
@@ -362,7 +362,7 @@ applications at all, and one of them is really eight applications.
 | `palette` | **done** | `examples/palette`; the essay it is written to explain has no Gren equivalent — see above |
 | `tvdemo` | **done** except the help system | `examples/demo` is its shell; the demos inside it are `ascii`, `calendar`, `puzzle`, `calc`, `mouse` and `viewer` |
 | `tvforms` | **done** (the UI half) | see above. Its other half is `.rsc` resource streaming — `opstream`/`ipstream` serialising views to disk — which has no Gren meaning |
-| `tvdir` | **done**, less its Change Dir dialog | `examples/dir` — and it turned out to need no new widget at all; see above. `TChDirDialog` is a coverage gap, listed at the end |
+| `tvdir` | **done** | `examples/dir` — and it turned out to need no new widget at all, Change Dir included; see above |
 | `tvedit` | a milestone of its own | `TEditor`/`TFileEditor`: a stateful text buffer with undo and clipboard. See the note below |
 | `tvhc` | **no** | a command-line help *compiler*, not a TUI |
 | `avscolor` | **no** | an AviSynth plugin |
@@ -433,7 +433,7 @@ excludes `evMouseWheel` (`views.h`), so a wheel event goes to whatever has
 
 ### The coverage gaps left
 
-Ten, in the order they were listed, four closed and one half closed. Each says what it
+Ten, in the order they were listed, five closed and one half closed. Each says what it
 would take, because "not done", "not decided" and "not needed" are three
 different problems.
 
@@ -507,23 +507,29 @@ directions — Alt-L raises the list window, which is a menu entry that used to
 do nothing at all when the window was already open, and adding an entry puts
 the caret back on the list the entry went into. FINDINGS has the write-up.
 
-**4. The standard file and directory dialogs.** `TFileDialog` and
-`TChDirDialog` (`stddlg.h`) are how a Turbo Vision program asks for a path, and
-there is no way to ask for one here — which is why `examples/dir` and
-`examples/viewer` both take theirs on the command line, and why `tvdir`'s
-Change Dir half is the one part of it not ported.
+**4. ~~The standard file and directory dialogs.~~ Done —
+[`Tui.fileDialog`](#fileDialog), and no protocol change.** The guess this entry
+used to make held: neither `TFileDialog` nor `TChDirDialog` is a class worth
+wrapping, and the answer is a function returning a `DialogSpec` — the shape (5)
+established. `examples/dir` now has the Change Dir half of `tvdir`, which was
+the one part of it not ported.
 
-The interesting thing is that neither looks like a class worth wrapping.
-`TFileDialog` *is* a `TDialog` full of stock controls — an input line, two
-buttons, a history — around a `TFileList`, which is a `TSortedListBox` over
-`FileSystem.listDirectory`. Following `TOutline` and `TScroller`, the answer is
-probably a dialog the model builds and a helper that produces its `views`,
-shipped in the package rather than in the binding. **That shape now exists**:
-(5) established it, and `Tui.messageBox` is what one of these looks like — a
-function returning a `DialogSpec`, no protocol change, the answer arriving as
-an ordinary `DialogClosed`. What is left here is the `TFileList` half, which is
-a sorted list box over `FileSystem.listDirectory`, and it wants (6) first for
-the history.
+`TFileDialog::readDirectory` runs inside the dialog; here `listDirectory` is a
+`Task`, so the model reads and hands over what it found, and `Alt-C` is two
+steps — read, then show. Which makes the helper a *layout* and almost nothing
+else: what the entries say, whether `".."` is among them and what a name means
+are the program's business. The same answer `TOutline` and `TScroller` got, for
+the third time.
+
+Two things it turned up, both in FINDINGS. **Navigating is a reopen**: a dialog
+is a `Cmd`, not part of `view`, and nothing patches one while it is up, so
+walking into a directory is a second listing and a second dialog — three lines
+in `update`, and a blink on screen. And **only four button names close a
+modal** — `ok`, `cancel`, `yes`, `no` — so a dialog gets at most four buttons,
+and `dir` spends three of them with Open as `"yes"`.
+
+Still missing and not blocking: `THistory` (6), and a wildcard filter, which is
+an `Array.keepIf` the model does before passing the entries in.
 
 **5. ~~A message box.~~ Done — [`Tui.messageBox`](#messageBox), and no protocol
 change at all.** It is the one gap whose answer was "write it in Gren": a

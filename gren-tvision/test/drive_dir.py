@@ -78,6 +78,31 @@ def files(app):
     return [row.strip() for row in column(app, FILES, FILES_WIDTH) if row.strip()]
 
 
+def box_edges(screen, title):
+    """(left, right) frame columns of the open dialog with this title."""
+    for line in screen.split("\n"):
+        if title in line and "╔" in line and "╗" in line:
+            return (line.index("╔"), line.rindex("╗"))
+    return None
+
+
+def chooser(app):
+    """The rows of the Change Dir dialog's list box.
+
+    The dialog is 58 wide and centred on an 80-column desktop, so its list
+    starts three columns inside its own left frame.
+    """
+    screen = app.render().split("\n")
+    left = None
+    for line in screen:
+        if "Change directory" in line and "╔" in line:
+            left = line.index("╔")
+    if left is None:
+        return []
+    return [row for row in
+            (screen[r][left + 3:left + 50].strip() for r in range(7, 15)) if row]
+
+
 def main():
     check = Checks()
     root = tempfile.mkdtemp(prefix="tvdir-")
@@ -140,6 +165,46 @@ def main():
         app.send(b"\x1b[B", settle=1.2)
         check("and the next one shows its own",
               files(app) == ["g1.txt", "g2.txt"], str(files(app)))
+
+        # The one part of tvdir that was never ported, because there was no
+        # way to ask for a path. TChDirDialog reads the directory from inside
+        # itself; here listing one is a Task, so Alt-C is two steps -- read,
+        # then show -- and Tui.fileDialog is only the layout.
+        app.send(b"\x1bc", settle=1.5)
+        opened = app.render()
+        check("Change dir opened a chooser", "Change directory" in opened, opened)
+        check("listing the directories it was given, and `..`",
+              chooser(app) == ["..", "alpha", "beta", "gamma"], str(chooser(app)))
+        edges = box_edges(opened, "Change directory")
+        check("and it centres itself on the desktop",
+              edges is not None and abs(edges[0] - (79 - edges[1])) <= 1,
+              f"frame at {edges} of 80 columns")
+
+        # Walking into one. A dialog is not part of `view` and nothing patches
+        # it while it is up, so this is a second listing and a second dialog --
+        # which in `update` is the same two lines that opened the first.
+        app.send(b"\x1b[B", settle=0.4)
+        app.send(b"\x1bo", settle=1.5)
+        check("Open walked into the highlighted directory",
+              chooser(app) == ["..", "deep"], str(chooser(app)))
+        check("and the path it shows came with it",
+              os.path.join(root, "alpha") in app.render(), app.render())
+
+        # `..` is the first row of the reopened dialog and the highlight starts
+        # there, so Chdir goes back up -- and the tree re-roots on the answer.
+        app.send(b"\x1bc", settle=1.5)
+        check("Chdir closed it and the tree re-rooted",
+              "Change directory" not in app.render()
+              and [r.strip() for r in tree(app)][0] == "▾ " + os.path.basename(root),
+              str(tree(app)))
+
+        # And down again, to prove the answer is a path rather than a direction.
+        app.send(b"\x1bc", settle=1.5)
+        app.send(b"\x1b[B", settle=0.4)
+        app.send(b"\x1bc", settle=1.5)
+        rows = [r.strip() for r in tree(app)]
+        check("choosing a subdirectory re-roots the tree there",
+              rows == ["▾ alpha", "▸ deep"], str(rows))
 
         app.send(b"\x1bx", settle=1.0)
         code = app.wait(timeout=6)

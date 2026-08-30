@@ -1943,3 +1943,87 @@ no question asked, and now asks; `Yes` and `No` come back as `DialogClosed`
 with the id, which is how the model tells that answer from the Add dialog's.
 The model needs no "am I asking?" flag, because the id it opened the box with
 is the id that comes back.
+
+## Closing gap 4: asking for a path
+
+`TFileDialog` and `TChDirDialog` are how a Turbo Vision program asks for a
+path, and this was the last gap that had never had its design decided —
+`examples/dir` and `examples/viewer` both took theirs on the command line, and
+`tvdir`'s Change Dir half was the one part of it not ported.
+
+The gap list guessed the answer and the guess held: neither is a class worth
+wrapping. `Tui.fileDialog` is a function returning a `DialogSpec`, the shape
+gap (5) established, and it added nothing to the protocol.
+
+### The model does the reading, so the dialog is two steps
+
+`TFileDialog::readDirectory` runs inside the dialog, from its constructor and
+again whenever the wildcard changes. There is no equivalent here and there
+should not be: `FileSystem.listDirectory` is a `Task`, so the model reads the
+directory and hands over what it found. `Alt-C` in `examples/dir` is therefore
+a `Cmd` that produces a `Msg` that opens a dialog — read, then show — and the
+helper never touches the filesystem at all.
+
+Which makes `fileDialog` a *layout* and almost nothing else: where the field
+goes, where the list goes, where the buttons go. What the entries say, whether
+`".."` is among them, and what a name means are the program's business. That is
+the same answer `TOutline` got in `dir` and `TScroller` got in `viewer`, for the
+third time: the C++ class is a widget because C++ had nowhere else to put the
+state.
+
+### Navigating is a reopen, and that is a real cost
+
+A window is part of `view` and is diffed. A dialog is a `Cmd` that produces a
+`Msg`, and nothing patches one while it is up — the differ walks
+`message.windows` and a dialog is not among them. So walking into a directory
+cannot change the list in place. It is a second listing and a second dialog,
+which in `update` is the same two lines that opened the first:
+
+```gren
+if closed.cmd == "yes" then
+    { model = model, command = browse model chosen }
+```
+
+That is genuinely fine to write and it blinks on screen, and both halves are
+worth saying out loud. A program that wants a file browser that never blinks
+wants a *window*, not a dialog, and would then be writing its own — which is
+allowed, and is what the helper being a plain function makes easy.
+
+### Only four button names close a modal
+
+`TChDirDialog` has Chdir, Revert, OK and Cancel; `TFileDialog` has Open,
+Replace, Clear and Cancel. Here a dialog is ended by `cmOK`, `cmCancel`,
+`cmYes` and `cmNo` and by nothing else — `TDialog::handleEvent` says so, and
+the protocol has no "close that dialog" message for the model to send. A button
+with any other command name is drawn, is pressable, sends its command, and
+leaves the dialog open.
+
+So a dialog gets at most four buttons, and `examples/dir` spends three of them:
+Open is `"yes"`, Chdir is `"ok"`, Cancel is `"cancel"`. Naming a navigation
+button `"yes"` reads oddly and is not a mistake — it is the reserved vocabulary
+the built-in command names already established, one level up, and this is the
+first thing that ran into its ceiling.
+
+### What the answer carries
+
+Two of the `values` matter, under ids the helper fixes rather than derives:
+
+  - `Tui.text "fileName"` — what was typed.
+  - `Tui.number "fileList"` — which row was highlighted, as an index into the
+    `entries` that were passed in.
+
+The index rather than the text, because the model already has the array it
+handed over and can look the row up in it — which is how `dir` turns a
+highlighted row back into a `Path` without parsing anything. Fixed ids because
+only one modal can be open at a time, so a name you can write down beats a name
+you have to construct; the cost is that a view in an open window must not use
+either of them, and the docs say so.
+
+### What is still missing, and it is not much
+
+`THistory` — gap (6), the drop-down beside the field that remembers what was
+typed before — is in every real `TFileDialog` and is not here. A wildcard is
+not either: `TFileDialog` filters on `*.txt` and the model would do that to its
+own array before passing it in, which is a line of `Array.keepIf` rather than a
+feature. Neither stopped `tvdir`'s Change Dir from being ported, which is the
+thing this gap was actually blocking.

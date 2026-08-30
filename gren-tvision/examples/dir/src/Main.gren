@@ -88,6 +88,16 @@ type alias Row =
     }
 
 
+{-| What the Change Dir dialog is currently showing. `TChDirDialog` reads the
+directory from inside itself; listing one here is a `Task`, so the model does
+the reading and the dialog is opened once the answer is in.
+-}
+type alias Browse =
+    { path : Path
+    , entries : Array { name : String, path : Path }
+    }
+
+
 type alias Model =
     { permission : FileSystem.Permission
     , root : Node
@@ -95,6 +105,8 @@ type alias Model =
     , files : Array String
     , fileTop : Int
     , status : String
+    , desktop : { cols : Int, rows : Int }
+    , browsing : Maybe Browse
     }
 
 
@@ -102,6 +114,7 @@ type Msg
     = Listed { path : Path, entries : Array { path : Path, entityType : FileSystem.EntityType } }
     | Failed { path : Path, error : FileSystem.Error }
     | Started Path
+    | Browsed { path : Path, entries : Array { path : Path, entityType : FileSystem.EntityType } }
     | FromTui Event
 
 
@@ -121,6 +134,8 @@ init env =
                 , files = []
                 , fileTop = 0
                 , status = "reading..."
+                , desktop = { cols = 80, rows = 23 }
+                , browsing = Nothing
                 }
             , command =
                 when startingPath env.args is
@@ -208,6 +223,23 @@ walk depth (Node it) =
 
     else
         here
+
+
+{-| The same listing, answered into the Change Dir dialog instead of the tree.
+A failure is reported in the status line and opens nothing.
+-}
+browse : Model -> Path -> Cmd Msg
+browse model path =
+    FileSystem.listDirectory model.permission path
+        |> Task.attempt
+            (\result ->
+                when result is
+                    Ok entries ->
+                        Browsed { path = path, entries = entries }
+
+                    Err error ->
+                        Failed { path = path, error = error }
+            )
 
 
 {-| Replace the node at `path`, wherever it is in the tree. Paths are unique,
@@ -326,6 +358,54 @@ update msg model =
             , command = Cmd.none
             }
 
+        -- The directories under `path`, plus `..`, which is the one entry the
+        -- filesystem does not list and every chooser has.
+        Browsed answer ->
+            let
+                entries =
+                    answer.entries
+                        |> Array.keepIf (\entry -> entry.entityType == FileSystem.Directory)
+                        |> Array.map
+                            (\entry ->
+                                { name = Path.filenameWithExtension entry.path
+                                , path = Path.append entry.path answer.path
+                                }
+                            )
+                        |> Array.sortBy .name
+
+                withParent =
+                    when Path.parentPath answer.path is
+                        Just up ->
+                            Array.pushFirst { name = "..", path = up } entries
+
+                        Nothing ->
+                            entries
+
+                browsing =
+                    { path = answer.path, entries = withParent }
+            in
+            { model = { model | browsing = Just browsing }
+            , command =
+                Tui.dialog tui <|
+                    Tui.fileDialog
+                        { id = "chdir"
+                        , title = "Change directory"
+                        , path = Path.toPosixString browsing.path
+                        , name = ""
+                        , entries = Array.map .name browsing.entries
+                        -- Three buttons, and only because three of the four
+                        -- names that close a modal were free. "Open" walks
+                        -- into a directory without leaving the dialog, which
+                        -- is a second dialog; "Change to" ends the browse.
+                        , buttons =
+                            [ { title = "~O~pen", cmd = "yes" }
+                            , { title = "~C~hdir", cmd = "ok" }
+                            , { title = "Cancel", cmd = "cancel" }
+                            ]
+                        , desktop = model.desktop
+                        }
+            }
+
         Failed answer ->
             { model =
                 { model
@@ -385,8 +465,53 @@ handleEvent event model =
         KeyPressed _ ->
             { model = model, command = Cmd.none }
 
+        Resized size ->
+            { model = { model | desktop = size }, command = Cmd.none }
+
+        -- The one part of tvdir that was not ported, because there was no way
+        -- to ask for a path. The listing has to be in hand before the dialog
+        -- can be opened, so this is two steps: read, then show.
+        Command "chdir" ->
+            { model = model, command = browse model (rootPath model) }
+
+        DialogClosed closed ->
+            when model.browsing is
+                Nothing ->
+                    { model = model, command = Cmd.none }
+
+                Just browsing ->
+                    let
+                        chosen =
+                            Array.get (Tui.number "fileList" closed.values) browsing.entries
+                                |> Maybe.map .path
+                                |> Maybe.withDefault browsing.path
+                    in
+                    if closed.cmd == "yes" then
+                        -- Walk into it. A dialog is not part of `view` and
+                        -- nothing patches one while it is up, so going deeper
+                        -- is another listing and another dialog -- which in
+                        -- `update` is the same two lines that opened the first.
+                        { model = model, command = browse model chosen }
+
+                    else if closed.cmd == "ok" then
+                        { model = { model | browsing = Nothing }
+                        , command = Task.perform Started (Task.succeed chosen)
+                        }
+
+                    else
+                        { model = { model | browsing = Nothing }, command = Cmd.none }
+
         _ ->
             { model = model, command = Cmd.none }
+
+
+{-| Where the tree is rooted, which is where Change Dir starts from.
+-}
+rootPath : Model -> Path
+rootPath model =
+    when model.root is
+        Node it ->
+            it.path
 
 
 {-| Expand or collapse, reading the directory the first time it is opened.
@@ -440,6 +565,7 @@ view model =
             , key = "Alt-D"
             , items =
                 [ Item { title = "~E~xpand or collapse", cmd = "toggle", key = "Alt-E", shortcut = "Alt-E" }
+                , Item { title = "~C~hange dir...", cmd = "chdir", key = "Alt-C", shortcut = "Alt-C" }
                 , Tui.Separator
                 , Item { title = "E~x~it", cmd = "quit", key = "Alt-X", shortcut = "Alt-X" }
                 ]

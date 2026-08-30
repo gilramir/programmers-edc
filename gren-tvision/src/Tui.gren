@@ -17,6 +17,7 @@ module Tui exposing
     , Window
     , defineProgram
     , dialog
+    , fileDialog
     , fixed
     , flag
     , flags
@@ -176,6 +177,7 @@ its own is a pull-down, and one without is a command sitting on the bar.
 @docs Event, Value, DialogSpec
 @docs dialog, quit, setEnabled, setDoubleClickDelay, focus
 @docs messageBox, MessageButton, okButtons, okCancelButtons, yesNoButtons, yesNoCancelButtons
+@docs fileDialog
 @docs text, number, flag, flags
 
 -}
@@ -849,6 +851,140 @@ messageBox box =
                 , text = box.text
                 }
             )
+            placed
+    }
+
+
+{-| A file or directory chooser, as a [`DialogSpec`](#DialogSpec) ready to hand
+to [`dialog`](#dialog).
+
+    Tui.dialog tui <|
+        Tui.fileDialog
+            { id = "chdir"
+            , title = "Change directory"
+            , path = Path.toPosixString model.here
+            , name = ""
+            , entries = Array.pushFirst ".." model.subdirectories
+            , buttons = Tui.okCancelButtons
+            , desktop = model.desktop
+            }
+
+`TFileDialog` and `TChDirDialog` read the directory themselves, from inside the
+dialog, and there is no equivalent of that here on purpose: listing a directory
+is a `Task`, so the model does the reading and hands over what it found. Which
+means this is a *layout* -- it decides where the field, the list and the
+buttons go, and nothing else. What the entries say, whether `".."` is among
+them and what a name means are the program's business.
+
+The answer arrives as a [`DialogClosed`](#Event) event, and two of its `values`
+are the point:
+
+  - `Tui.text "fileName" closed.values` -- what was typed in the field.
+  - `Tui.number "fileList" closed.values` -- which row was highlighted, as an
+    index into the `entries` you passed in. Look it up there rather than
+    parsing the text back.
+
+Those two ids are fixed rather than derived from `id`, because only one modal
+dialog can be open at a time and a name you can write down beats a name you
+have to construct. Do not give a view in an open *window* either of them.
+
+**Navigating is the caller's job, and it is a reopen.** A dialog is a `Cmd`
+that produces a `Msg`; it is not part of `view` and nothing patches it while it
+is up. So "the user chose a directory" is an answer like any other: list the
+new path, and open another one. That is the whole of it in `update`, and it is
+why this needed no protocol change -- but it does mean the dialog blinks, and
+a program that wants a file browser that never blinks wants a window rather
+than a dialog.
+
+-}
+fileDialog :
+    { id : String
+    , title : String
+    , path : String
+    , name : String
+    , entries : Array String
+    , buttons : Array MessageButton
+    , desktop : { cols : Int, rows : Int }
+    }
+    -> DialogSpec
+fileDialog spec =
+    let
+        width =
+            clamp 24 spec.desktop.cols 58
+
+        height =
+            clamp 12 spec.desktop.rows 18
+
+        left =
+            max 0 ((spec.desktop.cols - width) // 2)
+
+        top =
+            max 0 ((spec.desktop.rows - height) // 2)
+
+        count =
+            max 1 (Array.length spec.buttons)
+
+        buttonsWide =
+            (count * 12) + ((count - 1) * 2)
+
+        firstButton =
+            max 2 ((width - buttonsWide) // 2)
+
+        buttonRow =
+            height - 4
+
+        -- One row of path above the buttons, and the list fills what is left.
+        pathRow =
+            buttonRow - 2
+
+        placed =
+            Array.indexedMap
+                (\index button ->
+                    let
+                        x =
+                            firstButton + (index * 14)
+                    in
+                    Button
+                        { id = spec.id ++ "-" ++ button.cmd
+                        , rect = { x1 = x, y1 = buttonRow, x2 = x + 12, y2 = buttonRow + 2 }
+                        , title = button.title
+                        , cmd = button.cmd
+                        , isDefault = index == 0
+                        , takesFocus = True
+                        }
+                )
+                spec.buttons
+    in
+    { id = spec.id
+    , title = spec.title
+    , rect = { x1 = left, y1 = top, x2 = left + width, y2 = top + height }
+    , views =
+        Array.append
+            [ InputLine
+                { id = "fileName"
+                , rect = { x1 = 3, y1 = 2, x2 = width - 3, y2 = 3 }
+                , maxLen = 255
+                , value = spec.name
+                }
+            -- After the field it names, which is what a label requires.
+            , Label
+                { id = "fileNameLabel"
+                , rect = { x1 = 3, y1 = 1, x2 = 12, y2 = 2 }
+                , text = "~N~ame"
+                , for = "fileName"
+                }
+            , ListBox
+                { id = "fileList"
+                , rect = { x1 = 3, y1 = 4, x2 = width - 5, y2 = pathRow }
+                , items = spec.entries
+                , focused = 0
+                }
+            , StaticText
+                { id = "filePath"
+                , rect = { x1 = 3, y1 = pathRow, x2 = width - 3, y2 = pathRow + 1 }
+                , text = spec.path
+                }
+            ]
             placed
     }
 
