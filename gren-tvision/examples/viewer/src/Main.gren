@@ -1,0 +1,318 @@
+port module Main exposing (main)
+
+{-| tvdemo's file viewer (`tvision/examples/tvdemo/fileview.cpp`), in Gren:
+`File | Open`, without the file dialog.
+
+`TFileViewer` is a `TScroller` -- a view that owns a `delta`, is told its
+`limit`, and gets `scrollDraw()` called when either scroll bar moves. Its
+`draw()` then paints the slice at `delta`. All of that is one idea: *which part
+of the content is on screen*, kept inside the view because the view is the only
+thing that can redraw quickly.
+
+A model that re-renders keeps it in the model. `top` and `left` are two fields;
+the visible lines are a slice; and the two scroll bars are ordinary views whose
+`value` the model both reads and writes. There is nothing left for a
+`TScroller` to be. It is the same conclusion `examples/dir` reached about
+`TOutline`, and it arrived faster the second time.
+
+What is genuinely new here is the horizontal scroll bar. `mouse` has one in a
+dialog, where it is a slider; this is one doing the job it was named for, and
+the two are the same view -- which way a scroll bar points is decided by its
+rectangle, not by a field.
+
+Run it on a file: `run.sh viewer path/to/file`, or with no argument on this
+example's own source.
+
+-}
+
+import Array exposing (Array)
+import Bytes
+import FileSystem
+import FileSystem.Path as Path exposing (Path)
+import Init
+import Json.Decode as Decode
+import Json.Encode as Encode
+import Math
+import Node
+import String
+import Task
+import Tui exposing (Event(..), Hue(..), MenuItem(..), View(..))
+
+
+-- PORTS
+
+
+port tuiOut : Encode.Value -> Cmd msg
+
+
+port tuiIn : (Decode.Value -> msg) -> Sub msg
+
+
+tui : Tui.Ports Msg
+tui =
+    { toJs = tuiOut, fromJs = tuiIn }
+
+
+-- MODEL
+
+
+type alias Model =
+    { name : String
+    , lines : Array String
+    , widest : Int
+    , top : Int
+    , left : Int
+    , error : Maybe String
+    }
+
+
+type Msg
+    = Loaded { name : String, body : String }
+    | Failed String
+    | FromTui Event
+
+
+{-| The window is 76 by 20, its interior two columns and one row in from that,
+and the two scroll bars take a row and a column of what is left.
+-}
+height : Int
+height =
+    16
+
+
+width : Int
+width =
+    70
+
+
+init : Node.Environment -> Init.Task { model : Model, command : Cmd Msg }
+init env =
+    Init.await FileSystem.initialize <| \permission ->
+        let
+            path =
+                chosenPath env.args
+        in
+        Node.startProgram
+            { model =
+                { name = Path.toPosixString path
+                , lines = []
+                , widest = 1
+                , top = 0
+                , left = 0
+                , error = Nothing
+                }
+            , command =
+                FileSystem.readFile permission path
+                    |> Task.map (\bytes -> Maybe.withDefault "" (Bytes.toString bytes))
+                    |> Task.attempt
+                        (\result ->
+                            when result is
+                                Ok body ->
+                                    Loaded { name = Path.toPosixString path, body = body }
+
+                                Err error ->
+                                    Failed (FileSystem.errorToString error)
+                        )
+            }
+
+
+chosenPath : Array String -> Path
+chosenPath args =
+    args
+        |> Array.dropFirst 3
+        |> Array.findFirst (\arg -> not (String.startsWith "-" arg))
+        |> Maybe.map (\found -> Path.fromPosixString found.value)
+        |> Maybe.withDefault (Path.fromPosixString "src/Main.gren")
+
+
+-- UPDATE
+
+
+update : Msg -> Model -> { model : Model, command : Cmd Msg }
+update msg model =
+    when msg is
+        Loaded it ->
+            let
+                body =
+                    String.lines it.body
+            in
+            { model =
+                { model
+                    | name = it.name
+                    , lines = body
+                    , widest = Array.foldl (\line so -> max so (String.count line)) 1 body
+                }
+            , command = Cmd.none
+            }
+
+        Failed message ->
+            { model = { model | error = Just message }, command = Cmd.none }
+
+        FromTui event ->
+            { model = handleEvent event model, command = Cmd.none }
+
+
+handleEvent : Event -> Model -> Model
+handleEvent event model =
+    when event is
+        -- Both bars land here, told apart by the id that moved. `value` is the
+        -- same number the model already keeps, which is why nothing has to be
+        -- translated in either direction.
+        Scrolled bar ->
+            if bar.id == "down" then
+                { model | top = bar.value }
+
+            else
+                { model | left = bar.value }
+
+        KeyPressed pressed ->
+            when pressed.key is
+                "Up" ->
+                    scrollBy 0 -1 model
+
+                "Down" ->
+                    scrollBy 0 1 model
+
+                "Left" ->
+                    scrollBy -1 0 model
+
+                "Right" ->
+                    scrollBy 1 0 model
+
+                "PgUp" ->
+                    scrollBy 0 -height model
+
+                "PgDn" ->
+                    scrollBy 0 height model
+
+                "Home" ->
+                    { model | top = 0, left = 0 }
+
+                "End" ->
+                    { model | top = lastLine model, left = 0 }
+
+                _ ->
+                    model
+
+        _ ->
+            model
+
+
+scrollBy : Int -> Int -> Model -> Model
+scrollBy across down model =
+    { model
+        | top = clamp 0 (lastLine model) (model.top + down)
+        , left = clamp 0 (max 0 (model.widest - width)) (model.left + across)
+    }
+
+
+lastLine : Model -> Int
+lastLine model =
+    max 0 (Array.length model.lines - height)
+
+
+-- VIEW
+
+
+view : Model -> Tui.Ui
+view model =
+    { menuBar =
+        [ SubMenu
+            { title = "~F~ile"
+            , key = "Alt-F"
+            , items = [ Item { title = "E~x~it", cmd = "quit", key = "Alt-X", shortcut = "Alt-X" } ]
+            }
+        ]
+    , statusLine =
+        [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
+        , { text = "Arrows, PgUp/PgDn, Home/End scroll", key = "", cmd = "" }
+        , { text = "", key = "F10", cmd = "menu" }
+        ]
+    , windows = [ viewerWindow model ]
+    }
+
+
+viewerWindow : Model -> Tui.Window
+viewerWindow model =
+    { id = "viewWin"
+    , title = model.name
+    , rect = { x1 = 1, y1 = 1, x2 = 77, y2 = 21 }
+    , views =
+        [ Canvas
+            { id = "text"
+            , rect = { x1 = 2, y1 = 1, x2 = 2 + width, y2 = 1 + height }
+            , lines = visible model
+            , cursor = Nothing
+            -- It takes focus so that the arrow keys reach the model. The
+            -- scroll bars would take them otherwise, which would work -- but
+            -- only while one of the two had the caret.
+            , takesFocus = True
+            }
+        , Tui.ScrollBar
+            { id = "down"
+            , rect = { x1 = 2 + width, y1 = 1, x2 = 3 + width, y2 = 1 + height }
+            , value = model.top
+            , min = 0
+            , max = lastLine model
+            , pageStep = height
+            , arrowStep = 1
+            }
+        , Tui.ScrollBar
+            { id = "across"
+            , rect = { x1 = 2, y1 = 1 + height, x2 = 2 + width, y2 = 2 + height }
+            , value = model.left
+            , min = 0
+            , max = max 0 (model.widest - width)
+            , pageStep = width
+            , arrowStep = 1
+            }
+        , Tui.StaticText
+            { id = "where"
+            , rect = { x1 = 2, y1 = 2 + height, x2 = 2 + width, y2 = 3 + height }
+            , text = where_ model
+            }
+        ]
+    }
+
+
+{-| The slice at (`top`, `left`), which is the whole of what `TScroller` and its
+`delta` were for.
+-}
+visible : Model -> Array (Array Tui.Span)
+visible model =
+    when model.error is
+        Just message ->
+            [ [ Tui.ink LightRed message ] ]
+
+        Nothing ->
+            model.lines
+                |> Array.dropFirst model.top
+                |> Array.takeFirst height
+                |> Array.map
+                    (\line -> Tui.line (String.slice model.left (model.left + width) line))
+
+
+where_ : Model -> String
+where_ model =
+    "line "
+        ++ String.fromInt (model.top + 1)
+        ++ " of "
+        ++ String.fromInt (Array.length model.lines)
+        ++ "   column "
+        ++ String.fromInt (model.left + 1)
+        ++ "   widest "
+        ++ String.fromInt model.widest
+
+
+-- PROGRAM
+
+
+main : Tui.Program Model Msg
+main =
+    Tui.defineProgram tui
+        { init = init
+        , update = update
+        , subscriptions = \_ -> Sub.none
+        , view = view
+        , onEvent = FromTui
+        }

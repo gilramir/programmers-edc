@@ -1062,3 +1062,97 @@ The binding now makes the bar itself, in the single column immediately to the
 right of the list's own rectangle. That is a rule an author can lay out
 against, it is local to the list, and it costs the two existing examples two
 columns of width to keep the bar exactly where it was.
+
+## Finishing tvdemo
+
+### Every window was a dialog, and dialogs do not tile
+
+`JsWindow` derives from `TDialog` so that a window and a dialog are one class.
+That is a reasonable place to start and it quietly took the window-ness back
+out: `TDialog`'s constructor sets `growMode = 0` and `flags = wfMove |
+wfClose`, so no window this binding made could be zoomed, resized or grown with
+the terminal. Worse, `ofTileable` is set by exactly one class in all of Turbo
+Vision -- `TEditWindow` -- so `Tile` and `Cascade` had nothing to arrange and
+did nothing at all, silently.
+
+A non-modal window now puts all four back: `wfMove | wfGrow | wfClose |
+wfZoom`, `gfGrowAll | gfGrowRel`, `ofTileable`, and a `zoomRect`. Dialogs keep
+`TDialog`'s defaults, which is what makes them dialogs.
+
+The child views do *not* grow with the window, because their rectangles are
+what the model said they are. A tiled window therefore shows a clipped canvas
+rather than a stretched one. That is the honest behaviour for a declarative
+API and it is a known gap, not an oversight: growing a view would put its size
+somewhere the model cannot see, which is the thing this whole binding is
+arranged to avoid.
+
+### `"tile"` and `"cascade"` were documented and not implemented
+
+`Tui`'s docs have listed both as built-in command names since the first commit.
+`CommandRegistry` did not intern either, so they were handed out as ordinary
+user commands: the menu entry drew, the hotkey worked, and the model received
+`Command "tile"` while the desktop sat still.
+
+They were the two to be missed because they are the two `TApplication` handles.
+Everything else on that list belongs to `TProgram`, which is where anyone
+checking would look. `tools/check_consistency.py` now pulls the names out of
+Tui's own documentation and compares them against the table in `tvnode.h`,
+because nothing else can: an unknown name is a *valid* command, and its only
+symptom is that Turbo Vision does not act on it.
+
+### The first click is spent twice
+
+The API documented that the first click on an inactive window is spent
+activating it. `TView::handleEvent` applies the same rule one level down:
+
+    case evMouseDown:
+        if( (state & (sfSelected | sfDisabled)) == 0 && (options & ofSelectable) != 0 )
+            if( !focus() || (options & ofFirstClick) == 0 )
+                { clearEvent(event); return; }
+
+so a control that can take focus and has not got it spends the first click
+taking it. In `examples/viewer` the canvas holds the caret, so the scroll bar
+beside it needs two clicks to move -- which looked exactly like a scroll bar
+that had stopped responding, for about ten minutes.
+
+A view with `takesFocus = False` has no first click to spend, which is one more
+reason to say so where it is true.
+
+### What a Gren event viewer can see, and what it cannot
+
+`TEventViewer` hooks `getEvent` and prints every `TEvent` the application
+receives, mouse moves included. `examples/demo`'s viewer prints what crossed
+the port: a command, a selection, a key that reached a canvas, a dialog's
+answer. Everything Turbo Vision handled on its own -- the click that raised a
+window, the arrow that moved a highlight, `Tile` -- never arrives.
+
+That is the bargain rather than a limitation, and a window that lists what does
+cross the port is a fair way to show where the line is.
+
+### The clock is a status item, and Borland had a reason not to do that
+
+`TClockView` is a view on the *application*, outside the desktop, which this
+API cannot express: `Ui` has a menu bar, a status line and windows, and nothing
+that lives beside them. A status item is close enough for a clock -- an entry
+with an empty command is a hint rather than a button -- except that the status
+line is replaced whole rather than patched, so a clock in it rebuilds the
+status line once a second.
+
+Cheap, and it works. It is also precisely the reason Borland made the clock a
+view, and worth knowing before putting anything larger in there.
+
+### Porting the file viewer: `TScroller` goes the way of `TOutline`
+
+`TFileViewer` is a `TScroller`: a view that owns a `delta`, is told a `limit`,
+and paints the slice at `delta` when `scrollDraw()` says to. All of that is one
+idea -- which part of the content is on screen -- kept inside the view because
+the view is the only thing that can redraw fast enough.
+
+A model that re-renders keeps it in the model: `top` and `left` are two fields,
+the visible lines are a slice, and the scroll bars are ordinary views whose
+`value` the model both reads and writes. It is the same conclusion `tvdir`
+reached about `TOutline`, and it arrived faster the second time.
+
+What is genuinely new is a horizontal scroll bar doing the job it is named for.
+`mouse` has one as a slider; this one scrolls. They are the same view, because
+which way a scroll bar points is decided by its rectangle.

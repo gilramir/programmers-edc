@@ -22,6 +22,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 TUI_GREN = os.path.join(ROOT, "gren-tvision", "src", "Tui.gren")
+TVNODE_H = os.path.join(ROOT, "tvision-node", "src", "tvnode.h")
 DIFF_JS = os.path.join(ROOT, "gren-tvision-runtime", "diff.js")
 TUI_JS = os.path.join(ROOT, "gren-tvision-runtime", "tui.js")
 VIEWS_CC = os.path.join(ROOT, "tvision-node", "src", "views.cc")
@@ -92,6 +93,18 @@ def js_used_callbacks(src):
     return set(re.findall(r"^\s*(on\w+):", block.group(1), re.M)) if block else set()
 
 
+def gren_builtin_commands(src):
+    """The command names Tui's docs promise Turbo Vision handles itself."""
+    block = re.search(r"Built-in command names work here too:(.*?)Turbo\n", src, re.S)
+    return set(re.findall(r'`"(\w+)"`', block.group(1))) if block else set()
+
+
+def cc_builtin_commands(src):
+    """The ones CommandRegistry::reset actually interns."""
+    block = re.search(r"builtins\[\] = \{(.*?)\};", src, re.S)
+    return set(re.findall(r'\{"(\w+)",\s*cm\w+\}', block.group(1))) if block else set()
+
+
 def gren_event_kinds(src):
     # eventDecoder is the last thing in the file, so this runs to the end.
     block = re.search(r"eventDecoder =\n(.*)", src, re.S)
@@ -132,6 +145,7 @@ def main():
     views_cc = read(VIEWS_CC)
     app_cc = read(APP_CC)
     index_js = read(INDEX_JS)
+    tvnode_h = read(TVNODE_H)
 
     variants = gren_view_variants(tui_gren)
     encoded = gren_encoder_types(tui_gren)
@@ -198,7 +212,20 @@ def main():
     for name in accepted - used:
         notes.append(f"the binding offers {name}, the Gren runtime does not use it")
 
-    # 8. One protocol number, two languages.
+    # 8. Built-in command names. A name the registry does not know is not an
+    #    error anywhere: it is interned as an ordinary user command, the menu
+    #    entry draws, and "tile" arrives in the model as an event instead of
+    #    tiling the desktop. Exactly the kind of silence this file is for.
+    promised = gren_builtin_commands(tui_gren)
+    interned = cc_builtin_commands(tvnode_h)
+    require(promised, "could not find the built-in command list in Tui.gren's docs")
+    require(interned, "could not find CommandRegistry's builtins table in tvnode.h")
+    for name in sorted(promised - interned):
+        problems.append(f"Tui's docs promise the built-in command '{name}', which "
+                        f"CommandRegistry does not intern -- it would be handed out "
+                        f"as an ordinary user command and arrive as an event")
+
+    # 9. One protocol number, two languages.
     gren_protocol = re.search(r"protocolVersion =\n    (\d+)", tui_gren)
     js_protocol = re.search(r"const PROTOCOL = (\d+);", tui_js)
     require(gren_protocol and js_protocol, "could not find the protocol version on both sides")
@@ -207,7 +234,7 @@ def main():
                 f"protocol mismatch: Tui.gren says {gren_protocol.group(1)}, "
                 f"the runtime says {js_protocol.group(1)}")
 
-    # 9. Coverage: what the binding can do that Gren cannot ask for yet.
+    # 10. Coverage: what the binding can do that Gren cannot ask for yet.
     for wire in sorted(built - set(encoded.values())):
         notes.append(f"the binding supports '{wire}', the Gren API does not expose it yet")
 

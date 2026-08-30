@@ -615,6 +615,7 @@ static Napi::Value Window(const Napi::CallbackInfo &info)
 
     JsWindow *win = new JsWindow(getRect(env, spec, "window"),
                                  getString(spec, "title").c_str(), id);
+    win->beWindow();
     g_views.addWindow(id, win);
 
     TView *firstSelectable = nullptr;

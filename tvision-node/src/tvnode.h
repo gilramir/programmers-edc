@@ -81,6 +81,11 @@ public:
             {"resize", cmResize}, {"next", cmNext},     {"prev", cmPrev},
             {"menu", cmMenu},     {"help", cmHelp},     {"ok", cmOK},
             {"cancel", cmCancel}, {"yes", cmYes},       {"no", cmNo},
+            // Handled by TApplication rather than TProgram, which is why they
+            // are easy to leave out: nothing complains, the name is interned
+            // as an ordinary user command, and "tile" arrives in the model as
+            // an event instead of tiling the desktop.
+            {"tile", cmTile},     {"cascade", cmCascade},
         };
         for (auto &b : builtins)
             {
@@ -330,6 +335,20 @@ public:
     ~JsWindow();
 
     virtual void handleEvent(TEvent &event) override;
+
+    // JsWindow derives from TDialog so that a window and a dialog are one
+    // class -- but TDialog's constructor takes the window-ness back out:
+    // growMode = 0, flags = wfMove | wfClose, and ofTileable never set by
+    // anything in Turbo Vision except TEditWindow. A window on the desktop
+    // should zoom, resize, grow with the terminal and take part in Tile and
+    // Cascade, so a non-modal one puts all four back.
+    void beWindow()
+    {
+        flags = wfMove | wfGrow | wfClose | wfZoom;
+        growMode = gfGrowAll | gfGrowRel;
+        options |= ofTileable;
+        zoomRect = getBounds();
+    }
 
     std::string windowId;
 

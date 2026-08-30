@@ -1,0 +1,524 @@
+port module Main exposing (main)
+
+{-| tvdemo's shell (`tvision/examples/tvdemo`), in Gren: the parts of that
+program that are about the *application* rather than about one of the demos
+inside it. Its windows, its `Windows` menu, its event viewer and its clock.
+The demos themselves are `examples/ascii`, `calendar`, `puzzle`, `calc` and
+`mouse`.
+
+Three things are worth pointing at.
+
+**Tile and cascade are Turbo Vision's, not the model's.** `cmTile` and
+`cmCascade` move every window on the desktop, which is exactly the kind of
+thing this API has spent nine examples pulling *into* the model -- and it
+should stay where it is. A window's rectangle is where the model put it until
+the user moves, zooms or tiles it, and after that the model has no opinion:
+`Ui` lists which windows exist, not where they are. Writing them down would
+mean fighting the user for the mouse.
+
+Getting there found a bug. `Tui`'s documentation has promised `"tile"` and
+`"cascade"` as built-in command names since the beginning, and the binding did
+not intern either: they were handed out as ordinary user commands, so `Tile`
+did nothing but send the model an event. `TApplication` handles those two,
+where everything else on that list is `TProgram`'s, which is why they were the
+two to be missed. `tools/check_consistency.py` now cross-checks the list.
+
+**The event viewer sees less than the original's, and that is the design.**
+`TEventViewer` hooks `getEvent` and prints every `TEvent` the application
+receives -- mouse moves included. A Gren model is told what its *views* report:
+a command, a selection, a key that reached a canvas. Everything Turbo Vision
+handled on its own -- the click that raised a window, the arrow that moved a
+highlight, every mouse move -- never crosses the port. That is the whole
+bargain, and a window that lists what does cross it is a fair way to show it.
+
+**The clock is in the status line, and that costs something.** `TClockView` is
+a view on the application, outside the desktop, which this API has no way to
+express. A status item is close enough -- except that the status line is
+replaced whole rather than patched, so a clock in it rebuilds the status line
+once a second. Cheap, but it is precisely the reason Borland made the clock a
+view.
+
+-}
+
+import Array exposing (Array)
+import Init
+import Json.Decode as Decode
+import Json.Encode as Encode
+import Math
+import Node
+import String
+import Task
+import Time
+import Tui exposing (Event(..), Hue(..), MenuItem(..), View(..))
+
+
+-- PORTS
+
+
+port tuiOut : Encode.Value -> Cmd msg
+
+
+port tuiIn : (Decode.Value -> msg) -> Sub msg
+
+
+tui : Tui.Ports Msg
+tui =
+    { toJs = tuiOut, fromJs = tuiIn }
+
+
+-- MODEL
+
+
+type alias Note =
+    { id : Int
+    , body : Array String
+    }
+
+
+type alias Model =
+    { notes : Array Note
+    , nextId : Int
+    , events : Array String
+    , watching : Bool
+    , stopped : Bool
+    , hue : Hue
+    , now : Time.Posix
+    , zone : Time.Zone
+    }
+
+
+type Msg
+    = Tick Time.Posix
+    | GotZone Time.Zone
+    | FromTui Event
+
+
+init : Node.Environment -> Init.Task { model : Model, command : Cmd Msg }
+init _ =
+    Node.startProgram
+        { model =
+            { notes = [ note 1, note 2 ]
+            , nextId = 3
+            , events = []
+            , watching = True
+            , stopped = False
+            , hue = LightCyan
+            , now = Time.millisToPosix 0
+            , zone = Time.utc
+            }
+        , command = Task.perform GotZone Time.here
+        }
+
+
+note : Int -> Note
+note id =
+    { id = id
+    , body =
+        [ "Note " ++ String.fromInt id ++ "."
+        , ""
+        , "Move it, zoom it, tile the"
+        , "desktop -- none of which the"
+        , "model is told about, and none"
+        , "of which it needs to be."
+        ]
+    }
+
+
+-- UPDATE
+
+
+update : Msg -> Model -> { model : Model, command : Cmd Msg }
+update msg model =
+    when msg is
+        GotZone zone ->
+            { model = { model | zone = zone }, command = Cmd.none }
+
+        Tick now ->
+            { model = { model | now = now }, command = Cmd.none }
+
+        FromTui event ->
+            handleEvent event (record event model)
+
+
+{-| Everything the model is told, in the order it was told. The original's
+viewer prints every `TEvent` the application sees; this one can only print what
+crossed the port, which is the point of having it.
+-}
+record : Event -> Model -> Model
+record event model =
+    if model.stopped then
+        model
+
+    else
+        { model | events = Array.takeLast 200 (Array.pushLast (describe event) model.events) }
+
+
+describe : Event -> String
+describe event =
+    when event is
+        Command name ->
+            "Command " ++ name
+
+        Selected it ->
+            "Selected " ++ it.id ++ " #" ++ String.fromInt it.index
+
+        Focused it ->
+            "Focused " ++ it.id ++ " #" ++ String.fromInt it.index
+
+        KeyPressed it ->
+            "KeyPressed " ++ it.id ++ " " ++ it.key
+
+        Clicked it ->
+            "Clicked "
+                ++ it.id
+                ++ " ("
+                ++ String.fromInt it.x
+                ++ ", "
+                ++ String.fromInt it.y
+                ++ ")"
+                ++ (if it.isDouble then
+                        " double"
+
+                    else
+                        ""
+                   )
+
+        Scrolled it ->
+            "Scrolled " ++ it.id ++ " = " ++ String.fromInt it.value
+
+        DialogClosed it ->
+            "DialogClosed " ++ it.id ++ " " ++ it.cmd
+
+        WindowClosed id ->
+            "WindowClosed " ++ id
+
+        Unknown what ->
+            "Unknown " ++ what
+
+
+handleEvent : Event -> Model -> { model : Model, command : Cmd Msg }
+handleEvent event model =
+    when event is
+        Command "new" ->
+            { model =
+                { model
+                    | notes = Array.pushLast (note model.nextId) model.notes
+                    , nextId = model.nextId + 1
+                }
+            , command = Cmd.none
+            }
+
+        Command "events" ->
+            { model = { model | watching = not model.watching }, command = Cmd.none }
+
+        Command "stop" ->
+            { model = { model | stopped = not model.stopped }, command = Cmd.none }
+
+        Command "clear" ->
+            { model = { model | events = [] }, command = Cmd.none }
+
+        Command "about" ->
+            { model = model, command = Tui.dialog tui aboutDialog }
+
+        Command "colours" ->
+            { model = model, command = Tui.dialog tui (coloursDialog model) }
+
+        DialogClosed closed ->
+            if closed.id == "colours" && closed.cmd == "ok" then
+                { model = { model | hue = hueAt (Tui.number "pick" closed.values) }
+                , command = Cmd.none
+                }
+
+            else
+                { model = model, command = Cmd.none }
+
+        -- Windows the user closed from the frame have to leave the model, or
+        -- the next render puts them back. This is the one piece of window
+        -- management the model does have to care about.
+        WindowClosed id ->
+            { model =
+                { model
+                    | notes = Array.keepIf (\it -> windowId it /= id) model.notes
+                    , watching =
+                        if id == "eventWin" then
+                            False
+
+                        else
+                            model.watching
+                }
+            , command = Cmd.none
+            }
+
+        _ ->
+            { model = model, command = Cmd.none }
+
+
+hues : Array { name : String, hue : Hue }
+hues =
+    [ { name = "Light ~c~yan", hue = LightCyan }
+    , { name = "~Y~ellow", hue = Yellow }
+    , { name = "Light ~g~reen", hue = LightGreen }
+    , { name = "Light ~r~ed", hue = LightRed }
+    , { name = "~W~hite", hue = White }
+    ]
+
+
+hueAt : Int -> Hue
+hueAt index =
+    Array.get index hues
+        |> Maybe.map .hue
+        |> Maybe.withDefault LightCyan
+
+
+hueIndex : Hue -> Int
+hueIndex hue =
+    Array.findFirst (\it -> it.hue == hue) hues
+        |> Maybe.map .index
+        |> Maybe.withDefault 0
+
+
+-- SUBSCRIPTIONS
+
+
+subscriptions : Model -> Sub Msg
+subscriptions _ =
+    Time.every 1000 Tick
+
+
+-- VIEW
+
+
+view : Model -> Tui.Ui
+view model =
+    { menuBar =
+        [ SubMenu
+            { title = "~≡~"
+            , key = ""
+            , items =
+                [ Item { title = "~A~bout...", cmd = "about", key = "", shortcut = "" }
+                , Tui.Separator
+                , Item { title = "~E~vent viewer", cmd = "events", key = "Alt-0", shortcut = "Alt-0" }
+                ]
+            }
+        , SubMenu
+            { title = "~F~ile"
+            , key = ""
+            , items =
+                [ Item { title = "~N~ew note", cmd = "new", key = "F2", shortcut = "F2" }
+                , Tui.Separator
+                , Item { title = "E~x~it", cmd = "quit", key = "Alt-X", shortcut = "Alt-X" }
+                ]
+            }
+        -- Every one of these is Turbo Vision's own. They never reach the
+        -- model, which is why the window rectangles in `view` are a starting
+        -- position rather than a running one.
+        , SubMenu
+            { title = "~W~indows"
+            , key = ""
+            , items =
+                [ Item { title = "~R~esize/move", cmd = "resize", key = "Ctrl-F5", shortcut = "Ctrl-F5" }
+                , Item { title = "~Z~oom", cmd = "zoom", key = "F5", shortcut = "F5" }
+                , Item { title = "~N~ext", cmd = "next", key = "F6", shortcut = "F6" }
+                , Item { title = "~C~lose", cmd = "close", key = "Alt-F3", shortcut = "Alt-F3" }
+                , Item { title = "~T~ile", cmd = "tile", key = "", shortcut = "" }
+                , Item { title = "C~a~scade", cmd = "cascade", key = "", shortcut = "" }
+                ]
+            }
+        , SubMenu
+            { title = "~O~ptions"
+            , key = ""
+            , items = [ Item { title = "~C~olours...", cmd = "colours", key = "", shortcut = "" } ]
+            }
+        ]
+    , statusLine =
+        [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
+        , { text = "~F2~ New", key = "F2", cmd = "new" }
+        , { text = "~F5~ Zoom", key = "F5", cmd = "zoom" }
+        , { text = "~F6~ Next", key = "F6", cmd = "next" }
+        , { text = "~Alt-0~ Events", key = "Alt-0", cmd = "events" }
+        -- The clock. A status item is a hint when its command is empty, which
+        -- is what makes this legal; what it costs is a status line rebuilt
+        -- every second, because the status line is replaced whole.
+        , { text = clock model, key = "", cmd = "" }
+        ]
+    , windows =
+        Array.map (noteWindow model) model.notes
+            ++ (if model.watching then
+                    [ eventWindow model ]
+
+                else
+                    []
+               )
+    }
+
+
+clock : Model -> String
+clock model =
+    let
+        two n =
+            String.padLeft 2 '0' (String.fromInt n)
+    in
+    two (Time.toHour model.zone model.now)
+        ++ ":"
+        ++ two (Time.toMinute model.zone model.now)
+        ++ ":"
+        ++ two (Time.toSecond model.zone model.now)
+
+
+windowId : Note -> String
+windowId it =
+    "note" ++ String.fromInt it.id
+
+
+{-| The rectangle is where the window *starts*. Tile, cascade, zoom and a drag
+on the frame all move it afterwards, and none of them tell the model -- which
+is why re-rendering the same rectangle every time does not drag the window back
+where it began. A window's position is Turbo Vision's; which windows exist is
+the model's.
+-}
+noteWindow : Model -> Note -> Tui.Window
+noteWindow model it =
+    let
+        -- Staggered, but kept clear of the event viewer on the right: where a
+        -- window *starts* is the model's only say in the matter.
+        offset =
+            Math.modBy 4 it.id * 3
+    in
+    { id = windowId it
+    , title = "Note " ++ String.fromInt it.id
+    , rect = { x1 = 1 + offset, y1 = 1 + offset, x2 = 31 + offset, y2 = 10 + offset }
+    , views =
+        [ Canvas
+            { id = windowId it ++ "Body"
+            , rect = { x1 = 2, y1 = 1, x2 = 28, y2 = 8 }
+            , lines = Array.map (\line -> [ Tui.ink model.hue line ]) it.body
+            , cursor = Nothing
+            , takesFocus = False
+            }
+        ]
+    }
+
+
+eventWindow : Model -> Tui.Window
+eventWindow model =
+    { id = "eventWin"
+    , title =
+        if model.stopped then
+            "Event Viewer (Stopped)"
+
+        else
+            "Event Viewer"
+    , rect = { x1 = 40, y1 = 1, x2 = 79, y2 = 20 }
+    , views =
+        [ Canvas
+            { id = "eventLog"
+            , rect = { x1 = 2, y1 = 1, x2 = 37, y2 = 15 }
+            , lines =
+                model.events
+                    |> Array.takeLast 15
+                    |> Array.map (\it -> Tui.line (String.slice 0 35 it))
+            , cursor = Nothing
+            , takesFocus = False
+            }
+        , Tui.Button
+            { id = "stopButton"
+            , rect = { x1 = 2, y1 = 16, x2 = 15, y2 = 18 }
+            , title =
+                if model.stopped then
+                    "~S~tart"
+
+                else
+                    "~S~top"
+            , cmd = "stop"
+            , isDefault = False
+            , takesFocus = True
+            }
+        , Tui.Button
+            { id = "clearButton"
+            , rect = { x1 = 17, y1 = 16, x2 = 30, y2 = 18 }
+            , title = "C~l~ear"
+            , cmd = "clear"
+            , isDefault = False
+            , takesFocus = True
+            }
+        ]
+    }
+
+
+aboutDialog : Tui.DialogSpec
+aboutDialog =
+    { id = "about"
+    , title = "About"
+    , rect = { x1 = 16, y1 = 5, x2 = 63, y2 = 17 }
+    , views =
+        [ Tui.StaticText
+            { id = "aboutText"
+            , rect = { x1 = 2, y1 = 1, x2 = 45, y2 = 8 }
+            , text = "\n\u{0003}TURBO VISION DEMO\n \n\u{0003}the shell of it, in Gren\n \n\u{0003}tile and cascade are Turbo Vision's;\n\u{0003}which windows exist is the model's\n"
+            }
+        , Tui.Button
+            { id = "aboutOk"
+            , rect = { x1 = 18, y1 = 9, x2 = 29, y2 = 11 }
+            , title = "OK"
+            , cmd = "ok"
+            , isDefault = True
+            , takesFocus = True
+            }
+        ]
+    }
+
+
+{-| tvdemo's `Colors...` opens a `TColorDialog`, which edits the application's
+palette. There is no equivalent here and there does not need to be: a colour
+dialog is a form, and what it sets is a field. This one is five radio buttons.
+-}
+coloursDialog : Model -> Tui.DialogSpec
+coloursDialog model =
+    { id = "colours"
+    , title = "Colours"
+    , rect = { x1 = 24, y1 = 5, x2 = 56, y2 = 17 }
+    , views =
+        [ Tui.RadioButtons
+            { id = "pick"
+            , rect = { x1 = 3, y1 = 2, x2 = 28, y2 = 7 }
+            , items = Array.map .name hues
+            , selected = hueIndex model.hue
+            }
+        , Tui.Label
+            { id = "pickLabel"
+            , rect = { x1 = 2, y1 = 1, x2 = 20, y2 = 2 }
+            , text = "~N~ote colour"
+            , for = "pick"
+            }
+        , Tui.Button
+            { id = "coloursOk"
+            , rect = { x1 = 4, y1 = 8, x2 = 15, y2 = 10 }
+            , title = "~O~K"
+            , cmd = "ok"
+            , isDefault = True
+            , takesFocus = True
+            }
+        , Tui.Button
+            { id = "coloursCancel"
+            , rect = { x1 = 17, y1 = 8, x2 = 29, y2 = 10 }
+            , title = "Cancel"
+            , cmd = "cancel"
+            , isDefault = False
+            , takesFocus = True
+            }
+        ]
+    }
+
+
+-- PROGRAM
+
+
+main : Tui.Program Model Msg
+main =
+    Tui.defineProgram tui
+        { init = init
+        , update = update
+        , subscriptions = subscriptions
+        , view = view
+        , onEvent = FromTui
+        }

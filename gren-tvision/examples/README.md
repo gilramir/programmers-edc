@@ -21,6 +21,8 @@ Build them all with `../build.sh`, run one with `../run.sh <name>`.
 | `palette` | `tvision/examples/palette` | nothing -- it is the example whose entire subject the port removes, and the write-up says what that costs |
 | `mouse` | `tvision/examples/tvdemo` (mousedlg.cpp) | the scroll bar as a view of its own, `isDouble` on a click, `setDoubleClickDelay`, and `takesFocus` on a canvas |
 | `dir` | `tvision/examples/tvdir` | no widget at all — but it found a real bug in the diff, moved a list box's scroll bar, and is the first example to use the file system |
+| `demo` | `tvision/examples/tvdemo` (the shell) | real windows: zoom, resize, tile and cascade, which every window had silently been unable to do |
+| `viewer` | `tvision/examples/tvdemo` (fileview.cpp) | nothing — `TScroller` went the way of `TOutline`; but it is the first horizontal scroll bar doing its own job |
 
 ## What mmenu changed
 
@@ -218,6 +220,39 @@ directory is read when it is opened, and nothing blocks. It is also the first
 example to use the file system, which is what `init` being a full `Init.Task`
 was for.
 
+## What finishing tvdemo changed
+
+**Every window was a dialog.** `JsWindow` derives from `TDialog`, which sets
+`growMode = 0` and `flags = wfMove | wfClose` — so no window this binding made
+could be zoomed, resized or grown with the terminal, and `ofTileable` (set by
+exactly one class in all of Turbo Vision) was never set at all, so `Tile` and
+`Cascade` had nothing to arrange. A non-modal window now puts all four back.
+
+Their child views still do not grow with the window, because their rectangles
+are what the model said they are. That is a known gap rather than an oversight:
+growing a view would put its size somewhere the model cannot see.
+
+**`"tile"` and `"cascade"` were documented and not implemented.** Both have
+been on `Tui`'s built-in list since the first commit and neither was interned,
+so they arrived in the model as ordinary events while the desktop sat still.
+They are the two `TApplication` handles; everything else on that list is
+`TProgram`'s. `check_consistency.py` now compares the documented list against
+the table in the binding, because an unknown name is a *valid* command and its
+only symptom is that nothing happens.
+
+**The first click is spent twice.** The docs said an inactive window spends the
+first click being activated. `TView` applies the same rule one level down: a
+control that can take focus and has not got it spends the first click taking
+it. A scroll bar beside a focused canvas therefore needs two clicks, which
+looks exactly like a scroll bar that has stopped working.
+
+The other two findings are about where the line is. A Gren event viewer sees
+what crossed the port and nothing Turbo Vision handled itself — which is the
+bargain, and the viewer window is a fair way to show it. And the clock is a
+status item because `TClockView` is a view on the *application* and `Ui` has
+nowhere to put one; it works, at the cost of rebuilding the status line every
+second, which is precisely why Borland made it a view.
+
 ## The C++ examples, triaged
 
 `tvision/examples/` has eight entries. Two of them are not Turbo Vision
@@ -228,7 +263,7 @@ applications at all, and one of them is really eight applications.
 | `hello` | **done** | — |
 | `mmenu` | **done** | it was not about nested menus at all — see above |
 | `palette` | **done** | `examples/palette`; the essay it is written to explain has no Gren equivalent — see above |
-| `tvdemo` | split it up | see below |
+| `tvdemo` | **done** except the help system | `examples/demo` is its shell; the demos inside it are `ascii`, `calendar`, `puzzle`, `calc`, `mouse` and `viewer` |
 | `tvforms` | **done** (the UI half) | see above. Its other half is `.rsc` resource streaming — `opstream`/`ipstream` serialising views to disk — which has no Gren meaning |
 | `tvdir` | **done** | `examples/dir` — and it turned out to need no new widget at all; see above |
 | `tvedit` | a milestone of its own | `TEditor`/`TFileEditor`: a stateful text buffer with undo and clipboard. See the note below |
@@ -243,10 +278,11 @@ applications at all, and one of them is really eight applications.
 | calendar | **done** — `examples/calendar`; it wanted colour, see above |
 | puzzle | **done** — `examples/puzzle` |
 | calculator | **done** — `examples/calc`; it wanted `takesFocus`, see above |
-| event viewer | canvas |
+| event viewer | **done** — part of `examples/demo`; it sees what crosses the port and nothing else |
 | mouse settings | **done** — `examples/mouse`; it wanted the scroll bar, see above |
-| colours | `TColorDialog` — wrap as a command that answers with the chosen palette |
-| tile / cascade | `cmTile` and `cmCascade` are built-in command names already |
+| file viewer | **done** — `examples/viewer`; `TScroller` went the way of `TOutline` |
+| colours | **done** — part of `examples/demo`, as five radio buttons. A colour dialog is a form, and what it sets is a field |
+| tile / cascade | **done** — part of `examples/demo`. They were built-in command *names* and not built-in commands; see above |
 | help | `.hlp` files compiled by `tvhc`. Reimplementing help as ordinary windows from the model is a better use of the time than porting a binary format |
 
 ### The two genuinely hard ones
@@ -263,10 +299,17 @@ tightened later if the naive version turns out to be fast enough.
 Porting the compiler buys nothing a Gren program wants; help screens are just
 windows.
 
-## After that
+## Where that leaves it
 
-When the C++ examples run out, the coverage gaps left are roughly: the
-standard file and directory dialogs, and validators on input lines.
+Every C++ example is ported except `tvedit`, and everything in `tvdemo` except
+the help system. `tvhc` and `avscolor` are not Turbo Vision applications.
+
+`tvedit` is the one left, and it is a milestone rather than a port — see the
+note above. Nothing else in the list is blocked on it.
+
+The coverage gaps left are: the standard file and directory dialogs,
+validators on input lines, a view on the application rather than the desktop
+(`TClockView`'s slot), and child views that grow with their window.
 
 One gap is worth naming on its own, because `forms` walked right up to it: **a
 cluster or an input line in a plain window holds state the model never sees.**
