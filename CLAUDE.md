@@ -12,9 +12,20 @@ what is left).
 
 ```sh
 devbox run check      # ~5s, no terminal. Run it constantly.
-devbox run test       # the above plus every pty driver
-devbox run test:asan  # the same drivers under AddressSanitizer
+devbox run test       # the above plus every pty driver -- ~35s
+devbox run test:asan  # the same drivers under AddressSanitizer -- ~1m
 devbox run gren -- <example> [args]
+```
+
+The pty drivers run several at a time, through `tools/run_tests.py`. They are
+almost entirely asleep -- typing at a pty and waiting for a repaint -- so
+running them in parallel took the suite from three and a half minutes to about
+thirty seconds, and the wall clock is now the slowest single driver. That
+script can also be run directly, which is what to do while working on one:
+
+```sh
+devbox run -- python3 tools/run_tests.py entries   # just this one
+devbox run -- python3 tools/run_tests.py -j1       # one at a time
 ```
 
 `check` and `test` must both be green before a commit, and `test:asan` too for
@@ -39,8 +50,9 @@ port, write up what it forced in **both** `examples/README.md` and `FINDINGS.md`
 before moving on: the reason a design is the way it is stops being recoverable
 within a day.
 
-Every example is also a pty test (`gren-tvision/test/drive_<name>.py`) and is
-registered in `devbox.json`'s `test` and `test:asan` lists.
+Every example is also a pty test (`gren-tvision/test/drive_<name>.py`). There is
+no list to add it to: `tools/run_tests.py` treats every `test/drive*.py` under
+`tvision-node` and `gren-tvision` as a suite, so writing the file is enough.
 
 ## Git
 
