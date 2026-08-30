@@ -107,6 +107,7 @@ type alias Model =
     , status : String
     , desktop : { cols : Int, rows : Int }
     , browsing : Maybe Browse
+    , recent : Array String
     }
 
 
@@ -136,6 +137,7 @@ init env =
                 , status = "reading..."
                 , desktop = { cols = 80, rows = 23 }
                 , browsing = Nothing
+                , recent = []
                 }
             , command =
                 when startingPath env.args is
@@ -393,6 +395,12 @@ update msg model =
                         , path = Path.toPosixString browsing.path
                         , name = ""
                         , entries = Array.map .name browsing.entries
+                        -- Everywhere Chdir has actually been, newest first.
+                        -- TChDirDialog has this too and keeps it in a buffer
+                        -- shared by the whole program; here it is a field on
+                        -- the model, which is why it can be a *path* list
+                        -- rather than whatever else was typed today.
+                        , history = model.recent
                         -- Three buttons, and only because three of the four
                         -- names that close a modal were free. "Open" walks
                         -- into a directory without leaving the dialog, which
@@ -481,10 +489,25 @@ handleEvent event model =
 
                 Just browsing ->
                     let
-                        chosen =
+                        highlighted =
                             Array.get (Tui.number "fileList" closed.values) browsing.entries
                                 |> Maybe.map .path
                                 |> Maybe.withDefault browsing.path
+
+                        -- The field wins when there is anything in it, which
+                        -- is what TChDirDialog does and the only thing that
+                        -- makes the history drop-down mean anything: what it
+                        -- puts back is a path, and a path is not a row of the
+                        -- list beside it.
+                        typed =
+                            Tui.text "fileName" closed.values
+
+                        chosen =
+                            if typed == "" then
+                                highlighted
+
+                            else
+                                Path.fromPosixString typed
                     in
                     if closed.cmd == "yes" then
                         -- Walk into it. A dialog is not part of `view` and
@@ -494,7 +517,11 @@ handleEvent event model =
                         { model = model, command = browse model chosen }
 
                     else if closed.cmd == "ok" then
-                        { model = { model | browsing = Nothing }
+                        { model =
+                            { model
+                                | browsing = Nothing
+                                , recent = remember (Path.toPosixString chosen) model.recent
+                            }
                         , command = Task.perform Started (Task.succeed chosen)
                         }
 
@@ -503,6 +530,19 @@ handleEvent event model =
 
         _ ->
             { model = model, command = Cmd.none }
+
+
+{-| Newest first, no duplicates, and eight of them. Turbo Vision's history
+block does the same three things to whatever is put in it; the difference is
+that this one is a value in the model, so it could be written to a file and
+read back at startup, which Borland's never could.
+-}
+remember : String -> Array String -> Array String
+remember entry recent =
+    recent
+        |> Array.keepIf (\it -> it /= entry)
+        |> Array.pushFirst entry
+        |> Array.takeFirst 8
 
 
 {-| Where the tree is rooted, which is where Change Dir starts from.

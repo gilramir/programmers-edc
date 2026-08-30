@@ -180,6 +180,31 @@ def resizes(check):
         app.kill()
 
 
+def arrow(app):
+    """Where the filter box's history arrow is, 1-based for Pty.click."""
+    for row, line in enumerate(app.render().split("\n")):
+        col = line.find("\u2590\u2193\u258c")
+        if col >= 0:
+            return (col + 2, row + 1)
+    return None
+
+
+def dropdown(app, at):
+    """The rows of the open history drop-down, given where its arrow is.
+
+    It opens one row above the field and one column left of it, so its top
+    frame is the row above the arrow -- and it is the innermost box there,
+    hence the rindex.
+    """
+    screen = app.render().split("\n")
+    top = at[1] - 2
+    left = screen[top].rindex("\u2554")
+    right = screen[top].index("\u2557", left)
+    return [row for row in
+            (screen[r][left + 1:right].strip() for r in range(top + 1, top + 7))
+            if row]
+
+
 def main():
     check = Checks()
     env = dict(os.environ, TERM="xterm-256color")
@@ -302,6 +327,71 @@ def main():
 
     app.send(b"\x7f", settle=1.2)
     check("and emptying the box brings the whole list back",
+          "Entries (4)" in app.render(), app.render())
+
+    # 8b. The history drop-down on that same filter box.
+    #
+    #     Turbo Vision keeps this list in one buffer shared by the whole
+    #     program and adds to it behind the program's back, on focus loss.
+    #     Here it is a field on the model that only `update` writes to, and
+    #     what `update` writes is "a filter you actually chose something out
+    #     of" -- a rule no history block could express.
+    #
+    #     Two things are being driven here that the Change Dir dialog cannot
+    #     drive. Appending to the list is a *patch*: the window keeps its
+    #     caret, its highlight and its selection caption across it, which a
+    #     rebuild would take. And the clock keeps ticking while the drop-down
+    #     is open, which is the whole reason it is not a nested event loop --
+    #     `THistory::handleEvent` calls `owner->execView()`, and doing that
+    #     here would stop Node's loop dead for as long as the list was up.
+    app.send(b"e", settle=1.2)
+    app.send(b"\t", settle=0.6)
+    app.send(b" ", settle=1.0)
+    check("choosing from a filtered list is what remembers the filter",
+          "Selected: Gren" in app.render(), app.render())
+
+    app.send(b"\x1b[Z", settle=0.6)
+    app.send(b"\x7f", settle=0.8)
+    app.send(b"n", settle=1.0)
+    app.send(b"\t", settle=0.6)
+    app.send(b" ", settle=1.0)
+    app.send(b"\x1b[Z", settle=0.6)
+    check("a second filter, and a second thing chosen out of it",
+          "Entries (3)" in app.render() and "Selected: Turbo Vision" in app.render(),
+          app.render())
+
+    at = arrow(app)
+    check("the filter box has a history arrow beside it", at is not None,
+          app.render())
+    app.click(at[0], at[1], settle=1.2)
+    check("it drops down the filters that found something, newest first",
+          dropdown(app, at) == ["n", "e"], str(dropdown(app, at)))
+
+    # The claim the whole design of this widget rests on.
+    ticks_before = latest_int(app.render(), TICKS)
+    app.pump(3.2)
+    ticks_after = latest_int(app.render(), TICKS)
+    check("Gren keeps running behind the drop-down too",
+          ticks_after > ticks_before, f"ticks stuck at {ticks_before}")
+
+    # And choosing one is a Changed event on the *field*: the drop-down has no
+    # event of its own, because what happened is that the field's value moved.
+    app.send(b"\x1b[B", settle=0.5)
+    app.send(b"\r", settle=1.2)
+    picked = app.render()
+    check("choosing an entry refilters the list through the model",
+          "Entries (2)" in picked and "Gren" in picked and "Elm" in picked
+          and "Borland" not in picked, picked)
+    check("and the window kept the selection it had all along",
+          "Selected: Turbo Vision" in picked, picked)
+
+    # One backspace empties the whole field, where one backspace above deleted
+    # a single character. That is not an inconsistency: an entry chosen out of
+    # the history arrives *selected*, exactly as Borland leaves it, because the
+    # next thing typed is meant to replace it. A value the model set never is,
+    # for the opposite reason.
+    app.send(b"\x7f", settle=1.2)
+    check("a history pick arrives selected, so one backspace clears it",
           "Entries (4)" in app.render(), app.render())
 
     # 9. The other half of the same mechanism, and the half the model is not

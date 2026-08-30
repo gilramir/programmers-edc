@@ -363,6 +363,21 @@ type alias Window =
     for the same reason.
   - `InputLine` -- a text field. `value` is written to the field only when it
     changes *in the model*, so it never overwrites what the user is typing.
+  - `History` -- the `\u{25BC}` drop-down beside an input line, holding what was
+    typed into it before. It has no rectangle: it occupies the three columns
+    immediately to the **right** of the field it names, which is where Turbo
+    Vision puts every one of them, so leave three. **List the field before its
+    history**, as with a `Label`. Clicking the arrow -- or pressing `Down` in
+    the field -- opens a list of `items`; choosing one puts it in the field and
+    arrives as an ordinary [`Changed`](#Event) event *on the field*, because
+    that is what happened.
+
+    `items` is the model's array and nothing else writes to it. Turbo Vision
+    remembers the field for you, in one buffer shared by the whole program;
+    here nothing is remembered until the model decides to remember it, which
+    is usually one `Array.pushFirst` when a dialog is answered. That also
+    means the list survives a restart if the model saves it, which Turbo
+    Vision's never did.
   - `ListBox` -- gets a scroll bar of its own, in the single column
     immediately to the **right** of its rectangle, so leave one. (Turbo Vision
     puts it on the window's frame, which is right for a window that is a list
@@ -407,7 +422,7 @@ changes size. See [`Grow`](#Grow).
         }
 
 It is opt-in because most views do not want it, and a wrapper rather than a
-field on all nine records so that a view that does not care says nothing at
+field on all ten records so that a view that does not care says nothing at
 all. It takes a record because a Gren variant takes at most one argument, which
 is also what makes it look like every other constructor here. It encodes as a field on the view it wraps, so nothing downstream has a
 `Grows` to handle. Wrapping a wrapper is legal and the outer one wins.
@@ -428,6 +443,7 @@ type View
     = StaticText { id : String, rect : Rect, text : String }
     | Button { id : String, rect : Rect, title : String, cmd : String, isDefault : Bool, takesFocus : Bool }
     | InputLine { id : String, rect : Rect, maxLen : Int, value : String }
+    | History { id : String, for : String, items : Array String }
     | ListBox { id : String, rect : Rect, items : Array String, focused : Int }
     | CheckBoxes { id : String, rect : Rect, items : Array String, checked : Array Bool }
     | RadioButtons { id : String, rect : Rect, items : Array String, selected : Int }
@@ -865,6 +881,7 @@ to [`dialog`](#dialog).
             , path = Path.toPosixString model.here
             , name = ""
             , entries = Array.pushFirst ".." model.subdirectories
+            , history = model.recentPaths
             , buttons = Tui.okCancelButtons
             , desktop = model.desktop
             }
@@ -886,7 +903,13 @@ are the point:
 
 Those two ids are fixed rather than derived from `id`, because only one modal
 dialog can be open at a time and a name you can write down beats a name you
-have to construct. Do not give a view in an open *window* either of them.
+have to construct. Do not give a view in an open *window* either of them. The
+drop-down beside the field is `"fileHistory"` under the same rule.
+
+`history` is what the field remembers, and the model is the only thing that
+puts anything in it -- see [`View`](#View). Pass `[]` for a dialog that
+remembers nothing; the arrow is still drawn, exactly as it is on the first run
+of a Turbo Vision program.
 
 **Navigating is the caller's job, and it is a reopen.** A dialog is a `Cmd`
 that produces a `Msg`; it is not part of `view` and nothing patches it while it
@@ -903,6 +926,7 @@ fileDialog :
     , path : String
     , name : String
     , entries : Array String
+    , history : Array String
     , buttons : Array MessageButton
     , desktop : { cols : Int, rows : Int }
     }
@@ -961,10 +985,17 @@ fileDialog spec =
     , views =
         Array.append
             [ InputLine
+                -- Three columns short of where it would otherwise end,
+                -- because the history drop-down goes in them.
                 { id = "fileName"
-                , rect = { x1 = 3, y1 = 2, x2 = width - 3, y2 = 3 }
+                , rect = { x1 = 3, y1 = 2, x2 = width - 6, y2 = 3 }
                 , maxLen = 255
                 , value = spec.name
+                }
+            , History
+                { id = "fileHistory"
+                , for = "fileName"
+                , items = spec.history
                 }
             -- After the field it names, which is what a label requires.
             , Label
@@ -1277,6 +1308,13 @@ encodeViewFields view =
             , { key = "rect", value = encodeRect v.rect }
             , { key = "maxLen", value = Encode.int v.maxLen }
             , { key = "value", value = Encode.string v.value }
+            ]
+
+        History v ->
+            [ { key = "type", value = Encode.string "history" }
+            , { key = "id", value = Encode.string v.id }
+            , { key = "for", value = Encode.string v.for }
+            , { key = "items", value = Encode.array Encode.string v.items }
             ]
 
         ListBox v ->

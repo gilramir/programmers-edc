@@ -16,6 +16,7 @@
 const MUTABLE = {
   staticText: ['text'],
   inputLine: ['value'],
+  history: ['items'],
   listBox: ['items', 'focused'],
   canvas: ['lines', 'cursorAt'],
   checkBoxes: ['value'],
@@ -72,6 +73,16 @@ function createDiffer(tv, onClosed = () => {}) {
         break;
       case 'inputLine':
         if (before.value !== after.value) tv.setValue(after.id, after.value);
+        break;
+      case 'history':
+        // Nothing on screen changes: the drop-down reads the list when it
+        // opens, and the arrow beside the field looks the same whatever is
+        // behind it. Patching it rather than treating it as structural is
+        // still what keeps a model that appends to its history from rebuilding
+        // the window -- and so from closing the dialog the field is in.
+        if (JSON.stringify(before.items) !== JSON.stringify(after.items)) {
+          tv.setItems(after.id, after.items);
+        }
         break;
       case 'listBox': {
         const rebuilt = JSON.stringify(before.items) !== JSON.stringify(after.items);

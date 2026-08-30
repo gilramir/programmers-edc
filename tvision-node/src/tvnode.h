@@ -38,8 +38,12 @@
 #define Uses_TSubMenu
 #define Uses_TFrame
 #define Uses_TWindow
+#define Uses_THistory
+#define Uses_THistoryViewer
+#define Uses_THistoryWindow
 #include <tvision/tv.h>
 
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -257,6 +261,86 @@ public:
 
 private:
     std::string viewId;
+};
+
+// The drop-down beside an input line -- the list in the model's hands, and the
+// pop-up driven by the pump rather than by a nested loop.
+//
+// Two things about THistory have to be taken back out of it before it can be a
+// view in this API, and both are in the classes below.
+//
+// The list. Turbo Vision keeps history in one process-wide buffer:
+// historyAdd() and historyStr() (histlist.cpp) read and write a single fixed
+// block, keyed by a uchar, shared by every field in the program, and silently
+// dropping the oldest entries when it fills. None of that is reachable from a
+// Gren model -- it cannot see the list, bound it, or save it between runs --
+// so none of it is used. The items arrive with the render the way a list box's
+// do, JsHistoryViewer::getText reads that vector, and recordHistory() is
+// overridden to do nothing at all. The widget shows the list; the model
+// decides what goes into it.
+//
+// The loop. THistory::handleEvent calls owner->execView(), which is the one
+// thing this binding does not do anywhere else: a nested event loop would
+// block Node's for as long as the drop-down is open, stopping every timer,
+// promise and subscription the program has. So the open path is written out
+// here without that line, and the pop-up is pushed onto the same modal stack
+// tv.dialog() uses -- see openLocalModal.
+class JsHistoryViewer : public THistoryViewer {
+public:
+    JsHistoryViewer(const TRect &bounds, TScrollBar *hScroll,
+                    TScrollBar *vScroll,
+                    const std::vector<std::string> &theItems) noexcept;
+
+    virtual void getText(char *dest, short item, short maxLen) override;
+
+private:
+    std::vector<std::string> items;
+};
+
+class JsHistoryWindow : public THistoryWindow {
+public:
+    explicit JsHistoryWindow(const TRect &bounds) noexcept;
+
+    // THistoryWindow builds its viewer through a function pointer held in the
+    // virtually-inherited THistInit, which is precisely so that a subclass can
+    // supply its own. Borland's signature is the only awkward part: a ushort
+    // history id and nothing else, so the items travel in the file-static
+    // below rather than through the argument list.
+    static TListViewer *initViewer(TRect r, TWindow *win, ushort historyId);
+};
+
+class JsHistory : public THistory {
+public:
+    JsHistory(const TRect &bounds, TInputLine *aLink, std::string id,
+              std::string linkId) noexcept
+        : THistory(bounds, aLink, 0), viewId(std::move(id)),
+          linkViewId(std::move(linkId))
+    {
+    }
+
+    virtual void handleEvent(TEvent &event) override;
+
+    // The model owns the list, so there is nothing to record. THistory calls
+    // this when the field loses focus and again when the drop-down opens.
+    virtual void recordHistory(const char *) override {}
+
+    void setItems(std::vector<std::string> newItems)
+    {
+        items = std::move(newItems);
+    }
+
+    const std::vector<std::string> &getItems() const { return items; }
+
+    // Called when the pop-up closes, from the modal stack rather than from
+    // inside handleEvent.
+    void takeSelection(THistoryWindow *window, ushort result);
+
+private:
+    void openDropDown();
+
+    std::vector<std::string> items;
+    std::string viewId;
+    std::string linkViewId;
 };
 
 // TCluster keeps its state in a protected `value`, so reading and writing a
@@ -554,6 +638,11 @@ void applyCursors(const Napi::Env &env, const Napi::Value &items);
 
 // Values of every addressable input inside a window, as {id: value}.
 Napi::Object collectValues(const Napi::Env &env, const std::string &windowId);
+
+// Push a view onto the modal stack with a C++ continuation instead of a
+// promise -- see the note beside the definition, and JsHistory.
+void openLocalModal(TGroup *host, TView *view,
+                    std::function<void(TView *, ushort)> done);
 
 void registerViewApi(Napi::Env env, Napi::Object exports);
 

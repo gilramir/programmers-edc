@@ -131,14 +131,16 @@ bool g_quitRequested = false;
 // application's. Modality is preserved (input goes only to the top modal view)
 // and Node's event loop never stops.
 struct ModalSession {
-    explicit ModalSession(Napi::Env env)
-        : deferred(Napi::Promise::Deferred::New(env))
-    {
-    }
-
     TView *view = nullptr;
     TGroup *host = nullptr;
     std::string id;
+
+    // Set for a modal a *view* opened rather than the model: a history
+    // drop-down, and anything else a wrapped widget pops up for itself. When
+    // it is set the session has no promise to resolve and no fields to
+    // collect -- the callback is the whole result, and it runs while the view
+    // is still alive.
+    std::function<void(TView *, ushort)> onDone;
 
     // Saved by beginModal, restored by finishModal -- the same set execView
     // saves and restores.
@@ -148,7 +150,10 @@ struct ModalSession {
     TView *saveCurrent = nullptr;
     TCommandSet saveCommands;
 
-    Napi::Promise::Deferred deferred;
+    // Set for a dialog the model opened, and null for a drop-down a view
+    // opened: those two are the only ways onto this stack, and exactly one of
+    // `deferred` and `onDone` is set on any session.
+    std::unique_ptr<Napi::Promise::Deferred> deferred;
 };
 
 // A stack: a dialog opened from a dialog is ordinary.
@@ -695,9 +700,37 @@ static void closeTopModal(const Napi::Env &env, ushort result)
     g_modals.pop_back();
 
     finishModal(*s);
+    if (s->onDone)
+        {
+        s->onDone(s->view, result);
+        TObject::destroy(s->view);
+        return;
+        }
     Napi::Object out = modalResult(env, s->id, result);
     TObject::destroy(s->view);   // ~JsWindow unregisters the ids
-    s->deferred.Resolve(out);
+    s->deferred->Resolve(out);
+}
+
+// A modal opened from C++, by a view, with a C++ continuation.
+//
+// tv.dialog() is the model asking for a modal and being answered with a
+// promise. This is the other caller: THistory wants to put a list over the
+// field it belongs to and be told what was picked, and the alternative --
+// TGroup::execView, which is what Turbo Vision itself does -- runs a nested
+// event loop inside the pump's own handleEvent call. That would stop Node's
+// loop dead for as long as the drop-down was open: no timers, no promises, no
+// subscriptions, no renders. Reusing the stack keeps the one property the
+// whole modal design is for, which is that modal means "input goes here" and
+// never "the process stops".
+void openLocalModal(TGroup *host, TView *view,
+                    std::function<void(TView *, ushort)> done)
+{
+    auto session = std::make_unique<ModalSession>();
+    session->view = view;
+    session->host = host;
+    session->onDone = std::move(done);
+    beginModal(*session);
+    g_modals.push_back(std::move(session));
 }
 
 /* ------------------------------------------------------------------ */
@@ -760,7 +793,8 @@ static void teardown(const Napi::Env &env)
     // Settle any dialog still open so its awaiter is not left hanging. The
     // views themselves belong to the desktop and go with the application.
     for (auto it = g_modals.rbegin(); it != g_modals.rend(); ++it)
-        (*it)->deferred.Resolve(modalResult(env, (*it)->id, 0));
+        if ((*it)->deferred)
+            (*it)->deferred->Resolve(modalResult(env, (*it)->id, 0));
     g_modals.clear();
     g_closedWindows.clear();
     g_focusNotes.clear();
@@ -958,7 +992,9 @@ static Napi::Value Dialog(const Napi::CallbackInfo &info)
     if (g_views.has(id))
         throw Napi::Error::New(env, "tvision: id '" + id + "' is already in use");
 
-    auto session = std::make_unique<ModalSession>(env);
+    auto session = std::make_unique<ModalSession>();
+    session->deferred =
+        std::make_unique<Napi::Promise::Deferred>(Napi::Promise::Deferred::New(env));
     session->host = TProgram::deskTop;
     session->id = id;
 
@@ -983,7 +1019,7 @@ static Napi::Value Dialog(const Napi::CallbackInfo &info)
     beginModal(*session);
     applyInitialFocus(spec, firstSelectable);
     applyCursors(env, spec.Get("items"));
-    Napi::Promise promise = session->deferred.Promise();
+    Napi::Promise promise = session->deferred->Promise();
     g_modals.push_back(std::move(session));
     return promise;
 }

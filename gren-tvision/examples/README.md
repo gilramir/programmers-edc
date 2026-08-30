@@ -12,7 +12,7 @@ Build them all with `../build.sh`, run one with `../run.sh <name>`.
 |---|---|---|
 | `hello` | `tvision/hello.cpp` | menus, status line, modal dialog as a `Cmd`, dialog result as a `Msg` |
 | `mmenu` | `tvision/examples/mmenu` | a menu bar that changes at runtime, and menu bar entries that are commands rather than pull-downs |
-| `entries` | *(ours)* | list boxes, `Time.every` behind a modal dialog, `WindowClosed`, mutable window titles — and later `Tui.focus`, because "show me that window" is the thing a description of the UI cannot say, `Resized`, because it is the first example that does not assume 80x25, `Grows`, because a window that grows and a list box that does not is worse than neither, `Changed`, because a filter box is a control in an ordinary window, and `messageBox`, because Clear should ask first |
+| `entries` | *(ours)* | list boxes, `Time.every` behind a modal dialog, `WindowClosed`, mutable window titles — and later `Tui.focus`, because "show me that window" is the thing a description of the UI cannot say, `Resized`, because it is the first example that does not assume 80x25, `Grows`, because a window that grows and a list box that does not is worse than neither, `Changed`, because a filter box is a control in an ordinary window, `messageBox`, because Clear should ask first, and `History`, because a filter box worth typing into is one worth remembering |
 | `forms` | `tvision/examples/tvforms` | check boxes, radio buttons, labels, and a list box highlight the model can both read and move |
 | `ascii` | `tvision/examples/tvdemo` (ascii.cpp) | the canvas, from Gren: a view the model paints itself, and a cursor to select with |
 | `calendar` | `tvision/examples/tvdemo` (calendar.cpp) | colour on a canvas, as spans; and today as a field, because `Time.now` is a task |
@@ -20,7 +20,7 @@ Build them all with `../build.sh`, run one with `../run.sh <name>`.
 | `calc` | `tvision/examples/tvdemo` (calc.cpp) | `takesFocus` on a button: a keypad that can be pressed but never holds the caret |
 | `palette` | `tvision/examples/palette` | nothing -- it is the example whose entire subject the port removes, and the write-up says what that costs |
 | `mouse` | `tvision/examples/tvdemo` (mousedlg.cpp) | the scroll bar as a view of its own, `isDouble` on a click, `setDoubleClickDelay`, and `takesFocus` on a canvas |
-| `dir` | `tvision/examples/tvdir` | no widget at all — but it found a real bug in the diff, moved a list box's scroll bar, and is the first example to use the file system; later `Tui.fileDialog`, which finished the port |
+| `dir` | `tvision/examples/tvdir` | no widget at all — but it found a real bug in the diff, moved a list box's scroll bar, and is the first example to use the file system; later `Tui.fileDialog`, which finished the port, and the `History` on its field |
 | `demo` | `tvision/examples/tvdemo` (the shell) | real windows: zoom, resize, tile and cascade, which every window had silently been unable to do — and later the first `Tui.messageBox`, which is its About box with fifteen lines taken out |
 | `viewer` | `tvision/examples/tvdemo` (fileview.cpp) | nothing — `TScroller` went the way of `TOutline`; but it is the first horizontal scroll bar doing its own job |
 | `watch` | *(ours)* | not a port: a subscription from outside the program, several children at once, and a run that can be killed. It found a name the binding was silently swallowing |
@@ -413,7 +413,8 @@ Every `TView` subclass in `tvision/include/tvision/*.h` has been walked against
 the four layers, and the stock controls are all there: `TStaticText`, `TLabel`,
 `TButton`, `TInputLine`, `TCluster` with `TCheckBoxes` and `TRadioButtons`,
 `TListViewer` with `TListBox`, `TScrollBar`, `TMenuBar`/`TMenuBox`/`TSubMenu`,
-`TStatusLine`, `TWindow`/`TDialog`/`TFrame`, and the
+`TStatusLine`, `TWindow`/`TDialog`/`TFrame`,
+`THistory`/`THistoryViewer`/`THistoryWindow`, and the
 `TGroup`/`TProgram`/`TApplication`/`TDeskTop` scaffolding underneath. `Canvas`
 is the escape hatch for anything the set does not have.
 
@@ -433,9 +434,9 @@ excludes `evMouseWheel` (`views.h`), so a wheel event goes to whatever has
 
 ### The coverage gaps left
 
-Ten, in the order they were listed, five closed and one half closed. Each says what it
-would take, because "not done", "not decided" and "not needed" are three
-different problems.
+Ten, in the order they were listed, six closed and one half closed. Each says
+what it would take, because "not done", "not decided" and "not needed" are
+three different problems.
 
 None of them is reported by `tools/check_consistency.py` any more, which is
 what closing four of these looks like from that end. The port is the only way
@@ -528,8 +529,10 @@ in `update`, and a blink on screen. And **only four button names close a
 modal** — `ok`, `cancel`, `yes`, `no` — so a dialog gets at most four buttons,
 and `dir` spends three of them with Open as `"yes"`.
 
-Still missing and not blocking: `THistory` (6), and a wildcard filter, which is
-an `Array.keepIf` the model does before passing the entries in.
+`THistory` is in it now, under the fixed id `"fileHistory"`, taking its list
+from a `history` field on the spec. Still missing and not blocking: a wildcard
+filter, which is an `Array.keepIf` the model does before passing the entries
+in.
 
 **5. ~~A message box.~~ Done — [`Tui.messageBox`](#messageBox), and no protocol
 change at all.** It is the one gap whose answer was "write it in Gren": a
@@ -552,13 +555,45 @@ exports is either reachable or deliberately not, and each of the four says why.
 five lines of spec; `examples/entries` asks before Clear throws everything
 away.
 
-**6. `THistory` — the drop-down beside an input line.** `THistory`,
-`THistoryViewer` and `THistoryWindow` are the stock control that remembers what
-was typed into a field before, and it is in every `TFileDialog`. It is a real
-widget with real state, and the state is a list of strings the model would
-rather own — which makes it the same question `TOutline` answered, one size
-down: is this a widget to wrap, or a `ListBox` in a small window plus a field
-on the model?
+**6. ~~`THistory` — the drop-down beside an input line.~~ Done —
+[`History`](#View), and no protocol change.** The question this entry asked
+— a widget to wrap, or a `ListBox` in a small window plus a field on the
+model? — got the opposite answer to the four before it, and the reason
+generalises.
+
+**A package helper works when the interaction begins in `update`.** A message
+box and a file dialog both do: the model issues a `Cmd` and is answered with a
+`Msg`. A history drop-down opens over a field that is very often inside a
+dialog that is *already up*, where `update` is not driving the screen and there
+is no moment for it to be asked. So it is a view, and it is the first thing on
+this list that had to be.
+
+The state stayed with the model anyway, which is the part worth having.
+`historyAdd`/`historyStr` (`histlist.cpp`) are one process-wide buffer keyed by
+a hand-picked `uchar`, silently dropping the oldest entries when it fills, and
+written to behind the program's back when a field loses focus. None of it is
+used: `items` arrives with the render like a list box's, and `recordHistory` is
+overridden to do nothing. **The widget shows the list; the model decides what
+goes into it** — so `dir` remembers the directories Chdir was answered with,
+`entries` remembers a filter only when something was chosen out of it, and
+either could be saved to a file, which Borland's never could.
+
+It is the one view with no `rect`: it takes the three columns right of the
+field it names, which is where every Turbo Vision dialog puts one.
+
+Two things it forced, both in FINDINGS. **`THistory::handleEvent` calls
+`owner->execView`** — the nested modal loop milestone 2.5 removed — which
+would have stopped Node's event loop for as long as the drop-down was open. So
+the modal stack gained a second way in: `openLocalModal`, a view pushed onto
+the same stack `tv.dialog()` uses but answered with a C++ continuation instead
+of a promise. `drive_entries.py` checks the clock keeps ticking with the list
+open, which is the assertion that widget exists for. And **the model really is
+still running behind it**, so it can close the window the field is in — the
+continuation captures the view's id rather than `this` and looks it up when it
+fires.
+
+Choosing an entry arrives as an ordinary [`Changed`](#Event) event on the
+*field*, because that is what happened, so the protocol is still at 8.
 
 **7. `TMenuPopup` — context menus.** Right-click menus. The menu machinery is
 all there; what is missing is the way to open one at a point in response to a

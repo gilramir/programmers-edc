@@ -91,6 +91,143 @@ void JsRadioButtons::handleEvent(TEvent &event)
         noteChangedChoice(viewId, (int) value);
 }
 
+/* ------------------------------------------------------------------ */
+/*  The history drop-down                                             */
+/* ------------------------------------------------------------------ */
+
+static void setInputText(TInputLine *input, const std::string &text);
+
+// The items the window under construction is for.
+//
+// THistInit's factory takes a TRect, a TWindow and a ushort history id, and
+// the history id is the one thing we are not using. Live for exactly the
+// length of one JsHistoryWindow constructor, on the single thread TVision
+// runs on.
+static const std::vector<std::string> *g_pendingHistoryItems = nullptr;
+
+JsHistoryViewer::JsHistoryViewer(const TRect &bounds, TScrollBar *hScroll,
+                                 TScrollBar *vScroll,
+                                 const std::vector<std::string> &theItems) noexcept
+    : THistoryViewer(bounds, hScroll, vScroll, 0), items(theItems)
+{
+    // THistoryViewer's constructor sized itself against the global history
+    // block, which is empty here and stays empty, so everything it worked out
+    // there is worked out again against the vector.
+    //
+    // It also focuses row 1 rather than row 0 when there is more than one
+    // entry, because in Borland's design row 0 is the value it just recorded
+    // out of the field -- the thing the user is trying to replace. Nothing is
+    // recorded here, so row 0 is an ordinary entry and gets the highlight.
+    setRange((short) items.size());
+    int widest = 0;
+    for (const std::string &item : items)
+        widest = std::max(widest, (int) strwidth(item.c_str()));
+    hScrollBar->setRange(0, widest - size.x + 3);
+}
+
+void JsHistoryViewer::getText(char *dest, short item, short maxLen)
+{
+    if (item < 0 || (size_t) item >= items.size())
+        {
+        *dest = EOS;
+        return;
+        }
+    strncpy(dest, items[item].c_str(), maxLen);
+    dest[maxLen] = EOS;
+}
+
+JsHistoryWindow::JsHistoryWindow(const TRect &bounds) noexcept
+    : TWindowInit(&THistoryWindow::initFrame),
+      THistInit(&JsHistoryWindow::initViewer), THistoryWindow(bounds, 0)
+{
+    // Both bases are virtual, so it is this constructor's initialiser list
+    // that decides which factory runs and not THistoryWindow's -- which is
+    // exactly what THistInit is a separate virtual base for.
+}
+
+TListViewer *JsHistoryWindow::initViewer(TRect r, TWindow *win, ushort)
+{
+    static const std::vector<std::string> none;
+    r.grow(-1, -1);
+    return new JsHistoryViewer(
+        r, win->standardScrollBar(sbHorizontal | sbHandleKeyboard),
+        win->standardScrollBar(sbVertical | sbHandleKeyboard),
+        g_pendingHistoryItems != nullptr ? *g_pendingHistoryItems : none);
+}
+
+// THistory::handleEvent with two lines taken out of it.
+//
+// The evBroadcast branch is gone: it records the field into the global block
+// when focus leaves, and the model owns the list. And the open path calls
+// openDropDown() where Borland calls owner->execView(), which is the whole
+// point -- see the note on the classes in tvnode.h.
+void JsHistory::handleEvent(TEvent &event)
+{
+    TView::handleEvent(event);
+    if (event.what == evMouseDown ||
+        (event.what == evKeyDown && link != nullptr &&
+         ctrlToArrow(event.keyDown.keyCode) == kbDown &&
+         (link->state & sfFocused) != 0))
+        {
+        if (link != nullptr && link->focus())
+            openDropDown();
+        clearEvent(event);
+        }
+}
+
+void JsHistory::openDropDown()
+{
+    if (owner == nullptr || link == nullptr)
+        return;
+
+    // Borland's rectangle, unchanged (thistory.cpp:89-98): a column wider than
+    // the field on either side, seven rows of list below it, clipped to the
+    // group it opens in.
+    TRect r = link->getBounds();
+    r.a.x--;
+    r.b.x++;
+    r.a.y--;
+    r.b.y += 7;
+    r.intersect(owner->getExtent());
+    r.b.y--;
+
+    g_pendingHistoryItems = &items;
+    JsHistoryWindow *window = new JsHistoryWindow(r);
+    g_pendingHistoryItems = nullptr;
+
+    // Captured by id rather than by `this`. The model keeps running behind a
+    // modal here -- that is what openLocalModal buys -- so it can close the
+    // window this field lives in while the drop-down is still up, and `this`
+    // would be a dangling pointer by the time the list answered. ~JsWindow
+    // clears the registry, so a lookup that finds nothing is the whole check.
+    std::string id = viewId;
+    openLocalModal(owner, window, [id](TView *view, ushort result) {
+        ViewRef *ref = g_views.find(id);
+        if (ref != nullptr && ref->kind == "history")
+            ((JsHistory *) ref->view)
+                ->takeSelection((THistoryWindow *) view, result);
+    });
+}
+
+void JsHistory::takeSelection(THistoryWindow *window, ushort result)
+{
+    if (result != cmOK || link == nullptr)
+        return;
+
+    char picked[256];
+    window->getSelection(picked);
+
+    std::string before(link->data);
+    // Selected, unlike a value the model set: the user chose a whole entry and
+    // the next thing they type is meant to replace it. That is Borland's
+    // selectAll(True) and it is right here for the same reason it is wrong in
+    // setInputTextKeepingCaret.
+    setInputText(link, picked);
+    link->drawView();
+    if (!linkViewId.empty() && before != link->data)
+        noteChangedText(linkViewId, link->data);
+}
+
 JsCanvas::JsCanvas(const TRect &bounds, std::string id, int aColorIndex,
                    bool selectable, bool blockCursorShape) noexcept
     : TView(bounds), viewId(std::move(id)), colorIndex(aColorIndex)
@@ -494,6 +631,32 @@ TView *buildItems(const Napi::Env &env, JsWindow *win, const Napi::Value &value,
             made = new TLabel(getRect(env, it, "label"),
                               getString(it, "text").c_str(), target->view);
             }
+        else if (type == "history")
+            {
+            if (id.empty())
+                throw Napi::Error::New(env, "tvision: a history needs an id");
+            // Like a label, it points at a view that must already exist -- and
+            // unlike a label it has no rectangle of its own. A history icon
+            // sits in the three columns immediately right of its field in
+            // every Turbo Vision dialog there is (tfildlg.cpp:75,
+            // tchdrdlg.cpp:51), which makes the rectangle a consequence of the
+            // field rather than a decision, and one fewer thing to get wrong.
+            std::string forId = getString(it, "for");
+            ViewRef *target = g_views.find(forId);
+            if (target == nullptr || target->kind != "inputLine")
+                throw Napi::Error::New(env,
+                                       "tvision: history for '" + forId +
+                                           "', which is not an inputLine listed "
+                                           "before it");
+            TRect field = target->view->getBounds();
+            JsHistory *history =
+                new JsHistory(TRect(field.b.x, field.a.y, field.b.x + 3,
+                                    field.a.y + 1),
+                              (TInputLine *) target->view, id, forId);
+            if (it.Has("items"))
+                history->setItems(getStringArray(it.Get("items")));
+            made = history;
+            }
         else if (type == "listBox")
             {
             if (id.empty())
@@ -751,15 +914,23 @@ static Napi::Value SetTitle(const Napi::CallbackInfo &info)
     return Napi::Boolean::New(env, true);
 }
 
-// tv.setItems(id, [...]) -- replace a list box's contents.
+// tv.setItems(id, [...]) -- replace a list box's contents, or a
+// history drop-down's.
 static Napi::Value SetItems(const Napi::CallbackInfo &info)
 {
     Napi::Env env = info.Env();
     ViewRef *ref = g_views.find(info[0].ToString().Utf8Value());
-    if (ref == nullptr || ref->kind != "listBox")
+    if (ref == nullptr)
         return Napi::Boolean::New(env, false);
 
-    ((JsListBox *) ref->view)->setItems(getStringArray(info[1]));
+    if (ref->kind == "listBox")
+        ((JsListBox *) ref->view)->setItems(getStringArray(info[1]));
+    else if (ref->kind == "history")
+        // Nothing is redrawn: the list is read when the drop-down opens, and
+        // the icon beside the field looks the same either way.
+        ((JsHistory *) ref->view)->setItems(getStringArray(info[1]));
+    else
+        return Napi::Boolean::New(env, false);
     return Napi::Boolean::New(env, true);
 }
 

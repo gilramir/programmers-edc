@@ -16,6 +16,10 @@ why the original has to put up a "Please Wait" window and call
 `TScreen::flushScreen()` by hand. Here a directory is read when it is opened,
 `FileSystem.listDirectory` is a task, and the interface stays live throughout.
 
+And the history drop-down beside the Change Dir field is driven at the end:
+`THistory` is the first widget the package-helper shape could not answer, and
+the list in it is the model's rather than Turbo Vision's process-wide buffer.
+
 The tree it is pointed at is built here rather than found, so the rows are
 known exactly.
 """
@@ -101,6 +105,37 @@ def chooser(app):
         return []
     return [row for row in
             (screen[r][left + 3:left + 50].strip() for r in range(7, 15)) if row]
+
+
+def arrow(app):
+    """Where the history drop-down's arrow is, 1-based for Pty.click."""
+    for row, line in enumerate(app.render().split("\n")):
+        col = line.find("\u2590\u2193\u258c")
+        if col >= 0:
+            return (col + 2, row + 1)
+    return None
+
+
+def dropdown(app):
+    """The rows of the history drop-down, once it is open.
+
+    It is a window inside the dialog, so it is the first frame on screen whose
+    left edge is right of the dialog's own.
+    """
+    screen = app.render().split("\n")
+    dialog_left = top = left = None
+    for row, line in enumerate(screen):
+        if "Change directory" in line and "\u2554" in line:
+            dialog_left = line.index("\u2554")
+        elif dialog_left is not None and top is None and "\u2554" in line \
+                and line.index("\u2554") > dialog_left:
+            top, left = row, line.index("\u2554")
+    if top is None:
+        return []
+    right = screen[top].index("\u2557", left)
+    return [row for row in
+            (screen[r][left + 1:right].strip() for r in range(top + 1, top + 7))
+            if row]
 
 
 def main():
@@ -205,6 +240,47 @@ def main():
         rows = [r.strip() for r in tree(app)]
         check("choosing a subdirectory re-roots the tree there",
               rows == ["▾ alpha", "▸ deep"], str(rows))
+
+        # The history drop-down. Turbo Vision keeps this list in one buffer
+        # shared by the whole program and adds to it behind the program's back;
+        # here it is a field on the model that only `update` writes to, so what
+        # is in it is exactly the two directories Chdir has been answered with,
+        # newest first.
+        app.send(b"\x1bc", settle=1.5)
+        at = arrow(app)
+        check("the field has a history arrow beside it", at is not None,
+              app.render())
+        app.click(at[0], at[1], settle=1.2)
+        check("clicking it drops down what Chdir has been answered with",
+              dropdown(app) == [os.path.join(root, "alpha"), root],
+              str(dropdown(app)))
+
+        # Choosing one writes it into the field, which is a Changed event on
+        # the *field* -- the drop-down has no event of its own, because what
+        # happened is that the input line's value changed.
+        app.send(b"\x1b[B", settle=0.4)
+        app.send(b"\r", settle=1.0)
+        check("choosing an entry puts it in the field",
+              root in app.render().split("\n")[5], app.render())
+
+        # And the field beats the highlight, which is what TChDirDialog does
+        # and the only thing that makes a remembered path mean anything: the
+        # list beside it is showing alpha's subdirectories, not this.
+        app.send(b"\x1bc", settle=1.5)
+        rows = [r.strip() for r in tree(app)]
+        check("Chdir took the path from the field, not the list",
+              rows == ["\u25be " + os.path.basename(root), "\u25b8 alpha",
+                       "\u25b8 beta", "\u25b8 gamma"], str(rows))
+
+        # Answered with a path already in the list, so it moves to the front
+        # rather than appearing twice.
+        app.send(b"\x1bc", settle=1.5)
+        app.click(arrow(app)[0], arrow(app)[1], settle=1.2)
+        check("a repeat moves to the front instead of doubling up",
+              dropdown(app) == [root, os.path.join(root, "alpha")],
+              str(dropdown(app)))
+        app.send(b"\x1b", settle=0.5)
+        app.send(b"\x1b", settle=0.8)
 
         app.send(b"\x1bx", settle=1.0)
         code = app.wait(timeout=6)

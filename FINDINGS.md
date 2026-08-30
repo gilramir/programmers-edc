@@ -2027,3 +2027,114 @@ not either: `TFileDialog` filters on `*.txt` and the model would do that to its
 own array before passing it in, which is a line of `Array.keepIf` rather than a
 feature. Neither stopped `tvdir`'s Change Dir from being ported, which is the
 thing this gap was actually blocking.
+
+## Closing gap 6: a widget worth wrapping, at last
+
+`THistory` is the small `▐↓▌` beside an input line that drops down what was
+typed into it before, and the gap list asked the question `TOutline` had
+already answered once: is this a widget to wrap, or a `ListBox` in a small
+window plus a field on the model?
+
+Four times running the answer had been "not a widget" — `TOutline` in `dir`,
+`TScroller` in `viewer`, `TFileDialog` and `messageBox` as package helpers that
+return a `DialogSpec`. This is the first time the answer is "wrap it", and the
+reason is worth having written down, because it is a property of the *shape* of
+the thing and not of how much C++ it happens to contain.
+
+### The package-helper shape cannot reach inside a modal
+
+`Tui.messageBox` and `Tui.fileDialog` work because a dialog is a `Cmd` the
+model issues and a `Msg` the model receives. A history drop-down opens over a
+field that is very often *inside a dialog that is already open* — and while a
+modal is up, `update` is not what is driving the screen. There is no `Cmd` the
+model could issue at that moment and no `Msg` it could be answered with,
+because the thing that would have to ask for it is a click on an arrow three
+columns wide that the model is never told about.
+
+So the drop-down has to be a view. That is the rule the four earlier answers
+were really following, stated properly: a helper works when the interaction
+*begins* in `update`. When it begins inside a widget, it is a widget.
+
+### The list is Turbo Vision's, in one buffer, behind your back
+
+`historyAdd`, `historyStr` and `historyCount` (`histlist.cpp`) are the whole of
+Turbo Vision's history. They read and write **one** `calloc`'d block, shared by
+every field in the process, keyed by a `uchar` the caller picks by hand, and
+when it fills, `insertString` shifts the oldest records off the front and they
+are gone. `THistory::recordHistory` writes into it from `handleEvent` — on
+`cmReleasedFocus`, so simply tabbing out of a field appends to it.
+
+None of that is reachable from a Gren model. It cannot see the list, cannot
+bound it, cannot save it, and cannot decide what belongs in it. So none of it
+is used: `JsHistoryViewer::getText` reads a `std::vector<std::string>` that
+arrived with the render, and `recordHistory` is overridden to do nothing at
+all.
+
+**The widget shows the list; the model decides what goes into it.** That is a
+better widget, not a compromise, and both examples make the point by
+remembering something Borland's could not have: `dir` remembers the directories
+Chdir was actually *answered* with, and `entries` remembers a filter only when
+the user chose something out of the filtered list. Neither is "whatever was in
+the field when focus left". And because the list is a value in the model, it
+could be written to a file and read back at startup, which a history block
+never could.
+
+### The one line that had to go, and the machinery it needed
+
+`THistory::handleEvent` ends with `owner->execView(historyWindow)`.
+
+Milestone 2.5 took `execView` out of this binding on purpose: `TGroup::execView`
+is twenty lines of bookkeeping around one nested `p->execute()` loop, and that
+loop would run *inside* the pump's own `target->handleEvent(event)` call. Node's
+event loop would stop for as long as the drop-down was open — no timers, no
+promises, no subscriptions, no renders. "Modal means input goes here, not that
+the process stops" is the single property the whole modal design exists to
+preserve, and a widget that quietly reintroduced a nested loop would have
+broken it in the one place nobody would think to look.
+
+The fix is that the modal stack already existed and only needed a second way
+in. `ModalSession` gained an `onDone` callback beside its promise — exactly one
+of the two is ever set — and `openLocalModal(host, view, done)` pushes a view
+onto the same stack `tv.dialog()` uses, with a C++ continuation instead of a
+`Napi::Promise::Deferred`. `closeTopModal` calls the continuation while the view
+is still alive, which is what lets `getSelection()` be read out of it, and
+destroys it afterwards.
+
+`drive_entries.py` asserts the point directly: the clock's tick counter is read
+before and after a three-second pump *with the drop-down open*, and it moves.
+That check is the reason this widget is thirty lines of C++ rather than three.
+
+Two consequences fell out of reusing the stack rather than nesting:
+
+  - **A dangling `this` became possible, and had to be designed away.** The
+    model really is still running behind the drop-down, so it can close the
+    window the field lives in while the list is up. The continuation therefore
+    captures the history view's **id**, not `this`, and looks it up in the
+    registry when it fires — `~JsWindow` clears the registry, so a lookup that
+    finds nothing is the entire check.
+  - **Clicking the drop-down's close box is safe for free.**
+    `TWindow::handleEvent` already answers `cmClose` with `endModal(cmCancel)`
+    rather than `close()` when `sfModal` is set, and `beginModal` sets it.
+
+### No rectangle, and no protocol change
+
+A `History` is the one view with no `rect`. Every Turbo Vision dialog puts the
+icon in the three columns immediately right of its field (`tfildlg.cpp:75`,
+`tchdrdlg.cpp:51`), which makes the rectangle a consequence of the `for` field
+rather than a decision — the same rule a `ListBox`'s scroll bar already
+follows, and one fewer thing an author can get wrong. It does still take a
+`Grows` wrapper, and `entries` needs one: its filter box stretches with the
+window, so the arrow glued to it has to move with `pinRight` or the two overlap
+at the second size.
+
+Nothing was added to the protocol. Choosing an entry writes into the input
+line, so what the model is told is a `Changed` event **on the field** — because
+that is what happened. `setItems` grew a second `kind`, and that is the whole
+of the new surface.
+
+The last small thing: an entry chosen from the history arrives *selected*
+(Borland's `link->selectAll(True)`), where a value the model sets deliberately
+does not. That looks like an inconsistency and is the opposite of one — the
+user picked a whole entry and the next keystroke is meant to replace it, which
+is exactly the argument `setInputTextKeepingCaret` makes in reverse. There is a
+check for each.
