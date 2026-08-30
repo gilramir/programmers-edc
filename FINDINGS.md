@@ -478,10 +478,58 @@ time. Window rectangles are **desktop** coordinates -- y=0 is the row under the
 menu bar, not the top of the screen -- which matters as soon as you are aiming
 a mouse click at a close box.
 
+### Packaging: the split is forced, not chosen
+
+Preparing for a release turned up a hard constraint. **A Gren package may not
+declare ports** -- the compiler refuses outright:
+
+```
+-- PACKAGES CANNOT HAVE PORTS --
+Packages cannot declare any ports, so I am getting stuck here:
+1| port module Tui exposing (send)
+```
+
+with a long rationale about keeping the package ecosystem free of JavaScript.
+Inherited from Elm, and not negotiable. So the library is three artifacts:
+
+| artifact | registry | contents |
+|---|---|---|
+| `gilramir/gren-tvision` | Gren | pure Gren: types, encoders, `defineProgram` |
+| `gren-tvision` | npm | the diff layer and the `gren-tui` bin |
+| `tvision-node` | npm | the native binding |
+
+The package takes the ports as an argument -- a `Tui.Ports msg` record of the
+two functions -- and every application declares them itself. That is eight
+lines of boilerplate per program and there is no way around it.
+
+Two smaller things fell out of the same work:
+
+- An example inside the package repo builds against the working copy with
+  `"source-directories": ["src", "../../src"]`. Gren has no path dependencies,
+  and this is the way round it.
+- The render message carries a `protocol` integer that the runtime checks. A
+  Gren package and an npm package version independently and *will* skew; the
+  failure without a check is a UI that renders nothing, which is a miserable
+  thing to debug.
+
+### The native side needs no cmake
+
+`tvision` has no CMake-generated config header -- `config.h` is a checked-in
+source file and there is no `configure_file` anywhere -- and its `CMakeLists`
+globs `source/*/*.cpp` with no platform filtering, because the Windows-only
+files guard themselves. So `binding.gyp` can compile all 206 of them directly,
+which was verified: full suite green, one 1.3 MB `.node`, no cmake anywhere.
+
+That matters for distribution. It reduces a source install to a C++ compiler
+and ncurses headers, and with `prebuildify` + `node-gyp-build` most users get a
+binary and compile nothing. Because the addon is N-API, one prebuild per
+platform covers every Node version -- which is the whole reason for having used
+N-API rather than V8 directly.
+
 ### What is left
 
 `Tui` covers static text, buttons, input lines, list boxes and canvases. Check
 boxes, radio buttons and nested submenus exist in the binding but are not in
-the Gren types yet; adding them is a matter of another variant and another
-encoder, with no unknowns left in the way.
+the Gren types yet. `gren-tvision/examples/README.md` tracks what each of the
+remaining C++ examples would force into the API.
 

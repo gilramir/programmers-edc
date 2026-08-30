@@ -4,7 +4,9 @@ build-tvision.log
 node_modules/
 build/
 .devbox/
-build/asan.*
 gren-tvision/.gren/
 gren-tvision/gren_packages/
-gren-tvision/main.js
+gren-tvision/examples/*/.gren/
+gren-tvision/examples/*/gren_packages/
+gren-tvision/examples/*/main.js
+__pycache__/

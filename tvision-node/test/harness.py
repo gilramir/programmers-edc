@@ -107,7 +107,7 @@ class Pty:
             pass
 
 
-def node_argv(script):
+def node_argv(script, *args):
     """["node", script] -- or the ASAN wrapper when TVNODE_ASAN=1.
 
     An addon linked with -fsanitize=address cannot be dlopen'd into a plain
@@ -120,7 +120,7 @@ def node_argv(script):
     node = ["node"]
     if os.environ.get("TVNODE_ASAN") == "1":
         node = [os.path.join(here, "asan.sh"), "node"]
-    return node + [script]
+    return node + [script] + list(args)
 
 
 def asan_enabled():

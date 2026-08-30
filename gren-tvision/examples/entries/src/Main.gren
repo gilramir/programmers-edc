@@ -1,4 +1,4 @@
-module Main exposing (main)
+port module Main exposing (main)
 
 {-| Milestone 3: a Turbo Vision application written in Gren.
 
@@ -14,11 +14,32 @@ which is the thing milestone 2.5 went to some trouble to make true.
 
 import Array exposing (Array)
 import Init
+import Json.Decode as Decode
+import Json.Encode as Encode
 import Node
 import String
 import Task
 import Time
 import Tui exposing (Event(..), MenuItem(..), View(..))
+
+
+
+-- PORTS
+--
+-- A Gren package may not declare ports, so every application declares these
+-- two itself and hands them to Tui. The names are part of the contract with
+-- the JavaScript runtime.
+
+
+port tuiOut : Encode.Value -> Cmd msg
+
+
+port tuiIn : (Decode.Value -> msg) -> Sub msg
+
+
+tui : Tui.Ports Msg
+tui =
+    { toJs = tuiOut, fromJs = tuiIn }
 
 
 
@@ -81,7 +102,7 @@ handleEvent event model =
 
         Command "clear" ->
             { model = { model | items = [], selected = "(nothing selected)" }
-            , command = Tui.setEnabled "clear" False
+            , command = Tui.setEnabled tui "clear" False
             }
 
         Command "list" ->
@@ -111,7 +132,7 @@ handleEvent event model =
 
                 else
                     { model = { model | items = Array.pushLast entry model.items }
-                    , command = Tui.setEnabled "clear" True
+                    , command = Tui.setEnabled tui "clear" True
                     }
 
             else
@@ -132,7 +153,7 @@ handleEvent event model =
 
 addDialog : Cmd Msg
 addDialog =
-    Tui.dialog
+    Tui.dialog tui
         { id = "addDialog"
         , title = "Add an entry"
         , rect = { x1 = 16, y1 = 7, x2 = 64, y2 = 15 }
@@ -234,7 +255,7 @@ clock posix =
 
 main : Tui.Program Model Msg
 main =
-    Tui.defineProgram
+    Tui.defineProgram tui
         { init = init
         , update = update
         , subscriptions = \_ -> Time.every 1000 Tick

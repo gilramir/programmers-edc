@@ -1,5 +1,6 @@
-port module Tui exposing
-    ( Program, ProgramConfiguration, defineProgram
+module Tui exposing
+    ( Ports
+    , Program, ProgramConfiguration, defineProgram
     , Ui, Window, View(..), Rect
     , Menu, MenuItem(..), StatusItem
     , Event(..), DialogSpec
@@ -23,6 +24,28 @@ binding had to grow a non-blocking event pump and modal dialogs that do not
 stop Node: a `Cmd` that never returns to the runtime is a deadlock, not a
 dialog.
 
+## Where the ports come from
+
+Gren packages may not declare ports -- the compiler refuses outright, to keep
+the package ecosystem free of JavaScript. So the two ports are declared by the
+*application* and handed to this module as a [`Ports`](#Ports) record:
+
+    port module Main exposing (main)
+
+    port tuiOut : Encode.Value -> Cmd msg
+
+    port tuiIn : (Decode.Value -> msg) -> Sub msg
+
+    tui : Tui.Ports Msg
+    tui =
+        { toJs = tuiOut, fromJs = tuiIn }
+
+    main =
+        Tui.defineProgram tui { init = …, view = …, update = … }
+
+The names matter: the JavaScript runtime subscribes to `tuiOut` and sends to
+`tuiIn`.
+
 ## What is *not* in the view
 
 The menu bar and the status line are configuration, not view. Turbo Vision
@@ -31,6 +54,7 @@ no user-data channel, so they exist before there is a first model to render and
 cannot be swapped afterwards. `setEnabled` is how a command changes state at
 runtime.
 
+@docs Ports
 @docs Program, ProgramConfiguration, defineProgram
 @docs Ui, Window, View, Rect
 @docs Menu, MenuItem, StatusItem
@@ -52,10 +76,22 @@ import Task
 -- PORTS
 
 
-port tuiOut : Encode.Value -> Cmd msg
+{-| The application's two ports, handed over once. See the note above on why
+they cannot live in here.
+-}
+type alias Ports msg =
+    { toJs : Encode.Value -> Cmd msg
+    , fromJs : (Decode.Value -> msg) -> Sub msg
+    }
 
 
-port tuiIn : (Decode.Value -> msg) -> Sub msg
+{-| Bumped when the wire format changes. The runtime refuses a version it does
+not know rather than rendering nothing and leaving you to wonder why: a Gren
+package and an npm package version independently, and they will skew.
+-}
+protocolVersion : Int
+protocolVersion =
+    1
 
 
 
@@ -163,9 +199,9 @@ type alias DialogSpec =
 
 {-| Open one.
 -}
-dialog : DialogSpec -> Cmd msg
-dialog spec =
-    tuiOut <|
+dialog : Ports msg -> DialogSpec -> Cmd msg
+dialog ports spec =
+    ports.toJs <|
         Encode.object
             [ { key = "type", value = Encode.string "dialog" }
             , { key = "spec"
@@ -182,16 +218,16 @@ dialog spec =
 
 {-| Quit the application. Any open dialog is cancelled on the way out.
 -}
-quit : Cmd msg
-quit =
-    tuiOut (Encode.object [ { key = "type", value = Encode.string "quit" } ])
+quit : Ports msg -> Cmd msg
+quit ports =
+    ports.toJs (Encode.object [ { key = "type", value = Encode.string "quit" } ])
 
 
 {-| Grey a command out, everywhere it appears, or bring it back.
 -}
-setEnabled : String -> Bool -> Cmd msg
-setEnabled command on =
-    tuiOut <|
+setEnabled : Ports msg -> String -> Bool -> Cmd msg
+setEnabled ports command on =
+    ports.toJs <|
         Encode.object
             [ { key = "type", value = Encode.string "setEnabled" }
             , { key = "cmd", value = Encode.string command }
@@ -256,8 +292,8 @@ type alias ProgramConfiguration model msg =
 every update -- the whole description, every time. Working out what actually
 changed is the JavaScript side's job, exactly as a virtual DOM does it.
 -}
-defineProgram : ProgramConfiguration model msg -> Program model msg
-defineProgram config =
+defineProgram : Ports msg -> ProgramConfiguration model msg -> Program model msg
+defineProgram ports config =
     Node.defineProgram
         { init =
             \env ->
@@ -268,7 +304,7 @@ defineProgram config =
                             , command =
                                 Cmd.batch
                                     [ started.command
-                                    , render config started.model
+                                    , render ports config started.model
                                     ]
                             }
         , update =
@@ -281,27 +317,28 @@ defineProgram config =
                 , command =
                     Cmd.batch
                         [ stepped.command
-                        , render config stepped.model
+                        , render ports config stepped.model
                         ]
                 }
         , subscriptions =
             \model ->
                 Sub.batch
                     [ config.subscriptions model
-                    , tuiIn (decodeEvent >> config.onEvent)
+                    , ports.fromJs (decodeEvent >> config.onEvent)
                     ]
         }
 
 
-render : ProgramConfiguration model msg -> model -> Cmd msg
-render config model =
+render : Ports msg -> ProgramConfiguration model msg -> model -> Cmd msg
+render ports config model =
     let
         ui =
             config.view model
     in
-    tuiOut <|
+    ports.toJs <|
         Encode.object
             [ { key = "type", value = Encode.string "render" }
+            , { key = "protocol", value = Encode.int protocolVersion }
             , { key = "menuBar", value = Encode.array encodeMenu config.menuBar }
             , { key = "statusLine", value = Encode.array encodeStatusItem config.statusLine }
             , { key = "windows", value = Encode.array encodeWindow ui.windows }

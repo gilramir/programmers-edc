@@ -24,6 +24,7 @@
       "build": [
         "tvision-node/scripts/build-tvision.sh",
         "(cd tvision-node && npm install --no-audit --no-fund && npx node-gyp rebuild)",
+        "(cd gren-tvision-runtime && npm install --no-audit --no-fund)",
         "gren-tvision/build.sh"
       ],
       "hello": [
@@ -32,24 +33,6 @@
       "demo": [
         "cd tvision-node && node examples/demo.js"
       ],
-      "test": [
-        "(cd tvision-node && python3 test/drive_regress.py)",
-        "(cd tvision-node && python3 test/drive.py)",
-        "(cd tvision-node && python3 test/drive_demo.py)",
-        "(cd tvision-node && python3 test/drive_ascii.py)",
-        "(cd tvision-node && python3 test/drive_form.py)",
-        "(cd gren-tvision && python3 test/drive_gren.py)"
-      ],
-      "test:asan": [
-        "(cd tvision-node && TVNODE_ASAN=1 npx node-gyp rebuild)",
-        "(cd tvision-node && TVNODE_ASAN=1 python3 test/drive_regress.py)",
-        "(cd tvision-node && TVNODE_ASAN=1 python3 test/drive.py)",
-        "(cd tvision-node && TVNODE_ASAN=1 python3 test/drive_demo.py)",
-        "(cd tvision-node && TVNODE_ASAN=1 python3 test/drive_ascii.py)",
-        "(cd tvision-node && TVNODE_ASAN=1 python3 test/drive_form.py)",
-        "(cd gren-tvision && TVNODE_ASAN=1 python3 test/drive_gren.py)",
-        "(cd tvision-node && npx node-gyp rebuild)"
-      ],
       "ascii": [
         "(cd tvision-node && node examples/ascii.js)"
       ],
@@ -57,11 +40,32 @@
         "(cd tvision-node && node examples/form.js)"
       ],
       "gren": [
-        "gren-tvision/build.sh",
-        "(cd gren-tvision && node tui.js)"
+        "gren-tvision/run.sh ${1:-entries}"
       ],
       "gren:build": [
         "gren-tvision/build.sh"
+      ],
+      "test": [
+        "gren-tvision/build.sh",
+        "(cd tvision-node && python3 test/drive_regress.py)",
+        "(cd tvision-node && python3 test/drive.py)",
+        "(cd tvision-node && python3 test/drive_demo.py)",
+        "(cd tvision-node && python3 test/drive_ascii.py)",
+        "(cd tvision-node && python3 test/drive_form.py)",
+        "(cd gren-tvision && python3 test/drive_hello.py)",
+        "(cd gren-tvision && python3 test/drive_entries.py)"
+      ],
+      "test:asan": [
+        "(cd tvision-node && TVNODE_ASAN=1 npx node-gyp rebuild)",
+        "gren-tvision/build.sh",
+        "(cd tvision-node && TVNODE_ASAN=1 python3 test/drive_regress.py)",
+        "(cd tvision-node && TVNODE_ASAN=1 python3 test/drive.py)",
+        "(cd tvision-node && TVNODE_ASAN=1 python3 test/drive_demo.py)",
+        "(cd tvision-node && TVNODE_ASAN=1 python3 test/drive_ascii.py)",
+        "(cd tvision-node && TVNODE_ASAN=1 python3 test/drive_form.py)",
+        "(cd gren-tvision && TVNODE_ASAN=1 python3 test/drive_hello.py)",
+        "(cd gren-tvision && TVNODE_ASAN=1 python3 test/drive_entries.py)",
+        "(cd tvision-node && npx node-gyp rebuild)"
       ]
     }
   }

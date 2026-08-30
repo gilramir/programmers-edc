@@ -1,0 +1,143 @@
+port module Main exposing (main)
+
+{-| tvision/hello.cpp, in Gren.
+
+The original is 120 lines of C++ that subclasses TApplication, overrides
+handleEvent, and builds the greeting box by hand. Here it is a model (which
+answer was given), a view (what should be on screen), and an update.
+
+Compare with:
+
+  - tvision/hello.cpp                  the C++ original
+  - tvision-node/examples/hello.js     the same thing through the raw binding
+
+-}
+
+import Init
+import Json.Decode as Decode
+import Json.Encode as Encode
+import Node
+import Tui exposing (Event(..), MenuItem(..), View(..))
+
+
+port tuiOut : Encode.Value -> Cmd msg
+
+
+port tuiIn : (Decode.Value -> msg) -> Sub msg
+
+
+tui : Tui.Ports Msg
+tui =
+    { toJs = tuiOut, fromJs = tuiIn }
+
+
+
+-- MODEL
+
+
+type alias Model =
+    { answer : String }
+
+
+type Msg
+    = FromTui Event
+
+
+init : Node.Environment -> Init.Task { model : Model, command : Cmd Msg }
+init _ =
+    Node.startProgram
+        { model = { answer = "" }
+        , command = Cmd.none
+        }
+
+
+
+-- UPDATE
+
+
+update : Msg -> Model -> { model : Model, command : Cmd Msg }
+update msg model =
+    when msg is
+        FromTui (Command "greet") ->
+            { model = model, command = greetingBox }
+
+        FromTui (DialogClosed closed) ->
+            -- The C++ original threw the answer away. Having it as a message
+            -- is the whole point of the exercise.
+            { model = { model | answer = closed.cmd }, command = Cmd.none }
+
+        FromTui _ ->
+            { model = model, command = Cmd.none }
+
+
+{-| hello.cpp's greetingBox(), rectangle for rectangle.
+-}
+greetingBox : Cmd Msg
+greetingBox =
+    Tui.dialog tui
+        { id = "greeting"
+        , title = "Hello, World!"
+        , rect = { x1 = 25, y1 = 5, x2 = 55, y2 = 16 }
+        , views =
+            [ StaticText { id = "how", rect = { x1 = 3, y1 = 5, x2 = 15, y2 = 6 }, text = "How are you?" }
+            , Button { id = "terrific", rect = { x1 = 16, y1 = 2, x2 = 28, y2 = 4 }, title = "Terrific", cmd = "terrific", isDefault = False }
+            , Button { id = "fine", rect = { x1 = 16, y1 = 4, x2 = 28, y2 = 6 }, title = "Ok", cmd = "fine", isDefault = False }
+            , Button { id = "lousy", rect = { x1 = 16, y1 = 6, x2 = 28, y2 = 8 }, title = "Lousy", cmd = "lousy", isDefault = False }
+            , Button { id = "cancel", rect = { x1 = 16, y1 = 8, x2 = 28, y2 = 10 }, title = "Cancel", cmd = "cancel", isDefault = False }
+            ]
+        }
+
+
+
+-- VIEW
+
+
+view : Model -> Tui.Ui
+view model =
+    { windows =
+        if model.answer == "" then
+            []
+
+        else
+            [ { id = "answer"
+              , title = "You said"
+              , rect = { x1 = 22, y1 = 8, x2 = 58, y2 = 13 }
+              , views =
+                    [ StaticText
+                        { id = "answerText"
+                        , rect = { x1 = 2, y1 = 2, x2 = 34, y2 = 3 }
+                        , text = "You feel " ++ model.answer ++ "."
+                        }
+                    ]
+              }
+            ]
+    }
+
+
+
+-- PROGRAM
+
+
+main : Tui.Program Model Msg
+main =
+    Tui.defineProgram tui
+        { init = init
+        , update = update
+        , subscriptions = \_ -> Sub.none
+        , view = view
+        , onEvent = FromTui
+        , menuBar =
+            [ { title = "~H~ello"
+              , key = "Alt-H"
+              , items =
+                    [ Item { title = "~G~reeting...", cmd = "greet", key = "Alt-G", shortcut = "" }
+                    , Separator
+                    , Item { title = "E~x~it", cmd = "quit", key = "Alt-X", shortcut = "Alt-X" }
+                    ]
+              }
+            ]
+        , statusLine =
+            [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
+            , { text = "", key = "F10", cmd = "menu" }
+            ]
+        }

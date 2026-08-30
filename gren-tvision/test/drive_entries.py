@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Milestone 3: a Turbo Vision application written in Gren.
+"""examples/entries -- a Turbo Vision application written in Gren.
 
 Every check here crosses the whole stack -- Gren model, JSON over a port, the
 diff in tui.js, the N-API binding, TVision, and the terminal -- and back.
@@ -10,7 +10,9 @@ import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)
+ROOT = os.path.dirname(HERE)                       # the Gren package
+EXAMPLE = os.path.join(ROOT, "examples", "entries")
+RUNTIME = os.path.join(ROOT, "..", "gren-tvision-runtime", "bin", "gren-tui.js")
 sys.path.insert(0, os.path.join(ROOT, "..", "tvision-node", "test"))
 
 from harness import Pty, Checks, latest_int, node_argv
@@ -25,7 +27,7 @@ CLOSE_BOX = (5, 3)
 def main():
     check = Checks()
     env = dict(os.environ, TERM="xterm-256color")
-    app = Pty(node_argv(os.path.join(ROOT, "tui.js")), env, cwd=ROOT)
+    app = Pty(node_argv(RUNTIME, "main.js"), env, cwd=EXAMPLE)
 
     # 1. The first screen is a render of the Gren model.
     app.pump(2.0)

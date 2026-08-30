@@ -37,13 +37,18 @@ tvision-node/      the binding
   test/harness.py    pty driver + a small terminal emulator
   test/drive*.py     type at the app, assert on what it drew
   test/asan.sh       run node with AddressSanitizer preloaded
-gren-tvision/      milestone 3: the same idea, in Gren
-  src/Tui.gren       Ui types, encoders, ports, the program wrapper
-  src/Main.gren      an application: model, view, update. No C++ in sight.
-  tui.js             the diff layer between a port and the binding
-  test/drive_gren.py end-to-end, from Gren model to terminal and back
+gren-tvision/      the Gren package: gilramir/gren-tvision
+  src/Tui.gren       Ui types, encoders, the program wrapper. Pure Gren.
+  examples/          one directory per example, each its own application
+  test/              a pty driver per example
+gren-tvision-runtime/  the npm half: the diff layer + the `gren-tui` bin
 build-tvision/     libtvision.a, built PIC (generated)
 ```
+
+The split is forced: **Gren packages may not declare ports**, so the package
+can describe a UI but cannot reach a terminal. The application declares the two
+ports and hands them over; the npm runtime takes the description off the port
+and drives the binding. See FINDINGS.
 
 ## Running it
 
@@ -58,7 +63,8 @@ devbox run hello    # each of these runs one example in your terminal
 devbox run demo
 devbox run ascii
 devbox run form
-devbox run gren     # milestone 3: compiles the Gren program, then runs it
+devbox run gren           # the entries example, in Gren
+devbox run gren -- hello  # or any other example
 ```
 
 In `hello`: `Alt-G` or the Hello menu opens the greeting, `Tab` moves between
@@ -81,6 +87,9 @@ In `form`: `Alt-N` opens a record form with check boxes and radio buttons;
 In `gren`: `Alt-A` adds an entry through a modal dialog, the clock is a
 `Time.every` subscription, and closing the entries window tells the Gren model
 so it stays closed until `Alt-L` puts it back.
+
+[`gren-tvision/examples/README.md`](gren-tvision/examples/README.md) is the plan
+of record for what gets ported next and what API each one needs.
 
 `Enter` does not press buttons, select list items, or tick check boxes in Turbo
 Vision; `Space` does. See FINDINGS.
