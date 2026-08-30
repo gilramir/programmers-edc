@@ -14,7 +14,7 @@ const { createDiffer } = require('./diff');
 // Bumped in lockstep with Tui.protocolVersion on the Gren side. A Gren package
 // and an npm package version independently, and they will skew; refusing an
 // unknown version beats rendering nothing and leaving the author to guess.
-const PROTOCOL = 5;
+const PROTOCOL = 6;
 
 /**
  * Drive a compiled Gren program's UI.
@@ -89,6 +89,11 @@ function run(grenModule, options = {}) {
             onClick: (id, x, y, doubled) =>
               send({ type: 'click', id, x, y, doubled: !!doubled }),
             onClose: (id) => differ.windowClosed(id),
+            // Fires once at startup and again on every resize, so a model
+            // that lays out against it never has to assume a size. The
+            // numbers are the desktop's, not the screen's: window rectangles
+            // are in desktop coordinates.
+            onResize: (cols, rows) => send({ type: 'resized', cols, rows }),
             onExit: () => process.exit(0),
             onError: (err) => {
               console.error(err);

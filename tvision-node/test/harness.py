@@ -2,9 +2,9 @@
 
 A TUI cannot be tested by piping stdin: the addon refuses to start unless
 stdin/stdout are a terminal, and it draws with cursor addressing rather than
-lines of text. So we allocate a pty, fix its size at 80x25 (the rectangles in
-the examples assume it), type at it, and strip the escape sequences back out of
-what comes off the other end.
+lines of text. So we allocate a pty, give it a size -- 80x25 unless a test asks
+for another, which most of the examples' rectangles assume -- type at it, and
+strip the escape sequences back out of what comes off the other end.
 
 `screen()` returns everything written since the process started, not the
 current screen contents -- which is what we want for "did this ever appear"
@@ -33,17 +33,38 @@ ANSI = re.compile(
 
 
 class Pty:
-    def __init__(self, argv, env=None, cwd=None):
+    def __init__(self, argv, env=None, cwd=None, size=(COLS, ROWS)):
         env = env or dict(os.environ)
+        cols, rows = size
+        # The emulator replays the whole byte stream from the start on every
+        # render, so a grid that changed size mid-replay would have to be
+        # rewound. It is sized to the largest the terminal ever gets instead:
+        # everything written before a resize fits in it, and TVision repaints
+        # the whole screen afterwards, so nothing stale survives.
+        self.cols, self.rows = cols, rows
+        self.widest, self.tallest = cols, rows
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
-            fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLS, 0, 0))
+            fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
             if cwd:
                 os.chdir(cwd)
             os.execvpe(argv[0], argv, env)
             os._exit(127)
-        fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLS, 0, 0))
+        fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
         self.buf = b""
+
+    def resize(self, cols, rows, settle=1.5):
+        """Resize the terminal, the way dragging a window's corner does.
+
+        The ioctl is what a real terminal emulator does; the SIGWINCH is what
+        the kernel sends alongside it, and TVision is listening for it. Without
+        the signal the size changes and nothing notices.
+        """
+        self.cols, self.rows = cols, rows
+        self.widest, self.tallest = max(self.widest, cols), max(self.tallest, rows)
+        fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+        os.kill(self.pid, signal.SIGWINCH)
+        self.pump(settle)
 
     def pump(self, seconds):
         """Read for `seconds`, keeping everything."""
@@ -72,7 +93,14 @@ class Pty:
         Replay the whole stream every time: the buffers here are small and a
         stateful emulator that could drift is not worth the debugging.
         """
-        return Screen().feed(self.buf.decode("utf-8", "replace"))
+        screen = Screen(cols=self.widest, rows=self.tallest).feed(
+            self.buf.decode("utf-8", "replace")
+        )
+        # Replaying at the largest size the terminal ever had means a terminal
+        # that later *shrank* still holds what it drew when it was bigger.
+        # A real one would have thrown those cells away, and TVision only
+        # repaints inside the current size, so crop to it.
+        return screen.crop(self.cols, self.rows)
 
     def render(self):
         """What the screen looks like *now*. Good for "what does X say"."""
@@ -190,6 +218,16 @@ class Screen:
     def __init__(self, cols=COLS, rows=ROWS):
         self.cols, self.rows = cols, rows
         self.reset()
+
+    def crop(self, cols, rows):
+        """Throw away everything outside a `cols` x `rows` terminal."""
+        if cols == self.cols and rows == self.rows:
+            return self
+        self.grid = [row[:cols] for row in self.grid[:rows]]
+        self.attrs = [row[:cols] for row in self.attrs[:rows]]
+        self.cols, self.rows = cols, rows
+        self._clamp()
+        return self
 
     def reset(self):
         self.grid = [[" "] * self.cols for _ in range(self.rows)]

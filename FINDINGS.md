@@ -1399,6 +1399,11 @@ a `Rect` stops being the only way to place a view, and a declarative
 resolves against whatever size the window actually has. Then neither the model
 nor the C++ has to tell the other a number, and both symptoms go at once.
 
+*(Both are now settled differently, and the paragraph above is wrong on the
+part that matters — see "Closing gap 1" at the end. They are two decisions, not
+one, and the declarative layout does not have to be invented: `growMode` is it,
+and Turbo Vision already resolves it.)*
+
 The rest are ordinary: `focus`, a message box, `THistory`, `TMenuPopup`,
 validators together with the cluster state they need, `TMultiCheckBoxes`, and
 a view on the application. `examples/README.md` has each with what it would
@@ -1549,3 +1554,106 @@ window" command written against a pure description of the UI. It is a one-line
 fix now and it was unwriteable before. The other direction is the smaller and
 more ordinary one: a dialog gives the caret back to whoever had it before,
 which is not the list the new entry just went into.
+
+## Closing gap 1: how big the terminal is
+
+Every example here hardcoded 80x25 and there was no way not to. `screenSize()`
+had been in the binding since milestone 2 with no message to carry it, and
+there was no resize event either, so a program had no way to learn the size
+once *or* to hear that it changed.
+
+Two things turned out to be true before any of it was written, and both
+contradict the gap list.
+
+### Windows already grow with the terminal; their contents already do not
+
+`beWindow()` sets `growMode = gfGrowAll | gfGrowRel` on every non-modal window,
+because `TDialog`'s constructor takes the window-ness back out and a window on
+the desktop should zoom, resize and tile. `gfGrowRel` is the one that matters
+here: it means "keep my position and size *relative to the screen*", and
+`TGroup::changeBounds` does the arithmetic when the screen changes. So resizing
+the terminal has always rescaled the windows proportionally, and nobody had
+written that down.
+
+`JsCanvas` and every other child view is built with `growMode = 0`, on purpose.
+So the window grows and the views inside it stay exactly where the model put
+them. That is gap (2), and now it has a number: driving `examples/entries` from
+100x30 to 120x40 moves the list window's bottom frame from screen row 22 to row
+32 and leaves its Add button on row 15, where it was.
+
+Which means gap (1) and gap (2) are **not** one design decision, as the list
+says they are. Gap (2)'s answer already exists and is switched off: it is
+`growMode`, one integer per view, with Turbo Vision doing the resolving. There
+is no layout engine to invent. Gap (1) is a separate and simpler question —
+telling the model a number it currently has to guess.
+
+### The size cannot arrive in `init`, so it is an event
+
+`init : Node.Environment -> Init.Task ...` is Gren's, and there is nowhere in
+it to put a number that comes from C++. Worse, there is nothing to ask: the
+runtime calls `tv.start()` on the *first render*, so at the moment `init` runs
+there is no application, and `screenSize()` would refuse — it is guarded by
+`requireRunning`.
+
+So the size is an event, `Resized { cols, rows }`, which is the answer the rest
+of this API would have given anyway. It arrives once immediately after startup
+and again on every change, the model keeps it in a field, and `view` lays out
+against it. The first render happens before it, at whatever default the model
+was written with; nothing is on screen yet at that point, and driving the thing
+at 100x30 shows the finished layout with no flicker.
+
+It is the first event the model is told that it did not cause. Every other one
+is the user doing something.
+
+### The desktop's size, not the screen's
+
+`tv.screenSize()` returns 80x25 for an 80x25 terminal. A window's rectangle is
+in *desktop* coordinates, where `y = 0` is the row below the menu bar, so a
+model handed the screen size has to subtract the menu bar and the status line
+itself — which is precisely the arithmetic this exists to remove. `Resized`
+carries `deskTop->size`, and 80x25 arrives as 80x23.
+
+That leaves `screenSize()` superseded rather than missing. It is now in the
+consistency check's small exempt list, next to `log`, with the reason written
+down: an exemption that says why is a decision, and one that does not is a
+silenced check.
+
+### Polling the pump beats hooking the event
+
+A resize reaches Turbo Vision as `evCommand`/`cmScreenChanged` from a
+`WINDOW_BUFFER_SIZE_EVENT`, and `TProgram::handleEvent` answers it with
+`setScreenMode(smUpdate)`. Hooking that is possible and is the wrong place:
+`setScreenMode` can also be called by anything else, and the notification would
+fire from inside TVision's own event dispatch, which is the shape the queueing
+rule exists for.
+
+`flushResize()` compares `deskTop->size` with the last size reported, at the
+pump's safe point, beside `flushFocused` and `flushScrolled`. Two integers once
+per pump. It is true no matter how the resize happened, it needs no queue
+because the safe point *is* where it runs, and initialising the remembered size
+to zero is what makes the first pass after startup report the real size with no
+special case for startup at all.
+
+### Adding a variant to `Event` is a breaking change, and that is the point
+
+Three examples stopped compiling: `ascii`, `forms` and `demo`, each with an
+exhaustive `when` over `Event`. That is Gren doing its job — a program that
+silently ignored a new event would be the worse outcome — and the fix is one
+branch each. `demo`'s is not a stub: its event viewer is a window that names
+every event it sees, so it now prints `Resized 120x40`, which makes the third
+example that watches the API from inside also the one that watches this.
+
+### The harness had never resized a terminal
+
+`Pty` fixed the pty at 80x25 in its constructor and `display()` replayed the
+whole byte stream through a fresh 80x25 emulator on every call. Resizing needs
+three things: the `TIOCSWINSZ` ioctl a real terminal emulator does, the
+`SIGWINCH` the kernel sends with it — without the signal the size changes and
+nothing notices — and an emulator that survives the replay.
+
+The replay is the interesting one. A grid that changed size partway through
+would have to be rewound, so instead it is built at the largest size the
+terminal ever had, which everything written before a resize fits in, and then
+cropped to the current size. The crop is not cosmetic: without it a terminal
+that *shrank* still showed what it drew when it was bigger, because TVision
+only repaints inside the current size and the old cells were still in the grid.

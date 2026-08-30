@@ -50,6 +50,10 @@ type alias Model =
     , ticks : Int
     , now : Time.Posix
     , listOpen : Bool
+    -- How big the desktop is, which the program is told rather than assuming.
+    -- The value here is only what the very first render uses: Resized arrives
+    -- immediately after the application starts, before anyone can see it.
+    , desk : { cols : Int, rows : Int }
     }
 
 
@@ -70,6 +74,7 @@ init _ =
             , ticks = 0
             , now = Time.millisToPosix 0
             , listOpen = True
+            , desk = { cols = 80, rows = 23 }
             }
         , command = Cmd.none
         }
@@ -127,6 +132,11 @@ handleEvent event model =
 
         Clicked _ ->
             { model = model, command = Cmd.none }
+
+        -- The terminal is a size the model is told, once at startup and again
+        -- whenever it changes. Every window here is placed against it.
+        Resized size ->
+            { model = { model | desk = size }, command = Cmd.none }
 
         -- The dialog's result arrives as a message, the way any Cmd's does.
         DialogClosed closed ->
@@ -222,11 +232,21 @@ view model =
     }
 
 
+{-| A fixed-width panel against the right-hand edge of the desktop, wherever
+that edge happens to be. This is the whole of what knowing the size buys: the
+rectangle used to say 48 and 79, which is the right-hand edge of an 80-column
+terminal and the middle of a 120-column one.
+-}
 clockWindow : Model -> Tui.Window
 clockWindow model =
     { id = "clock"
     , title = "Gren"
-    , rect = { x1 = 48, y1 = 1, x2 = 79, y2 = 9 }
+    , rect =
+        { x1 = model.desk.cols - 32
+        , y1 = 1
+        , x2 = model.desk.cols - 1
+        , y2 = 9
+        }
     , views =
         [ StaticText
             { id = "clockTime"
@@ -247,11 +267,22 @@ clockWindow model =
     }
 
 
+{-| And this one takes whatever the panel left, in both directions.
+
+The views inside it do not follow, which is the next gap along and is visible
+the moment the terminal is anything other than 80x25: the window grows and the
+list box in it stays the size the model gave it.
+-}
 listWindow : Model -> Tui.Window
 listWindow model =
     { id = "list"
     , title = "Entries (" ++ String.fromInt (Array.length model.items) ++ ")"
-    , rect = { x1 = 1, y1 = 1, x2 = 46, y2 = 17 }
+    , rect =
+        { x1 = 1
+        , y1 = 1
+        , x2 = model.desk.cols - 34
+        , y2 = model.desk.rows - 6
+        }
     , views =
         [ ListBox
             { id = "entries"

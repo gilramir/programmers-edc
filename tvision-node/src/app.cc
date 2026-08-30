@@ -83,6 +83,7 @@ Napi::FunctionReference g_onScroll;
 Napi::FunctionReference g_onKey;
 Napi::FunctionReference g_onClick;
 Napi::FunctionReference g_onClose;
+Napi::FunctionReference g_onResize;
 
 // Windows are destroyed wholesale when the application goes away; that is not
 // news anyone needs, and calling into JS from inside the teardown would be a
@@ -477,6 +478,39 @@ static void flushScrolled()
                             Napi::Number::New(env, note.value)});
 }
 
+// How big the desktop was the last time the model was told. Zero means "never
+// told", which is what makes the first pass after startup report the real size
+// without a special case for it.
+static TPoint g_lastDeskSize = {0, 0};
+
+// Polled at the pump's safe point rather than hooked onto cmScreenChanged.
+//
+// TVision learns about a resize in three different places -- a SIGWINCH, a
+// WINDOW_BUFFER_SIZE_EVENT, a setScreenMode() somebody called -- and they all
+// end at the same place, which is the desktop having different bounds than it
+// had before. Comparing the bounds is true whichever route was taken, and it
+// is a comparison of two integers once per pump.
+//
+// The desktop's size and not the screen's, because a window's rectangle is in
+// desktop coordinates. Reporting 80x25 to a model that has to subtract the
+// menu bar and the status line for itself would be handing it the arithmetic
+// this exists to remove.
+static void flushResize()
+{
+    if (g_onResize.IsEmpty() || g_hasPendingError || g_shuttingDown || !g_app)
+        return;
+
+    TPoint size = g_app->deskTop->size;
+    if (size.x == g_lastDeskSize.x && size.y == g_lastDeskSize.y)
+        return;
+    g_lastDeskSize = size;
+
+    Napi::Env env = g_onResize.Env();
+    Napi::HandleScope scope(env);
+    callJs(g_onResize, {Napi::Number::New(env, size.x),
+                        Napi::Number::New(env, size.y)});
+}
+
 void noteWindowClosed(const std::string &id)
 {
     if (g_onClose.IsEmpty() || g_shuttingDown)
@@ -620,7 +654,8 @@ static void prepare(const Napi::Env &env, const Napi::Value &value)
                           std::make_pair("onScroll", &g_onScroll),
                           std::make_pair("onKey", &g_onKey),
                           std::make_pair("onClick", &g_onClick),
-                          std::make_pair("onClose", &g_onClose)})
+                          std::make_pair("onClose", &g_onClose),
+                          std::make_pair("onResize", &g_onResize)})
         {
         if (!config.Has(binding.first))
             continue;
@@ -662,6 +697,8 @@ static void teardown(const Napi::Env &env)
     g_onKey.Reset();
     g_onClick.Reset();
     g_onClose.Reset();
+    g_onResize.Reset();
+    g_lastDeskSize = {0, 0};
     g_config = AppConfig();
 }
 
@@ -752,6 +789,7 @@ static Napi::Value Step(const Napi::CallbackInfo &info)
         flushFocused();
         flushScrolled();
         flushClosedWindows();
+        flushResize();
 
         // The outer half of TGroup::execute(): a command the target considers
         // valid ends it. For the application that means quitting; for a modal
@@ -776,6 +814,10 @@ static Napi::Value Step(const Napi::CallbackInfo &info)
     flushFocused();
     flushScrolled();
     flushClosedWindows();
+    // Again outside the loop: the very first pump after tv.start() usually
+    // breaks out on evNothing before reaching the safe point above, and the
+    // size the application started at is the one every layout needs first.
+    flushResize();
 
     if (finished || g_hasPendingError)
         {

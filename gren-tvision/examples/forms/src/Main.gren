@@ -229,6 +229,11 @@ handleEvent event model =
         Scrolled _ ->
             { model = model, command = Cmd.none }
 
+        -- Fixed-size forms in fixed-size windows; the size is nothing this one
+        -- needs. examples/entries is the one that lays out against it.
+        Resized _ ->
+            { model = model, command = Cmd.none }
+
         Unknown _ ->
             { model = model, command = Cmd.none }
 

@@ -242,12 +242,17 @@ def main():
     called = js_binding_calls(tui_js) | js_binding_calls(diff_js)
     require(exported, "could not find module.exports in tvision-node/index.js")
     require(called, "could not find any tv.* call in the runtime")
-    # `log` is for the runtime's own debugging -- the terminal belongs to
-    # TVision, so console.log() draws garbage -- and is not a Gren capability.
+    # Two exceptions, each with a reason rather than a shrug. `log` is for the
+    # runtime's own debugging -- the terminal belongs to TVision, so
+    # console.log() draws garbage over the app -- and is not a Gren capability
+    # at all. `screenSize` is superseded: it reports the *screen*, and what a
+    # window's rectangle is written in is the desktop, which the Resized event
+    # carries to the model without being asked.
+    unreachable_on_purpose = {"log", "screenSize"}
     for name in sorted(called - exported):
         problems.append(f"the runtime calls tv.{name}(), which index.js does not "
                         f"export -- it would throw the first time it ran")
-    for name in sorted(exported - called - {"log"}):
+    for name in sorted(exported - called - unreachable_on_purpose):
         notes.append(f"the binding exports {name}(), and no message in the protocol "
                      f"reaches it -- no Gren program can ask for it")
 

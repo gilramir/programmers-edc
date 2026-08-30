@@ -51,6 +51,7 @@ function start(config) {
     onKey: guard(config.onKey),
     onClick: guard(config.onClick),
     onClose: guard(config.onClose),
+    onResize: guard(config.onResize),
   });
 
   const report = (err) => {

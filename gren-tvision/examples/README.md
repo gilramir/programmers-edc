@@ -12,7 +12,7 @@ Build them all with `../build.sh`, run one with `../run.sh <name>`.
 |---|---|---|
 | `hello` | `tvision/hello.cpp` | menus, status line, modal dialog as a `Cmd`, dialog result as a `Msg` |
 | `mmenu` | `tvision/examples/mmenu` | a menu bar that changes at runtime, and menu bar entries that are commands rather than pull-downs |
-| `entries` | *(ours)* | list boxes, `Time.every` behind a modal dialog, `WindowClosed`, mutable window titles — and later `Tui.focus`, because "show me that window" is the thing a description of the UI cannot say |
+| `entries` | *(ours)* | list boxes, `Time.every` behind a modal dialog, `WindowClosed`, mutable window titles — and later `Tui.focus`, because "show me that window" is the thing a description of the UI cannot say, and `Resized`, because it is the first example that does not assume 80x25 |
 | `forms` | `tvision/examples/tvforms` | check boxes, radio buttons, labels, and a list box highlight the model can both read and move |
 | `ascii` | `tvision/examples/tvdemo` (ascii.cpp) | the canvas, from Gren: a view the model paints itself, and a cursor to select with |
 | `calendar` | `tvision/examples/tvdemo` (calendar.cpp) | colour on a canvas, as spans; and today as a field, because `Time.now` is a task |
@@ -433,50 +433,59 @@ excludes `evMouseWheel` (`views.h`), so a wheel event goes to whatever has
 
 ### The coverage gaps left
 
-Ten, in the order they were listed, one of them now closed. Each says what it
+Ten, in the order they were listed, two of them now closed. Each says what it
 would take, because "not done", "not decided" and "not needed" are three
 different problems.
 
-Three of them are now reported by `tools/check_consistency.py` on every run —
-`screenSize`, `messageBox` and `getValue` — which is where the last one came
-from: the port is the only way into the binding, so an exported function no
-runtime call site reaches is a capability no Gren program can use. It named
-`focus` too until protocol 5 carried it, and the note went away on its own.
+Two of them are now reported by `tools/check_consistency.py` on every run —
+`messageBox` and `getValue` — which is where the second one came from: the port
+is the only way into the binding, so an exported function no runtime call site
+reaches is a capability no Gren program can use. It named `focus` and
+`screenSize` too; protocol 5 carried the first and protocol 6 superseded the
+second, and both notes went away without the check being touched.
 
-The first two are one design with two symptoms, and they are the only gaps on
-this list that touch *every* program written with the API rather than one kind
-of program.
+The first two were listed here as one design with two symptoms. They are not:
+closing the first showed that the second's mechanism already exists upstream
+and is switched off. Both still touch *every* program written with the API
+rather than one kind of program, which is why they are first.
 
-**1. The model does not know how big the terminal is.** Every example here
-hardcodes 80x25 — `dir` stops its window at column 78, `watch` divides an
-assumed 23-row desktop by the number of jobs. Run any of them in a 120x40
-terminal and Turbo Vision uses the whole screen while the windows sit in an
-80x23 box in the corner with fifteen rows of empty desktop below them.
+**1. ~~The model does not know how big the terminal is.~~ Done — the
+[`Resized`](#Event) event, protocol 6.** It carries the **desktop's** size, not
+the screen's, because that is the coordinate system a window's rectangle is
+written in; it arrives once at startup and again on every change; and
+`examples/entries` lays both its windows out against it. FINDINGS has the
+write-up, including why it could not arrive in `init` and why the binding polls
+for it at the pump rather than hooking `cmScreenChanged`.
 
-The binding has had `screenSize()` since milestone 2 and Gren cannot call it:
-the Gren-to-runtime protocol is five messages (`render`, `dialog`,
-`setEnabled`, `doubleClickDelay`, `quit`) and there is no sixth. Nor is there a
-resize event, so a terminal that changes size mid-run is never mentioned to the
-model either.
+`screenSize()` is superseded rather than missing — it reports the screen — and
+is now in the consistency check's exempt list with that reason attached.
 
-What it would take is a decision rather than plumbing. The size could arrive in
-`init` and again as an event, which is the smallest change and makes every
-`view` function do arithmetic. Or rectangles could stop being absolute — see
-the next one.
+The other examples still hardcode 80x25 and are still correct at 80x25. `dir`
+stopping its window at column 78 and `watch` dividing an assumed 23-row desktop
+are now ordinary bugs with an ordinary fix, rather than things the API could
+not express.
 
-**2. Child views do not grow with their window.** A window can be zoomed,
-resized and tiled, and the views inside it keep the rectangles the model gave
-them, so a tiled window shows a clipped canvas rather than a stretched one.
+**2. Child views do not grow with their window** — and the answer is smaller
+than this entry used to claim. Two things are now measured rather than assumed:
 
-This has been called deliberate, on the grounds that growing a view would put
-its size somewhere the model cannot see. That reasoning is sound and the
-conclusion is probably wrong, because it is the same problem as the one above:
-both are asking the model to know a number that Turbo Vision owns. The
-alternative worth considering is that a `Rect` stops being the only way to
-place a view — a declarative `fill`/`fixed` layout describes intent rather than
-coordinates, the runtime resolves it against whatever size the window actually
-is, and nobody has to be told a number. That would close both gaps at once and
-is a prerequisite for anything editor-shaped.
+  - **Windows already grow with the terminal.** `beWindow()` has always set
+    `growMode = gfGrowAll | gfGrowRel`, so `TGroup::changeBounds` rescales
+    every window proportionally when the screen changes. Nobody had written
+    that down.
+  - **Their contents do not, by construction.** `JsCanvas` and every other
+    child view is built with `growMode = 0`. Driving `examples/entries` from
+    100x30 to 120x40 moves the list window's bottom frame from screen row 22 to
+    row 32 and leaves its Add button on row 15. `drive_entries.py` checks
+    exactly that, so the gap is recorded rather than merely known.
+
+So this is **not** the same design decision as (1), which is what this list
+used to say, and it does not need a `fill`/`fixed` layout invented for it.
+Turbo Vision already has the declarative layout: `growMode` is one integer per
+view — `gfGrowLoX`, `gfGrowLoY`, `gfGrowHiX`, `gfGrowHiY`, `gfGrowRel` — and
+the resolving is `TGroup::changeBounds`, which runs already. What is left is to
+decide how a `View` says it, and to pass it through the four layers. It is
+still the prerequisite for anything editor-shaped, because `TEditor` sets
+`gfGrowHiX | gfGrowHiY` in its own constructor.
 
 **3. ~~The model cannot move focus.~~ Done — `Tui.focus`, protocol 5.** It was
 the cheapest item on the list and it was not quite plumbing: two things had to

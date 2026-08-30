@@ -199,10 +199,13 @@ a string, and gave a button `takesFocus`. Version 4 added the scroll bar view,
 its [`Scrolled`](#Event) event, `isDouble` on a click, and `takesFocus` on a
 canvas. Version 5 added [`focus`](#focus), which is the first message this
 protocol has carried that names a view rather than describing the whole UI.
+Version 6 added the [`Resized`](#Event) event, which is how a program finds
+out how big the terminal is -- the first thing the model is told that it did
+not ask for and cannot cause.
 -}
 protocolVersion : Int
 protocolVersion =
-    5
+    6
 
 
 -- GEOMETRY
@@ -478,6 +481,12 @@ type alias StatusItem =
     A drag reports only where it ended: the intermediate positions are
     collapsed, because a model that re-rendered on each of them would redraw
     the window a dozen times per gesture.
+  - `Resized` -- how big the **desktop** is, in character cells. It arrives
+    once when the application starts and again whenever the terminal changes
+    size, so a program that lays out against it never has to assume 80x25.
+    The desktop rather than the screen because that is the coordinate system a
+    [`Window`](#Window)'s rectangle is written in: the menu bar and the status
+    line are Turbo Vision's and are already subtracted.
   - `DialogClosed` -- a [`dialog`](#dialog) was dismissed. `cmd` is the button
     that closed it (`"cancel"` if it was cancelled or closed from its frame),
     and `values` holds every field in it -- read them with [`text`](#text),
@@ -493,6 +502,7 @@ type Event
     | KeyPressed { id : String, key : String }
     | Clicked { id : String, x : Int, y : Int, isDouble : Bool }
     | Scrolled { id : String, value : Int }
+    | Resized { cols : Int, rows : Int }
     | DialogClosed { id : String, cmd : String, values : Decode.Value }
     | WindowClosed String
     | Unknown String
@@ -1039,6 +1049,12 @@ eventDecoder =
                             (\id value -> Scrolled { id = id, value = value })
                             (Decode.field "id" Decode.string)
                             (Decode.field "value" Decode.int)
+
+                    "resized" ->
+                        Decode.map2
+                            (\cols rows -> Resized { cols = cols, rows = rows })
+                            (Decode.field "cols" Decode.int)
+                            (Decode.field "rows" Decode.int)
 
                     "dialogClosed" ->
                         Decode.map3

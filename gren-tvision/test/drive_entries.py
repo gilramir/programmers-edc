@@ -44,6 +44,98 @@ def active(screen, title):
 CLOSE_BOX = (5, 3)
 
 
+def corners(screen):
+    """The frame columns of the two windows, which share a row.
+
+    The list window is on the left, so of the two right-hand corners on that
+    row the leftmost is its; the clock is on the right, so of the two left-hand
+    corners the rightmost is its. Either corner is doubled when its window is
+    the active one, hence both characters in each set.
+    """
+    found = {}
+    for line in screen.split("\n"):
+        if "Entries (" in line:
+            found["list_right"] = min(i for i, c in enumerate(line) if c in "┐╗")
+        if " Gren " in line and ("┌" in line or "╔" in line):
+            found["clock_left"] = max(i for i, c in enumerate(line) if c in "┌╔")
+            found["clock_right"] = max(i for i, c in enumerate(line) if c in "┐╗")
+    return found
+
+
+def row_of(screen, text):
+    """Which screen row `text` is on, or -1."""
+    for i, line in enumerate(screen.split("\n")):
+        if text in line:
+            return i
+    return -1
+
+
+def bottom_of_list(screen):
+    """The screen row of the list window's bottom frame."""
+    rows = screen.split("\n")
+    return max((i for i, l in enumerate(rows) if len(l) > 2 and l[1] in "└╚"),
+               default=-1)
+
+
+def resizes(check):
+    """A second application, in a terminal that is not 80x25 and then changes.
+
+    Every example here used to hardcode 80x25 and there was no way not to:
+    screenSize() was in the binding with no message to carry it. This one is
+    told, by a Resized event that arrives once at startup and again whenever
+    the terminal changes.
+    """
+    env = dict(os.environ, TERM="xterm-256color")
+    app = Pty(node_argv(RUNTIME, "main.js"), env, cwd=EXAMPLE, size=(100, 30))
+    try:
+        app.pump(2.0)
+        at100 = app.render()
+        check("a 100-column terminal is laid out as 100 columns",
+              corners(at100).get("list_right") == 65,
+              f"corners {corners(at100)}")
+        check("the panel is against the right-hand edge, wherever it is",
+              corners(at100).get("clock_right") == 98,
+              f"corners {corners(at100)}")
+        check("and the desktop's full height is used",
+              bottom_of_list(at100) == 22, f"bottom {bottom_of_list(at100)}")
+
+        # The event arrives again, and the model lays out again. Turbo Vision
+        # moves the windows itself first -- a window is gfGrowRel, so it is
+        # rescaled proportionally before anyone is told -- and then the model's
+        # own rectangles replace that.
+        app.resize(120, 40)
+        at120 = app.render()
+        check("growing the terminal re-laid the windows out",
+              corners(at120).get("list_right") == 85, f"corners {corners(at120)}")
+        check("the panel followed the new right-hand edge",
+              corners(at120).get("clock_right") == 118, f"corners {corners(at120)}")
+        check("and the new height too", bottom_of_list(at120) == 32,
+              f"bottom {bottom_of_list(at120)}")
+
+        # The gap this does *not* close, recorded rather than tolerated: the
+        # window grew and the views inside it did not, because every child view
+        # is built with growMode = 0. The window's bottom frame moved from row
+        # 22 to row 32 and the button it contains did not move at all.
+        check("the views inside did not grow with it -- gap (2), still open",
+              row_of(at120, "Add...") == row_of(at100, "Add..."),
+              f"the button moved from {row_of(at100, 'Add...')} "
+              f"to {row_of(at120, 'Add...')}")
+
+        # And shrinking is the same event with smaller numbers.
+        app.resize(80, 25)
+        at80 = app.render()
+        check("shrinking it back gives the 80-column layout exactly",
+              corners(at80).get("list_right") == 45
+              and corners(at80).get("clock_right") == 78
+              and bottom_of_list(at80) == 17,
+              f"corners {corners(at80)} bottom {bottom_of_list(at80)}")
+
+        app.send(b"\x1bx", settle=1.0)
+        check("exit code 0 after three sizes", app.wait(timeout=6) == 0)
+    finally:
+        app.kill()
+
+
 def main():
     check = Checks()
     env = dict(os.environ, TERM="xterm-256color")
@@ -137,6 +229,8 @@ def main():
     app.send(b"\x1bx", settle=1.0)
     code = app.wait(timeout=6)
     check("exit code 0", code == 0, f"exit={code}")
+
+    resizes(check)
 
     return check.report(app)
 

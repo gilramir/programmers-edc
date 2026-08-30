@@ -186,6 +186,9 @@ describe event =
         Scrolled it ->
             "Scrolled " ++ it.id ++ " = " ++ String.fromInt it.value
 
+        Resized it ->
+            "Resized " ++ String.fromInt it.cols ++ "x" ++ String.fromInt it.rows
+
         DialogClosed it ->
             "DialogClosed " ++ it.id ++ " " ++ it.cmd
 

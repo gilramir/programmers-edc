@@ -204,6 +204,11 @@ handleEvent event model =
         Scrolled _ ->
             model
 
+        -- This chart is 80x25 by construction, so the size is nothing it
+        -- needs. examples/entries is the one that lays out against it.
+        Resized _ ->
+            model
+
         Unknown _ ->
             model
 
