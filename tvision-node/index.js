@@ -155,6 +155,13 @@ module.exports = {
   dialog: addon.dialog,
   messageBox,
 
+  // A context menu at a point in a view, modal until something is chosen or
+  // the user clicks away. The chosen command comes back through onCommand like
+  // any other, because it is put back on the event queue rather than reported
+  // specially -- so the model never has to know where a command came from.
+  // Flat: entries and separators, no submenus. See the note on JsMenuPopup.
+  popupMenu: addon.popupMenu,
+
   screenSize: addon.screenSize,
   doubleClickDelay: addon.doubleClickDelay,
   log,

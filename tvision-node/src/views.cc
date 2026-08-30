@@ -300,7 +300,8 @@ void JsCanvas::handleEvent(TEvent &event)
         {
         TPoint spot = makeLocal(event.mouse.where);
         dispatchClick(viewId, spot.x, spot.y,
-                      (event.mouse.eventFlags & meDoubleClick) != 0);
+                      (event.mouse.eventFlags & meDoubleClick) != 0,
+                      (event.mouse.buttons & mbRightButton) != 0);
         clearEvent(event);
         }
 }

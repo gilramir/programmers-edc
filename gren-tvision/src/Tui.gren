@@ -5,6 +5,7 @@ module Tui exposing
     , Hue(..)
     , MenuItem(..)
     , MessageButton
+    , PopupItem(..)
     , Ports
     , Program
     , ProgramConfiguration
@@ -32,6 +33,7 @@ module Tui exposing
     , pinBottom
     , pinRight
     , plain
+    , popupMenu
     , quit
     , setDoubleClickDelay
     , setEnabled
@@ -173,7 +175,7 @@ its own is a pull-down, and one without is a command sitting on the bar.
 @docs Ui, Window, View, Rect
 @docs Grow, fixed, stretch, stretchWidth, stretchHeight, pinRight, pinBottom
 @docs Span, Hue, line, plain, ink, on
-@docs MenuItem, StatusItem
+@docs MenuItem, StatusItem, PopupItem, popupMenu
 @docs Event, Value, DialogSpec
 @docs dialog, quit, setEnabled, setDoubleClickDelay, focus
 @docs messageBox, MessageButton, okButtons, okCancelButtons, yesNoButtons, yesNoCancelButtons
@@ -222,11 +224,14 @@ out how big the terminal is -- the first thing the model is told that it did
 not ask for and cannot cause. Version 7 added [`Grows`](#View), which puts a
 `grow` field on the view it wraps: an older runtime would pass it to a binding
 that ignores unknown fields, and the view would silently not move. Version 8
-added the [`Changed`](#Event) event and [`Value`](#Value).
+added the [`Changed`](#Event) event and [`Value`](#Value). Version 9 added
+[`popupMenu`](#popupMenu) and `isRight` on a [`Clicked`](#Event) event, which
+go together: a context menu is opened by the model, and a right click is how
+the model finds out it was asked for one.
 -}
 protocolVersion : Int
 protocolVersion =
-    8
+    9
 
 
 -- GEOMETRY
@@ -564,6 +569,15 @@ else. Calling a command `"cancel"` because there is a Cancel entry on the menu
 gets an entry that draws, a hotkey that works, and no event ever -- Turbo
 Vision took it, and outside a dialog `cmCancel` does nothing at all. Nothing
 reports this. Pick another name.
+
+**One known limitation, and it is the menu bar's rather than this package's.**
+`TMenuView::execute` runs an event loop of its own while a pull-down is open,
+so for as long as one is down the program is stopped: no timers, no
+subscriptions, no renders. Nothing is lost -- a `Time.every` that should have
+fired arrives when the menu closes -- and a menu is open for a second at a
+time, which is why this has never been in the way. It is why
+[`popupMenu`](#popupMenu) is not built on Turbo Vision's own `TMenuPopup`,
+and why a context menu does not have the problem.
 -}
 type MenuItem
     = Item { title : String, cmd : String, key : String, shortcut : String }
@@ -600,6 +614,9 @@ type alias StatusItem =
   - `KeyPressed` -- a key reached a focused canvas. Names look like `"Left"`,
     `"F5"`, `"Alt-X"`, `"Ctrl-A"` or `"a"`.
   - `Clicked` -- a canvas was clicked, in the canvas's own coordinates.
+    `isRight` says which button, and exists for one reason:
+    [`popupMenu`](#popupMenu) takes a view and a point in it, which is exactly
+    what this event carries.
     `isDouble` marks the second click of a double click; the first arrived on
     its own a moment earlier, so a view that acts on both will act twice.
   - `Scrolled` -- a [`ScrollBar`](#View) moved, by arrow, page, drag or key.
@@ -632,7 +649,7 @@ type Event
     | Selected { id : String, index : Int, text : String }
     | Focused { id : String, index : Int, text : String }
     | KeyPressed { id : String, key : String }
-    | Clicked { id : String, x : Int, y : Int, isDouble : Bool }
+    | Clicked { id : String, x : Int, y : Int, isDouble : Bool, isRight : Bool }
     | Scrolled { id : String, value : Int }
     | Resized { cols : Int, rows : Int }
     | Changed { id : String, value : Value }
@@ -1018,6 +1035,84 @@ fileDialog spec =
             ]
             placed
     }
+
+
+{-| One entry in a context menu, or the line between two groups of them.
+
+`shortcut` is the right-aligned hint text (`"Ctrl-X"`), which is a label and
+nothing else -- a context menu is open for a moment, so there is no global key
+to bind. That is the difference from [`MenuItem`](#MenuItem), along with the
+one that matters: there is no `SubMenu` here.
+
+**A context menu is flat, and that is a decision rather than an omission.** A
+submenu in Turbo Vision is a menu opened from inside the loop that is running
+the menu above it, and that loop is a nested `getEvent` -- it stops timers,
+subscriptions and renders for as long as it is up. `popupMenu` is driven by
+the same pump as everything else here instead, which is what a flat menu makes
+possible. Turbo Vision's own only context menu -- `TEditor`'s Cut, Copy, Paste
+and Undo -- is flat too.
+-}
+type PopupItem
+    = Entry { title : String, cmd : String, shortcut : String }
+    | Divider
+
+
+{-| A context menu, at a point in a view.
+
+    Clicked click ->
+        if click.isRight then
+            { model = model
+            , command =
+                Tui.popupMenu tui
+                    { view = click.id
+                    , at = { x = click.x, y = click.y }
+                    , items =
+                        [ Entry { title = "Cu~t~", cmd = "cut", shortcut = "Shift-Del" }
+                        , Entry { title = "~C~opy", cmd = "copy", shortcut = "Ctrl-Ins" }
+                        , Divider
+                        , Entry { title = "~D~elete", cmd = "delete", shortcut = "" }
+                        ]
+                    }
+            }
+
+        else
+            ...
+
+`view` and `at` are the id and the coordinates a [`Clicked`](#Event) event
+hands you, so opening a menu where the user clicked needs no arithmetic. Any
+view's id will do, and so will a window's; the point is in that view's own
+coordinate system, and the menu is placed on the desktop from there, flipping
+up or left if there is no room below or right.
+
+**The answer is an ordinary [`Command`](#Event) event.** Nothing comes back
+that says a menu was involved, because nothing should: `cmd = "delete"` here
+reaches `update` exactly as `Item { cmd = "delete" }` on the menu bar does,
+and a built-in name like `"quit"` is handled by Turbo Vision without a round
+trip either way. Choosing nothing -- `Esc`, or a click outside -- sends
+nothing at all.
+
+It is modal while it is up, in the sense the rest of this package uses: input
+goes to the menu and nowhere else, and the program carries on. Entries are
+picked with the mouse, with the arrow keys and `Enter`, or by the letter the
+`~` marks underline.
+
+An entry whose command has been turned off with [`setEnabled`](#setEnabled) is
+drawn greyed and cannot be chosen, exactly as it would be on the menu bar --
+the menu reads the command set once, when it opens.
+-}
+popupMenu :
+    Ports msg
+    -> { view : String, at : { x : Int, y : Int }, items : Array PopupItem }
+    -> Cmd msg
+popupMenu ports spec =
+    ports.toJs <|
+        Encode.object
+            [ { key = "type", value = Encode.string "popupMenu" }
+            , { key = "view", value = Encode.string spec.view }
+            , { key = "x", value = Encode.int spec.at.x }
+            , { key = "y", value = Encode.int spec.at.y }
+            , { key = "items", value = Encode.array encodePopupItem spec.items }
+            ]
 
 
 {-| Quit. Any open dialog is cancelled on the way out, and the process exits
@@ -1475,6 +1570,25 @@ encodeMenuItem item =
                 ]
 
 
+{-| The same wire shape a menu item uses, minus the case that would nest. The
+binding parses both with the same function and refuses a submenu there, which
+is the belt to this type's braces.
+-}
+encodePopupItem : PopupItem -> Encode.Value
+encodePopupItem item =
+    when item is
+        Divider ->
+            Encode.object [ { key = "separator", value = Encode.bool True } ]
+
+        Entry i ->
+            Encode.object
+                [ { key = "title", value = Encode.string i.title }
+                , { key = "cmd", value = Encode.string i.cmd }
+                , { key = "key", value = Encode.string "" }
+                , { key = "shortcut", value = Encode.string i.shortcut }
+                ]
+
+
 encodeStatusItem : StatusItem -> Encode.Value
 encodeStatusItem item =
     Encode.object
@@ -1523,14 +1637,21 @@ eventDecoder =
                             (Decode.field "key" Decode.string)
 
                     "click" ->
-                        Decode.map4
-                            (\id x y doubled ->
-                                Clicked { id = id, x = x, y = y, isDouble = doubled }
+                        Decode.map5
+                            (\id x y doubled right ->
+                                Clicked
+                                    { id = id
+                                    , x = x
+                                    , y = y
+                                    , isDouble = doubled
+                                    , isRight = right
+                                    }
                             )
                             (Decode.field "id" Decode.string)
                             (Decode.field "x" Decode.int)
                             (Decode.field "y" Decode.int)
                             (Decode.field "doubled" Decode.bool)
+                            (Decode.field "right" Decode.bool)
 
                     "scroll" ->
                         Decode.map2

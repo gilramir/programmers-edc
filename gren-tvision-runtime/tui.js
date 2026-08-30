@@ -14,7 +14,7 @@ const { createDiffer } = require('./diff');
 // Bumped in lockstep with Tui.protocolVersion on the Gren side. A Gren package
 // and an npm package version independently, and they will skew; refusing an
 // unknown version beats rendering nothing and leaving the author to guess.
-const PROTOCOL = 8;
+const PROTOCOL = 9;
 
 /**
  * Drive a compiled Gren program's UI.
@@ -86,8 +86,8 @@ function run(grenModule, options = {}) {
             onFocus: (id, index, text) => send({ type: 'focus', id, index, text }),
             onScroll: (id, value) => send({ type: 'scroll', id, value }),
             onKey: (id, key) => send({ type: 'key', id, key }),
-            onClick: (id, x, y, doubled) =>
-              send({ type: 'click', id, x, y, doubled: !!doubled }),
+            onClick: (id, x, y, doubled, right) =>
+              send({ type: 'click', id, x, y, doubled: !!doubled, right: !!right }),
             onClose: (id) => differ.windowClosed(id),
             // Fires once at startup and again on every resize, so a model
             // that lays out against it never has to assume a size. The
@@ -158,6 +158,20 @@ function run(grenModule, options = {}) {
       case 'focus':
         pendingFocus = message.id;
         if (started) tv.focus(message.id);
+        break;
+
+      // A context menu, which is a Cmd for the same reason a dialog is: it is
+      // modal, and what comes back is the user's answer. Unlike a dialog it
+      // needs no plumbing on the way back at all -- the command the user chose
+      // arrives through onCommand, indistinguishable from the same command on
+      // the menu bar, which is the whole point.
+      case 'popupMenu':
+        tv.popupMenu({
+          view: message.view,
+          x: message.x,
+          y: message.y,
+          items: message.items,
+        });
         break;
 
       case 'doubleClickDelay':

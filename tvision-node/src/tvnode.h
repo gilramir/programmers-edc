@@ -25,6 +25,7 @@
 #define Uses_TListViewer
 #define Uses_TMenu
 #define Uses_TMenuBar
+#define Uses_TMenuBox
 #define Uses_TMenuItem
 #define Uses_TProgram
 #define Uses_TRect
@@ -445,6 +446,48 @@ public:
     }
 };
 
+// A context menu that does not run its own event loop.
+//
+// TMenuPopup would have been the obvious base and cannot be used: its
+// execute() is TMenuView::execute(), two hundred lines wrapped around a
+// getEvent() loop, and running it from inside the pump's own handleEvent call
+// stops Node's event loop for as long as the menu is open. The menu bar has
+// always done exactly that -- see FINDINGS -- and it is Turbo Vision's own
+// code, so it is left alone; nothing new is built on top of it.
+//
+// This one is driven by the pump like every other modal here, and that is what
+// makes it flat. A submenu is the recursive owner->execView() in the middle of
+// that loop; without submenus the whole state machine is a highlight, a click
+// and two keys. Turbo Vision's own only context menu -- TEditor's Cut/Copy/
+// Paste/Undo (teditor2.cpp:102) -- is flat too.
+//
+// TMenuBox is kept for the drawing: the frame, the hotkey highlighting, the
+// right-aligned shortcut column and the menu palette are all its.
+class JsMenuPopup : public TMenuBox {
+public:
+    JsMenuPopup(const TRect &bounds, TMenu *aMenu) noexcept;
+
+    // What ~TMenuPopup does. TMenuView does not own its menu -- the menu bar's
+    // outlives every box that shows it -- but a popup's is built for it.
+    ~JsMenuPopup() { delete menu; }
+
+    virtual void handleEvent(TEvent &event) override;
+
+private:
+    TMenuItem *itemAt(const TPoint &where);
+    void moveTo(TMenuItem *item);
+    void walk(bool forward);
+    void pick();
+    void cancel();
+
+    // A mouse-up only counts once a mouse-down has landed inside. The click
+    // that *asked* for this menu is still in flight when it opens -- the model
+    // hears the press, answers with a Cmd, and the release arrives after the
+    // box is on screen -- so without this the menu would close itself the
+    // instant it appeared.
+    bool armed = false;
+};
+
 class JsWindow : public TDialog {
 public:
     JsWindow(const TRect &bounds, TStringView title, std::string id) noexcept
@@ -600,7 +643,12 @@ void noteWindowClosed(const std::string &id);
 // `doubled` is TVision's meDoubleClick: the second click of a pair, which the
 // first click has already been reported for. tvdemo's mouse dialog exists to
 // let you feel where the boundary between the two is.
-void dispatchClick(const std::string &id, int x, int y, bool doubled);
+//
+// `rightButton` is the only reason a model would want to know which button was
+// pressed, and it is why: a right click is what opens a context menu, and the
+// model is the only thing that knows what should be in one.
+void dispatchClick(const std::string &id, int x, int y, bool doubled,
+                   bool rightButton);
 
 /* ------------------------------------------------------------------ */
 /*  Reading JS values                                                 */
@@ -642,7 +690,13 @@ Napi::Object collectValues(const Napi::Env &env, const std::string &windowId);
 // Push a view onto the modal stack with a C++ continuation instead of a
 // promise -- see the note beside the definition, and JsHistory.
 void openLocalModal(TGroup *host, TView *view,
-                    std::function<void(TView *, ushort)> done);
+                    std::function<void(TView *, ushort)> done,
+                    bool viewIsGroup = true);
+
+// End it. A modal view normally says it is finished by setting
+// TGroup::endState, which only a group has; JsMenuPopup is a TMenuBox, so it
+// says so here instead and the session keeps the slot on its behalf.
+void endLocalModal(TView *view, ushort command);
 
 void registerViewApi(Napi::Env env, Napi::Object exports);
 

@@ -2138,3 +2138,121 @@ does not. That looks like an inconsistency and is the opposite of one — the
 user picked a whole entry and the next keystroke is meant to replace it, which
 is exactly the argument `setInputTextKeepingCaret` makes in reverse. There is a
 check for each.
+
+## Closing gap 7: a context menu, and the loop the menu bar has always had
+
+`TMenuPopup` is Turbo Vision's right-click menu, and the entry for this gap
+said the menu machinery was all there and what was missing was a way to open
+one at a point. Both halves turned out to be wrong: the way to open one was the
+easy part, and the machinery is where the problem is.
+
+### The menu bar freezes the whole program, and always has
+
+`TMenuView::execute()` (`tmnuview.cpp:179`) is two hundred lines built around
+`getEvent(e)` at the top of a `do ... while`. `TMenuBar::handleEvent` reaches it
+through `do_a_select`, which means that when a pull-down is open, that loop is
+running **inside the pump's own `target->handleEvent(event)` call**, and Node's
+event loop is not running at all.
+
+Measured in `examples/entries`, whose clock is a plain `Time.every`
+subscription:
+
+    control, nothing open:    ticks 1 -> 5 over 3.5s
+    with a pull-down open:    ticks 5 -> 5 over 3.5s
+    after Esc:                ticks 6 -> 9
+
+Nothing is lost — the timers and the I/O are queued and fire when the menu
+closes — but for as long as a menu is down, every subscription, every promise
+and every render in the program is stopped. Nobody had written this down, and
+it is the exact defect the history drop-down went out of its way to avoid one
+commit earlier.
+
+It is not fixed here, and the reason is a trade rather than an oversight.
+Making it go away means reimplementing `TMenuView::execute` as a state machine
+the pump can step: five flags carried across iterations (`autoSelect`,
+`firstEvent`, `itemShown`, `lastTargetItem`, `mouseActive`), `putEvent`
+re-injection in three places, and a recursive `owner->execView(target)` in the
+middle for submenus. It is the least documented and most fiddly code in Turbo
+Vision, every menu in every example runs through it, and what it buys is a
+one-second freeze while somebody looks at a menu. So it is written down here
+and in `examples/README.md`, and nothing new was built on top of it.
+
+### Which is why a context menu is flat
+
+`TMenuPopup::execute()` *is* `TMenuView::execute()`. Using it would have
+widened the hole rather than left it where it was.
+
+So `JsMenuPopup` is a `TMenuBox` — kept for the drawing, which is the part
+worth having: the frame, the hotkey underlining, the right-aligned shortcut
+column and the menu palette are all its — with a `handleEvent` of its own and
+no `execute` anywhere. It goes on the same modal stack `tv.dialog()` and the
+history drop-down use, so it is driven by the pump like everything else, and
+`drive_demo.py` checks the clock against it: the status-line clock keeps
+ticking with the menu open, which is the assertion the whole class exists for.
+
+**A submenu is the recursion.** `PopupItem` has `Entry` and `Divider` and no
+`SubMenu`, because a submenu in Turbo Vision is a menu opened by
+`owner->execView` from inside the loop running the menu above it — which is
+precisely the thing not being done here. Without them the state machine is a
+highlight, a click and two keys, and that is short enough to be obviously
+right. `TEditor::initContextMenu` (`teditor2.cpp:102`) is Cut, Copy, Paste and
+Undo, so Turbo Vision's own only context menu is flat too. The type makes it
+unexpressible and the binding throws on one anyway, because the wire shape is
+shared with the menu bar's.
+
+### A modal view is not always a group
+
+This is the bug that was waiting rather than the one that was found. The pump
+computed its target as
+
+    TGroup *target = g_modals.empty() ? (TGroup *) g_app.get()
+                                      : (TGroup *) g_modals.back()->view;
+
+and then read `target->endState`. `endState` is a member of **`TGroup`**, not
+`TView` (`views.h:919`) — and so is `eventError`. Every modal on the stack had
+been a `JsWindow` or a `THistoryWindow`, both groups, so the cast had always
+been true. A `TMenuBox` is not, and reading `endState` off one reads past the
+end of the object.
+
+`TView::endModal` gives the same result from the other side: it forwards to
+`TopView()->endModal(command)`, and for a plain view that is `TView::endModal`
+again — an infinite recursion. Turbo Vision's modality is group-only by
+construction, which is *why* `TMenuView::execute` is a loop and not a modal
+view.
+
+So the session owns the answer now instead of the pump assuming it:
+`ModalSession::endState()` reads `TGroup::endState` for a group and its own
+`ended` slot for anything else, `endLocalModal(view, command)` sets that slot,
+and `target` is a `TView *`. `handleEvent`, `valid` and `eventError` were the
+only other things asked of it, and only the last is a group's.
+
+### What comes back is a command, and nothing else
+
+Choosing an entry puts an `evCommand` back on the event queue — which is what
+`TMenuView::do_a_select` does with the command its own loop returned — rather
+than reporting anything of its own. Two things fall out of that and both are
+the point. A built-in name like `"quit"`, `"close"` or `"zoom"` is handled by
+`TApplication` exactly as it would be from the menu bar, without a round trip
+through the model. And a name of the model's own arrives as an ordinary
+`Command` event, indistinguishable from the same entry on the menu bar or its
+function key. `examples/demo`'s menu is three of Turbo Vision's own window
+commands and `update` handles none of them; `drive_demo.py` checks that Zoom
+zoomed *and* that nothing about it reached the model.
+
+`Esc` and a click outside end it with `cmCancel` and send nothing. An entry
+whose `cmd` is `"cancel"` is therefore indistinguishable from `Esc`, which is
+correct rather than a collision.
+
+### The right button had to cross the port
+
+`Clicked` gained `isRight`, which is the other half of protocol 9: a context
+menu is opened by the model, and until now the model was never told which
+button was pressed. The coordinates were already right — `Clicked` reports in
+the *view's* own coordinates, and `popupMenu` takes a view id and a point in
+it, so opening a menu where the user clicked is the click event handed straight
+back with no arithmetic.
+
+One inherited surprise, and it is the "two clicks, not one" rule again: the
+first right click on an inactive window is spent activating it, because
+`TView::handleEvent` selects on `evMouseDown` whichever button it was. Both
+`drive_demo.py` and anyone using this will click twice.

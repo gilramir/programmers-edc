@@ -154,6 +154,29 @@ struct ModalSession {
     // opened: those two are the only ways onto this stack, and exactly one of
     // `deferred` and `onDone` is set on any session.
     std::unique_ptr<Napi::Promise::Deferred> deferred;
+
+    // Turbo Vision ends a modal by setting TGroup::endState, and only a group
+    // has one. Every modal on this stack was a window until the popup menu,
+    // which is a TMenuBox -- so the session says which kind it is holding
+    // rather than the pump assuming, and keeps the slot itself for the kind
+    // that has nowhere to put it. Reading a TGroup member off a plain TView
+    // reads past the end of the object, which is a bug that would have shown
+    // up as something else entirely.
+    bool viewIsGroup = true;
+    ushort ended = 0;
+
+    ushort endState() const
+    {
+        return viewIsGroup ? ((TGroup *) view)->endState : ended;
+    }
+
+    void clearEndState()
+    {
+        if (viewIsGroup)
+            ((TGroup *) view)->endState = 0;
+        else
+            ended = 0;
+    }
 };
 
 // A stack: a dialog opened from a dialog is ordinary.
@@ -625,7 +648,8 @@ static void flushClosedWindows()
         callJs(g_onClose, {Napi::String::New(env, id)});
 }
 
-void dispatchClick(const std::string &id, int x, int y, bool doubled)
+void dispatchClick(const std::string &id, int x, int y, bool doubled,
+                   bool rightButton)
 {
     if (g_onClick.IsEmpty() || g_hasPendingError)
         return;
@@ -634,7 +658,8 @@ void dispatchClick(const std::string &id, int x, int y, bool doubled)
     Napi::HandleScope scope(env);
     callJs(g_onClick, {Napi::String::New(env, id), Napi::Number::New(env, x),
                        Napi::Number::New(env, y),
-                       Napi::Boolean::New(env, doubled)});
+                       Napi::Boolean::New(env, doubled),
+                       Napi::Boolean::New(env, rightButton)});
 }
 
 /* ------------------------------------------------------------------ */
@@ -723,14 +748,211 @@ static void closeTopModal(const Napi::Env &env, ushort result)
 // whole modal design is for, which is that modal means "input goes here" and
 // never "the process stops".
 void openLocalModal(TGroup *host, TView *view,
-                    std::function<void(TView *, ushort)> done)
+                    std::function<void(TView *, ushort)> done, bool viewIsGroup)
 {
     auto session = std::make_unique<ModalSession>();
     session->view = view;
     session->host = host;
     session->onDone = std::move(done);
+    session->viewIsGroup = viewIsGroup;
     beginModal(*session);
     g_modals.push_back(std::move(session));
+}
+
+void endLocalModal(TView *view, ushort command)
+{
+    for (auto it = g_modals.rbegin(); it != g_modals.rend(); ++it)
+        if ((*it)->view == view)
+            {
+            (*it)->ended = command;
+            return;
+            }
+}
+
+/* ------------------------------------------------------------------ */
+/*  The context menu                                                  */
+/* ------------------------------------------------------------------ */
+
+JsMenuPopup::JsMenuPopup(const TRect &bounds, TMenu *aMenu) noexcept
+    : TMenuBox(bounds, aMenu, nullptr)
+{
+    // TMenuView leaves `current` at the menu's default, which for a context
+    // menu is nothing -- TMenuPopup::execute zeroes it deliberately, on the
+    // grounds that a highlighted entry under the pointer looks wrong. Nothing
+    // is highlighted here either until the pointer or an arrow key says so.
+    current = nullptr;
+
+    // What TMenuView::updateMenu does on cmCommandSetChanged, done once at
+    // construction because that is the only moment this menu exists for.
+    // Without it a command turned off with tv.setEnabled() would be drawn in
+    // the ordinary colour, and only refuse to be chosen when it was.
+    for (TMenuItem *p = menu != nullptr ? menu->items : nullptr; p != nullptr;
+         p = p->next)
+        if (p->name != nullptr)
+            p->disabled = commandEnabled(p->command) ? False : True;
+}
+
+TMenuItem *JsMenuPopup::itemAt(const TPoint &where)
+{
+    if (menu == nullptr)
+        return nullptr;
+    TPoint spot = makeLocal(where);
+    for (TMenuItem *p = menu->items; p != nullptr; p = p->next)
+        if (p->name != nullptr && getItemRect(p).contains(spot))
+            return p;
+    return nullptr;
+}
+
+void JsMenuPopup::moveTo(TMenuItem *item)
+{
+    if (item == current)
+        return;
+    current = item;
+    drawView();
+}
+
+// Up and down, wrapping, skipping the separators. TMenuView has nextItem and
+// prevItem for this and they are private, which is why they are here again --
+// and the chain is singly linked, so backwards is a walk from the front.
+void JsMenuPopup::walk(bool forward)
+{
+    if (menu == nullptr || menu->items == nullptr)
+        return;
+
+    // Bounded rather than "until it comes back to where it started": a menu
+    // of nothing but dividers has no name to land on, and the wrap would go
+    // round for ever looking for one.
+    int room = 0;
+    for (TMenuItem *p = menu->items; p != nullptr; p = p->next)
+        ++room;
+
+    TMenuItem *start = current;
+    TMenuItem *at = current;
+    do
+        {
+        if (forward)
+            at = (at == nullptr || at->next == nullptr) ? menu->items : at->next;
+        else
+            {
+            TMenuItem *before = nullptr;
+            for (TMenuItem *p = menu->items; p != nullptr && p != at; p = p->next)
+                before = p;
+            if (before == nullptr)
+                for (before = menu->items; before->next != nullptr;
+                     before = before->next)
+                    ;
+            at = before;
+            }
+        }
+    while (--room > 0 && at != start && at->name == nullptr);
+    if (at->name != nullptr)
+        moveTo(at);
+}
+
+void JsMenuPopup::pick()
+{
+    if (current == nullptr || current->name == nullptr ||
+        current->command == 0 || !commandEnabled(current->command))
+        return;
+    endLocalModal(this, current->command);
+}
+
+void JsMenuPopup::cancel()
+{
+    endLocalModal(this, cmCancel);
+}
+
+// Deliberately not TMenuView::handleEvent. Both of the branches that matter
+// there end in do_a_select(), which calls execute() -- the nested loop this
+// class exists to not have.
+//
+// Every event reaches here, including the ones outside the box, because the
+// pump sends them straight to the top modal view rather than through the
+// desktop. Clicking away is therefore something this can see and act on.
+void JsMenuPopup::handleEvent(TEvent &event)
+{
+    switch (event.what)
+        {
+        case evMouseDown:
+            if (mouseInView(event.mouse.where))
+                {
+                armed = true;
+                moveTo(itemAt(event.mouse.where));
+                }
+            else
+                cancel();
+            clearEvent(event);
+            break;
+
+        // Only while a button is held: the terminal is put in mode 1002, which
+        // reports motion during a drag and not otherwise, so a hover that
+        // follows the pointer is not on offer. Turbo Vision's own menus track
+        // the same way.
+        case evMouseMove:
+            if (armed && mouseInView(event.mouse.where))
+                moveTo(itemAt(event.mouse.where));
+            clearEvent(event);
+            break;
+
+        case evMouseUp:
+            if (armed)
+                {
+                if (mouseInView(event.mouse.where) &&
+                    itemAt(event.mouse.where) != nullptr)
+                    {
+                    moveTo(itemAt(event.mouse.where));
+                    pick();
+                    }
+                else
+                    cancel();
+                }
+            clearEvent(event);
+            break;
+
+        case evKeyDown:
+            switch (event.keyDown.keyCode)
+                {
+                case kbUp:
+                    walk(false);
+                    break;
+                case kbDown:
+                    walk(true);
+                    break;
+                // Straight to `current` rather than through moveTo, which
+                // would draw the menu once with nothing highlighted on the
+                // way past.
+                case kbHome:
+                    current = nullptr;
+                    walk(true);
+                    break;
+                case kbEnd:
+                    current = nullptr;
+                    walk(false);
+                    break;
+                case kbEnter:
+                    pick();
+                    break;
+                case kbEsc:
+                    cancel();
+                    break;
+                default:
+                    // A letter picks the entry it underlines, the way it does
+                    // in a pull-down. Anything else is swallowed rather than
+                    // passed on: a modal menu that let keystrokes through to
+                    // the window behind it would be a surprising one.
+                    if (TMenuItem *p = findItem(event.keyDown.getText()))
+                        {
+                        moveTo(p);
+                        pick();
+                        }
+                    break;
+                }
+            clearEvent(event);
+            break;
+
+        default:
+            break;
+        }
 }
 
 /* ------------------------------------------------------------------ */
@@ -889,9 +1111,15 @@ static Napi::Value Step(const Napi::CallbackInfo &info)
         // Recomputed every pass: a callback may have opened or closed a
         // dialog. This is the whole of modality -- events go to the top modal
         // view instead of to the application.
-        TGroup *target = g_modals.empty()
-                             ? (TGroup *) g_app.get()
-                             : (TGroup *) g_modals.back()->view;
+        //
+        // A TView and not a TGroup, which it used to be. Every modal here was
+        // a window until the popup menu, which is a TMenuBox; handleEvent,
+        // eventError and valid are all TView virtuals, and the one thing that
+        // was not -- endState -- now belongs to the session. See
+        // ModalSession::endState.
+        TView *target = g_modals.empty()
+                            ? (TView *) g_app.get()
+                            : g_modals.back()->view;
 
         TEvent event;
         g_app->getEvent(event);      // also runs idle() when there is nothing
@@ -900,8 +1128,12 @@ static Napi::Value Step(const Napi::CallbackInfo &info)
 
         ++handled;
         target->handleEvent(event);
-        if (event.what != evNothing)
-            target->eventError(event);
+        // TGroup's, not TView's, and it only ever walks up to the application
+        // to be ignored. A popup menu swallows everything it is given, so
+        // there is nothing left to report and nowhere for it to go.
+        if (event.what != evNothing &&
+            (g_modals.empty() || g_modals.back()->viewIsGroup))
+            ((TGroup *) target)->eventError(event);
 
         // Safe point: this event is finished, so whatever it destroyed is
         // fully gone and whatever it moved has settled. Both queues are
@@ -915,19 +1147,23 @@ static Napi::Value Step(const Napi::CallbackInfo &info)
         // The outer half of TGroup::execute(): a command the target considers
         // valid ends it. For the application that means quitting; for a modal
         // dialog it means the dialog is done.
-        if (target->endState != 0)
+        ushort ending = g_modals.empty() ? g_app->endState
+                                         : g_modals.back()->endState();
+        if (ending != 0)
             {
-            if (target->valid(target->endState))
+            if (target->valid(ending))
                 {
                 if (g_modals.empty())
                     {
                     finished = true;
                     break;
                     }
-                closeTopModal(env, target->endState);
+                closeTopModal(env, ending);
                 }
+            else if (g_modals.empty())
+                g_app->endState = 0;
             else
-                target->endState = 0;
+                g_modals.back()->clearEndState();
             }
         }
 
@@ -1024,6 +1260,77 @@ static Napi::Value Dialog(const Napi::CallbackInfo &info)
     return promise;
 }
 
+// tv.popupMenu({view, x, y, items}) -- a context menu at a point in a view.
+//
+// The command the user chose is put back on the event queue rather than
+// dispatched from here, which is what TMenuView::do_a_select does with the
+// command its own loop returned. A built-in like "quit" or "close" is then
+// handled by TApplication exactly as it would be from the menu bar, and a name
+// of the model's own reaches onCommand by the same route as every other
+// command. The model does not have to know where a command came from, and this
+// is what makes that true.
+static Napi::Value PopupMenu(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    requireRunning(env, "popupMenu");
+
+    if (!info[0].IsObject())
+        throw Napi::TypeError::New(env, "tvision: popupMenu(spec) needs a spec "
+                                        "object");
+    Napi::Object spec = info[0].As<Napi::Object>();
+
+    // The anchor decides the coordinate system, because a context menu is
+    // opened from a click and a click arrives in the coordinates of the view
+    // that was clicked. Asking the model to convert those to the desktop's
+    // would be arithmetic it should never have to do.
+    std::string anchorId = getString(spec, "view");
+    TView *anchor = nullptr;
+    if (ViewRef *ref = g_views.find(anchorId))
+        anchor = ref->view;
+    else if (JsWindow *win = g_views.findWindow(anchorId))
+        anchor = win;
+    if (anchor == nullptr)
+        throw Napi::Error::New(env, "tvision: popupMenu view '" + anchorId +
+                                        "' does not exist");
+
+    std::vector<MenuItemDef> items = parseMenuItems(env, spec.Get("items"));
+    for (const MenuItemDef &item : items)
+        if (item.isSubMenu())
+            throw Napi::Error::New(env, "tvision: a popup menu cannot contain a "
+                                        "submenu ('" + item.title + "') -- a "
+                                        "submenu is a menu opening inside a "
+                                        "menu, and this one is driven by the "
+                                        "pump rather than by a loop of its own");
+    TMenu *menu = buildMenu(items);
+    if (menu == nullptr)
+        throw Napi::Error::New(env, "tvision: a popup menu needs at least one "
+                                    "item");
+
+    TPoint at = TProgram::deskTop->makeLocal(
+        anchor->makeGlobal(TPoint{getInt(spec, "x", 0), getInt(spec, "y", 0)}));
+
+    // From the point to the far corner. TMenuBox sizes itself to its items
+    // inside whatever it is given and flips up or left when it does not fit,
+    // which is the same rectangle TMenuView::execute hands a submenu.
+    TRect room(at.x, at.y, TProgram::deskTop->size.x, TProgram::deskTop->size.y);
+    JsMenuPopup *popup = new JsMenuPopup(room, menu);
+
+    openLocalModal(
+        TProgram::deskTop, popup,
+        [](TView *, ushort result) {
+            if (result == 0 || result == cmCancel)
+                return;
+            TEvent chosen;
+            chosen.what = evCommand;
+            chosen.message.command = result;
+            chosen.message.infoPtr = nullptr;
+            TProgram::application->putEvent(chosen);
+        },
+        false);   // a TMenuBox, so not a group -- see ModalSession::endState
+
+    return env.Undefined();
+}
+
 // tv.quit() -- ask the application to exit, as if the user had chosen Exit.
 static Napi::Value Quit(const Napi::CallbackInfo &info)
 {
@@ -1109,6 +1416,7 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports)
     exports.Set("start", Napi::Function::New(env, Start));
     exports.Set("step", Napi::Function::New(env, Step));
     exports.Set("dialog", Napi::Function::New(env, Dialog));
+    exports.Set("popupMenu", Napi::Function::New(env, PopupMenu));
     exports.Set("quit", Napi::Function::New(env, Quit));
     exports.Set("setMenuBar", Napi::Function::New(env, SetMenuBar));
     exports.Set("setStatusLine", Napi::Function::New(env, SetStatusLine));

@@ -14,6 +14,10 @@ If `view` were re-asserting positions, tiling would snap straight back.
 It also checks the bug this example found: `"tile"` and `"cascade"` were
 documented as built-in command names and were not interned as such, so they
 arrived in the model as ordinary events and moved nothing.
+
+And the context menu, which makes the same point from a third direction and
+one of its own: the clock has to keep ticking while the menu is open, because
+Turbo Vision's own TMenuPopup would have stopped it.
 """
 
 import os
@@ -40,6 +44,25 @@ def frames(app):
             if "─" in line or "═" in line:
                 found.setdefault(m.group(1), (m.start(), row))
     return found
+
+
+def note_box(app, title):
+    """(left column, row) of the frame line carrying this note's title."""
+    for row, line in enumerate(app.render().split("\n")):
+        if title in line and ("\u250c" in line or "\u2554" in line):
+            upto = line.index(title)
+            return (max(line.rfind("\u250c", 0, upto), line.rfind("\u2554", 0, upto)),
+                    row)
+    return None
+
+
+def topmost_note(app):
+    """The newest note, which is the one nothing is stacked on top of."""
+    for title in sorted(frames(app), reverse=True):
+        at = note_box(app, title)
+        if at is not None:
+            return (title, at)
+    return (None, None)
 
 
 def log(app):
@@ -151,6 +174,55 @@ def main():
     app.send(b"\x1b[B", settle=0.4)
     app.send(b"\r", settle=0.9)
     check("and it closed", "Note colour" not in app.render(), app.render())
+
+    # The context menu. Two right clicks and not one: the first is spent
+    # activating the window, which is TView::handleEvent's rule for any click
+    # on anything that is not already selected.
+    note, at = topmost_note(app)
+    check("a note is where its frame says it is", at is not None, app.render())
+    app.right_click(at[0] + 3, at[1] + 2, settle=1.0)
+    app.right_click(at[0] + 3, at[1] + 2, settle=1.2)
+    opened = app.render()
+    check("a right click opened a context menu",
+          all(re.search(pattern, opened)
+              for pattern in (r"Zoom\s+F5", r"Next\s+F6", r"Close\s+Alt-F3")),
+          opened)
+    check("and the model was told which button it was",
+          any("right" in line for line in log(app)), str(log(app)))
+
+    # The reason this is not TMenuPopup. Its execute() is TMenuView::execute(),
+    # a getEvent loop, and running one from inside the pump stops Node's event
+    # loop -- which the menu bar above still does and this does not. The clock
+    # is the witness: a Time.every subscription, ticking behind the open menu.
+    ticking = re.search(r"\d\d:\d\d:\d\d", app.render()).group(0)
+    app.pump(3.2)
+    check("the clock keeps ticking with the menu open",
+          re.search(r"\d\d:\d\d:\d\d", app.render()).group(0) != ticking,
+          f"clock stuck at {ticking}")
+
+    # Choosing nothing is not observable in the log -- none of the three
+    # commands on this menu reaches the model even when it *is* chosen, which
+    # is the next check -- so what "nothing happened" means here is that no
+    # window moved, zoomed or closed.
+    untouched = frames(app)
+    app.send(b"\x1b", settle=1.0)
+    check("Esc closes it and chooses nothing",
+          not re.search(r"Close\s+Alt-F3", app.render())
+          and frames(app) == untouched,
+          f"{untouched} -> {frames(app)}")
+
+    # And what it chooses is an ordinary command. "zoom" is Turbo Vision's own
+    # -- the model does not handle it and never hears about it -- so this is
+    # the same assertion the Tile check below makes, arriving by a third route
+    # after the menu bar and the F5 key.
+    at = note_box(app, note)
+    app.right_click(at[0] + 3, at[1] + 2, settle=1.0)
+    app.send(b"z", settle=1.2)
+    check("a letter picks the entry it underlines, and Zoom zoomed",
+          note_box(app, note) == (0, 1), str(note_box(app, note)))
+    check("and zooming did not reach the model either",
+          not any("Command zoom" in line for line in log(app)), str(log(app)))
+    app.send(b"\x1b[15~", settle=1.0)   # F5 again: back where it was
 
     # Now the part this example exists for.
     before = frames(app)

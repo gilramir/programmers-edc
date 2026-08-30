@@ -31,6 +31,13 @@ handled on its own -- the click that raised a window, the arrow that moved a
 highlight, every mouse move -- never crosses the port. That is the whole
 bargain, and a window that lists what does cross it is a fair way to show it.
 
+**Right-click a note.** The context menu that comes up holds three of Turbo
+Vision's own window commands, and `update` does not handle any of them -- the
+same three do the same thing from the Windows menu, from their function keys
+and from here, because a command from a popup is a command. It is also where
+to watch the clock: it keeps ticking with the menu open, which `TMenuPopup`
+would not have allowed.
+
 **The clock is in the status line, and that costs something.** `TClockView` is
 a view on the application, outside the desktop, which this API has no way to
 express. A status item is close enough -- except that the status line is
@@ -49,7 +56,7 @@ import Node
 import String
 import Task
 import Time
-import Tui exposing (Event(..), Hue(..), MenuItem(..), View(..))
+import Tui exposing (Event(..), Hue(..), MenuItem(..), PopupItem(..), View(..))
 
 
 -- PORTS
@@ -195,6 +202,12 @@ describe event =
                     else
                         ""
                    )
+                ++ (if it.isRight then
+                        " right"
+
+                    else
+                        ""
+                   )
 
         Scrolled it ->
             "Scrolled " ++ it.id ++ " = " ++ String.fromInt it.value
@@ -253,6 +266,34 @@ handleEvent event model =
 
         Command "about" ->
             { model = model, command = Tui.dialog tui (aboutDialog model) }
+
+        -- A right click on a note asks for a context menu, and asking is all
+        -- it does. Every entry on it is one of Turbo Vision's own window
+        -- commands, already on the Windows menu above, and not one of them is
+        -- handled here or anywhere in this file -- so the menu is proof of
+        -- two things at once: a command from a popup is indistinguishable
+        -- from the same command anywhere else, and the clock in the status
+        -- line keeps ticking while the menu is up. The second is the whole
+        -- reason this is not Turbo Vision's own TMenuPopup, whose execute()
+        -- would stop it.
+        Clicked click ->
+            if click.isRight then
+                { model = model
+                , command =
+                    Tui.popupMenu tui
+                        { view = click.id
+                        , at = { x = click.x, y = click.y }
+                        , items =
+                            [ Entry { title = "~Z~oom", cmd = "zoom", shortcut = "F5" }
+                            , Entry { title = "~N~ext", cmd = "next", shortcut = "F6" }
+                            , Divider
+                            , Entry { title = "~C~lose", cmd = "close", shortcut = "Alt-F3" }
+                            ]
+                        }
+                }
+
+            else
+                { model = model, command = Cmd.none }
 
         Command "colours" ->
             { model = model, command = Tui.dialog tui (coloursDialog model) }

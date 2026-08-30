@@ -120,15 +120,21 @@ class Pty:
         os.write(self.fd, data)
         self.pump(settle)
 
-    def click(self, col, row, settle=0.5):
-        """One left click at 1-based (col, row), in SGR mouse encoding.
+    def click(self, col, row, settle=0.5, button=0):
+        """One click at 1-based (col, row), in SGR mouse encoding.
 
         TVision turns on modes 1000, 1002 and 1006 at startup, so it is
         listening for these -- which makes the close box, the scroll bars and
         list selection reachable from a test.
+
+        `button` is the SGR code: 0 is the left button and 2 is the right one,
+        which is the one a context menu is opened with.
         """
-        self.send(f"\x1b[<0;{col};{row}M".encode(), settle=0.15)
-        self.send(f"\x1b[<0;{col};{row}m".encode(), settle=settle)
+        self.send(f"\x1b[<{button};{col};{row}M".encode(), settle=0.15)
+        self.send(f"\x1b[<{button};{col};{row}m".encode(), settle=settle)
+
+    def right_click(self, col, row, settle=0.5):
+        self.click(col, row, settle=settle, button=2)
 
     def wait(self, timeout=5):
         end = time.time() + timeout

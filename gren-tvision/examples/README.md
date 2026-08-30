@@ -21,7 +21,7 @@ Build them all with `../build.sh`, run one with `../run.sh <name>`.
 | `palette` | `tvision/examples/palette` | nothing -- it is the example whose entire subject the port removes, and the write-up says what that costs |
 | `mouse` | `tvision/examples/tvdemo` (mousedlg.cpp) | the scroll bar as a view of its own, `isDouble` on a click, `setDoubleClickDelay`, and `takesFocus` on a canvas |
 | `dir` | `tvision/examples/tvdir` | no widget at all — but it found a real bug in the diff, moved a list box's scroll bar, and is the first example to use the file system; later `Tui.fileDialog`, which finished the port, and the `History` on its field |
-| `demo` | `tvision/examples/tvdemo` (the shell) | real windows: zoom, resize, tile and cascade, which every window had silently been unable to do — and later the first `Tui.messageBox`, which is its About box with fifteen lines taken out |
+| `demo` | `tvision/examples/tvdemo` (the shell) | real windows: zoom, resize, tile and cascade, which every window had silently been unable to do — and later the first `Tui.messageBox`, which is its About box with fifteen lines taken out, and `popupMenu`, whose right-click menu is three commands it already had |
 | `viewer` | `tvision/examples/tvdemo` (fileview.cpp) | nothing — `TScroller` went the way of `TOutline`; but it is the first horizontal scroll bar doing its own job |
 | `watch` | *(ours)* | not a port: a subscription from outside the program, several children at once, and a run that can be killed. It found a name the binding was silently swallowing |
 
@@ -414,7 +414,8 @@ the four layers, and the stock controls are all there: `TStaticText`, `TLabel`,
 `TButton`, `TInputLine`, `TCluster` with `TCheckBoxes` and `TRadioButtons`,
 `TListViewer` with `TListBox`, `TScrollBar`, `TMenuBar`/`TMenuBox`/`TSubMenu`,
 `TStatusLine`, `TWindow`/`TDialog`/`TFrame`,
-`THistory`/`THistoryViewer`/`THistoryWindow`, and the
+`THistory`/`THistoryViewer`/`THistoryWindow`, `TMenuBox` as a context menu,
+and the
 `TGroup`/`TProgram`/`TApplication`/`TDeskTop` scaffolding underneath. `Canvas`
 is the escape hatch for anything the set does not have.
 
@@ -434,7 +435,7 @@ excludes `evMouseWheel` (`views.h`), so a wheel event goes to whatever has
 
 ### The coverage gaps left
 
-Ten, in the order they were listed, six closed and one half closed. Each says
+Ten, in the order they were listed, seven closed and one half closed. Each says
 what it would take, because "not done", "not decided" and "not needed" are
 three different problems.
 
@@ -595,10 +596,52 @@ fires.
 Choosing an entry arrives as an ordinary [`Changed`](#Event) event on the
 *field*, because that is what happened, so the protocol is still at 8.
 
-**7. `TMenuPopup` — context menus.** Right-click menus. The menu machinery is
-all there; what is missing is the way to open one at a point in response to a
-click. `TEditor::initContextMenu` returns one, so this is a soft prerequisite
-for the editor.
+**7. ~~`TMenuPopup` — context menus.~~ Done — [`popupMenu`](#popupMenu) and
+[`PopupItem`](#PopupItem), protocol 9.** This entry said the menu machinery was
+all there and what was missing was a way to open one at a point. Both halves
+were wrong. Opening one was the easy part, and the machinery is where the
+problem is.
+
+**`TMenuView::execute()` is a nested event loop, and the menu bar has always
+run it.** Two hundred lines around a `getEvent` at the top of a `do ... while`,
+reached from `TMenuBar::handleEvent` — so while a pull-down is open it is
+spinning inside the pump's own `handleEvent` call and Node's loop is stopped.
+Measured in `entries`, whose clock is a `Time.every` subscription: 1 → 5 ticks
+in 3.5 seconds normally, 5 → 5 with a pull-down open, moving again the moment
+`Esc` is pressed. Nothing is *lost* — the timers fire when the menu closes —
+but every subscription, promise and render in the program is stopped for as
+long as somebody is looking at a menu. **That is a known limitation and it is
+not fixed**: undoing it means reimplementing `execute` as a state machine the
+pump can step, five flags carried across iterations and a recursive `execView`
+in the middle, in the least documented code in the library, to buy back a
+one-second freeze. FINDINGS has the measurement and the argument.
+
+What was done instead is that nothing new was built on top of it.
+`TMenuPopup::execute()` *is* `TMenuView::execute()`, so the popup here is a
+`TMenuBox` — kept for the drawing — with a `handleEvent` of its own, on the
+same modal stack `dialog` and the history drop-down use. `drive_demo.py`
+checks the clock keeps ticking with the context menu open, which is the
+assertion the class exists for.
+
+**A context menu is flat**, and that is the same fact seen from the other end:
+a submenu is the recursive `execView` in the middle of that loop.
+`PopupItem` is `Entry` and `Divider` and there is no `SubMenu`.
+`TEditor::initContextMenu` — Cut, Copy, Paste, Undo — is flat too, so the
+thing this gap is a prerequisite for does not want one.
+
+**What comes back is an ordinary `Command` event**, because the chosen command
+is put back on the event queue rather than reported specially. A built-in like
+`"quit"` or `"zoom"` is handled by `TApplication` without reaching the model at
+all; anything else arrives indistinguishable from the same entry on the menu
+bar. `examples/demo`'s context menu is three of Turbo Vision's own window
+commands and `update` handles none of them.
+
+Protocol 9 is that message plus `isRight` on a [`Clicked`](#Event) event, which
+go together: the model opens the menu, and a right click is how it learns it
+was asked for one. Two other things fell out and are in FINDINGS — the pump was
+casting every modal view to `TGroup *` and reading `TGroup::endState` off it,
+which had been true of every modal until this one; and the first right click on
+an inactive window is still spent activating it.
 
 **8. Validators on input lines** — the second half of what used to be two
 faces of one hole. The first face is closed; this is what is left of it.
