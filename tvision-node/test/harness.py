@@ -97,6 +97,26 @@ class Pty:
             pass
 
 
+def node_argv(script):
+    """["node", script] -- or the ASAN wrapper when TVNODE_ASAN=1.
+
+    An addon linked with -fsanitize=address cannot be dlopen'd into a plain
+    node: "ASan runtime does not come first in initial library list". The
+    runtime has to be preloaded, which is what test/asan.sh does. Every driver
+    goes through here so an ASAN build does not silently fail to start and
+    look like an application bug.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    node = ["node"]
+    if os.environ.get("TVNODE_ASAN") == "1":
+        node = [os.path.join(here, "asan.sh"), "node"]
+    return node + [script]
+
+
+def asan_enabled():
+    return os.environ.get("TVNODE_ASAN") == "1"
+
+
 class Checks:
     def __init__(self):
         self.failures = []

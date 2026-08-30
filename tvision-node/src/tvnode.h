@@ -8,9 +8,9 @@
 
 #include <napi.h>
 
-#define Uses_MsgBox
 #define Uses_TApplication
 #define Uses_TButton
+#define Uses_TCommandSet
 #define Uses_TDeskTop
 #define Uses_TDialog
 #define Uses_TEvent

@@ -9,10 +9,10 @@
 // that is possible under milestone 1's blocking run() -- Node's event loop
 // never gets a turn.
 //
-// The exception is deliberate and visible: File > Go to opens a *modal*
-// dialog, which is a nested event loop inside TVision, and the clock stops
-// dead until you dismiss it. That is the wart milestone 3 has to design
-// around.
+// Dialogs are modal in the Turbo Vision sense -- File > Go to takes all the
+// input until you dismiss it -- without stopping Node. The clock keeps ticking
+// behind it, because the dialog is driven by the same pump as everything else
+// rather than by a nested loop inside TVision.
 
 const fsp = require('fs/promises');
 const path = require('path');
@@ -147,7 +147,7 @@ tv.start({
     { text: '', key: 'F10', cmd: 'menu' },
   ],
 
-  onCommand(cmd) {
+  async onCommand(cmd) {
     tv.log('command:', cmd);
 
     switch (cmd) {
@@ -161,9 +161,9 @@ tv.start({
         return refreshDirectory();
 
       case 'goto': {
-        // Modal: this blocks Node's event loop, clock included, until it is
-        // dismissed. See the comment at the top of the file.
-        const answer = tv.dialog({
+        // Modal, and awaited: input goes only to this dialog, but the clock
+        // behind it keeps running.
+        const answer = await tv.dialog({
           title: 'Go to directory',
           rect: [15, 6, 65, 14],
           items: [

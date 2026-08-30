@@ -23,7 +23,7 @@
       ],
       "build": [
         "tvision-node/scripts/build-tvision.sh",
-        "cd tvision-node && npm install --no-audit --no-fund && npx node-gyp rebuild"
+        "(cd tvision-node && npm install --no-audit --no-fund && npx node-gyp rebuild)"
       ],
       "hello": [
         "cd tvision-node && node examples/hello.js"
@@ -32,12 +32,16 @@
         "cd tvision-node && node examples/demo.js"
       ],
       "test": [
-        "cd tvision-node && python3 test/drive.py && python3 test/drive_demo.py"
+        "(cd tvision-node && python3 test/drive_regress.py)",
+        "(cd tvision-node && python3 test/drive.py)",
+        "(cd tvision-node && python3 test/drive_demo.py)"
       ],
       "test:asan": [
-        "cd tvision-node && TVNODE_ASAN=1 npx node-gyp rebuild",
-        "cd tvision-node && python3 test/drive_regress.py && python3 test/drive.py && python3 test/drive_demo.py",
-        "cd tvision-node && npx node-gyp rebuild"
+        "(cd tvision-node && TVNODE_ASAN=1 npx node-gyp rebuild)",
+        "(cd tvision-node && TVNODE_ASAN=1 python3 test/drive_regress.py)",
+        "(cd tvision-node && TVNODE_ASAN=1 python3 test/drive.py)",
+        "(cd tvision-node && TVNODE_ASAN=1 python3 test/drive_demo.py)",
+        "(cd tvision-node && npx node-gyp rebuild)"
       ]
     }
   }

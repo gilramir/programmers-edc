@@ -14,6 +14,7 @@ next to these directories.
 | **0** | Does a Node addon built here load, and can it reach a system library? | done |
 | **1** | `hello.cpp` as a Node app, with the menus and dialog described in JS | done |
 | **2** | A larger demo on a non-blocking event pump, with addressable views | done |
+| **2.5** | Modal dialogs that do not stop Node, and more ported demos | in progress |
 | **3** | Gren on top, through ports | designed, not built |
 
 See [FINDINGS.md](FINDINGS.md) for what we learned doing it, including the
@@ -55,9 +56,9 @@ buttons, `Space` presses one, `Alt-X` quits.
 
 In `demo`: `Alt-C` opens a clock painted by `setInterval`, `Alt-D` a directory
 listing produced by `await fs.readdir()`; `Space` on an entry stats it
-asynchronously, `../` walks up. `Alt-G` opens a *modal* dialog — watch the
-clock stop dead while it is up, then start again when you dismiss it. That
-freeze is the honest limitation milestone 3 has to design around.
+asynchronously, `../` walks up. `Alt-G` opens a modal dialog — it takes all the
+input, as a modal dialog should, but the clock behind it keeps ticking.
+Modality was hoisted out of `execView`'s nested loop; see FINDINGS.
 
 `Enter` does not press buttons or select list items in Turbo Vision; `Space`
 does. See FINDINGS.

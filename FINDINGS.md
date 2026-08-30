@@ -116,7 +116,7 @@ Node stays completely alive: the demo's clock is a plain `setInterval`, and its
 directory listing is `await fs.readdir()` writing back into a window. The test
 asserts both by watching the screen change on its own.
 
-### Modal dialogs freeze Node, and the test says so
+### Modal dialogs froze Node (fixed -- see "Modality without the loop")
 
 `execView` starts a *nested* `TGroup::execute()` inside TVision, which the pump
 knows nothing about. Open the demo's `File > Go to` and the clock stops dead
@@ -126,6 +126,74 @@ This is asserted rather than hidden — `drive_demo.py` checks that the tick
 counter does *not* move while the dialog is up, and does move again afterwards.
 If milestone 3 makes dialogs non-modal, that check fails loudly and tells the
 next person the constraint is gone.
+
+### Modality without the loop
+
+`TGroup::execView` (`tgroup.cpp:193-215`) is twenty lines, of which exactly one
+is a problem:
+
+```c++
+saveOptions/saveOwner/saveTopView/saveCurrent/saveCommands…
+TheTopView = p;  p->setState(sfModal, True);  setCurrent(p, enterSelect);
+ushort retval = p->execute();          // ← the nested loop
+…restore all of it…
+```
+
+**Modality in Turbo Vision is state, plus a loop.** The state is `sfModal`, the
+global `TheTopView`, and some current-view and command-set bookkeeping. The
+loop is the part we already know how to replace -- `step()` replaced the
+application's one in milestone 2.
+
+So `beginModal()` does everything up to `p->execute()`, `finishModal()` does
+everything after it, and the pump drives the dialog's events in between,
+keeping a stack so a dialog opened from a dialog is ordinary. Input goes only
+to the top modal view -- that is what modal means -- and Node's loop never
+stops. **No fork of tvision was needed.**
+
+Three things had to be true, and all three were:
+
+- **`TheTopView` is reachable.** It is a plain global with external linkage
+  (`TView *TheTopView = 0;` in `tgroup.cpp`), declared in no header. One
+  `extern` line and it is ours.
+- **It does not affect drawing.** It is read in exactly two places --
+  `TView::endModal` and the status line's command enabling -- and by no drawing
+  code. That is what lets a window behind a modal dialog keep repainting, which
+  is the whole point: the clock ticks behind the dialog.
+- **Closing a modal window with the mouse is safe.** `TWindow::handleEvent`
+  turns `cmClose` into `cmCancel` when `sfModal` is set rather than calling
+  `close()`, so the view is never destroyed underneath the session that owns
+  it.
+
+Consequences for the API, both good:
+
+- **`tv.dialog()` returns a Promise** of `{cmd, values}`. `await` reads better
+  than the synchronous version did, and it is exactly the shape Gren needs: a
+  `Cmd` that produces a `Msg`.
+- **The blocking `tv.run()` is gone.** Under it Node's loop never ran, so a
+  promise could never settle and every dialog would deadlock. `examples/hello.js`
+  moved to the pump and awaits its dialogs. `tv.messageBox()` moved to
+  JavaScript too, because TVision's `::messageBox()` calls `execView` and would
+  have dragged the nested loop back in through the side door.
+
+Two smaller things the change turned up: `tv.quit()` has to be *deferred* to
+the pump rather than acted on immediately, because it can be called from a list
+box's `onSelect`, which runs inside the dialog's own `handleEvent` -- tearing
+the dialog down there would free it under TVision's feet. And `{onSelect:
+undefined}` is ordinary JavaScript, so the config parser now treats an
+undefined callback as an absent one instead of a type error.
+
+### The ASAN build could not run the other tests
+
+An addon linked with `-fsanitize=address` cannot be `dlopen`'d into a plain
+node: *"ASan runtime does not come first in initial library list"*. The
+regression driver knew to preload the runtime; the other two did not, so under
+`TVNODE_ASAN=1` they failed every check at once and looked like an application
+that could not start. All three drivers now go through `harness.node_argv()`,
+which adds the wrapper when `TVNODE_ASAN=1` is set.
+
+Related, and the same shape as the earlier gyp mistake: `devbox` runs every
+line of a script in the *same* shell, so a second `cd tvision-node` fails. Each
+line is its own subshell now.
 
 ### Ids, and the dangling pointer they invite
 

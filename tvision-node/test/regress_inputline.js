@@ -8,8 +8,10 @@
 // "free(): invalid size" -- when the dialog was destroyed, which made it look
 // like a TVision bug rather than ours.
 //
-// Open the dialog, cancel it, repeat. Under -Dasan=1 the bad write is caught
-// on the first one; without ASAN it takes a few rounds to abort, if at all.
+// Open the dialog, dismiss it, repeat -- which now also exercises the modal
+// session stack: begin/finish bookkeeping, the promise, and destroying the
+// view from the pump. Under TVNODE_ASAN=1 the bad write is caught on the first
+// round; without ASAN it takes a few, if it aborts at all.
 
 const tv = require('..');
 
@@ -27,15 +29,16 @@ tv.start({
   },
 });
 
-// The dialog is modal, so this runs one round per turn of the pump rather than
-// in a loop -- setImmediate hands control back so the app can actually draw.
-function next() {
-  if (round >= ROUNDS) {
-    tv.quit();
-    return;
+async function run() {
+  while (round < ROUNDS) {
+    round += 1;
+    await openOne();
   }
-  round += 1;
-  tv.dialog({
+  tv.quit();
+}
+
+function openOne() {
+  return tv.dialog({
     title: `Round ${round}`,
     rect: [10, 5, 70, 13],
     items: [
@@ -44,7 +47,6 @@ function next() {
       { type: 'button', rect: [20, 5, 30, 7], title: 'OK', cmd: 'ok', default: true },
     ],
   });
-  setImmediate(next);
 }
 
-setImmediate(next);
+run();

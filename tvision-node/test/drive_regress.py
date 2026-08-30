@@ -9,7 +9,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from harness import Pty, Checks
+from harness import Pty, Checks, node_argv, asan_enabled
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -25,11 +25,10 @@ def main():
         os.remove(stale)
 
     env = dict(os.environ, TERM="xterm-256color")
-    app = Pty(
-        [os.path.join(HERE, "asan.sh"), "node",
-         os.path.join(HERE, "regress_inputline.js")],
-        env, cwd=ROOT,
-    )
+    if not asan_enabled():
+        print("note: TVNODE_ASAN=1 not set -- running as a plain functional "
+              "test, with no memory checking")
+    app = Pty(node_argv(os.path.join(HERE, "regress_inputline.js")), env, cwd=ROOT)
 
     app.pump(2.0)
     check("dialog opened", "Round 1" in app.render(), app.screen()[-300:])

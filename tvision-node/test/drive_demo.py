@@ -15,7 +15,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from harness import Pty, Checks, latest_int
+from harness import Pty, Checks, latest_int, node_argv
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -30,7 +30,7 @@ def main():
         os.remove(LOG)
 
     env = dict(os.environ, TERM="xterm-256color", TVISION_LOG=LOG)
-    app = Pty(["node", os.path.join(ROOT, "examples", "demo.js")], env, cwd=ROOT)
+    app = Pty(node_argv(os.path.join(ROOT, "examples", "demo.js")), env, cwd=ROOT)
 
     # 1. start() returned and the app is up -- which already means Node's loop
     #    is the one running, because nothing else would be pumping it.
@@ -69,8 +69,9 @@ def main():
           "bytes" in described or "directory" in described,
           "info line never updated")
 
-    # 5. The known wart, asserted so a future milestone notices when it goes
-    #    away: a modal dialog nests TVision's own event loop, so Node stops.
+    # 5. Modality without the freeze. The dialog takes all the input -- that
+    #    is what modal means -- but the clock behind it keeps ticking, because
+    #    it is driven by the pump rather than by a nested loop inside TVision.
     app.send(b"\x1bg", settle=1.0)
     check("modal dialog opened", "Go to directory" in app.render())
 
@@ -79,15 +80,18 @@ def main():
     before_modal = latest_int(app.render(), TICKS)
     app.pump(3.2)
     during = latest_int(app.render(), TICKS)
-    check("modal dialog freezes node (known limitation)", during == before_modal,
-          f"ticks moved {before_modal} -> {during} -- did modality get fixed?")
+    check("node keeps running behind a modal dialog", during > before_modal,
+          f"ticks stuck at {before_modal} -- is the dialog nesting a loop again?")
+    # And the dialog really was modal: keys went to it, not to the app behind
+    # it -- Alt-D would otherwise have opened the directory window over the top.
+    check("input went to the dialog, not the app",
+          "Go to directory" in app.render())
     app.send(b"\x1b", settle=1.0)     # cancel
 
-    # And it thaws.
-    app.pump(2.5)
+    app.pump(1.0)
     after_modal = latest_int(app.render(), TICKS)
-    check("node resumes after the dialog closes", after_modal > before_modal,
-          f"ticks {before_modal} -> {after_modal}")
+    check("still ticking after the dialog closes", after_modal > during,
+          f"ticks {during} -> {after_modal}")
 
     # 6. Quit through the status line, and let onExit run.
     app.send(b"\x1bx", settle=1.0)

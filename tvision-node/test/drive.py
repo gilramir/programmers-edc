@@ -5,7 +5,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from harness import Pty, Checks
+from harness import Pty, Checks, node_argv
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -18,7 +18,7 @@ def main():
         os.remove(LOG)
 
     env = dict(os.environ, TERM="xterm-256color", TVISION_LOG=LOG)
-    app = Pty(["node", os.path.join(ROOT, "examples", "hello.js")], env, cwd=ROOT)
+    app = Pty(node_argv(os.path.join(ROOT, "examples", "hello.js")), env, cwd=ROOT)
 
     # 1. It starts and draws its chrome.
     app.pump(1.5)
@@ -52,13 +52,13 @@ def main():
     app.send(b"\r", settle=0.6)   # dismiss the messageBox
     app.send(b"\x1b", settle=0.4) # and anything still on top
 
-    # 4. Alt-X quits, run() returns, and the JS after it runs.
+    # 4. Alt-X quits and onExit runs.
     app.send(b"\x1bx", settle=1.0)
     code = app.wait(timeout=6)
 
     check("process exited", code is not None, "still running")
     check("exit code 0", code == 0, f"exit={code}")
-    check("ran the code after run()", "tvision app exited cleanly" in app.screen())
+    check("onExit ran", "tvision app exited cleanly" in app.screen())
 
     # 5. The JS callback saw the command and the dialog's answer.
     logged = open(LOG).read() if os.path.exists(LOG) else ""

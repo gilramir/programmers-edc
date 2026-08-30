@@ -1,14 +1,17 @@
 'use strict';
 
-// Milestone 1: tvision/hello.cpp, with the C++ parts of it moved into JS.
+// tvision/hello.cpp, with the C++ parts of it moved into JS.
 //
 // The menu bar, the status line and the greeting dialog are all described as
 // plain JS objects here -- nothing in this file is compiled. Compare with
 // tvision/hello.cpp to see what the addon took over.
+//
+// It was written against the original blocking run(); it awaits its dialogs
+// now, because dialogs are modal without stopping Node.
 
 const tv = require('..');
 
-tv.run({
+tv.start({
   menuBar: [
     {
       title: '~H~ello',
@@ -26,12 +29,12 @@ tv.run({
     { text: '', key: 'F10', cmd: 'menu' },
   ],
 
-  onCommand(cmd) {
+  async onCommand(cmd) {
     tv.log('command:', cmd);
 
     if (cmd === 'greet') {
       // hello.cpp's greetingBox(), rectangle for rectangle.
-      const answer = tv.dialog({
+      const answer = await tv.dialog({
         title: 'Hello, World!',
         rect: [25, 5, 55, 16],
         items: [
@@ -47,11 +50,13 @@ tv.run({
       // whole point of the exercise: a TVision dialog result, in JavaScript.
       tv.log('answer:', answer.cmd);
       if (answer.cmd && answer.cmd !== 'cancel') {
-        tv.messageBox(`You said you feel ${answer.cmd}.`);
+        await tv.messageBox(`You said you feel ${answer.cmd}.`);
       }
     }
   },
-});
 
-// run() returned, so the app has quit and the terminal is ours again.
-console.log('tvision app exited cleanly');
+  onExit() {
+    // The app has quit and the terminal is ours again.
+    console.log('tvision app exited cleanly');
+  },
+});
