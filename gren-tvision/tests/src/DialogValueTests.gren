@@ -1,0 +1,65 @@
+module DialogValueTests exposing (dialogValueSuite)
+
+{-| `Tui.text`, `Tui.number` and `Tui.flag` read a dialog's fields out of the
+JSON the runtime sends back with a `DialogClosed` event.
+
+What is worth testing about them is not the happy path but the *defaults*. They
+are total functions by design -- a dialog whose field went away should not take
+the program down -- which means a typo in a field name is silently an empty
+string. These tests pin that behaviour down so it stays a decision rather than
+an accident.
+
+@docs dialogValueSuite
+-}
+
+import Expect
+import Json.Encode as Encode
+import Task
+import Test.Runner.UnitNode as U
+import Tui
+
+
+{-| -}
+dialogValueSuite : U.Suite
+dialogValueSuite =
+    U.suite
+        { name = "DialogValues"
+        , setUpSuite = U.noSuiteFixture
+        , tearDownSuite = U.noTearDown
+        , setUp = \_ -> Task.succeed {}
+        , tearDown = U.noTearDown
+        , tests =
+            [ U.test "text reads an input line" <| \_ ->
+                Task.succeed (Expect.equal "Ada" (Tui.text "name" values))
+            , U.test "text of a missing field is empty" <| \_ ->
+                Task.succeed (Expect.equal "" (Tui.text "nope" values))
+            , U.test "text of a non-string field is empty" <| \_ ->
+                Task.succeed (Expect.equal "" (Tui.text "index" values))
+            , U.test "number reads a list box selection" <| \_ ->
+                Task.succeed (Expect.equal 2 (Tui.number "index" values))
+            , U.test "number of a missing field is zero" <| \_ ->
+                Task.succeed (Expect.equal 0 (Tui.number "nope" values))
+            , U.test "number of a non-numeric field is zero" <| \_ ->
+                Task.succeed (Expect.equal 0 (Tui.number "name" values))
+            , U.test "flag reads one check box out of its group" <| \_ ->
+                Task.succeed (Expect.equal True (Tui.flag "boxes" 0 values))
+            , U.test "flag reads an unticked box" <| \_ ->
+                Task.succeed (Expect.equal False (Tui.flag "boxes" 1 values))
+            , U.test "flag past the end of the group is False" <| \_ ->
+                Task.succeed (Expect.equal False (Tui.flag "boxes" 99 values))
+            , U.test "flag of a missing field is False" <| \_ ->
+                Task.succeed (Expect.equal False (Tui.flag "nope" 0 values))
+            ]
+        }
+
+
+{-| The shape the runtime actually sends: an input line is a string, a list box
+or radio group is a number, and a check box group is an array of booleans.
+-}
+values : Encode.Value
+values =
+    Encode.object
+        [ { key = "name", value = Encode.string "Ada" }
+        , { key = "index", value = Encode.int 2 }
+        , { key = "boxes", value = Encode.array Encode.bool [ True, False, True ] }
+        ]

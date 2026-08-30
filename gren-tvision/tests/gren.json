@@ -1,0 +1,21 @@
+{
+    "type": "application",
+    "platform": "node",
+    "source-directories": [
+        "src",
+        "../src"
+    ],
+    "gren-version": "0.6.6",
+    "dependencies": {
+        "direct": {
+            "gilramir/gren-unit-node": "1.1.0",
+            "gren-lang/core": "7.4.2",
+            "gren-lang/node": "6.1.0",
+            "gren-lang/test": "5.0.0"
+        },
+        "indirect": {
+            "gilramir/gren-argparse": "2.0.0",
+            "gren-lang/url": "6.0.0"
+        }
+    }
+}

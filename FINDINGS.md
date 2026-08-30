@@ -526,10 +526,54 @@ binary and compile nothing. Because the addon is N-API, one prebuild per
 platform covers every Node version -- which is the whole reason for having used
 N-API rather than V8 directly.
 
+### Testing a TUI at three levels
+
+"How do you unit-test a TUI?" has a better answer than it looks, because most
+of what can break is not the terminal:
+
+- **`node --test`, against a fake binding** (`gren-tvision-runtime/test/`).
+  Pulling the diff into its own module and passing the binding in as an
+  argument made every bug this layer has ever had into a millisecond-long unit
+  test: a window rebuilt because its title changed, a self-inflicted close
+  reported as the user's, an input line overwritten while someone was typing in
+  it. Eleven tests, 50ms, no terminal.
+- **`gren-lang/test` via `gilramir/gren-unit-node`** (`gren-tvision/tests/`) for
+  the package's own pure logic. Narrow on purpose: most of `Tui` is types and
+  encoders whose only real assertion is "the runtime understood it".
+- **pty drivers** for everything that needs a terminal. Slow, and the only
+  honest test of a TUI.
+
+The middle one turned up the two-output-forms lesson again: `gren make Main
+--output=app.js` gives a module that runs nothing, so the test runner exited 0
+in silence. A test runner wants `gren make Main`; the examples want the `.js`
+form.
+
+### A checker for the things no compiler checks
+
+Adding a view type means editing four things in three languages: a Gren union,
+a Gren encoder, a JavaScript patcher and a C++ builder. Miss one and nothing
+complains -- the widget silently does not appear, or appears and then never
+updates.
+
+`tools/check_consistency.py` walks all four and compares them, plus the event
+names in both directions and the protocol version on both sides of the port. It
+prints a table:
+
+```
+view type    Gren   encoder   patcher   binding
+button         ok     ok        --        ok
+canvas         ok     ok        ok        ok
+checkBoxes     --     --        --        ok
+```
+
+The `--` under *binding* are errors. The `--` under *Gren* are the to-do list,
+generated from the code rather than maintained by hand.
+
 ### What is left
 
 `Tui` covers static text, buttons, input lines, list boxes and canvases. Check
-boxes, radio buttons and nested submenus exist in the binding but are not in
-the Gren types yet. `gren-tvision/examples/README.md` tracks what each of the
-remaining C++ examples would force into the API.
+boxes, radio buttons and labels exist in the binding but are not in the Gren
+types yet -- which the consistency checker will keep saying until they are.
+`gren-tvision/examples/README.md` tracks what each of the remaining C++
+examples would force into the API.
 

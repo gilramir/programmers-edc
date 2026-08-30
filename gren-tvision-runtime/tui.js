@@ -9,71 +9,21 @@
 // and never has to know that a window is a long-lived object with focus and
 // scroll position to lose.
 
-const tv = require('tvision-node');
+const { createDiffer } = require('./diff');
 
 // Bumped in lockstep with Tui.protocolVersion on the Gren side. A Gren package
 // and an npm package version independently, and they will skew; refusing an
 // unknown version beats rendering nothing and leaving the author to guess.
 const PROTOCOL = 1;
 
-// Fields a view can change without being rebuilt. Everything else -- the id,
-// the rectangle, a button's command -- is structural: change one and the
-// window is torn down and made again. A window's *title* is not structural
-// either; see setTitle below.
-const MUTABLE = {
-  staticText: ['text'],
-  inputLine: ['value'],
-  listBox: ['items'],
-  canvas: ['lines'],
-};
-
-function skeleton(view) {
-  const copy = { ...view };
-  for (const field of MUTABLE[view.type] || []) delete copy[field];
-  return JSON.stringify(copy);
-}
-
-function sameShape(before, after) {
-  if (!before) return false;
-  if (JSON.stringify(before.rect) !== JSON.stringify(after.rect)) return false;
-  if (before.items.length !== after.items.length) return false;
-  return before.items.every((view, i) => skeleton(view) === skeleton(after.items[i]));
-}
-
-function patchView(before, after) {
-  switch (after.type) {
-    case 'staticText':
-      // Compared against the *previous description*, never against what is on
-      // screen. An input line the user has typed into disagrees with the model
-      // by design; writing the model back on every render would eat their
-      // keystrokes.
-      if (before.text !== after.text) tv.setText(after.id, after.text);
-      break;
-    case 'inputLine':
-      if (before.value !== after.value) tv.setValue(after.id, after.value);
-      break;
-    case 'listBox':
-      if (JSON.stringify(before.items) !== JSON.stringify(after.items)) {
-        tv.setItems(after.id, after.items);
-      }
-      break;
-    case 'canvas':
-      if (JSON.stringify(before.lines) !== JSON.stringify(after.lines)) {
-        tv.setLines(after.id, after.lines);
-      }
-      break;
-    default:
-      break;
-  }
-}
-
 /**
  * Drive a compiled Gren program's UI.
  *
  * @param grenModule  the module `gren make Main --output=main.js` produced
- * @param options     {flags, moduleName, outPort, inPort}
+ * @param options     {flags, moduleName, outPort, inPort, tv}
  */
 function run(grenModule, options = {}) {
+  const tv = options.tv || require('tvision-node');
   // TUI_DEBUG=<file> traces the port traffic. The terminal belongs to TVision,
   // so this is the only way to watch the conversation.
   const trace = process.env.TUI_DEBUG
@@ -82,66 +32,7 @@ function run(grenModule, options = {}) {
     : () => {};
 
   let started = false;
-  let current = new Map(); // window id -> the spec we last applied
-
-  // tv.close() destroys the window, which notifies onClose, which we would
-  // otherwise report to Gren as "the user closed this" -- and Gren would drop
-  // it from the model that had just asked for it. The notification is
-  // delivered by the pump at a safe point rather than from inside the
-  // destructor, so it arrives *after* the call that caused it: a synchronous
-  // flag is not enough, and the ids we closed ourselves have to be remembered
-  // until they come back.
-  const selfClosed = new Set();
-
-  // A render can arrive while we are in the middle of applying one: patching a
-  // view can close a window, which notifies Gren, which updates, which
-  // renders. Take the newest and apply it after, rather than recursing.
-  let applying = false;
-  let pending = null;
-
-  function closeWindow(id) {
-    selfClosed.add(id);
-    tv.close(id);
-  }
-
-  function applyWindows(windows) {
-    if (applying) {
-      pending = windows;
-      return;
-    }
-    applying = true;
-
-    try {
-      do {
-        const next = new Map(windows.map((w) => [w.id, w]));
-
-        for (const id of current.keys()) {
-          if (!next.has(id) && tv.exists(id)) closeWindow(id);
-        }
-
-        for (const window of windows) {
-          // tv.exists() rather than our own bookkeeping: the user may have
-          // closed this window from its frame since the last render.
-          if (!tv.exists(window.id)) {
-            tv.window(window);
-          } else if (!sameShape(current.get(window.id), window)) {
-            closeWindow(window.id);
-            tv.window(window);
-          } else {
-            const before = current.get(window.id);
-            if (before.title !== window.title) tv.setTitle(window.id, window.title);
-            window.items.forEach((view, i) => patchView(before.items[i], view));
-          }
-        }
-
-        current = next;
-        windows = pending;
-        pending = null;
-      } while (windows);
-    } finally {
-      applying = false;
-    }
-  }
+  let differ = null;
 
   // `gren make Main` produces Gren.Main; anything else is whatever was named.
   const namespace = grenModule.Gren || grenModule;
@@ -179,6 +70,7 @@ function run(grenModule, options = {}) {
           );
         }
         if (!started) {
+          differ = createDiffer(tv, (id) => send({ type: 'windowClosed', id }));
           // The menu bar and status line arrive with the first render and are
           // used once: Turbo Vision builds them inside the TApplication
           // constructor and they cannot be swapped afterwards.
@@ -189,10 +81,7 @@ function run(grenModule, options = {}) {
             onSelect: (id, index, text) => send({ type: 'select', id, index, text }),
             onKey: (id, key) => send({ type: 'key', id, key }),
             onClick: (id, x, y) => send({ type: 'click', id, x, y }),
-            onClose: (id) => {
-              if (selfClosed.delete(id)) return;
-              send({ type: 'windowClosed', id });
-            },
+            onClose: (id) => differ.windowClosed(id),
             onExit: () => process.exit(0),
             onError: (err) => {
               console.error(err);
@@ -201,7 +90,7 @@ function run(grenModule, options = {}) {
           });
           started = true;
         }
-        applyWindows(message.windows);
+        differ.apply(message.windows);
         break;
 
       case 'dialog':

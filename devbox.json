@@ -46,6 +46,10 @@
         "gren-tvision/build.sh"
       ],
       "test": [
+        "python3 tools/check_consistency.py",
+        "(cd gren-tvision && gren docs --output=/dev/null)",
+        "(cd gren-tvision-runtime && node --test test/*.test.js)",
+        "(cd gren-tvision/tests && ./run.sh)",
         "gren-tvision/build.sh",
         "(cd tvision-node && python3 test/drive_regress.py)",
         "(cd tvision-node && python3 test/drive.py)",
@@ -66,6 +70,12 @@
         "(cd gren-tvision && TVNODE_ASAN=1 python3 test/drive_hello.py)",
         "(cd gren-tvision && TVNODE_ASAN=1 python3 test/drive_entries.py)",
         "(cd tvision-node && npx node-gyp rebuild)"
+      ],
+      "check": [
+        "python3 tools/check_consistency.py",
+        "(cd gren-tvision && gren docs --output=/dev/null)",
+        "(cd gren-tvision-runtime && node --test test/*.test.js)",
+        "(cd gren-tvision/tests && ./run.sh)"
       ]
     }
   }

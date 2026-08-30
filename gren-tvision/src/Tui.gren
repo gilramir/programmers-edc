@@ -8,29 +8,30 @@ module Tui exposing
     , flag, number, text
     )
 
-{-| Turbo Vision, as the Elm architecture.
+{-| Terminal user interfaces on [Turbo Vision][tv], as the Elm architecture.
 
-The bargain is the same one `elm/browser` makes with the DOM. You write
+You write
 
     view : Model -> Ui
 
-and hand back a description of what should be on screen. This module encodes it
-as JSON and sends it over a port; the JavaScript on the other side diffs it
-against what is already there and calls into the native binding to patch the
-difference. Events come back the same way and arrive as messages.
+and hand back a description of what should be on screen. The description is
+encoded as JSON and sent over a port; the JavaScript runtime on the other side
+compares it with what is already there and patches the difference. Events come
+back the same way and arrive as messages.
 
-Nothing here calls C++, and nothing here blocks. That is the whole reason the
-binding had to grow a non-blocking event pump and modal dialogs that do not
-stop Node: a `Cmd` that never returns to the runtime is a deadlock, not a
-dialog.
+Nothing here calls into C++ and nothing here blocks, including modal dialogs.
 
-## Where the ports come from
+[tv]: https://github.com/magiblot/tvision
 
-Gren packages may not declare ports -- the compiler refuses outright, to keep
-the package ecosystem free of JavaScript. So the two ports are declared by the
-*application* and handed to this module as a [`Ports`](#Ports) record:
+
+## A complete program
 
     port module Main exposing (main)
+
+    import Json.Decode as Decode
+    import Json.Encode as Encode
+    import Node
+    import Tui exposing (Event(..), MenuItem(..), View(..))
 
     port tuiOut : Encode.Value -> Cmd msg
 
@@ -40,19 +41,89 @@ the package ecosystem free of JavaScript. So the two ports are declared by the
     tui =
         { toJs = tuiOut, fromJs = tuiIn }
 
-    main =
-        Tui.defineProgram tui { init = …, view = …, update = … }
+    type Msg
+        = FromTui Event
 
-The names matter: the JavaScript runtime subscribes to `tuiOut` and sends to
-`tuiIn`.
+    main : Tui.Program Int Msg
+    main =
+        Tui.defineProgram tui
+            { init = \_ -> Node.startProgram { model = 0, command = Cmd.none }
+            , update = \_ model -> { model = model + 1, command = Cmd.none }
+            , subscriptions = \_ -> Sub.none
+            , onEvent = FromTui
+            , view =
+                \model ->
+                    { windows =
+                        [ { id = "counter"
+                          , title = "Counter"
+                          , rect = { x1 = 2, y1 = 2, x2 = 40, y2 = 8 }
+                          , views =
+                                [ StaticText
+                                    { id = "count"
+                                    , rect = { x1 = 2, y1 = 1, x2 = 30, y2 = 2 }
+                                    , text = "clicks: " ++ String.fromInt model
+                                    }
+                                ]
+                          }
+                        ]
+                    }
+            , menuBar = []
+            , statusLine =
+                [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" } ]
+            }
+
+Build and run it with:
+
+    gren make Main --output=main.js && gren-tui main.js
+
+
+## Where the ports come from
+
+Gren packages may not declare ports -- the compiler refuses, to keep the
+package ecosystem free of JavaScript -- so the two ports are declared by your
+application and handed over as a [`Ports`](#Ports) record, as above. The names
+`tuiOut` and `tuiIn` are what the JavaScript runtime looks for.
+
+
+## Ids are the contract
+
+Every window and every view carries an `id`. Keep it stable across renders:
+that is what lets the runtime patch a view in place rather than rebuild it, and
+a rebuilt window loses its focus, its scroll position and its place in the
+z-order.
+
+Ids also disappear on their own. When a window closes -- including when the
+user closes it from its frame -- everything in it is gone, and you find out
+through a [`WindowClosed`](#Event) event. A model that ignores that event will
+put the window straight back on the next render.
+
 
 ## What is *not* in the view
 
 The menu bar and the status line are configuration, not view. Turbo Vision
-builds both inside the `TApplication` constructor, from static callbacks with
-no user-data channel, so they exist before there is a first model to render and
-cannot be swapped afterwards. `setEnabled` is how a command changes state at
-runtime.
+builds both inside its application constructor, from static callbacks, so they
+exist before there is a first model to render and cannot be swapped afterwards.
+[`setEnabled`](#setEnabled) is the one thing about them that can change while
+the program runs.
+
+
+## Things Turbo Vision does that will surprise you
+
+  - **`Enter` does not press the focused button**, or select a list item, or
+    tick a check box. `Space` does all three. `Enter` means "the default action
+    of this dialog", and only a button with `isDefault = True` answers it.
+
+  - **Hotkeys are one flat namespace.** Inside a dialog the first control that
+    claims `Alt-`*x* gets it. Worse, the status line's keys are global and beat
+    even an open modal dialog, so a status entry bound to `Alt-N` makes every
+    `~N~ame` field in the program unreachable.
+
+  - **Window rectangles are desktop coordinates.** `y1 = 0` is the row under
+    the menu bar, not the top of the screen. Rectangles *inside* a window are
+    relative to that window, whose frame occupies row and column zero.
+
+  - **The first click on an inactive window is spent activating it** and does
+    not reach the control underneath.
 
 @docs Ports
 @docs Program, ProgramConfiguration, defineProgram
@@ -60,7 +131,7 @@ runtime.
 @docs Menu, MenuItem, StatusItem
 @docs Event, DialogSpec
 @docs dialog, quit, setEnabled
-@docs flag, number, text
+@docs text, number, flag
 
 -}
 
@@ -98,9 +169,13 @@ protocolVersion =
 -- GEOMETRY
 
 
-{-| A rectangle in character cells, in the order Turbo Vision takes them.
-Inside a window the origin is the window's own top-left corner, and the frame
-occupies row and column zero.
+{-| A rectangle in character cells: `x1,y1` is the top-left corner and `x2,y2`
+is one past the bottom-right, so `{ x1 = 2, y1 = 1, x2 = 30, y2 = 2 }` is a
+single row 28 columns wide.
+
+A window's rectangle is in **desktop** coordinates -- `y1 = 0` is the row below
+the menu bar. A view's rectangle is relative to the window that contains it,
+whose frame takes up row and column zero, so the usable area starts at 1.
 -}
 type alias Rect =
     { x1 : Int, y1 : Int, x2 : Int, y2 : Int }
@@ -111,14 +186,23 @@ type alias Rect =
 
 
 {-| Everything that should be on screen right now.
+
+Windows not in this list are closed; windows in it that are not on screen are
+opened. There is no separate "open a window" command -- put it in the view and
+it appears.
 -}
 type alias Ui =
     { windows : Array Window }
 
 
-{-| A window, addressed by a stable id. Keep the id stable across renders: it
-is what lets the diff patch a window in place instead of tearing it down, and
-tearing it down loses focus and scroll position.
+{-| A window on the desktop.
+
+`id` must be stable across renders -- it is how the runtime recognises this as
+the same window. `title` can change freely; it is patched in place.
+
+Changing a window's `rect`, or the id, type or rectangle of anything inside it,
+is a structural change: the window is closed and rebuilt, losing focus and
+z-order. Changing only the *content* of its views is not.
 -}
 type alias Window =
     { id : String
@@ -128,9 +212,25 @@ type alias Window =
     }
 
 
-{-| The controls. `Canvas` is the interesting one: it paints whatever lines it
-is given, so a Gren program can render content the stock widgets cannot
-express -- which is what tvdemo's ASCII chart and calendar are.
+{-| The controls.
+
+  - `StaticText` -- a run of text. Longer than its rectangle is silently
+    truncated, so budget the columns.
+  - `Button` -- sends `cmd` as a [`Command`](#Event) event when pressed, or
+    closes a [`dialog`](#dialog) with it. Press with `Space`; `Enter` only
+    reaches a button with `isDefault = True`.
+  - `InputLine` -- a text field. `value` is written to the field only when it
+    changes *in the model*, so it never overwrites what the user is typing.
+  - `ListBox` -- gets a scroll bar of its own. Selecting an entry (`Space`, or
+    a double click) sends a [`Selected`](#Event) event.
+  - `Canvas` -- paints exactly the lines it is given, and sends
+    [`KeyPressed`](#Event) and [`Clicked`](#Event) events while focused. This is
+    the escape hatch for anything the stock controls cannot express: Turbo
+    Vision's own calendar and ASCII chart are views of this kind.
+
+The first control in the list gets focus when the window opens. Turbo Vision
+itself focuses the *last* one added, which in a list written top to bottom is
+the Cancel button; this diverges from that deliberately.
 -}
 type View
     = StaticText { id : String, rect : Rect, text : String }
@@ -144,13 +244,25 @@ type View
 -- MENUS
 
 
-{-| One pull-down on the menu bar.
+{-| One pull-down on the menu bar. `key` is its hotkey, as in `"Alt-F"`.
+
+A `~` in a title marks the highlighted letter: `"~F~ile"` draws as *F*ile.
 -}
 type alias Menu =
     { title : String, key : String, items : Array MenuItem }
 
 
-{-| Menu entries nest: an entry with entries of its own is a submenu.
+{-| A menu entry.
+
+  - `Item` -- `cmd` arrives as a [`Command`](#Event) event. `key` is a hotkey
+    that works anywhere (`"Alt-A"`, `"F5"`, `""` for none); `shortcut` is the
+    hint drawn right-aligned in the menu, and is text only.
+  - `Separator` -- a horizontal rule.
+  - `SubMenu` -- entries within entries, to any depth.
+
+Built-in command names work here too: `"quit"`, `"close"`, `"zoom"`,
+`"resize"`, `"next"`, `"prev"`, `"menu"`, `"cascade"`, `"tile"`. Turbo Vision
+handles those itself and they do not arrive as events.
 -}
 type MenuItem
     = Item { title : String, cmd : String, key : String, shortcut : String }
@@ -158,8 +270,14 @@ type MenuItem
     | SubMenu { title : String, key : String, items : Array MenuItem }
 
 
-{-| One entry on the status line. Its key works everywhere, including over an
-open modal dialog -- Turbo Vision gives the status line every keystroke first.
+{-| One entry on the status line.
+
+Its `key` works **everywhere**, including over an open modal dialog: Turbo
+Vision offers the status line every keystroke before anything else sees it. Pick
+these carefully -- a status entry on `Alt-N` makes `Alt-N` unusable in every
+dialog in the program.
+
+An entry with an empty `cmd` is a hint: drawn, but not clickable.
 -}
 type alias StatusItem =
     { text : String, key : String, cmd : String }
@@ -169,7 +287,21 @@ type alias StatusItem =
 -- EVENTS
 
 
-{-| What the terminal did.
+{-| Something happened. Route these into your `Msg` with the `onEvent` field of
+[`defineProgram`](#defineProgram).
+
+  - `Command` -- a menu entry, status line entry or button, by its `cmd` name.
+  - `Selected` -- an entry in a list box was chosen (`Space` or double click).
+  - `KeyPressed` -- a key reached a focused canvas. Names look like `"Left"`,
+    `"F5"`, `"Alt-X"`, `"Ctrl-A"` or `"a"`.
+  - `Clicked` -- a canvas was clicked, in the canvas's own coordinates.
+  - `DialogClosed` -- a [`dialog`](#dialog) was dismissed. `cmd` is the button
+    that closed it (`"cancel"` if it was cancelled or closed from its frame),
+    and `values` holds every field in it -- read them with [`text`](#text),
+    [`number`](#number) and [`flag`](#flag).
+  - `WindowClosed` -- the user closed a window from its frame. **Handle this**:
+    if the model still lists the window, the next render reopens it.
+  - `Unknown` -- an event this version of the package does not understand.
 -}
 type Event
     = Command String
@@ -185,9 +317,8 @@ type Event
 -- COMMANDS
 
 
-{-| A modal dialog. It takes all the input until it is dismissed, and answers
-with a `DialogClosed` event carrying the button that closed it and the value of
-every field in it.
+{-| A modal dialog: the same shape as a [`Window`](#Window), plus the fact that
+it is answered rather than merely shown.
 -}
 type alias DialogSpec =
     { id : String
@@ -197,7 +328,28 @@ type alias DialogSpec =
     }
 
 
-{-| Open one.
+{-| Open a modal dialog.
+
+Modal means what it means in Turbo Vision -- input goes to this dialog and
+nowhere else -- and *not* that anything stops: subscriptions keep firing and
+tasks keep running behind it.
+
+The answer arrives as a [`DialogClosed`](#Event) event carrying `id`, so this
+is an ordinary `Cmd` that produces a `Msg`, like an HTTP request:
+
+    update msg model =
+        when msg is
+            FromTui (Command "add") ->
+                { model = model, command = Tui.dialog tui addEntryDialog }
+
+            FromTui (DialogClosed closed) ->
+                if closed.cmd == "ok" then
+                    { model = { model | items = Array.pushLast (Tui.text "entry" closed.values) model.items }
+                    , command = Cmd.none
+                    }
+
+                else
+                    { model = model, command = Cmd.none }
 -}
 dialog : Ports msg -> DialogSpec -> Cmd msg
 dialog ports spec =
@@ -216,14 +368,28 @@ dialog ports spec =
             ]
 
 
-{-| Quit the application. Any open dialog is cancelled on the way out.
+{-| Quit. Any open dialog is cancelled on the way out, and the process exits
+once the terminal has been restored.
+
+The built-in command name `"quit"` on a menu entry or status line entry does
+the same thing without a round trip through your `update`.
 -}
 quit : Ports msg -> Cmd msg
 quit ports =
     ports.toJs (Encode.object [ { key = "type", value = Encode.string "quit" } ])
 
 
-{-| Grey a command out, everywhere it appears, or bring it back.
+{-| Grey a command out everywhere it appears -- menu entries, status line
+entries and buttons alike -- or bring it back.
+
+    Tui.setEnabled tui "clear" (Array.length model.items > 0)
+
+A disabled command cannot be triggered by any route, including its hotkey.
+
+One limit inherited from Turbo Vision: only the first 146 distinct command
+names in a program can be disabled. Beyond that they are numbered above the
+range Turbo Vision allows to be greyed out, and `setEnabled` has no effect on
+them.
 -}
 setEnabled : Ports msg -> String -> Bool -> Cmd msg
 setEnabled ports command on =
@@ -239,7 +405,8 @@ setEnabled ports command on =
 -- READING DIALOG VALUES
 
 
-{-| The text a field held when the dialog closed.
+{-| Read an input line's text out of a [`DialogClosed`](#Event) event's
+`values`. Missing or wrong-typed fields give `""`.
 -}
 text : String -> Decode.Value -> String
 text field values =
@@ -247,7 +414,8 @@ text field values =
         |> Result.withDefault ""
 
 
-{-| The number a field held -- a list box's selection, a radio group's index.
+{-| Read a number out of a dialog's `values` -- a list box's focused index, for
+instance. Missing or wrong-typed fields give `0`.
 -}
 number : String -> Decode.Value -> Int
 number field values =
@@ -255,7 +423,8 @@ number field values =
         |> Result.withDefault 0
 
 
-{-| Whether a check box was ticked.
+{-| Read one check box out of a dialog's `values`, by the index of the box
+within its group. Missing fields give `False`.
 -}
 flag : String -> Int -> Decode.Value -> Bool
 flag field index values =
@@ -269,13 +438,23 @@ flag field index values =
 -- PROGRAM
 
 
-{-| -}
+{-| What [`defineProgram`](#defineProgram) returns, and the type your `main`
+should be annotated with.
+-}
 type alias Program model msg =
     Node.Program model msg
 
 
-{-| Like `Node.defineProgram`, plus a `view` and the two static pieces of
-Turbo Vision furniture.
+{-| The same fields as `Node.defineProgram`, plus:
+
+  - `view` -- the description of what should be on screen, rendered once at
+    startup and again after every update.
+  - `onEvent` -- how an [`Event`](#Event) becomes one of your messages.
+  - `menuBar` and `statusLine` -- fixed for the life of the program; see the
+    note above.
+
+`init` is a full `Init.Task`, so subsystems like `FileSystem` can be awaited
+before the first model exists.
 -}
 type alias ProgramConfiguration model msg =
     { init : Node.Environment -> Init.Task { model : model, command : Cmd msg }
@@ -288,9 +467,12 @@ type alias ProgramConfiguration model msg =
     }
 
 
-{-| Wire it all together. The view is rendered once at startup and again after
-every update -- the whole description, every time. Working out what actually
-changed is the JavaScript side's job, exactly as a virtual DOM does it.
+{-| Build the program.
+
+The whole view is sent after every update -- the entire description, every
+time. Working out what actually changed is the runtime's job, exactly as a
+virtual DOM does it, so a `view` that rebuilds its whole `Ui` on each call
+costs nothing beyond the JSON.
 -}
 defineProgram : Ports msg -> ProgramConfiguration model msg -> Program model msg
 defineProgram ports config =

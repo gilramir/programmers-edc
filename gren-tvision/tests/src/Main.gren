@@ -1,0 +1,26 @@
+module Main exposing (main)
+
+{-| Unit tests for the pure parts of the package.
+
+What is testable here is deliberately narrow. Most of `Tui` is types and
+encoders whose only meaningful assertion is "the runtime understood it", and
+that is what the pty drivers in `../test` assert by running the real thing
+against a real terminal. What lives here is the logic with decisions in it.
+
+Run with `./run.sh`.
+-}
+
+import DialogValueTests exposing (dialogValueSuite)
+import Node
+import Test.Runner.UnitNode as U
+
+
+main : Node.SimpleProgram a
+main =
+    U.run
+        { name = "gren-tvision"
+        , version = "1.0.0"
+        , suites =
+            [ dialogValueSuite
+            ]
+        }

@@ -10,3 +10,7 @@ gren-tvision/examples/*/.gren/
 gren-tvision/examples/*/gren_packages/
 gren-tvision/examples/*/main.js
 __pycache__/
+gren-tvision/tests/.gren/
+gren-tvision/tests/gren_packages/
+gren-tvision/tests/app
+gren-tvision/tests/app.js

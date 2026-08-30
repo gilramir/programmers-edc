@@ -42,6 +42,9 @@ gren-tvision/      the Gren package: gilramir/gren-tvision
   examples/          one directory per example, each its own application
   test/              a pty driver per example
 gren-tvision-runtime/  the npm half: the diff layer + the `gren-tui` bin
+  diff.js            one UI description -> calls on the binding (unit tested)
+  test/              node:test, against a fake binding
+tools/             cross-language consistency checks
 build-tvision/     libtvision.a, built PIC (generated)
 ```
 
@@ -57,8 +60,9 @@ toolchain that will load it (see FINDINGS.md).
 
 ```sh
 devbox run build    # libtvision.a (PIC) + the addon
-devbox run test     # pty-driven checks, no terminal needed
-devbox run test:asan  # the same, plus memory checks under AddressSanitizer
+devbox run check    # fast: consistency, docs, unit tests. No terminal, ~5s
+devbox run test     # the above plus the pty drivers
+devbox run test:asan  # the pty drivers under AddressSanitizer
 devbox run hello    # each of these runs one example in your terminal
 devbox run demo
 devbox run ascii

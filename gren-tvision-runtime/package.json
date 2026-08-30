@@ -9,9 +9,13 @@
   },
   "files": [
     "tui.js",
+    "diff.js",
     "bin"
   ],
   "dependencies": {
     "tvision-node": "file:../tvision-node"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
   }
 }
