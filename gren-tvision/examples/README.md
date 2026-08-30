@@ -12,7 +12,7 @@ Build them all with `../build.sh`, run one with `../run.sh <name>`.
 |---|---|---|
 | `hello` | `tvision/hello.cpp` | menus, status line, modal dialog as a `Cmd`, dialog result as a `Msg` |
 | `mmenu` | `tvision/examples/mmenu` | a menu bar that changes at runtime, and menu bar entries that are commands rather than pull-downs |
-| `entries` | *(ours)* | list boxes, `Time.every` behind a modal dialog, `WindowClosed`, mutable window titles |
+| `entries` | *(ours)* | list boxes, `Time.every` behind a modal dialog, `WindowClosed`, mutable window titles — and later `Tui.focus`, because "show me that window" is the thing a description of the UI cannot say |
 | `forms` | `tvision/examples/tvforms` | check boxes, radio buttons, labels, and a list box highlight the model can both read and move |
 | `ascii` | `tvision/examples/tvdemo` (ascii.cpp) | the canvas, from Gren: a view the model paints itself, and a cursor to select with |
 | `calendar` | `tvision/examples/tvdemo` (calendar.cpp) | colour on a canvas, as spans; and today as a field, because `Time.now` is a task |
@@ -433,14 +433,15 @@ excludes `evMouseWheel` (`views.h`), so a wheel event goes to whatever has
 
 ### The coverage gaps left
 
-Ten, in the order I would attack them. Each says what it would take, because
-"not done", "not decided" and "not needed" are three different problems.
+Ten, in the order they were listed, one of them now closed. Each says what it
+would take, because "not done", "not decided" and "not needed" are three
+different problems.
 
-Four of them are now reported by `tools/check_consistency.py` on every run,
-which is where the fourth came from: the port is the only way into the binding,
-so an exported function no runtime call site reaches is a capability no Gren
-program can use. It names `focus`, `screenSize`, `messageBox` and `getValue`.
-When a gap below is closed, its note disappears on its own.
+Three of them are now reported by `tools/check_consistency.py` on every run —
+`screenSize`, `messageBox` and `getValue` — which is where the last one came
+from: the port is the only way into the binding, so an exported function no
+runtime call site reaches is a capability no Gren program can use. It named
+`focus` too until protocol 5 carried it, and the note went away on its own.
 
 The first two are one design with two symptoms, and they are the only gaps on
 this list that touch *every* program written with the API rather than one kind
@@ -477,13 +478,12 @@ coordinates, the runtime resolves it against whatever size the window actually
 is, and nobody has to be told a number. That would close both gaps at once and
 is a prerequisite for anything editor-shaped.
 
-**3. The model cannot move focus.** `tv.focus(id)` is in the binding and, like
-`screenSize`, has no message to carry it. So a program can decide who gets
-focus when a window opens — the order of `views` does that — and can never
-change its mind: no "put the caret in the field the error was in", no "raise
-that window". `ListBox`'s `focused` field is a different thing; it moves a
-highlight, not the caret. This one is plumbing rather than design, and it is
-the cheapest item on the list.
+**3. ~~The model cannot move focus.~~ Done — `Tui.focus`, protocol 5.** It was
+the cheapest item on the list and it was not quite plumbing: two things had to
+be decided and one C++ bug had to be fixed. `examples/entries` uses it in both
+directions — Alt-L raises the list window, which is a menu entry that used to
+do nothing at all when the window was already open, and adding an entry puts
+the caret back on the list the entry went into. FINDINGS has the write-up.
 
 **4. The standard file and directory dialogs.** `TFileDialog` and
 `TChDirDialog` (`stddlg.h`) are how a Turbo Vision program asks for a path, and

@@ -19,6 +19,26 @@ from harness import Pty, Checks, latest_int, node_argv
 
 TICKS = r"ticks: (\d+)"
 
+
+def active(screen, title):
+    """Is the window with this title the active one?
+
+    Turbo Vision draws the active window's frame with a double line and every
+    other window's with a single one, which is the only evidence on screen of
+    where focus went -- and the two windows here share their top row, so this
+    reads the frame run immediately left of the title rather than the row.
+    """
+    for line in screen.split("\n"):
+        at = line.find(title)
+        if at < 0:
+            continue
+        i = at - 1
+        while i >= 0 and line[i] == " ":
+            i -= 1
+        if i >= 0 and line[i] in "═─":
+            return line[i] == "═"
+    return None
+
 # The list window's close box. Window rectangles are *desktop* coordinates, so
 # y=1 is the second row under the menu bar -- screen row 3, counting from 1.
 CLOSE_BOX = (5, 3)
@@ -63,10 +83,17 @@ def main():
           "the model did not grow")
     check("the new entry was rendered", "Elm" in added, "list was not patched")
 
+    # A dialog hands the caret back to whatever had it before, which is not
+    # necessarily the list the entry just went into. Tui.focus names a view
+    # here rather than a window, and TView::focus walks up its owner chain --
+    # so the window it is in becomes the active one.
+    check("the caret went to the list the entry went into",
+          active(added, "Entries (4)"),
+          "the dialog gave focus back to whatever had it before")
+
     # 4. An event from a view becomes a Msg, and the answer is patched back in.
-    # The first click on an inactive window is spent activating it, so the
-    # keyboard does the actual choosing: Home, then Down, is the second entry
-    # wherever the click happened to land. Space selects; Enter does nothing.
+    # Home, then Down, is the second entry wherever the click happened to land.
+    # Space selects; Enter does nothing.
     app.click(6, 5)
     app.send(b"\x1b[H", settle=0.3)
     app.send(b"\x1b[B", settle=0.3)
@@ -82,9 +109,30 @@ def main():
     check("closing a window told the model", "Entries (" not in app.render(),
           "the window came back, so WindowClosed never arrived")
 
-    # 6. And the model can put it back.
+    # 6. And the model can put it back -- with the caret, which is the half a
+    #    render cannot express. This is also the deferred path: the focus
+    #    message names a window the same update creates, and an update's Cmd
+    #    and its render are one Cmd.batch, so the message can leave before the
+    #    window it names exists.
     app.send(b"\x1bl", settle=1.2)
-    check("the model can reopen it", "Entries (4)" in app.render())
+    reopened = app.render()
+    check("the model can reopen it", "Entries (4)" in reopened)
+    check("and focus a window the same update created",
+          active(reopened, "Entries (4)"),
+          "the focus arrived before the render that built the window")
+
+    # 7. The gap this closed: Alt-L on a window that was already open did
+    #    nothing at all. The flag was already True, the render found no
+    #    difference, and the window stayed where it was. Take the focus away
+    #    with a click and ask for it back.
+    app.click(50, 3, settle=0.8)
+    check("clicking the clock window activated it", active(app.render(), "Gren"))
+    app.send(b"\x1bl", settle=1.2)
+    raised = app.render()
+    check("Alt-L raises a window that is already open",
+          active(raised, "Entries (4)"), "the list did not come forward")
+    check("and the window it came forward over went quiet",
+          active(raised, "Gren") is False)
 
     app.send(b"\x1bx", settle=1.0)
     code = app.wait(timeout=6)

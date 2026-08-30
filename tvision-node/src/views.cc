@@ -787,6 +787,17 @@ static Napi::Value Focus(const Napi::CallbackInfo &info)
         }
     if (ViewRef *ref = g_views.find(id))
         {
+        // Raising the window first is not belt and braces, it is the whole
+        // thing. TView::focus() returns at once for a view that is already
+        // sfSelected, and sfSelected means "current within my group" -- which
+        // a window's first control almost always is, whether or not that
+        // window is the active one. So focusing a control in a background
+        // window did exactly nothing, and reported success.
+        if (JsWindow *owner = g_views.findWindow(ref->windowId))
+            {
+            owner->select();
+            owner->focus();
+            }
         ref->view->focus();
         return Napi::Boolean::New(env, true);
         }

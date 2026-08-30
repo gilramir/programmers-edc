@@ -101,8 +101,15 @@ handleEvent event model =
             , command = Tui.setEnabled tui "clear" False
             }
 
+        -- Opening a window that is already open used to be a no-op: the flag
+        -- was already True, the render found no difference, and Alt-L did
+        -- nothing at all for a window sitting behind the clock. "Show me that
+        -- one" is the thing a description of the UI cannot say, because the
+        -- window is already in the description.
         Command "list" ->
-            { model = { model | listOpen = True }, command = Cmd.none }
+            { model = { model | listOpen = True }
+            , command = Tui.focus tui "list"
+            }
 
         Command _ ->
             { model = model, command = Cmd.none }
@@ -133,7 +140,15 @@ handleEvent event model =
 
                 else
                     { model = { model | items = Array.pushLast entry model.items }
-                    , command = Tui.setEnabled tui "clear" True
+                    , command =
+                        Cmd.batch
+                            [ Tui.setEnabled tui "clear" True
+                            -- The dialog took the caret with it and gives it
+                            -- back to whatever had it before, which is not
+                            -- necessarily the list the new entry just went
+                            -- into.
+                            , Tui.focus tui "entries"
+                            ]
                     }
 
             else

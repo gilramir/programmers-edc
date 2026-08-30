@@ -1464,3 +1464,88 @@ a `case` the runtime handles that Gren never sends is dead code, not a bug.
 Both halves of this are the same lesson, and it is the one that keeps
 recurring here: a consistency check that enumerates what to look at will drift
 out of date exactly as quietly as the thing it is checking. Derive the list.
+
+## Closing gap 3: the model can move the focus
+
+`tv.focus(id)` had been in the binding since milestone 2 with no message to
+carry it, and the gap list called it "plumbing rather than design, and the
+cheapest item on the list". It was the cheapest. It was not plumbing: two
+things had to be decided and one of the two calls turned out not to work.
+
+### A message that names one view is a different kind of message
+
+Every message this protocol carries describes the whole UI — `render` is the
+model's entire `view`, and `dialog` is a whole dialog — or is about the
+application: `quit`, `setEnabled`, `doubleClickDelay`. `focus` is the first one
+that names a single view and asks for something to happen to it, and that is
+not an accident of this feature. Where the caret is at any given moment belongs
+to Turbo Vision: a click moves it, Tab moves it, closing a window moves it. A
+model that tried to hold it as a field would be describing the past, and the
+differ would fight the user for it on every render.
+
+So focus is a command and not a field, nothing comes back, and an id naming
+nothing is ignored. That is the same answer `Tui.dialog` gives, one size down.
+
+### The message arrives before the view it names exists
+
+`defineProgram` batches every update's command with the render that follows it:
+
+```gren
+command = Cmd.batch [ stepped.command, render ports config stepped.model ]
+```
+
+The user's command leaves first — the port trace shows `focus` on one line and
+`render` on the next — so `Tui.focus tui "list"` in the same update that opens
+the window called `"list"` reaches the binding while that window does not yet
+exist. Focusing a view that is not there is the identical silent nothing the
+canvas `cursor` was, and for a related reason: there is nothing to focus.
+
+This is the third thing in this project with that shape, after `~JsWindow` and
+`setItems`' `focusItem(0)`, and the rule from the first two applies unchanged:
+**a thing that names a view has to happen after the view exists.** Cursors
+became a second pass after `deskTop->insert()`; focus became an id the runtime
+holds and applies again once the render has been applied. It is also tried
+immediately, which costs one no-op call and means the feature does not depend
+on a `Cmd.batch` ordering nothing promises.
+
+### `sfSelected` does not mean what the name suggests
+
+The first version focused the view and reported success, and the window it was
+in stayed grey. The callback even came back — Turbo Vision said the list box
+was focused — and the frame did not change.
+
+`TView::focus()` starts with
+
+```c++
+if ((state & (sfSelected | sfModal)) == 0)
+```
+
+and does nothing at all otherwise. `sfSelected` is not "has the caret": it is
+"I am my group's `current`", which a window's first control is from the moment
+the window is built, whether or not that window is the active one. So focusing
+the first control of a background window is always a no-op, and always claims
+to have worked.
+
+The binding's window branch was already right — `select()` then `focus()`, the
+two calls a click on a frame makes. The view branch now raises the owning
+window with those same two calls before focusing the view, which `ViewRef`
+could already answer because it carries the `windowId` it was registered
+under. A view in a modal dialog has no `JsWindow` to find, and falls through to
+the plain `focus()` that was there before.
+
+The consequence worth remembering is not the fix, it is that this failed
+*successfully*: a `Boolean` came back `True`, the focus callback fired, and the
+screen disagreed. Only a pty test that reads the frame characters could tell —
+Turbo Vision draws the active window's frame with a double line and every other
+window's with a single one, and that is the only evidence anywhere on screen of
+which window has the focus.
+
+### What it is worth
+
+`examples/entries` had a menu entry that did nothing. Alt-L set `listOpen` to a
+value it already had, the render found no difference, and the window stayed
+behind whatever was in front of it — the failure mode of every "show me that
+window" command written against a pure description of the UI. It is a one-line
+fix now and it was unwriteable before. The other direction is the smaller and
+more ordinary one: a dialog gives the caret back to whoever had it before,
+which is not the list the new entry just went into.

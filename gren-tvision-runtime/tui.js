@@ -14,7 +14,7 @@ const { createDiffer } = require('./diff');
 // Bumped in lockstep with Tui.protocolVersion on the Gren side. A Gren package
 // and an npm package version independently, and they will skew; refusing an
 // unknown version beats rendering nothing and leaving the author to guess.
-const PROTOCOL = 4;
+const PROTOCOL = 5;
 
 /**
  * Drive a compiled Gren program's UI.
@@ -33,6 +33,9 @@ function run(grenModule, options = {}) {
 
   let started = false;
   let differ = null;
+  // See the `focus` case below: a focus can name a view the render it came
+  // with has not built yet.
+  let pendingFocus = null;
 
   // `gren make Main` produces Gren.Main; anything else is whatever was named.
   const namespace = grenModule.Gren || grenModule;
@@ -97,6 +100,10 @@ function run(grenModule, options = {}) {
           differ.chrome(message.menuBar, message.statusLine);
         }
         differ.apply(message.windows);
+        if (pendingFocus !== null) {
+          tv.focus(pendingFocus);
+          pendingFocus = null;
+        }
         break;
 
       case 'dialog':
@@ -115,6 +122,29 @@ function run(grenModule, options = {}) {
 
       case 'setEnabled':
         tv.setEnabled(message.cmd, message.on);
+        break;
+
+      // The only message that names one view. Everything else describes the
+      // whole UI and lets the differ work out what moved; focus cannot be
+      // derived that way, because where the caret is at any moment is
+      // Turbo Vision's business and not the model's.
+      //
+      // Held until after the next render, and tried once now as well.
+      //
+      // An update's Cmd and its render are one Cmd.batch, and the Cmd leaves
+      // first: a focus naming a window the same update opens arrives before
+      // the window exists. Focusing a view that is not there yet is the same
+      // silent nothing `cursor` was -- it reports failure and that is all --
+      // so the id is held and applied again once the render that builds it
+      // has been applied. That also covers the case where the view does exist
+      // but the render rebuilds the window it is in.
+      //
+      // The attempt now is for the other order, which Cmd.batch does not rule
+      // out. Focusing an id twice is idempotent and an id that names nothing
+      // is a no-op, so the redundant call costs nothing.
+      case 'focus':
+        pendingFocus = message.id;
+        if (started) tv.focus(message.id);
         break;
 
       case 'doubleClickDelay':

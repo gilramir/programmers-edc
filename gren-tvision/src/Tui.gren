@@ -16,6 +16,7 @@ module Tui exposing
     , dialog
     , flag
     , flags
+    , focus
     , ink
     , line
     , number
@@ -158,7 +159,7 @@ its own is a pull-down, and one without is a command sitting on the bar.
 @docs Span, Hue, line, plain, ink, on
 @docs MenuItem, StatusItem
 @docs Event, DialogSpec
-@docs dialog, quit, setEnabled, setDoubleClickDelay
+@docs dialog, quit, setEnabled, setDoubleClickDelay, focus
 @docs text, number, flag, flags
 
 -}
@@ -196,11 +197,12 @@ to turn into a sentence.
 Version 3 made a canvas line an array of coloured [`Span`](#Span)s rather than
 a string, and gave a button `takesFocus`. Version 4 added the scroll bar view,
 its [`Scrolled`](#Event) event, `isDouble` on a click, and `takesFocus` on a
-canvas.
+canvas. Version 5 added [`focus`](#focus), which is the first message this
+protocol has carried that names a view rather than describing the whole UI.
 -}
 protocolVersion : Int
 protocolVersion =
-    4
+    5
 
 
 -- GEOMETRY
@@ -559,6 +561,35 @@ the same thing without a round trip through your `update`.
 quit : Ports msg -> Cmd msg
 quit ports =
     ports.toJs (Encode.object [ { key = "type", value = Encode.string "quit" } ])
+
+
+{-| Put the caret on a view, or bring a window to the front.
+
+    Tui.focus tui "list"        -- raise the window called "list"
+    Tui.focus tui "entryField"  -- and put the caret in a field inside one
+
+The id is looked up as a window first and then as a view, because those are the
+two things worth naming: raising a window selects it and focuses it, the way
+clicking its frame would, and focusing a view moves the caret within whatever
+window it is in.
+
+The order of a window's `views` decides who has the caret when the window
+*opens*, and that is the only say the model has otherwise -- so this is how a
+program puts the caret back in the field an error was about, or answers "show
+me that window" for a window that is already open and buried.
+
+An id that names nothing is ignored. Nothing comes back: focus moves for
+reasons of its own -- a click, a Tab, a window closing -- so a model that
+tracked what it last asked for would be describing the past.
+
+-}
+focus : Ports msg -> String -> Cmd msg
+focus ports id =
+    ports.toJs <|
+        Encode.object
+            [ { key = "type", value = Encode.string "focus" }
+            , { key = "id", value = Encode.string id }
+            ]
 
 
 {-| How long Turbo Vision waits before deciding that two clicks were two
