@@ -320,6 +320,17 @@ anything tagged with another. `dir` has the same hazard in one comment — two
 listings in flight, and the late one must not overwrite the recent one — and
 this is that shape at full size.
 
+**Every window this binding makes is grey, so half the palette is unusable in
+it.** `JsWindow` derives from `TDialog`, which means a window's background is
+the light grey a dialog has rather than Turbo Vision's blue — and the eight
+*bright* hues are exactly the ones a light background eats. The first version
+of this example painted a passing job `LightGreen`, a failing one `LightRed`
+and a running one `LightGray`, which is respectively hard to read, hard to
+read, and invisible. They are `Green`, `Red`, `DarkGray` and — for a job with
+nothing to say — no colour at all, which is `Tui.plain` and stays right if the
+palette ever moves. `drive_watch.py` asserts on the two colour codes, because
+nothing else on screen would notice.
+
 And one that is about the API rather than about watching: **a scroll bar the
 model moves and the user moves needs a rule for who wins.** `mouse` had a bar
 the user moves; `dir` had one the model moves; this is the first with both.

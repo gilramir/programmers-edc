@@ -731,31 +731,47 @@ describe job =
 
 
 {-| The slice of the output the pane is showing, in the colour its state
-deserves. Colour is the only thing that says at a glance which of four windows
-is the one that went wrong.
+deserves. Colour is the only thing that says at a glance which of several
+windows is the one that went wrong.
 -}
 paneLines : Int -> Job -> Array (Array Tui.Span)
 paneLines rows job =
+    let
+        paint =
+            when hue job is
+                Just colour ->
+                    Tui.ink colour
+
+                Nothing ->
+                    Tui.plain
+    in
     job.lines
         |> Array.dropFirst job.top
         |> Array.takeFirst rows
-        |> Array.map (\text -> [ Tui.ink (hue job) (String.takeFirst 75 text) ])
+        |> Array.map (\text -> [ paint (String.takeFirst 75 text) ])
 
 
-hue : Job -> Hue
+{-| A window here is grey, because everything the binding makes is a
+`TDialog` underneath, and the eight bright hues are the half of the sixteen
+that a light background eats: `LightGreen` on grey is barely there and
+`LightGray` is not there at all. So these are the dark half, and a job with
+nothing to say uses no colour at all -- which is `Tui.plain`, the palette's
+own, and stays right if the palette ever changes.
+-}
+hue : Job -> Maybe Hue
 hue job =
     when job.state is
         Finished 0 ->
-            LightGreen
+            Just Green
 
         Finished _ ->
-            LightRed
+            Just Red
 
         Cancelled ->
-            Brown
+            Just DarkGray
 
         _ ->
-            LightGray
+            Nothing
 
 
 -- PROGRAM

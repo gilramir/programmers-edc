@@ -139,6 +139,16 @@ def main():
               state[1].startswith("[exit 3]"), str(state))
         check("the slow command's output arrived", pane(app, 1) == ["beta"],
               str(pane(app, 1)))
+
+        # Colour is the only thing that says which of several windows went
+        # wrong, and everything this binding makes is a TDialog underneath, so
+        # the window is grey and the eight bright hues are the wrong half:
+        # LightGreen on grey is barely there and LightGray is invisible.
+        # 32 and 31 are the dark green and dark red that are readable on it.
+        screen = app.display()
+        check("a job's output is painted in the dark half of the palette",
+              (screen.fg_at(1, 2), screen.fg_at(1, 2 + SLOT)) == (32, 31),
+              f"{screen.fg_at(1, 2)} then {screen.fg_at(1, 2 + SLOT)}")
         # Two children finished while a third is still going. Run sequentially
         # that is impossible, and the margin is the third one's thirty seconds
         # rather than a gap someone has to time.

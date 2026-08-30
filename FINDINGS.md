@@ -1319,3 +1319,30 @@ That is the result worth recording. Thirteen ports were each chosen because a
 C++ example would force something, and each one did. The first program written
 for the API rather than translated into it forced nothing — the widget set was
 finished, and what it found instead was a documentation hole with teeth in it.
+
+### Every window is grey, so half the palette is unreadable in one
+
+`examples/watch` paints a job's output in the colour of its state, and the
+first attempt used `LightGreen` for a pass, `LightRed` for a failure and
+`LightGray` for a run still going. On screen that is hard to read, hard to
+read, and completely invisible.
+
+The reason is one line of inheritance. `JsWindow` derives from `TDialog`
+(FINDINGS has the note on what else that cost), so a window's background is the
+light grey a dialog has and not the blue a `TWindow` has. Against light grey
+the eight *bright* hues — the top half of the sixteen — are the wrong half:
+`LightGray` text on a `LightGray` ground is nothing at all, and the rest are
+low contrast. Against Turbo Vision's blue they would all have been fine, which
+is why the mistake is easy to make from a palette table.
+
+`Green`, `Red` and `DarkGray` read properly, and a job with nothing to say uses
+**no colour at all** — `Tui.plain`, which paints in whatever the view's palette
+entry says. That last one is the point worth keeping: a span that names no
+colour is the only kind that stays correct if the window's palette ever
+changes, and it is exactly what the calendar's write-up argued for when spans
+were added. Naming a colour is for the thing that is different from its
+surroundings, not for the ordinary case.
+
+`drive_watch.py` asserts on the two colour codes directly. Nothing else on
+screen would show the difference, which is the same reason `drive_calendar.py`
+has to.
