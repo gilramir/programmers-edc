@@ -8,7 +8,8 @@
     "build": "node-gyp rebuild",
     "hello": "node examples/hello.js",
     "demo": "node examples/demo.js",
-    "test": "python3 test/drive.py && python3 test/drive_demo.py"
+    "test": "python3 test/drive.py && python3 test/drive_demo.py",
+    "test:asan": "TVNODE_ASAN=1 node-gyp rebuild && python3 test/drive_regress.py; node-gyp rebuild"
   },
   "dependencies": {
     "node-addon-api": "^8.5.0"

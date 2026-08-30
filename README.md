@@ -33,6 +33,7 @@ tvision-node/      the binding
   examples/demo.js   a clock and a directory browser driven by Node (pumped)
   test/harness.py    pty driver + a small terminal emulator
   test/drive*.py     type at the app, assert on what it drew
+  test/asan.sh       run node with AddressSanitizer preloaded
 build-tvision/     libtvision.a, built PIC (generated)
 ```
 
@@ -44,6 +45,7 @@ toolchain that will load it (see FINDINGS.md).
 ```sh
 devbox run build    # libtvision.a (PIC) + the addon
 devbox run test     # pty-driven checks, no terminal needed
+devbox run test:asan  # the same, plus memory checks under AddressSanitizer
 devbox run hello    # milestone 1, in your terminal
 devbox run demo     # milestone 2, in your terminal
 ```

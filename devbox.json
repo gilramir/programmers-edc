@@ -33,6 +33,11 @@
       ],
       "test": [
         "cd tvision-node && python3 test/drive.py && python3 test/drive_demo.py"
+      ],
+      "test:asan": [
+        "cd tvision-node && TVNODE_ASAN=1 npx node-gyp rebuild",
+        "cd tvision-node && python3 test/drive_regress.py && python3 test/drive.py && python3 test/drive_demo.py",
+        "cd tvision-node && npx node-gyp rebuild"
       ]
     }
   }

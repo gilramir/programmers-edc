@@ -151,6 +151,55 @@ blocking form never returns to Node, every string handed to a JS callback would
 otherwise accumulate for the entire life of the application. `Napi::HandleScope`
 in the dispatch functions bounds it.
 
+### The crash: one byte, ten minutes later
+
+Reported from a real session: clock open, modal dialog open for a while, closed
+it with the mouse, `free(): invalid size`, core dumped.
+
+It was ours, in the input line setup:
+
+```
+TInputLine(bounds, limit)  ->  maxLen = limit - 1,  data = new char[maxLen + 1]
+```
+
+The constructor takes a *limit* but stores `maxLen = limit - 1`, so the last
+writable index is the object's own `maxLen`, not the limit you passed in.
+Writing the terminator at `data[limit]` runs one byte past the block, quietly
+corrupts the next chunk's header, and aborts whenever that chunk is next freed
+-- which is when the dialog is destroyed, minutes and several interactions
+later. It looks like a TVision bug and is not.
+
+The same function used `input->maxLen` in one place and the local `maxLen` in
+another; only the second was wrong. Both callers now go through one
+`setInputText()` helper so the off-by-one cannot come back.
+
+### AddressSanitizer, and a test that passed for the wrong reason
+
+This addon does manual memory management against a library from 1994, so the
+crash bought an ASAN build: `TVNODE_ASAN=1 npx node-gyp rebuild`, then
+`test/asan.sh` preloads the runtime and `test/drive_regress.py` opens and closes
+input-line dialogs under it.
+
+Two things about it are worth writing down.
+
+**The first version of that build did nothing at all.** `binding.gyp` had a
+`condition` on `asan==1`, but gyp `-D` values are strings, `"1" == 1` is false
+in Python, and `node-gyp rebuild -- -Dasan=1` does not forward to gyp anyway. So
+the addon was built without instrumentation, the regression test reported
+"no AddressSanitizer report", and it was green while the bug was still in the
+tree -- twice. `nm -D build/Release/tvision.node | grep -c __asan` returning 0
+is what gave it away. The flags now come from `scripts/asan-flags.sh`, which
+either prints them or does not.
+
+**ASAN's report was being shredded by the terminal.** It goes to stderr, which
+here is a pty that TVision has in raw mode and is actively repainting; the
+report came out as confetti and the check could not find it. `ASAN_OPTIONS`
+now sets `log_path=build/asan`, so a report is a *file*, and the check is
+`glob()`. With the bug put back, it points straight at `views.cc:138`.
+
+Both failure modes have the same shape, and it is the shape to watch for in
+this project: a check that cannot fail is worse than no check.
+
 ### `Enter` is not the key you think it is, twice
 
 `TListViewer` selects on **Space**, not Enter (`tlstview.cpp`) — Enter is not in

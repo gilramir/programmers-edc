@@ -126,6 +126,19 @@ TRect getRect(const Napi::Env &env, const Napi::Object &o, const char *where)
     return TRect(c[0], c[1], c[2], c[3]);
 }
 
+// TInputLine's constructor takes a *limit* and stores maxLen = limit - 1, with
+// a buffer of maxLen + 1 bytes -- so the last writable index is the object's
+// own maxLen, not the limit that was passed in. Writing at [limit] is one byte
+// past the end of the heap block: it corrupts the next chunk's header and
+// aborts much later, when the dialog is destroyed ("free(): invalid size").
+// Both callers go through here so the off-by-one cannot come back.
+static void setInputText(TInputLine *input, const std::string &text)
+{
+    strncpy(input->data, text.c_str(), input->maxLen);
+    input->data[input->maxLen] = EOS;
+    input->selectAll(True);
+}
+
 static std::vector<std::string> getStringArray(const Napi::Value &v)
 {
     std::vector<std::string> out;
@@ -176,11 +189,7 @@ void buildItems(const Napi::Env &env, JsWindow *win, const Napi::Value &value,
                 new TInputLine(getRect(env, it, "inputLine"), maxLen);
             std::string initial = getString(it, "value");
             if (!initial.empty())
-                {
-                strncpy(input->data, initial.c_str(), maxLen);
-                input->data[maxLen] = EOS;
-                input->selectAll(True);
-                }
+                setInputText(input, initial);
             made = input;
             }
         else if (type == "label")
@@ -337,10 +346,7 @@ static Napi::Value SetValue(const Napi::CallbackInfo &info)
         return Napi::Boolean::New(env, false);
 
     TInputLine *input = (TInputLine *) ref->view;
-    std::string text = info[1].ToString().Utf8Value();
-    strncpy(input->data, text.c_str(), input->maxLen);
-    input->data[input->maxLen] = EOS;
-    input->selectAll(True);
+    setInputText(input, info[1].ToString().Utf8Value());
     input->drawView();
     return Napi::Boolean::New(env, true);
 }

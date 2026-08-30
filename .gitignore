@@ -4,3 +4,4 @@ build-tvision.log
 node_modules/
 build/
 .devbox/
+build/asan.*
