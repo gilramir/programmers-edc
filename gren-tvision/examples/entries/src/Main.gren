@@ -23,7 +23,6 @@ import Time
 import Tui exposing (Event(..), MenuItem(..), View(..))
 
 
-
 -- PORTS
 --
 -- A Gren package may not declare ports, so every application declares these
@@ -40,7 +39,6 @@ port tuiIn : (Decode.Value -> msg) -> Sub msg
 tui : Tui.Ports Msg
 tui =
     { toJs = tuiOut, fromJs = tuiIn }
-
 
 
 -- MODEL
@@ -60,7 +58,6 @@ type Msg
     | FromTui Event
 
 
-
 -- INIT
 
 
@@ -76,7 +73,6 @@ init _ =
             }
         , command = Cmd.none
         }
-
 
 
 -- UPDATE
@@ -166,13 +162,32 @@ addDialog =
         }
 
 
-
 -- VIEW
 
 
 view : Model -> Tui.Ui
 view model =
-    { windows =
+    { menuBar =
+        [ SubMenu
+            { title = "~E~ntries"
+            , key = "Alt-E"
+            , items =
+                [ Item { title = "~A~dd...", cmd = "add", key = "Alt-A", shortcut = "Alt-A" }
+                , Item { title = "~L~ist window", cmd = "list", key = "Alt-L", shortcut = "Alt-L" }
+                , Separator
+                , Item { title = "~C~lear", cmd = "clear", key = "", shortcut = "" }
+                , Separator
+                , Item { title = "E~x~it", cmd = "quit", key = "Alt-X", shortcut = "Alt-X" }
+                ]
+            }
+        ]
+    , statusLine =
+        [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
+        , { text = "~Alt-A~ Add", key = "Alt-A", cmd = "add" }
+        , { text = "~Alt-L~ List", key = "Alt-L", cmd = "list" }
+        , { text = "", key = "F10", cmd = "menu" }
+        ]
+    , windows =
         Array.append
             [ clockWindow model ]
             (if model.listOpen then
@@ -249,7 +264,6 @@ clock posix =
         ++ pad (Time.toSecond Time.utc posix)
 
 
-
 -- PROGRAM
 
 
@@ -261,23 +275,4 @@ main =
         , subscriptions = \_ -> Time.every 1000 Tick
         , view = view
         , onEvent = FromTui
-        , menuBar =
-            [ { title = "~E~ntries"
-              , key = "Alt-E"
-              , items =
-                    [ Item { title = "~A~dd...", cmd = "add", key = "Alt-A", shortcut = "Alt-A" }
-                    , Item { title = "~L~ist window", cmd = "list", key = "Alt-L", shortcut = "Alt-L" }
-                    , Separator
-                    , Item { title = "~C~lear", cmd = "clear", key = "", shortcut = "" }
-                    , Separator
-                    , Item { title = "E~x~it", cmd = "quit", key = "Alt-X", shortcut = "Alt-X" }
-                    ]
-              }
-            ]
-        , statusLine =
-            [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
-            , { text = "~Alt-A~ Add", key = "Alt-A", cmd = "add" }
-            , { text = "~Alt-L~ List", key = "Alt-L", cmd = "list" }
-            , { text = "", key = "F10", cmd = "menu" }
-            ]
         }

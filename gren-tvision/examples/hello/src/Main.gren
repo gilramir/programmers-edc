@@ -31,7 +31,6 @@ tui =
     { toJs = tuiOut, fromJs = tuiIn }
 
 
-
 -- MODEL
 
 
@@ -49,7 +48,6 @@ init _ =
         { model = { answer = "" }
         , command = Cmd.none
         }
-
 
 
 -- UPDATE
@@ -88,13 +86,27 @@ greetingBox =
         }
 
 
-
 -- VIEW
 
 
 view : Model -> Tui.Ui
 view model =
-    { windows =
+    { menuBar =
+        [ SubMenu
+            { title = "~H~ello"
+            , key = "Alt-H"
+            , items =
+                [ Item { title = "~G~reeting...", cmd = "greet", key = "Alt-G", shortcut = "" }
+                , Separator
+                , Item { title = "E~x~it", cmd = "quit", key = "Alt-X", shortcut = "Alt-X" }
+                ]
+            }
+        ]
+    , statusLine =
+        [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
+        , { text = "", key = "F10", cmd = "menu" }
+        ]
+    , windows =
         if model.answer == "" then
             []
 
@@ -114,7 +126,6 @@ view model =
     }
 
 
-
 -- PROGRAM
 
 
@@ -126,18 +137,4 @@ main =
         , subscriptions = \_ -> Sub.none
         , view = view
         , onEvent = FromTui
-        , menuBar =
-            [ { title = "~H~ello"
-              , key = "Alt-H"
-              , items =
-                    [ Item { title = "~G~reeting...", cmd = "greet", key = "Alt-G", shortcut = "" }
-                    , Separator
-                    , Item { title = "E~x~it", cmd = "quit", key = "Alt-X", shortcut = "Alt-X" }
-                    ]
-              }
-            ]
-        , statusLine =
-            [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
-            , { text = "", key = "F10", cmd = "menu" }
-            ]
         }

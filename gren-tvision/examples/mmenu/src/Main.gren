@@ -1,0 +1,202 @@
+port module Main exposing (main)
+
+{-| tvision/examples/mmenu, in Gren.
+
+The C++ original exists to demonstrate one thing: a menu bar that changes while
+the program runs. Turbo Vision builds the menu bar in the application
+constructor, so Borland's answer was a `TMultiMenu` subclass holding an array
+of `TMenu*`, a new broadcast command `cmMMChangeMenu`, and a `handleEvent`
+override to receive it -- 124 lines of framework across three files, so that
+`message(TProgram::menuBar, evBroadcast, cmMMChangeMenu, (void *) 3)` could
+select menu three.
+
+Here the menu bar is part of the view, so which one is showing is a number in
+the model:
+
+    menuBar = menu model.current
+
+That is the whole mechanism. Everything else in this file is the three menus
+themselves and a window to show what was chosen.
+
+-}
+
+import Array exposing (Array)
+import Init
+import Json.Decode as Decode
+import Json.Encode as Encode
+import Math
+import Node
+import Tui exposing (Event(..), MenuItem(..), View(..))
+
+
+port tuiOut : Encode.Value -> Cmd msg
+
+
+port tuiIn : (Decode.Value -> msg) -> Sub msg
+
+
+tui : Tui.Ports Msg
+tui =
+    { toJs = tuiOut, fromJs = tuiIn }
+
+
+-- MODEL
+
+
+type alias Model =
+    { current : Int
+    , chosen : String
+    }
+
+
+type Msg
+    = FromTui Event
+
+
+init : Node.Environment -> Init.Task { model : Model, command : Cmd Msg }
+init _ =
+    Node.startProgram
+        { model = { current = 0, chosen = "(nothing yet)" }
+        , command = Cmd.none
+        }
+
+
+-- UPDATE
+
+
+update : Msg -> Model -> { model : Model, command : Cmd Msg }
+update msg model =
+    when msg is
+        FromTui (Command "cycle") ->
+            -- The original's cmCycle, and the entire TMultiMenu machinery.
+            { model = { model | current = Math.modBy (Array.length menus) (model.current + 1) }
+            , command = Cmd.none
+            }
+
+        FromTui (Command name) ->
+            { model = { model | chosen = name }, command = Cmd.none }
+
+        FromTui _ ->
+            { model = model, command = Cmd.none }
+
+
+-- THE MENUS
+
+
+{-| Three menu bars. The first entry of each is a plain command sitting on the
+bar rather than a pull-down -- which the original does too, and which is why a
+menu bar here is an `Array MenuItem` and not an array of pull-downs.
+-}
+menus : Array (Array MenuItem)
+menus =
+    [ [ Item { title = "~N~ext menu", cmd = "cycle", key = "Alt-N", shortcut = "" }
+      , numbered "~M~enu One"
+      , SubMenu
+            { title = "~F~ile"
+            , key = "Alt-F"
+            , items =
+                [ Item { title = "~N~ew", cmd = "new", key = "", shortcut = "" }
+                , Item { title = "~O~pen", cmd = "open", key = "", shortcut = "" }
+                , Item { title = "~S~ave", cmd = "save", key = "", shortcut = "" }
+                , Item { title = "S~a~ve all", cmd = "saveAll", key = "", shortcut = "" }
+                ]
+            }
+      ]
+    , [ Item { title = "~N~ext menu", cmd = "cycle", key = "Alt-N", shortcut = "" }
+      , numbered "~M~enu Two"
+      , SubMenu
+            { title = "~E~dit"
+            , key = "Alt-E"
+            , items =
+                [ Item { title = "Cu~t~", cmd = "cut", key = "", shortcut = "" }
+                , Item { title = "~C~opy", cmd = "copy", key = "", shortcut = "" }
+                , Item { title = "~P~aste", cmd = "paste", key = "", shortcut = "" }
+                ]
+            }
+      ]
+    , [ Item { title = "~N~ext menu", cmd = "cycle", key = "Alt-N", shortcut = "" }
+      , numbered "~M~enu Three"
+      , SubMenu
+            { title = "~C~ompile"
+            , key = "Alt-C"
+            , items =
+                [ Item { title = "~C~ompile", cmd = "compile", key = "", shortcut = "" }
+                , Item { title = "~M~ake", cmd = "make", key = "", shortcut = "" }
+                , Item { title = "~L~ink", cmd = "link", key = "", shortcut = "" }
+                , Item { title = "~B~uild All", cmd = "buildAll", key = "", shortcut = "" }
+                ]
+            }
+      ]
+    ]
+
+
+{-| The One/Two/Three pull-down every one of the three menus carries.
+-}
+numbered : String -> MenuItem
+numbered title =
+    SubMenu
+        { title = title
+        , key = "Alt-M"
+        , items =
+            [ Item { title = "~O~ne", cmd = "one", key = "", shortcut = "" }
+            , Item { title = "~T~wo", cmd = "two", key = "", shortcut = "" }
+            , Item { title = "T~h~ree", cmd = "three", key = "", shortcut = "" }
+            ]
+        }
+
+
+menuBarFor : Int -> Array MenuItem
+menuBarFor index =
+    Array.get index menus
+        |> Maybe.withDefault []
+
+
+-- VIEW
+
+
+view : Model -> Tui.Ui
+view model =
+    { menuBar = menuBarFor model.current
+    , statusLine =
+        [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
+        , { text = "~Alt-N~ Next menu", key = "Alt-N", cmd = "cycle" }
+        , { text = "", key = "F10", cmd = "menu" }
+        ]
+    , windows =
+        [ { id = "status"
+          , title = "Multiple menu bars"
+          , rect = { x1 = 8, y1 = 4, x2 = 62, y2 = 13 }
+          , views =
+                [ StaticText
+                    { id = "which"
+                    , rect = { x1 = 2, y1 = 1, x2 = 50, y2 = 2 }
+                    , text = "Menu bar " ++ String.fromInt (model.current + 1) ++ " of " ++ String.fromInt (Array.length menus)
+                    }
+                , StaticText
+                    { id = "chosen"
+                    , rect = { x1 = 2, y1 = 2, x2 = 50, y2 = 3 }
+                    , text = "Last command: " ++ model.chosen
+                    }
+                , StaticText
+                    { id = "note"
+                    , rect = { x1 = 2, y1 = 4, x2 = 50, y2 = 7 }
+                    , text = "Alt-N, or the first entry on the bar, cycles. The bar is part of the view, so this is one number in the model."
+                    }
+                ]
+          }
+        ]
+    }
+
+
+-- PROGRAM
+
+
+main : Tui.Program Model Msg
+main =
+    Tui.defineProgram tui
+        { init = init
+        , update = update
+        , subscriptions = \_ -> Sub.none
+        , view = view
+        , onEvent = FromTui
+        }

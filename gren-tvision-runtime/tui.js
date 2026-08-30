@@ -71,9 +71,10 @@ function run(grenModule, options = {}) {
         }
         if (!started) {
           differ = createDiffer(tv, (id) => send({ type: 'windowClosed', id }));
-          // The menu bar and status line arrive with the first render and are
-          // used once: Turbo Vision builds them inside the TApplication
-          // constructor and they cannot be swapped afterwards.
+          differ.chrome(message.menuBar, message.statusLine);   // records them
+          // The first render builds the application, menu bar and status line
+          // included; later ones can replace them, because Turbo Vision keeps
+          // both in members a subclass can swap.
           tv.start({
             menuBar: message.menuBar,
             statusLine: message.statusLine,
@@ -89,6 +90,8 @@ function run(grenModule, options = {}) {
             },
           });
           started = true;
+        } else {
+          differ.chrome(message.menuBar, message.statusLine);
         }
         differ.apply(message.windows);
         break;

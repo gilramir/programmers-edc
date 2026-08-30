@@ -20,7 +20,5 @@ main =
     U.run
         { name = "gren-tvision"
         , version = "1.0.0"
-        , suites =
-            [ dialogValueSuite
-            ]
+        , suites = [ dialogValueSuite ]
         }

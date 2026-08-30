@@ -416,13 +416,12 @@ is all there is to it. Commands sent from `init` arrive after `init()` returns,
 so subscribing afterwards does not miss them. No wrapper, no stripping, no
 kernel code.
 
-### The menu bar is configuration, not view
+### The menu bar is configuration, not view *(wrong -- see below)*
 
 `TProgInit` calls `initMenuBar` and `initStatusLine` from inside the
 `TApplication` constructor, so they exist before there is a first model to
-render and cannot be swapped afterwards. They are fields of the program, not
-part of `view`. `Tui.setEnabled` is how a command changes at runtime, which is
-the only part of a menu Turbo Vision will let you move.
+render. The conclusion drawn from that -- that they therefore cannot change --
+was wrong, and porting `mmenu` is what found it.
 
 ### Turbo Vision focuses the last view; a list wants the first
 
@@ -477,6 +476,48 @@ clicks a list row and expects that row to be focused is wrong about half the
 time. Window rectangles are **desktop** coordinates -- y=0 is the row under the
 menu bar, not the top of the screen -- which matters as soon as you are aiming
 a mouse click at a close box.
+
+### Porting mmenu: the menu bar *is* part of the view
+
+`tvision/examples/mmenu` is not about nested menus. It exists to demonstrate a
+menu bar that changes while the program runs, which this project had documented
+as impossible.
+
+It is not impossible. `TMenuView` keeps its `TMenu` in a protected member and
+`TStatusLine` keeps its `TStatusDef` chain the same way, so a subclass can
+replace either and redraw. Borland's `TMultiMenu` does exactly that: an array
+of menus, a broadcast command `cmMMChangeMenu`, and
+
+```c++
+menu = mList[event.message.infoInt];
+drawView();
+```
+
+The constructor is only where a menu bar *starts*.
+
+So `menuBar` and `statusLine` moved out of the program's configuration and into
+`Ui`, where they are diffed like everything else. The C++ original spends 124
+lines across three files on the mechanism; the Gren version is
+
+```gren
+menuBar = menuBarFor model.current
+```
+
+Two smaller things came with it:
+
+- **A menu bar entry does not have to be a pull-down.** The original puts a
+  plain "Next menu" command directly on the bar. The API could not express
+  that, so `Menu` went away and the menu bar became an `Array MenuItem`: an
+  entry with entries of its own is a pull-down, one without is a command. That
+  is both more faithful and less to explain.
+- **`-fno-rtti`.** node-gyp compiles without RTTI, so there is no
+  `dynamic_cast` to recover a `JsMenuBar` from `TProgram::menuBar`. Keeping our
+  own pointer to what we built is cheaper than turning RTTI on.
+
+Replacing the status line needs one further trick: `TStatusLine::update()`
+refreshes its items only when the help context has changed, and ours never
+changes. Setting `helpCtx` to a value nothing uses before calling `update()`
+forces the refresh.
 
 ### Packaging: the split is forced, not chosen
 

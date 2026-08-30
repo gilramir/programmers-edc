@@ -1,11 +1,22 @@
 module Tui exposing
-    ( Ports
-    , Program, ProgramConfiguration, defineProgram
-    , Ui, Window, View(..), Rect
-    , Menu, MenuItem(..), StatusItem
-    , Event(..), DialogSpec
-    , dialog, quit, setEnabled
-    , flag, number, text
+    ( DialogSpec
+    , Event(..)
+    , MenuItem(..)
+    , Ports
+    , Program
+    , ProgramConfiguration
+    , Rect
+    , StatusItem
+    , Ui
+    , View(..)
+    , Window
+    , defineProgram
+    , dialog
+    , flag
+    , number
+    , quit
+    , setEnabled
+    , text
     )
 
 {-| Terminal user interfaces on [Turbo Vision][tv], as the Elm architecture.
@@ -98,13 +109,17 @@ through a [`WindowClosed`](#Event) event. A model that ignores that event will
 put the window straight back on the next render.
 
 
-## What is *not* in the view
+## The menu bar is part of the view too
 
-The menu bar and the status line are configuration, not view. Turbo Vision
-builds both inside its application constructor, from static callbacks, so they
-exist before there is a first model to render and cannot be swapped afterwards.
-[`setEnabled`](#setEnabled) is the one thing about them that can change while
-the program runs.
+Turbo Vision builds the menu bar and the status line inside its application
+constructor, which makes them look like fixed configuration -- but that is only
+where they start. Both live in members that can be swapped while the program
+runs, so both are in [`Ui`](#Ui) alongside the windows, and changing one is an
+ordinary model change. tvision's own `mmenu` example exists to demonstrate
+exactly that, and `examples/mmenu` is it, in a dozen lines.
+
+A menu bar is just a list of [`MenuItem`](#MenuItem)s: an entry with entries of
+its own is a pull-down, and one without is a command sitting on the bar.
 
 
 ## Things Turbo Vision does that will surprise you
@@ -128,7 +143,7 @@ the program runs.
 @docs Ports
 @docs Program, ProgramConfiguration, defineProgram
 @docs Ui, Window, View, Rect
-@docs Menu, MenuItem, StatusItem
+@docs MenuItem, StatusItem
 @docs Event, DialogSpec
 @docs dialog, quit, setEnabled
 @docs text, number, flag
@@ -141,7 +156,6 @@ import Json.Decode as Decode
 import Json.Encode as Encode
 import Node
 import Task
-
 
 
 -- PORTS
@@ -165,7 +179,6 @@ protocolVersion =
     1
 
 
-
 -- GEOMETRY
 
 
@@ -181,18 +194,21 @@ type alias Rect =
     { x1 : Int, y1 : Int, x2 : Int, y2 : Int }
 
 
-
 -- VIEWS
 
 
-{-| Everything that should be on screen right now.
+{-| Everything that should be on screen right now: the menu bar across the top,
+the status line across the bottom, and the windows in between.
 
 Windows not in this list are closed; windows in it that are not on screen are
 opened. There is no separate "open a window" command -- put it in the view and
 it appears.
 -}
 type alias Ui =
-    { windows : Array Window }
+    { menuBar : Array MenuItem
+    , statusLine : Array StatusItem
+    , windows : Array Window
+    }
 
 
 {-| A window on the desktop.
@@ -240,25 +256,19 @@ type View
     | Canvas { id : String, rect : Rect, lines : Array String }
 
 
-
 -- MENUS
 
 
-{-| One pull-down on the menu bar. `key` is its hotkey, as in `"Alt-F"`.
-
-A `~` in a title marks the highlighted letter: `"~F~ile"` draws as *F*ile.
--}
-type alias Menu =
-    { title : String, key : String, items : Array MenuItem }
-
-
-{-| A menu entry.
+{-| An entry in a menu, or on the menu bar itself.
 
   - `Item` -- `cmd` arrives as a [`Command`](#Event) event. `key` is a hotkey
     that works anywhere (`"Alt-A"`, `"F5"`, `""` for none); `shortcut` is the
     hint drawn right-aligned in the menu, and is text only.
   - `Separator` -- a horizontal rule.
-  - `SubMenu` -- entries within entries, to any depth.
+  - `SubMenu` -- a pull-down. Nests to any depth, and on the menu bar this is
+    what a normal menu is.
+
+A `~` in a title marks the highlighted letter: `"~F~ile"` draws as *F*ile.
 
 Built-in command names work here too: `"quit"`, `"close"`, `"zoom"`,
 `"resize"`, `"next"`, `"prev"`, `"menu"`, `"cascade"`, `"tile"`. Turbo Vision
@@ -281,7 +291,6 @@ An entry with an empty `cmd` is a hint: drawn, but not clickable.
 -}
 type alias StatusItem =
     { text : String, key : String, cmd : String }
-
 
 
 -- EVENTS
@@ -311,7 +320,6 @@ type Event
     | DialogClosed { id : String, cmd : String, values : Decode.Value }
     | WindowClosed String
     | Unknown String
-
 
 
 -- COMMANDS
@@ -401,7 +409,6 @@ setEnabled ports command on =
             ]
 
 
-
 -- READING DIALOG VALUES
 
 
@@ -434,7 +441,6 @@ flag field index values =
         |> Maybe.withDefault False
 
 
-
 -- PROGRAM
 
 
@@ -450,8 +456,6 @@ type alias Program model msg =
   - `view` -- the description of what should be on screen, rendered once at
     startup and again after every update.
   - `onEvent` -- how an [`Event`](#Event) becomes one of your messages.
-  - `menuBar` and `statusLine` -- fixed for the life of the program; see the
-    note above.
 
 `init` is a full `Init.Task`, so subsystems like `FileSystem` can be awaited
 before the first model exists.
@@ -461,8 +465,6 @@ type alias ProgramConfiguration model msg =
     , update : msg -> model -> { model : model, command : Cmd msg }
     , subscriptions : model -> Sub msg
     , view : model -> Ui
-    , menuBar : Array Menu
-    , statusLine : Array StatusItem
     , onEvent : Event -> msg
     }
 
@@ -479,16 +481,15 @@ defineProgram ports config =
     Node.defineProgram
         { init =
             \env ->
-                Init.await (config.init env) <|
-                    \started ->
-                        Node.startProgram
-                            { model = started.model
-                            , command =
-                                Cmd.batch
-                                    [ started.command
-                                    , render ports config started.model
-                                    ]
-                            }
+                Init.await (config.init env) <| \started ->
+                    Node.startProgram
+                        { model = started.model
+                        , command =
+                            Cmd.batch
+                                [ started.command
+                                , render ports config started.model
+                                ]
+                        }
         , update =
             \msg model ->
                 let
@@ -521,11 +522,10 @@ render ports config model =
         Encode.object
             [ { key = "type", value = Encode.string "render" }
             , { key = "protocol", value = Encode.int protocolVersion }
-            , { key = "menuBar", value = Encode.array encodeMenu config.menuBar }
-            , { key = "statusLine", value = Encode.array encodeStatusItem config.statusLine }
+            , { key = "menuBar", value = Encode.array encodeMenuItem ui.menuBar }
+            , { key = "statusLine", value = Encode.array encodeStatusItem ui.statusLine }
             , { key = "windows", value = Encode.array encodeWindow ui.windows }
             ]
-
 
 
 -- ENCODERS
@@ -594,15 +594,6 @@ encodeView view =
                 ]
 
 
-encodeMenu : Menu -> Encode.Value
-encodeMenu menu =
-    Encode.object
-        [ { key = "title", value = Encode.string menu.title }
-        , { key = "key", value = Encode.string menu.key }
-        , { key = "items", value = Encode.array encodeMenuItem menu.items }
-        ]
-
-
 encodeMenuItem : MenuItem -> Encode.Value
 encodeMenuItem item =
     when item is
@@ -632,7 +623,6 @@ encodeStatusItem item =
         , { key = "key", value = Encode.string item.key }
         , { key = "cmd", value = Encode.string item.cmd }
         ]
-
 
 
 -- DECODING EVENTS

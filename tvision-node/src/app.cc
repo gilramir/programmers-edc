@@ -60,12 +60,6 @@ struct MenuItemDef {
     bool isSubMenu() const { return !items.empty(); }
 };
 
-struct SubMenuDef {
-    std::string title;
-    TKey key;
-    std::vector<MenuItemDef> items;
-};
-
 struct StatusItemDef {
     std::string text;
     TKey key;
@@ -73,7 +67,10 @@ struct StatusItemDef {
 };
 
 struct AppConfig {
-    std::vector<SubMenuDef> menus;
+    // A menu bar is just a menu: an entry with entries of its own is a
+    // pull-down, and one without is a command sitting on the bar. tvision's
+    // mmenu example puts "Next menu" on the bar exactly that way.
+    std::vector<MenuItemDef> menus;
     std::vector<StatusItemDef> status;
 };
 
@@ -91,6 +88,11 @@ Napi::FunctionReference g_onClose;
 bool g_shuttingDown = false;
 
 std::vector<std::string> g_closedWindows;
+
+// node-gyp compiles with -fno-rtti, so there is no dynamic_cast to recover
+// these from TProgram::menuBar / statusLine. We made them; we keep them.
+JsMenuBar *g_menuBar = nullptr;
+JsStatusLine *g_statusLine = nullptr;
 
 // Set while a JS callback is throwing, so we can unwind the TVision loop and
 // rethrow into JS once the terminal has been restored.
@@ -172,31 +174,21 @@ static std::vector<MenuItemDef> parseMenuItems(const Napi::Env &env,
     return items;
 }
 
-static void parseMenuBar(const Napi::Env &env, const Napi::Value &value)
+static std::vector<MenuItemDef> parseMenuBar(const Napi::Env &env,
+                                             const Napi::Value &value)
 {
-    if (!value.IsArray())
-        throw Napi::Error::New(env, "tvision: menuBar must be an array");
-    Napi::Array menus = value.As<Napi::Array>();
-
-    for (uint32_t i = 0; i < menus.Length(); ++i)
-        {
-        Napi::Object m = menus.Get(i).As<Napi::Object>();
-        SubMenuDef sub;
-        sub.title = getString(m, "title");
-        sub.key = getKey(env, m, "key", "menuBar entry '" + sub.title + "'");
-
-        if (m.Has("items"))
-            sub.items = parseMenuItems(env, m.Get("items"));
-        g_config.menus.push_back(std::move(sub));
-        }
+    return parseMenuItems(env, value);
 }
 
-static void parseStatusLine(const Napi::Env &env, const Napi::Value &value)
+
+static std::vector<StatusItemDef> parseStatusLine(const Napi::Env &env,
+                                                  const Napi::Value &value)
 {
     if (!value.IsArray())
         throw Napi::Error::New(env, "tvision: statusLine must be an array");
     Napi::Array items = value.As<Napi::Array>();
 
+    std::vector<StatusItemDef> out;
     for (uint32_t i = 0; i < items.Length(); ++i)
         {
         Napi::Object it = items.Get(i).As<Napi::Object>();
@@ -204,9 +196,11 @@ static void parseStatusLine(const Napi::Env &env, const Napi::Value &value)
         item.text = getString(it, "text");
         item.key = getKey(env, it, "key", "status item '" + item.text + "'");
         item.command = g_commands.intern(getString(it, "cmd"));
-        g_config.status.push_back(std::move(item));
+        out.push_back(std::move(item));
         }
+    return out;
 }
+
 
 /* ------------------------------------------------------------------ */
 /*  The application                                                   */
@@ -228,73 +222,86 @@ public:
 
 static std::unique_ptr<JsApp> g_app;
 
+static TMenuItem *makeMenuItem(const MenuItemDef &def);
+
 // Items must be appended while the submenu's `next` is still null: operator+
-// walks to the *last* submenu in the chain before inserting, so building a
-// nested menu bottom-up is the only order that works.
-static void fillSubMenu(TSubMenu *sub, const std::vector<MenuItemDef> &items)
+// walks to the *last* submenu in the chain before inserting, so a nested menu
+// has to be built bottom-up.
+static void appendItems(TSubMenu *sub, const std::vector<MenuItemDef> &items)
 {
-    for (const MenuItemDef &item : items)
+    for (const MenuItemDef &def : items)
         {
-        if (item.separator)
-            {
-            *sub + newLine();
-            }
-        else if (item.isSubMenu())
-            {
-            TSubMenu *nested = new TSubMenu(item.title.c_str(), item.key);
-            fillSubMenu(nested, item.items);
-            // The cast is load-bearing. operator+(TSubMenu&, TSubMenu&) appends
-            // a *sibling*, which quietly turns a nested menu into another
-            // top-level one on the menu bar; operator+(TSubMenu&, TMenuItem&)
-            // puts it inside. Both compile, and only the overload chosen tells
-            // you which you meant.
-            *sub + *static_cast<TMenuItem *>(nested);
-            }
-        else
-            {
-            *sub + *new TMenuItem(item.title.c_str(), item.command, item.key,
-                                  hcNoContext,
-                                  item.shortcut.empty()
-                                      ? TStringView()
-                                      : TStringView(item.shortcut.c_str()));
-            }
+        // The static type decides the overload. operator+(TSubMenu&, TMenuItem&)
+        // puts the entry *inside* this submenu; operator+(TSubMenu&, TSubMenu&)
+        // would make it a sibling, which on the menu bar means a whole extra
+        // pull-down. makeMenuItem returning TMenuItem* is what keeps this right.
+        *sub + *makeMenuItem(def);
         }
+}
+
+static TMenuItem *makeMenuItem(const MenuItemDef &def)
+{
+    if (def.separator)
+        return &newLine();
+
+    if (def.isSubMenu())
+        {
+        TSubMenu *sub = new TSubMenu(def.title.c_str(), def.key);
+        appendItems(sub, def.items);
+        return sub;
+        }
+
+    return new TMenuItem(def.title.c_str(), def.command, def.key, hcNoContext,
+                         def.shortcut.empty() ? TStringView()
+                                              : TStringView(def.shortcut.c_str()));
+}
+
+static TMenu *buildMenu(const std::vector<MenuItemDef> &items)
+{
+    TMenuItem *head = nullptr;
+    for (const MenuItemDef &def : items)
+        {
+        TMenuItem *made = makeMenuItem(def);
+        if (head == nullptr)
+            head = made;
+        else
+            *head + *made;   // sibling chain: the entries along the bar
+        }
+    return head == nullptr ? nullptr : new TMenu(*head);
+}
+
+static TStatusDef *buildStatusDef(const std::vector<StatusItemDef> &items)
+{
+    if (items.empty())
+        return nullptr;
+
+    TStatusDef *def = new TStatusDef(0, 0xFFFF);
+    for (const StatusItemDef &item : items)
+        *def + *new TStatusItem(item.text.empty()
+                                    ? TStringView()
+                                    : TStringView(item.text.c_str()),
+                                item.key, item.command);
+    return def;
 }
 
 TMenuBar *JsApp::initMenuBar(TRect r)
 {
     r.b.y = r.a.y + 1;
-    if (g_config.menus.empty())
+    TMenu *menu = buildMenu(g_config.menus);
+    if (menu == nullptr)
         return nullptr;
-
-    TSubMenu *first = nullptr;
-    for (const SubMenuDef &def : g_config.menus)
-        {
-        TSubMenu *sub = new TSubMenu(def.title.c_str(), def.key);
-        fillSubMenu(sub, def.items);
-        if (first == nullptr)
-            first = sub;
-        else
-            *first + *sub;
-        }
-
-    return new TMenuBar(r, *first);
+    g_menuBar = new JsMenuBar(r, menu);
+    return g_menuBar;
 }
 
 TStatusLine *JsApp::initStatusLine(TRect r)
 {
     r.a.y = r.b.y - 1;
-    if (g_config.status.empty())
+    TStatusDef *defs = buildStatusDef(g_config.status);
+    if (defs == nullptr)
         return nullptr;
-
-    TStatusDef *def = new TStatusDef(0, 0xFFFF);
-    for (const StatusItemDef &item : g_config.status)
-        *def + *new TStatusItem(item.text.empty()
-                                    ? TStringView()
-                                    : TStringView(item.text.c_str()),
-                                item.key, item.command);
-
-    return new TStatusLine(r, *def);
+    g_statusLine = new JsStatusLine(r, *defs);
+    return g_statusLine;
 }
 
 void JsApp::handleEvent(TEvent &event)
@@ -516,12 +523,14 @@ static void prepare(const Napi::Env &env, const Napi::Value &value)
     g_config = AppConfig();
     g_commands.reset();
     g_views.clear();
+    g_menuBar = nullptr;
+    g_statusLine = nullptr;
     g_hasPendingError = false;
 
     if (config.Has("menuBar"))
-        parseMenuBar(env, config.Get("menuBar"));
+        g_config.menus = parseMenuBar(env, config.Get("menuBar"));
     if (config.Has("statusLine"))
-        parseStatusLine(env, config.Get("statusLine"));
+        g_config.status = parseStatusLine(env, config.Get("statusLine"));
 
     for (auto &binding : {std::make_pair("onCommand", &g_onCommand),
                           std::make_pair("onSelect", &g_onSelect),
@@ -555,6 +564,8 @@ static void teardown(const Napi::Env &env)
     g_shuttingDown = true;
     g_app.reset();          // the destructor gives the terminal back
     g_shuttingDown = false;
+    g_menuBar = nullptr;    // destroyed with the application
+    g_statusLine = nullptr;
     g_running = false;
     g_quitRequested = false;
     g_views.clear();
@@ -762,6 +773,40 @@ static Napi::Value Quit(const Napi::CallbackInfo &info)
     return env.Undefined();
 }
 
+// tv.setMenuBar(items) -- replace the whole menu bar while running.
+//
+// Turbo Vision builds it in the application constructor, but that is only
+// where it starts: TMenuView keeps its TMenu in a member, and swapping it is
+// what tvision's mmenu example does. This is what lets the menu bar be part of
+// a declarative view instead of fixed configuration.
+static Napi::Value SetMenuBar(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    requireRunning(env, "setMenuBar");
+
+    g_config.menus = parseMenuBar(env, info[0]);
+    if (g_menuBar == nullptr)
+        return Napi::Boolean::New(env, false);   // started without one
+
+    g_menuBar->replace(buildMenu(g_config.menus));
+    return Napi::Boolean::New(env, true);
+}
+
+// tv.setStatusLine(items) -- the same, for the status line.
+static Napi::Value SetStatusLine(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    requireRunning(env, "setStatusLine");
+
+    g_config.status = parseStatusLine(env, info[0]);
+    TStatusDef *defs = buildStatusDef(g_config.status);
+    if (g_statusLine == nullptr || defs == nullptr)
+        return Napi::Boolean::New(env, false);
+
+    g_statusLine->replace(defs);
+    return Napi::Boolean::New(env, true);
+}
+
 // tv.screenSize() -- so JS can lay windows out relative to the terminal.
 static Napi::Value ScreenSize(const Napi::CallbackInfo &info)
 {
@@ -780,6 +825,8 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports)
     exports.Set("step", Napi::Function::New(env, Step));
     exports.Set("dialog", Napi::Function::New(env, Dialog));
     exports.Set("quit", Napi::Function::New(env, Quit));
+    exports.Set("setMenuBar", Napi::Function::New(env, SetMenuBar));
+    exports.Set("setStatusLine", Napi::Function::New(env, SetStatusLine));
     exports.Set("screenSize", Napi::Function::New(env, ScreenSize));
     registerViewApi(env, exports);
     return exports;

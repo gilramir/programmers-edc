@@ -22,6 +22,7 @@
 #define Uses_TKeys
 #define Uses_TLabel
 #define Uses_TListViewer
+#define Uses_TMenu
 #define Uses_TMenuBar
 #define Uses_TMenuItem
 #define Uses_TProgram
@@ -212,6 +213,63 @@ public:
 
     uint32_t selected() const { return value; }
     void setSelected(uint32_t v) { value = v; drawView(); }
+};
+
+// Turbo Vision builds the menu bar and the status line inside the application
+// constructor, from static callbacks -- but that is only where they *start*.
+// TMenuView keeps its TMenu in a protected member and TStatusLine keeps its
+// TStatusDef chain the same way, so a subclass can swap either at runtime.
+// tvision's own mmenu example does exactly this for menus; these two make the
+// menu bar and the status line part of the view rather than fixed
+// configuration.
+class JsMenuBar : public TMenuBar {
+public:
+    JsMenuBar(const TRect &bounds, TMenu *aMenu) noexcept
+        : TMenuBar(bounds, aMenu)
+    {
+    }
+
+    void replace(TMenu *newMenu)
+    {
+        delete menu;   // exactly what ~TMenuBar does
+        menu = newMenu;
+        drawView();
+    }
+};
+
+class JsStatusLine : public TStatusLine {
+public:
+    JsStatusLine(const TRect &bounds, TStatusDef &aDefs) noexcept
+        : TStatusLine(bounds, aDefs)
+    {
+    }
+
+    void replace(TStatusDef *newDefs)
+    {
+        // ~TStatusLine's loop, written out because disposeItems is private.
+        while (defs != nullptr)
+            {
+            TStatusDef *def = defs;
+            defs = defs->next;
+            TStatusItem *item = def->items;
+            while (item != nullptr)
+                {
+                TStatusItem *next = item->next;
+                delete item;
+                item = next;
+                }
+            delete def;
+            }
+
+        defs = newDefs;
+        items = nullptr;
+
+        // update() refreshes `items` from `defs` only when the help context
+        // has changed, and ours never does. A value nothing uses forces it.
+        helpCtx = 0xFFFE;
+        update();
+        drawView();
+    }
 };
 
 class JsWindow : public TDialog {

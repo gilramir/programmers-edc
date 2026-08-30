@@ -174,3 +174,41 @@ test('sameShape ignores the mutable fields and nothing else', () => {
   );
   assert.equal(sameShape(undefined, a), false, 'nothing is not the same shape as something');
 });
+
+// --- the menu bar and status line ------------------------------------------
+
+test('the first chrome is recorded, not applied', () => {
+  // The application is built out of the first render, menu bar included, so
+  // the differ must not also try to replace what does not exist yet.
+  const tv = fakeTv();
+  tv.setMenuBar = () => assert.fail('must not replace the menu bar before startup');
+  tv.setStatusLine = () => assert.fail('must not replace the status line before startup');
+  const differ = createDiffer(tv);
+  assert.equal(differ.chrome([{ title: 'File' }], []), false, 'the first call reports "not applied"');
+});
+
+test('an unchanged menu bar is left alone', () => {
+  const tv = fakeTv();
+  tv.setMenuBar = () => assert.fail('nothing changed');
+  tv.setStatusLine = () => assert.fail('nothing changed');
+  const differ = createDiffer(tv);
+  const menu = [{ title: 'File', key: 'Alt-F', items: [] }];
+  differ.chrome(menu, []);
+  assert.equal(differ.chrome(menu, []), true);
+});
+
+test('a changed menu bar is replaced, and only it', () => {
+  const calls = [];
+  const tv = fakeTv();
+  tv.setMenuBar = (m) => calls.push(['setMenuBar', m[0].title]);
+  tv.setStatusLine = () => calls.push(['setStatusLine']);
+  const differ = createDiffer(tv);
+  const status = [{ text: '~Alt-X~ Exit', key: 'Alt-X', cmd: 'quit' }];
+
+  differ.chrome([{ title: 'One' }], status);
+  differ.chrome([{ title: 'Two' }], status);
+  assert.deepEqual(calls, [['setMenuBar', 'Two']], 'the status line did not change');
+
+  differ.chrome([{ title: 'Two' }], [{ text: 'other', key: '', cmd: '' }]);
+  assert.deepEqual(calls, [['setMenuBar', 'Two'], ['setStatusLine']]);
+});

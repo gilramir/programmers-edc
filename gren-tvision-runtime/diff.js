@@ -39,6 +39,7 @@ function sameShape(before, after) {
  */
 function createDiffer(tv, onClosed = () => {}) {
   let current = new Map(); // window id -> the spec we last applied
+  let chrome = null;       // the menu bar and status line we last applied
 
   // tv.close() destroys the window, which notifies onClose -- but not until the
   // pump reaches a safe point, so the notification arrives *after* the call
@@ -123,6 +124,32 @@ function createDiffer(tv, onClosed = () => {}) {
       } finally {
         applying = false;
       }
+    },
+
+    /**
+     * Apply the menu bar and status line, which are part of the view like
+     * anything else -- Turbo Vision lets both be swapped after startup. Sent
+     * whole rather than diffed entry by entry: they are small, and rebuilding
+     * one has no state to lose.
+     *
+     * Returns false the first time, when the caller still has to build the
+     * application out of them.
+     */
+    chrome(menuBar, statusLine) {
+      const next = JSON.stringify([menuBar, statusLine]);
+      if (chrome === null) {
+        chrome = next;
+        return false;
+      }
+      if (chrome === next) return true;
+
+      const [beforeMenu, beforeStatus] = JSON.parse(chrome);
+      if (JSON.stringify(beforeMenu) !== JSON.stringify(menuBar)) tv.setMenuBar(menuBar);
+      if (JSON.stringify(beforeStatus) !== JSON.stringify(statusLine)) {
+        tv.setStatusLine(statusLine);
+      }
+      chrome = next;
+      return true;
     },
 
     /** Route a close notification: ours is swallowed, the user's is reported. */
