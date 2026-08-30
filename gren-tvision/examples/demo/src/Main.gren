@@ -84,6 +84,9 @@ type alias Model =
     , hue : Hue
     , now : Time.Posix
     , zone : Time.Zone
+    -- Only the About box needs this, and it needs it because a message box
+    -- centres itself and a rectangle is in desktop coordinates.
+    , desktop : { cols : Int, rows : Int }
     }
 
 
@@ -105,6 +108,7 @@ init _ =
             , hue = LightCyan
             , now = Time.millisToPosix 0
             , zone = Time.utc
+            , desktop = { cols = 80, rows = 23 }
             }
         , command = Task.perform GotZone Time.here
         }
@@ -238,6 +242,9 @@ handleEvent event model =
         Command "events" ->
             { model = { model | watching = not model.watching }, command = Cmd.none }
 
+        Resized size ->
+            { model = { model | desktop = size }, command = Cmd.none }
+
         Command "stop" ->
             { model = { model | stopped = not model.stopped }, command = Cmd.none }
 
@@ -245,7 +252,7 @@ handleEvent event model =
             { model = { model | events = [] }, command = Cmd.none }
 
         Command "about" ->
-            { model = model, command = Tui.dialog tui aboutDialog }
+            { model = model, command = Tui.dialog tui (aboutDialog model) }
 
         Command "colours" ->
             { model = model, command = Tui.dialog tui (coloursDialog model) }
@@ -472,27 +479,15 @@ eventWindow model =
     }
 
 
-aboutDialog : Tui.DialogSpec
-aboutDialog =
-    { id = "about"
-    , title = "About"
-    , rect = { x1 = 16, y1 = 5, x2 = 63, y2 = 17 }
-    , views =
-        [ Tui.StaticText
-            { id = "aboutText"
-            , rect = { x1 = 2, y1 = 1, x2 = 45, y2 = 8 }
-            , text = "\n\u{0003}TURBO VISION DEMO\n \n\u{0003}the shell of it, in Gren\n \n\u{0003}tile and cascade are Turbo Vision's;\n\u{0003}which windows exist is the model's\n"
-            }
-        , Tui.Button
-            { id = "aboutOk"
-            , rect = { x1 = 18, y1 = 9, x2 = 29, y2 = 11 }
-            , title = "OK"
-            , cmd = "ok"
-            , isDefault = True
-            , takesFocus = True
-            }
-        ]
-    }
+aboutDialog : Model -> Tui.DialogSpec
+aboutDialog model =
+    Tui.messageBox
+        { id = "about"
+        , title = "About"
+        , text = "\n\u{0003}TURBO VISION DEMO\n \n\u{0003}the shell of it, in Gren\n \n\u{0003}tile and cascade are Turbo Vision's;\n\u{0003}which windows exist is the model's\n"
+        , buttons = Tui.okButtons
+        , desktop = model.desktop
+        }
 
 
 {-| tvdemo's `Colors...` opens a `TColorDialog`, which edits the application's

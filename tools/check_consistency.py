@@ -285,7 +285,13 @@ def main():
     #                 event answers the same need by telling the model instead,
     #                 which is the shape Focused and Scrolled already set, and
     #                 leaves every message one-way.
-    unreachable_on_purpose = {"log", "screenSize", "getValue"}
+    #   messageBox -- tvision-node's own convenience for JavaScript callers,
+    #                 and used by its examples. A message box is a dialog, so
+    #                 the Gren package builds its own (Tui.messageBox) out of
+    #                 the dialog message rather than reaching for this one --
+    #                 which is why closing that gap added nothing to the
+    #                 protocol at all.
+    unreachable_on_purpose = {"log", "screenSize", "getValue", "messageBox"}
     for name in sorted(called - exported):
         problems.append(f"the runtime calls tv.{name}(), which index.js does not "
                         f"export -- it would throw the first time it ran")

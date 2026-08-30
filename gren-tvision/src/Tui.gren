@@ -4,6 +4,7 @@ module Tui exposing
     , Grow
     , Hue(..)
     , MenuItem(..)
+    , MessageButton
     , Ports
     , Program
     , ProgramConfiguration
@@ -22,7 +23,10 @@ module Tui exposing
     , focus
     , ink
     , line
+    , messageBox
     , number
+    , okButtons
+    , okCancelButtons
     , on
     , pinBottom
     , pinRight
@@ -34,6 +38,8 @@ module Tui exposing
     , stretchHeight
     , stretchWidth
     , text
+    , yesNoButtons
+    , yesNoCancelButtons
     )
 
 {-| Terminal user interfaces on [Turbo Vision][tv], as the Elm architecture.
@@ -169,6 +175,7 @@ its own is a pull-down, and one without is a command sitting on the bar.
 @docs MenuItem, StatusItem
 @docs Event, Value, DialogSpec
 @docs dialog, quit, setEnabled, setDoubleClickDelay, focus
+@docs messageBox, MessageButton, okButtons, okCancelButtons, yesNoButtons, yesNoCancelButtons
 @docs text, number, flag, flags
 
 -}
@@ -686,6 +693,164 @@ dialog ports spec =
                         ]
               }
             ]
+
+
+{-| One button on a [`messageBox`](#messageBox). `cmd` is what comes back in
+the [`DialogClosed`](#Event) event, and the four Turbo Vision uses --
+`"ok"`, `"cancel"`, `"yes"`, `"no"` -- are built-in names that close the dialog
+by themselves. Any other name closes nothing, which makes a message box with a
+button that does not dismiss it, so use one of the four unless that is what you
+meant.
+-}
+type alias MessageButton =
+    { title : String, cmd : String }
+
+
+{-| Just OK. -}
+okButtons : Array MessageButton
+okButtons =
+    [ { title = "~O~K", cmd = "ok" } ]
+
+
+{-| OK and Cancel. -}
+okCancelButtons : Array MessageButton
+okCancelButtons =
+    [ { title = "~O~K", cmd = "ok" }
+    , { title = "Cancel", cmd = "cancel" }
+    ]
+
+
+{-| Yes and No. Closing the box from its frame or with `Esc` still reports
+`"cancel"`, which a two-button box has no button for -- handle it.
+-}
+yesNoButtons : Array MessageButton
+yesNoButtons =
+    [ { title = "~Y~es", cmd = "yes" }
+    , { title = "~N~o", cmd = "no" }
+    ]
+
+
+{-| Yes, No and Cancel. -}
+yesNoCancelButtons : Array MessageButton
+yesNoCancelButtons =
+    [ { title = "~Y~es", cmd = "yes" }
+    , { title = "~N~o", cmd = "no" }
+    , { title = "Cancel", cmd = "cancel" }
+    ]
+
+
+{-| A message box, as a [`DialogSpec`](#DialogSpec) ready to hand to
+[`dialog`](#dialog).
+
+    Tui.dialog tui <|
+        Tui.messageBox
+            { id = "confirm"
+            , title = "Delete"
+            , text = "Delete \"" ++ name ++ "\"?\nThis cannot be undone."
+            , buttons = Tui.yesNoButtons
+            , desktop = model.desktop
+            }
+
+The answer arrives as a [`DialogClosed`](#Event) carrying the `id` you gave it
+and the `cmd` of the button that closed it -- so a message box is an ordinary
+`Cmd` producing a `Msg`, exactly like any other dialog, and there is nothing
+new to learn.
+
+This is a *helper*, not a new kind of thing: it returns a spec you can pick
+apart or adjust. Turbo Vision's own `messageBox()` is a function in the library
+because it calls `execView`, the nested loop this binding does not have; here
+a message box is fifteen lines of dialog that every program would otherwise
+write for itself, so the package writes them.
+
+`desktop` is what makes it centre, and it is the reason this could not have
+been written before the [`Resized`](#Event) event: a rectangle is in desktop
+coordinates and nothing in a pure `view` function knew how big the desktop was.
+Pass the size the model was last told.
+
+The box is sized to its longest line, up to the width of the desktop. `text`
+may contain newlines; very long lines are wrapped by the static text inside,
+which can overflow a box sized by line count -- break them yourself if that
+matters.
+
+-}
+messageBox :
+    { id : String
+    , title : String
+    , text : String
+    , buttons : Array MessageButton
+    , desktop : { cols : Int, rows : Int }
+    }
+    -> DialogSpec
+messageBox box =
+    let
+        lines =
+            String.split "\n" box.text
+
+        longest =
+            Array.foldl (\each wide -> max wide (String.count each)) 0 lines
+
+        count =
+            max 1 (Array.length box.buttons)
+
+        -- Twelve columns each and two between, which is what a Turbo Vision
+        -- dialog button measures.
+        buttonsWide =
+            (count * 12) + ((count - 1) * 2)
+
+        width =
+            clamp 1 box.desktop.cols (max (max 34 (longest + 8)) (buttonsWide + 6))
+
+        height =
+            clamp 1 box.desktop.rows (Array.length lines + 7)
+
+        left =
+            max 0 ((box.desktop.cols - width) // 2)
+
+        top =
+            max 0 ((box.desktop.rows - height) // 2)
+
+        row =
+            height - 4
+
+        firstButton =
+            max 2 ((width - buttonsWide) // 2)
+
+        placed =
+            Array.indexedMap
+                (\index button ->
+                    let
+                        x =
+                            firstButton + (index * 14)
+                    in
+                    Button
+                        { id = box.id ++ "-" ++ button.cmd
+                        , rect = { x1 = x, y1 = row, x2 = x + 12, y2 = row + 2 }
+                        , title = button.title
+                        , cmd = button.cmd
+                        , isDefault = index == 0
+                        , takesFocus = True
+                        }
+                )
+                box.buttons
+    in
+    { id = box.id
+    , title = box.title
+    , rect = { x1 = left, y1 = top, x2 = left + width, y2 = top + height }
+    , views =
+        Array.pushFirst
+            (StaticText
+                { id = box.id ++ "-text"
+                , rect =
+                    { x1 = 3
+                    , y1 = 2
+                    , x2 = width - 3
+                    , y2 = 2 + Array.length lines
+                    }
+                , text = box.text
+                }
+            )
+            placed
+    }
 
 
 {-| Quit. Any open dialog is cancelled on the way out, and the process exits

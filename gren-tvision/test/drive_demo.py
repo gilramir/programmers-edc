@@ -74,6 +74,18 @@ def press(app, label):
     return False
 
 
+def box_edges(screen, title):
+    """(left, right) frame columns of the active dialog with this title.
+
+    A dialog is the focused view, so its frame is the doubled one; the title
+    row is the only place both corners appear.
+    """
+    for line in screen.split("\n"):
+        if title in line and "╔" in line and "╗" in line:
+            return (line.index("╔"), line.rindex("╗"))
+    return None
+
+
 def main():
     check = Checks()
     env = dict(os.environ, TERM="xterm-256color")
@@ -115,6 +127,22 @@ def main():
     press(app, "Start")
     press(app, "Clear")
     check("Clear empties it", all(line == "" for line in log(app)), str(log(app)))
+
+    # About is a message box now: the same dialog it always was, built by
+    # Tui.messageBox instead of by hand. What the helper adds is that it
+    # centres itself, which needs the desktop's size -- so this is also the
+    # first thing in this example that depends on the Resized event.
+    menu(app, "≡", 1)
+    about = app.render()
+    check("the About box opened", "TURBO VISION DEMO" in about, about)
+    edges = box_edges(about, "About")
+    # Within a column: the box is 45 wide on an 80-column desktop, and 35
+    # columns of margin do not divide in two.
+    check("and a message box centres itself on the desktop",
+          edges is not None and abs(edges[0] - (79 - edges[1])) <= 1,
+          f"frame at {edges} of 80 columns")
+    app.send(b"\r", settle=0.9)
+    check("and its OK button closed it", "TURBO VISION DEMO" not in app.render())
 
     # The colours dialog is five radio buttons, because a colour dialog is a
     # form and what it sets is a field.

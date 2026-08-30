@@ -1865,3 +1865,81 @@ bookkeeping about where a row went.
 The three C++ paths are tested one level down, in `tvision-node`'s own
 `drive_form.py`, which already types into a field, toggles a check box by
 hotkey and can move a radio button, and now reads all three out of the log.
+
+## Closing gap 5: a message box the package builds
+
+`tv.messageBox()` was the last name the reachability check printed, and closing
+the gap added nothing to the protocol. That is the whole point of it.
+
+### The one gap whose answer was "write it in Gren"
+
+Turbo Vision's `messageBox()` is a library function because it has to be: it
+calls `execView`, the nested modal loop milestone 2.5 removed, so a program
+cannot express it. The JavaScript binding has its own for the same practical
+reason — `tvision-node` is a package people use from JavaScript, and
+`examples/hello.js` and `examples/demo.js` both call it.
+
+None of that applies on the Gren side. A message box *is* a dialog: a static
+text, a row of buttons, and a rectangle. Every one of those already crosses the
+port. So `Tui.messageBox` returns a `DialogSpec` — a value, which the caller
+hands to `Tui.dialog` like any other — and the answer arrives as an ordinary
+`DialogClosed` carrying the id it was opened with. No message, no event, no
+protocol version. `examples/demo`'s About box was fifteen lines of hand-built
+dialog and is now five lines of spec, which is the argument in one diff.
+
+That leaves `tv.messageBox()` reachable from JavaScript and not from Gren, on
+purpose, and it is the fourth name in the consistency check's exempt list. Four
+out of twenty-two exports, each with a written reason, and the check now prints
+no coverage notes at all — every function the binding exports is either
+reachable or deliberately not.
+
+### It could not have been written two commits ago
+
+A message box centres itself, a dialog's rectangle is in desktop coordinates,
+and until the `Resized` event nothing in a pure `view` function knew how big
+the desktop was. So `desktop` is a field on the spec and the model passes the
+size it was last told:
+
+```gren
+Tui.dialog tui <|
+    Tui.messageBox
+        { id = "confirmClear"
+        , title = "Clear"
+        , text = "Throw away all " ++ String.fromInt n ++ " entries?"
+        , buttons = Tui.yesNoButtons
+        , desktop = model.desk
+        }
+```
+
+The JavaScript one calls `screenSize()` and is a row out because of it: it
+centres against the *screen* and then places the result in desktop
+coordinates, so an 80x25 terminal puts the box one row below centre. Nobody
+noticed, and nobody would; it is worth writing down only because the Gren
+version gets it right by having been given the right number rather than by
+being more careful.
+
+### `"yes"` and `"no"` were already built-in names
+
+A message box needs its buttons to dismiss it, and nothing in `Tui` does that
+— a button sends a command and the model decides. The four that close a dialog
+by themselves are `cmOK`, `cmCancel`, `cmYes` and `cmNo`, and all four have
+been in `CommandRegistry`'s builtins table since the `watch` example put them
+there. So `okButtons`, `okCancelButtons`, `yesNoButtons` and
+`yesNoCancelButtons` are four arrays of two fields, and `TDialog::handleEvent`
+does the rest.
+
+The sharp edge is documented rather than fixed: a button whose `cmd` is
+anything else does not close the box, which is a message box you cannot
+dismiss. It is the same reserved-vocabulary trap the built-in command names
+already had, one level up.
+
+### Two examples, because a message box is two different things
+
+`examples/demo` gets the informational one — its About box, which was already a
+dialog and is now the helper, so the diff is the fifteen lines disappearing.
+
+`examples/entries` gets the confirmation. `Clear` threw away every entry with
+no question asked, and now asks; `Yes` and `No` come back as `DialogClosed`
+with the id, which is how the model tells that answer from the Add dialog's.
+The model needs no "am I asking?" flag, because the id it opened the box with
+is the id that comes back.

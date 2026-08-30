@@ -94,6 +94,26 @@ def zoom_box(screen, title):
     return None
 
 
+def box_edges(screen, title):
+    """(left, right) frame columns of the active dialog with this title.
+
+    A dialog has the focus, so its frame is the doubled one, and the title row
+    is the only place both of its corners appear.
+    """
+    for line in screen.split("\n"):
+        if title in line and "╔" in line and "╗" in line:
+            return (line.index("╔"), line.rindex("╗"))
+    return None
+
+
+def clear_menu(app):
+    """Entries > Clear, which is the third line of the first pull-down."""
+    bar = app.render().split("\n")[0]
+    at = bar.index("Entries")
+    app.click(at + 1, 1, settle=0.6)
+    app.click(at + 3, 6, settle=1.0)
+
+
 def resizes(check):
     """A second application, in a terminal that is not 80x25 and then changes.
 
@@ -310,6 +330,32 @@ def main():
     check("and the renders that keep arriving do not undo it",
           bottom_of_list(app.render()) == 23,
           f"bottom frame back at row {bottom_of_list(app.render())}")
+
+    # 10. A message box, which is a dialog the *package* builds rather than the
+    #     binding. Turbo Vision's own messageBox() is a library function
+    #     because it calls execView, the nested loop this pump exists instead
+    #     of; here it is a DialogSpec, so nothing new reaches the protocol and
+    #     the answer comes back as an ordinary DialogClosed.
+    clear_menu(app)
+    asking = app.render()
+    check("Clear asks first", "Throw away all" in asking, asking)
+    edges = box_edges(asking, "Clear")
+    check("and the box centres itself on the desktop",
+          edges is not None and abs(edges[0] - (79 - edges[1])) <= 1,
+          f"frame at {edges} of 80 columns")
+    check("with the two buttons it was given",
+          "Yes" in asking and "No" in asking, asking)
+
+    # "yes" and "no" are built-in command names, so the buttons close the box
+    # by themselves and the model is told which one did it.
+    app.send(b"\x1bn", settle=1.0)
+    check("No leaves everything alone",
+          "Throw away all" not in app.render() and "Entries (4)" in app.render(),
+          app.render())
+
+    clear_menu(app)
+    app.send(b"\x1by", settle=1.0)
+    check("Yes empties the list", "Entries (0)" in app.render(), app.render())
 
     app.send(b"\x1bx", settle=1.0)
     code = app.wait(timeout=6)

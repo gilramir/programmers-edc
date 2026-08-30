@@ -12,7 +12,7 @@ Build them all with `../build.sh`, run one with `../run.sh <name>`.
 |---|---|---|
 | `hello` | `tvision/hello.cpp` | menus, status line, modal dialog as a `Cmd`, dialog result as a `Msg` |
 | `mmenu` | `tvision/examples/mmenu` | a menu bar that changes at runtime, and menu bar entries that are commands rather than pull-downs |
-| `entries` | *(ours)* | list boxes, `Time.every` behind a modal dialog, `WindowClosed`, mutable window titles — and later `Tui.focus`, because "show me that window" is the thing a description of the UI cannot say, `Resized`, because it is the first example that does not assume 80x25, `Grows`, because a window that grows and a list box that does not is worse than neither, and `Changed`, because a filter box is a control in an ordinary window |
+| `entries` | *(ours)* | list boxes, `Time.every` behind a modal dialog, `WindowClosed`, mutable window titles — and later `Tui.focus`, because "show me that window" is the thing a description of the UI cannot say, `Resized`, because it is the first example that does not assume 80x25, `Grows`, because a window that grows and a list box that does not is worse than neither, `Changed`, because a filter box is a control in an ordinary window, and `messageBox`, because Clear should ask first |
 | `forms` | `tvision/examples/tvforms` | check boxes, radio buttons, labels, and a list box highlight the model can both read and move |
 | `ascii` | `tvision/examples/tvdemo` (ascii.cpp) | the canvas, from Gren: a view the model paints itself, and a cursor to select with |
 | `calendar` | `tvision/examples/tvdemo` (calendar.cpp) | colour on a canvas, as spans; and today as a field, because `Time.now` is a task |
@@ -21,7 +21,7 @@ Build them all with `../build.sh`, run one with `../run.sh <name>`.
 | `palette` | `tvision/examples/palette` | nothing -- it is the example whose entire subject the port removes, and the write-up says what that costs |
 | `mouse` | `tvision/examples/tvdemo` (mousedlg.cpp) | the scroll bar as a view of its own, `isDouble` on a click, `setDoubleClickDelay`, and `takesFocus` on a canvas |
 | `dir` | `tvision/examples/tvdir` | no widget at all — but it found a real bug in the diff, moved a list box's scroll bar, and is the first example to use the file system |
-| `demo` | `tvision/examples/tvdemo` (the shell) | real windows: zoom, resize, tile and cascade, which every window had silently been unable to do |
+| `demo` | `tvision/examples/tvdemo` (the shell) | real windows: zoom, resize, tile and cascade, which every window had silently been unable to do — and later the first `Tui.messageBox`, which is its About box with fifteen lines taken out |
 | `viewer` | `tvision/examples/tvdemo` (fileview.cpp) | nothing — `TScroller` went the way of `TOutline`; but it is the first horizontal scroll bar doing its own job |
 | `watch` | *(ours)* | not a port: a subscription from outside the program, several children at once, and a run that can be killed. It found a name the binding was silently swallowing |
 
@@ -433,17 +433,18 @@ excludes `evMouseWheel` (`views.h`), so a wheel event goes to whatever has
 
 ### The coverage gaps left
 
-Ten, in the order they were listed, three closed and one half closed. Each says what it
+Ten, in the order they were listed, four closed and one half closed. Each says what it
 would take, because "not done", "not decided" and "not needed" are three
 different problems.
 
-One of them is still reported by `tools/check_consistency.py` on every run —
-`messageBox`. The port is the only way into the binding, so an exported
-function no runtime call site reaches is a capability no Gren program can use.
-That check named four when it was written: `focus`, which protocol 5 carried;
-`screenSize` and `getValue`, which protocols 6 and 8 superseded and which are
-now in its exempt list with a written reason each; and `messageBox`, which is
-gap (5) below and is still open.
+None of them is reported by `tools/check_consistency.py` any more, which is
+what closing four of these looks like from that end. The port is the only way
+into the binding, so an exported function no runtime call site reaches is a
+capability no Gren program can use — and the check named four when it was
+written. `focus` was carried by protocol 5. `screenSize`, `getValue` and
+`messageBox` are in its exempt list now, one written reason each: the first two
+superseded by `Resized` and `Changed`, the third deliberately a JavaScript-only
+convenience because the Gren package builds its own.
 
 The first two were listed here as one design with two symptoms. They were two,
 and neither needed the new layout language this list proposed: the first is an
@@ -517,15 +518,33 @@ The interesting thing is that neither looks like a class worth wrapping.
 buttons, a history — around a `TFileList`, which is a `TSortedListBox` over
 `FileSystem.listDirectory`. Following `TOutline` and `TScroller`, the answer is
 probably a dialog the model builds and a helper that produces its `views`,
-shipped in the package rather than in the binding. That is a design decision
-nobody has made yet, not a missing widget. It wants (6) first, for the history.
+shipped in the package rather than in the binding. **That shape now exists**:
+(5) established it, and `Tui.messageBox` is what one of these looks like — a
+function returning a `DialogSpec`, no protocol change, the answer arriving as
+an ordinary `DialogClosed`. What is left here is the `TFileList` half, which is
+a sorted list box over `FileSystem.listDirectory`, and it wants (6) first for
+the history.
 
-**5. A message box.** `tv.messageBox()` exists in the JavaScript binding, built
-there rather than in C++ because Turbo Vision's own `messageBox()` calls
-`execView` — the nested loop milestone 2.5 removed. Gren cannot reach it. A
-message box *is* a dialog, so nothing is impossible, but every program will
-write the same fifteen lines. The same package-helper shape as (4), and small
-enough to be the thing that establishes it.
+**5. ~~A message box.~~ Done — [`Tui.messageBox`](#messageBox), and no protocol
+change at all.** It is the one gap whose answer was "write it in Gren": a
+message box *is* a dialog, and every part of one already crosses the port. The
+helper returns a `DialogSpec`, the caller hands it to `dialog` like any other,
+and the answer arrives as an ordinary `DialogClosed` carrying the id.
+
+That establishes the package-helper shape (4) needs. It also could not have
+been written before gap (1): a box centres itself, a dialog's rectangle is in
+desktop coordinates, and `desktop` is a field on the spec that the model fills
+in from what `Resized` told it.
+
+`tv.messageBox()` stays reachable from JavaScript and not from Gren, on
+purpose — `tvision-node` is a package people use from JavaScript and its own
+examples call it — so it is the fourth name in the consistency check's exempt
+list. The check now prints no coverage notes at all: every function the binding
+exports is either reachable or deliberately not, and each of the four says why.
+
+`examples/demo`'s About box was fifteen lines of hand-built dialog and is now
+five lines of spec; `examples/entries` asks before Clear throws everything
+away.
 
 **6. `THistory` — the drop-down beside an input line.** `THistory`,
 `THistoryViewer` and `THistoryWindow` are the stock control that remembers what

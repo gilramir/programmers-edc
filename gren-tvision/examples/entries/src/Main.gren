@@ -107,9 +107,23 @@ handleEvent event model =
         Command "add" ->
             { model = model, command = addDialog }
 
+        -- Ask first. A message box is an ordinary dialog, so the question is
+        -- a Cmd and the answer is a Msg, and the model does not need a flag
+        -- for "asking" -- the id on the way out is the id on the way back.
         Command "clear" ->
-            { model = { model | items = [], selected = "(nothing selected)" }
-            , command = Tui.setEnabled tui "clear" False
+            { model = model
+            , command =
+                Tui.dialog tui <|
+                    Tui.messageBox
+                        { id = "confirmClear"
+                        , title = "Clear"
+                        , text =
+                            "Throw away all "
+                                ++ String.fromInt (Array.length model.items)
+                                ++ " entries?"
+                        , buttons = Tui.yesNoButtons
+                        , desktop = model.desk
+                        }
             }
 
         -- Opening a window that is already open used to be a no-op: the flag
@@ -167,8 +181,18 @@ handleEvent event model =
                     { model = model, command = Cmd.none }
 
         -- The dialog's result arrives as a message, the way any Cmd's does.
+        -- Two dialogs now, told apart by the id each was opened with.
         DialogClosed closed ->
-            if closed.cmd == "ok" then
+            if closed.id == "confirmClear" then
+                if closed.cmd == "yes" then
+                    { model = { model | items = [], selected = "(nothing selected)" }
+                    , command = Tui.setEnabled tui "clear" False
+                    }
+
+                else
+                    { model = model, command = Cmd.none }
+
+            else if closed.cmd == "ok" then
                 let
                     entry =
                         String.trim (Tui.text "entry" closed.values)
