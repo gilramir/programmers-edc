@@ -56,6 +56,23 @@ def main():
     check("check box hotkey toggled it", "[X] Retrocomputing" in app.render(),
           "Alt-R did not tick the box")
 
+    # 4b. Every one of those edits was reported as it happened. That is the
+    #     half Turbo Vision does not do: it keeps a cluster's state in a
+    #     protected `value` and an input line's in `data`, and a program reads
+    #     them when the dialog is answered and not before. Alt-P is the Phone
+    #     *radio button* rather than the Phone field -- see above -- so it is
+    #     also how the radio is moved; Alt-E puts it back for step 5.
+    app.send(b"\x1bp", settle=0.4)
+    app.send(b"\x1be", settle=0.4)
+    logged = open(LOG).read()
+    check("typing was reported as it happened",
+          "changed: name Ada Lovelace" in logged, repr(logged[-400:]))
+    check("a check box was reported as one boolean per box",
+          "changed: interests [true,true,false,false]" in logged, repr(logged[-400:]))
+    check("a radio button was reported as an index",
+          "changed: contact 1" in logged and "changed: contact 0" in logged,
+          repr(logged[-400:]))
+
     # 5. Enter presses the default button (OK).
     app.send(b"\r", settle=1.0)
     listed = app.render()

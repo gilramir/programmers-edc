@@ -209,6 +209,11 @@ handleEvent event model =
         Resized _ ->
             model
 
+        -- Nothing here has a value the user can move: a canvas reports keys
+        -- and clicks, not a value.
+        Changed _ ->
+            model
+
         Unknown _ ->
             model
 

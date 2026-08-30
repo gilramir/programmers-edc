@@ -238,15 +238,44 @@ private:
     std::string viewId;
 };
 
+// An input line that says when the user changed it.
+//
+// TInputLine has no notification of its own -- Turbo Vision programs read the
+// field when the dialog is answered and never before, which is exactly the
+// hole this fills for a window that is not a dialog. There is no single method
+// every edit goes through either: typing, Backspace, a paste, a click that
+// moves the cursor and Ctrl-Y all land in handleEvent. So the comparison is
+// made around it, which cannot miss a route.
+class JsInputLine : public TInputLine {
+public:
+    JsInputLine(const TRect &bounds, int aMaxLen, std::string id) noexcept
+        : TInputLine(bounds, aMaxLen), viewId(std::move(id))
+    {
+    }
+
+    virtual void handleEvent(TEvent &event) override;
+
+private:
+    std::string viewId;
+};
+
 // TCluster keeps its state in a protected `value`, so reading and writing a
 // check box from JS means either getData/setData with a raw byte buffer, or a
 // subclass. A subclass is harder to get wrong.
+//
+// The same handleEvent sandwich as JsInputLine, and for the same reason: a box
+// is toggled by Space, by a click, by its hotkey and by the arrow keys moving
+// the selection, and `value` afterwards is the only thing all four have in
+// common.
 class JsCheckBoxes : public TCheckBoxes {
 public:
-    JsCheckBoxes(const TRect &bounds, TSItem *items, uint32_t aCount) noexcept
-        : TCheckBoxes(bounds, items), count(aCount)
+    JsCheckBoxes(const TRect &bounds, TSItem *items, uint32_t aCount,
+                 std::string id) noexcept
+        : TCheckBoxes(bounds, items), count(aCount), viewId(std::move(id))
     {
     }
+
+    virtual void handleEvent(TEvent &event) override;
 
     uint32_t bits() const { return value; }
     void setBits(uint32_t v) { value = v; drawView(); }
@@ -254,17 +283,25 @@ public:
     // TCluster keeps its labels in a protected collection, and JS wants an
     // array of the right length back.
     const uint32_t count;
+
+private:
+    std::string viewId;
 };
 
 class JsRadioButtons : public TRadioButtons {
 public:
-    JsRadioButtons(const TRect &bounds, TSItem *items) noexcept
-        : TRadioButtons(bounds, items)
+    JsRadioButtons(const TRect &bounds, TSItem *items, std::string id) noexcept
+        : TRadioButtons(bounds, items), viewId(std::move(id))
     {
     }
 
+    virtual void handleEvent(TEvent &event) override;
+
     uint32_t selected() const { return value; }
     void setSelected(uint32_t v) { value = v; drawView(); }
+
+private:
+    std::string viewId;
 };
 
 // Turbo Vision builds the menu bar and the status line inside the application
@@ -452,6 +489,17 @@ void dispatchKey(const std::string &id, const std::string &key);
 // is itself inside the render. Calling back into JS from there would re-enter
 // the diff while it is halfway through building a window.
 void noteFocused(const std::string &id, int index, const std::string &text);
+
+// The user changed a view's value. One of the three, by the kind of value it
+// is: text for an input line, a bit per box for a check box cluster, an index
+// for radio buttons. Queued and drained at the pump, like every other
+// notification a JavaScript call could otherwise re-enter TVision from.
+// A cluster's bitfield as an array of `count` booleans.
+Napi::Array checkedArray(const Napi::Env &env, uint32_t bits, uint32_t count);
+
+void noteChangedText(const std::string &id, const std::string &text);
+void noteChangedFlags(const std::string &id, uint32_t bits, uint32_t count);
+void noteChangedChoice(const std::string &id, int index);
 
 // Queued for the same reason, and more urgently: setValue() calls scrollDraw()
 // directly, so a render that moves a scroll bar would call back into JS from

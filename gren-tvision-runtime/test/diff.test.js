@@ -310,6 +310,51 @@ test('sameShape ignores the mutable fields and nothing else', () => {
   assert.equal(sameShape(undefined, a), false, 'nothing is not the same shape as something');
 });
 
+test('a value the user changed is not written back to them', () => {
+  // The controlled-input problem. The model is told what the user typed, keeps
+  // it (which is the point of being told) and renders it straight back. If the
+  // differ compared that against the value it last *applied*, it would see a
+  // difference and write it into the field the user is typing in.
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  const field = (value) =>
+    win({ items: [{ type: 'inputLine', id: 'f', rect: [2, 1, 30, 2], maxLen: 40, value }] });
+
+  differ.apply([field('')]);
+  tv.calls.length = 0;
+
+  differ.valueChanged('f', 'ab');   // what the view now says
+  differ.apply([field('ab')]);      // the model, echoing it back
+  assert.deepEqual(tv.calls, []);
+});
+
+test('a value the model changed is still written', () => {
+  // The other half: being told what the user typed must not make the field
+  // read-only. A model that transforms what it was given -- upper-casing it,
+  // rejecting a character -- has to be able to say so.
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  const field = (value) =>
+    win({ items: [{ type: 'inputLine', id: 'f', rect: [2, 1, 30, 2], maxLen: 40, value }] });
+
+  differ.apply([field('')]);
+  tv.calls.length = 0;
+
+  differ.valueChanged('f', 'ab');
+  differ.apply([field('AB')]);
+  assert.deepEqual(tv.calls, [['setValue', 'f', 'AB']]);
+});
+
+test('a change to an id no window has is ignored rather than thrown on', () => {
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  differ.apply([win()]);
+  differ.valueChanged('nobody', 'x');   // must not throw
+  tv.calls.length = 0;
+  differ.apply([win()]);
+  assert.deepEqual(tv.calls, []);
+});
+
 // --- the menu bar and status line ------------------------------------------
 
 test('the first chrome is recorded, not applied', () => {

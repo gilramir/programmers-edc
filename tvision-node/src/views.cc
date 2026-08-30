@@ -3,6 +3,7 @@
 #include "tvnode.h"
 #include "keys.h"
 
+#include <algorithm>
 #include <cstring>
 
 namespace tvnode {
@@ -61,6 +62,33 @@ void JsListBox::setItems(std::vector<std::string> newItems)
         quiet = false;
         }
     drawView();
+}
+
+// The sandwich: what it was, let TInputLine do whatever it does, what it is
+// now. Nothing else can tell a keystroke that inserted a character from one
+// that moved the cursor, and nothing else has to.
+void JsInputLine::handleEvent(TEvent &event)
+{
+    std::string before(data);
+    TInputLine::handleEvent(event);
+    if (!viewId.empty() && before != data)
+        noteChangedText(viewId, data);
+}
+
+void JsCheckBoxes::handleEvent(TEvent &event)
+{
+    uint32_t before = value;
+    TCheckBoxes::handleEvent(event);
+    if (!viewId.empty() && before != value)
+        noteChangedFlags(viewId, value, count);
+}
+
+void JsRadioButtons::handleEvent(TEvent &event)
+{
+    uint32_t before = value;
+    TRadioButtons::handleEvent(event);
+    if (!viewId.empty() && before != value)
+        noteChangedChoice(viewId, (int) value);
 }
 
 JsCanvas::JsCanvas(const TRect &bounds, std::string id, int aColorIndex,
@@ -255,11 +283,34 @@ TRect getRect(const Napi::Env &env, const Napi::Object &o, const char *where)
 // past the end of the heap block: it corrupts the next chunk's header and
 // aborts much later, when the dialog is destroyed ("free(): invalid size").
 // Both callers go through here so the off-by-one cannot come back.
+// The text a field starts with. selectAll(True) is Turbo Vision's own
+// convention for a value handed to a field the user has not touched yet: the
+// whole thing is selected, so typing replaces it.
 static void setInputText(TInputLine *input, const std::string &text)
 {
     strncpy(input->data, text.c_str(), input->maxLen);
     input->data[input->maxLen] = EOS;
     input->selectAll(True);
+}
+
+// The text the *model* set, which is a different thing and must not select.
+//
+// A model that keeps what a Changed event told it renders it straight back,
+// and if the render is a little behind the typing -- two keystrokes read in
+// one pump, one render still in flight -- the value that arrives is one
+// keystroke stale. Writing it costs a repaint and nothing else. Selecting it
+// costs the user their next keystroke, which replaces the whole field.
+//
+// So: text in, caret at the end, nothing selected. That is also the right
+// answer for the deliberate case, a model that transforms what was typed.
+static void setInputTextKeepingCaret(TInputLine *input, const std::string &text)
+{
+    strncpy(input->data, text.c_str(), input->maxLen);
+    input->data[input->maxLen] = EOS;
+    int end = (int) strlen(input->data);
+    input->curPos = input->selStart = input->selEnd = end;
+    input->firstPos = std::max(0, end - input->size.x + 2);
+    input->drawView();
 }
 
 // Each entry is a string (the whole line, in the view's colour) or an array
@@ -328,7 +379,7 @@ static uint32_t checkedBits(const Napi::Value &value)
     return bits;
 }
 
-static Napi::Array checkedArray(const Napi::Env &env, uint32_t bits, uint32_t count)
+Napi::Array checkedArray(const Napi::Env &env, uint32_t bits, uint32_t count)
 {
     Napi::Array out = Napi::Array::New(env, count);
     for (uint32_t i = 0; i < count; ++i)
@@ -424,7 +475,7 @@ TView *buildItems(const Napi::Env &env, JsWindow *win, const Napi::Value &value,
             {
             int maxLen = getInt(it, "maxLen", 128);
             TInputLine *input =
-                new TInputLine(getRect(env, it, "inputLine"), maxLen);
+                new JsInputLine(getRect(env, it, "inputLine"), maxLen, id);
             std::string initial = getString(it, "value");
             if (!initial.empty())
                 setInputText(input, initial);
@@ -508,7 +559,7 @@ TView *buildItems(const Napi::Env &env, JsWindow *win, const Napi::Value &value,
             uint32_t count = 0;
             TSItem *chain = makeItemChain(env, it.Get("items"), "checkBoxes", count);
             JsCheckBoxes *boxes =
-                new JsCheckBoxes(getRect(env, it, "checkBoxes"), chain, count);
+                new JsCheckBoxes(getRect(env, it, "checkBoxes"), chain, count, id);
             if (it.Has("value"))
                 boxes->setBits(checkedBits(it.Get("value")));
             made = boxes;
@@ -518,7 +569,7 @@ TView *buildItems(const Napi::Env &env, JsWindow *win, const Napi::Value &value,
             uint32_t count = 0;
             TSItem *chain = makeItemChain(env, it.Get("items"), "radioButtons", count);
             JsRadioButtons *radio =
-                new JsRadioButtons(getRect(env, it, "radioButtons"), chain);
+                new JsRadioButtons(getRect(env, it, "radioButtons"), chain, id);
             (void) count;
             radio->setSelected((uint32_t) getInt(it, "value", 0));
             made = radio;
@@ -745,9 +796,8 @@ static Napi::Value SetValue(const Napi::CallbackInfo &info)
 
     if (ref->kind == "inputLine")
         {
-        TInputLine *input = (TInputLine *) ref->view;
-        setInputText(input, info[1].ToString().Utf8Value());
-        input->drawView();
+        setInputTextKeepingCaret((TInputLine *) ref->view,
+                                 info[1].ToString().Utf8Value());
         return Napi::Boolean::New(env, true);
         }
     if (ref->kind == "listBox")

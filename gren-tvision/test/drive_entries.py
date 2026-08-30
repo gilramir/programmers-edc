@@ -250,13 +250,47 @@ def main():
     check("and the window it came forward over went quiet",
           active(raised, "Gren") is False)
 
-    # 8. The other half of the same mechanism, and the half the model is not
+    # 8. A control in an ordinary window, which is the thing this API could
+    #    not see before protocol 8: Turbo Vision reports neither a keystroke
+    #    nor a cluster, so a program read a field when a *dialog* was answered
+    #    and at no other moment. The filter box is a `Changed` event, a field
+    #    on the model, and a `view` that reads it.
+    #
+    #    Both characters go in one write on purpose. They are read in one pass
+    #    of the pump, and the race that hides behind them is the whole reason
+    #    the C++ collapses a burst into one notification and the runtime
+    #    records what the view reported before the model is asked. With
+    #    neither, the render for the first keystroke lands after the second has
+    #    been typed, writes the stale value back, and -- because a value the
+    #    model sets used to arrive through selectAll -- leaves the field
+    #    selected so that the next key replaces all of it.
+    app.send(b"or", settle=1.2)
+    filtered = app.render()
+    check("typing in an ordinary window reached the model",
+          "or" in filtered.split("\n")[3], filtered.split("\n")[3])
+    check("and the model filtered the list with it",
+          "Entries (1)" in filtered and "Borland" in filtered
+          and "Turbo Vision" not in filtered,
+          filtered)
+
+    # One backspace deletes one character. It is the assertion this whole
+    # mechanism exists to make true.
+    app.send(b"\x7f", settle=1.2)
+    check("a backspace deletes one character, not the field",
+          "Entries (2)" in app.render(),
+          app.render().split("\n")[3])
+
+    app.send(b"\x7f", settle=1.2)
+    check("and emptying the box brings the whole list back",
+          "Entries (4)" in app.render(), app.render())
+
+    # 9. The other half of the same mechanism, and the half the model is not
     #    involved in at all. Clicking the frame's zoom box is Turbo Vision's
     #    own command: it never reaches the model, so every rectangle the model
     #    goes on sending is the one it was already sending and the differ has
     #    nothing to do. What moves the views inside is TGroup::changeBounds
     #    resolving the growMode each of them was given.
-    box = zoom_box(raised, "Entries (")
+    box = zoom_box(app.render(), "Entries (")
     check("the active window's frame has a zoom box", box is not None, raised)
     app.click(box[0] + 2, box[1] + 1, settle=1.2)
     zoomed = app.render()

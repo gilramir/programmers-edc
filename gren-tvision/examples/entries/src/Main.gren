@@ -50,6 +50,11 @@ type alias Model =
     , ticks : Int
     , now : Time.Posix
     , listOpen : Bool
+    -- What is typed into the filter box. The model holds it because the model
+    -- is told: a control in an ordinary window used to be state only Turbo
+    -- Vision could see, readable when a *dialog* was answered and at no other
+    -- moment.
+    , filter : String
     -- How big the desktop is, which the program is told rather than assuming.
     -- The value here is only what the very first render uses: Resized arrives
     -- immediately after the application starts, before anyone can see it.
@@ -74,6 +79,7 @@ init _ =
             , ticks = 0
             , now = Time.millisToPosix 0
             , listOpen = True
+            , filter = ""
             , desk = { cols = 80, rows = 23 }
             }
         , command = Cmd.none
@@ -137,6 +143,28 @@ handleEvent event model =
         -- whenever it changes. Every window here is placed against it.
         Resized size ->
             { model = { model | desk = size }, command = Cmd.none }
+
+        -- The user typed in the filter box. Storing it and rendering it back
+        -- is the whole point and is also the trap: the runtime records what
+        -- the view reported before the model is asked, so the render that
+        -- follows agrees with the field and writes nothing into it. Without
+        -- that, `setValue` would select the whole field and the next keystroke
+        -- would replace it.
+        Changed changed ->
+            -- The id has to be checked, and forgetting to is a live bug rather
+            -- than a tidiness point: the Add dialog has an input line too, and
+            -- its keystrokes arrive here exactly like the filter box's. Typing
+            -- a new entry would filter the list down to the entry being typed.
+            when changed.value is
+                Tui.Text typed ->
+                    if changed.id == "filter" then
+                        { model = { model | filter = typed }, command = Cmd.none }
+
+                    else
+                        { model = model, command = Cmd.none }
+
+                _ ->
+                    { model = model, command = Cmd.none }
 
         -- The dialog's result arrives as a message, the way any Cmd's does.
         DialogClosed closed ->
@@ -274,7 +302,7 @@ and answered separately, by `Grows`.
 listWindow : Model -> Tui.Window
 listWindow model =
     { id = "list"
-    , title = "Entries (" ++ String.fromInt (Array.length model.items) ++ ")"
+    , title = "Entries (" ++ String.fromInt (Array.length (visible model)) ++ ")"
     , rect =
         { x1 = 1
         , y1 = 1
@@ -288,13 +316,33 @@ listWindow model =
     -- because the terminal did or because the user dragged its corner -- and
     -- the model is not told about the second one at all.
     , views =
-        [ Grows
+        -- A control in an ordinary window, which is the thing this API could
+        -- not see until protocol 8. Turbo Vision reports neither a keystroke
+        -- nor a cluster; a program reads a field when a *dialog* is answered
+        -- and at no other moment, so a filter box was not expressible outside
+        -- one. `Changed` is what makes this eight lines instead of a dialog.
+        [ StaticText
+            { id = "filterLabel"
+            , rect = { x1 = 2, y1 = 1, x2 = 9, y2 = 2 }
+            , text = "Filter:"
+            }
+        , Grows
+            { grow = Tui.stretchWidth
+            , view =
+                InputLine
+                    { id = "filter"
+                    , rect = { x1 = 10, y1 = 1, x2 = 43, y2 = 2 }
+                    , maxLen = 40
+                    , value = model.filter
+                    }
+            }
+        , Grows
             { grow = Tui.stretch
             , view =
                 ListBox
                     { id = "entries"
-                    , rect = { x1 = 2, y1 = 1, x2 = 43, y2 = 11 }
-                    , items = model.items
+                    , rect = { x1 = 2, y1 = 2, x2 = 43, y2 = 11 }
+                    , items = visible model
                     , focused = 0
                     }
             }
@@ -325,6 +373,24 @@ listWindow model =
             }
         ]
     }
+
+
+{-| What the list shows. `Selected` reports the *text* of the row rather than
+its index, so narrowing the list needs no bookkeeping about where a row went.
+-}
+visible : Model -> Array String
+visible model =
+    let
+        needle =
+            String.toLower (String.trim model.filter)
+    in
+    if String.isEmpty needle then
+        model.items
+
+    else
+        Array.keepIf
+            (\item -> String.contains needle (String.toLower item))
+            model.items
 
 
 clock : Time.Posix -> String

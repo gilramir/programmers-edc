@@ -12,7 +12,7 @@ Build them all with `../build.sh`, run one with `../run.sh <name>`.
 |---|---|---|
 | `hello` | `tvision/hello.cpp` | menus, status line, modal dialog as a `Cmd`, dialog result as a `Msg` |
 | `mmenu` | `tvision/examples/mmenu` | a menu bar that changes at runtime, and menu bar entries that are commands rather than pull-downs |
-| `entries` | *(ours)* | list boxes, `Time.every` behind a modal dialog, `WindowClosed`, mutable window titles — and later `Tui.focus`, because "show me that window" is the thing a description of the UI cannot say, `Resized`, because it is the first example that does not assume 80x25, and `Grows`, because a window that grows and a list box that does not is worse than neither |
+| `entries` | *(ours)* | list boxes, `Time.every` behind a modal dialog, `WindowClosed`, mutable window titles — and later `Tui.focus`, because "show me that window" is the thing a description of the UI cannot say, `Resized`, because it is the first example that does not assume 80x25, `Grows`, because a window that grows and a list box that does not is worse than neither, and `Changed`, because a filter box is a control in an ordinary window |
 | `forms` | `tvision/examples/tvforms` | check boxes, radio buttons, labels, and a list box highlight the model can both read and move |
 | `ascii` | `tvision/examples/tvdemo` (ascii.cpp) | the canvas, from Gren: a view the model paints itself, and a cursor to select with |
 | `calendar` | `tvision/examples/tvdemo` (calendar.cpp) | colour on a canvas, as spans; and today as a field, because `Time.now` is a task |
@@ -433,16 +433,17 @@ excludes `evMouseWheel` (`views.h`), so a wheel event goes to whatever has
 
 ### The coverage gaps left
 
-Ten, in the order they were listed, three of them now closed. Each says what it
+Ten, in the order they were listed, three closed and one half closed. Each says what it
 would take, because "not done", "not decided" and "not needed" are three
 different problems.
 
-Two of them are now reported by `tools/check_consistency.py` on every run —
-`messageBox` and `getValue` — which is where the second one came from: the port
-is the only way into the binding, so an exported function no runtime call site
-reaches is a capability no Gren program can use. It named `focus` and
-`screenSize` too; protocol 5 carried the first and protocol 6 superseded the
-second, and both notes went away without the check being touched.
+One of them is still reported by `tools/check_consistency.py` on every run —
+`messageBox`. The port is the only way into the binding, so an exported
+function no runtime call site reaches is a capability no Gren program can use.
+That check named four when it was written: `focus`, which protocol 5 carried;
+`screenSize` and `getValue`, which protocols 6 and 8 superseded and which are
+now in its exempt list with a written reason each; and `messageBox`, which is
+gap (5) below and is still open.
 
 The first two were listed here as one design with two symptoms. They were two,
 and neither needed the new layout language this list proposed: the first is an
@@ -539,33 +540,38 @@ all there; what is missing is the way to open one at a point in response to a
 click. `TEditor::initContextMenu` returns one, so this is a soft prerequisite
 for the editor.
 
-**8. Validators on input lines, and clusters that hold unseen state.** Two
-faces of one hole, which is why they are together now.
+**8. Validators on input lines** — the second half of what used to be two
+faces of one hole. The first face is closed; this is what is left of it.
 
 `TValidator` and its five subclasses vet a field *as it is typed* —
 `TFilterValidator` rejects a keystroke outright, `TRangeValidator` and
 `TPXPictureValidator` check on the way out. The model cannot do the first,
 because it is never told about a keystroke that reached an input line.
 
-And `forms` walked up to the other side: values are collected when a *dialog*
-is answered and at no other moment, so a check box ticked in an ordinary window
-is invisible until something asks. Turbo Vision programs are shaped that way —
-data entry happens in modal forms — so it has not been in the way, but it is
-the same hole the `Focused` event filled for list boxes. Fill it once, in both
-directions, and validation becomes something the model does with the value it
-now has.
+`forms` walked up to the other side of it: values were collected when a
+*dialog* was answered and at no other moment, so a check box ticked in an
+ordinary window was invisible until something asked. Turbo Vision programs are
+shaped that way — data entry happens in modal forms — so it was never in the
+way there, but it was the same hole the `Focused` event filled for list boxes.
 
-**The read half of that is smaller than it looks, and this paragraph used to
-have it wrong.** `tv.getValue(id)` already returns the text of a live input
-line, the highlighted row of a list box, the bits of a check box cluster or the
-selected radio button (`views.cc:683`), from an ordinary window and not a
-dialog. It has never been reachable: like `screenSize` and `focus`, there is no
-message that carries it. So "the model cannot see a check box that was ticked"
-is one message wide, not a feature — and the design question that remains is
-only whether the model *asks* (a query, which this protocol has never had) or
-is *told* (a `Changed` event, which is the shape `Focused` already set). The
-keystroke-level half — what a validator needs — is the part that is genuinely
-missing.
+**That half is done — the [`Changed`](#Event) event, protocol 8.** The
+model is *told* when the user moves a value: typed into an input line, ticked a
+check box, chose a radio button. Told rather than asked, which is what keeps
+every message in this protocol one-way — a query would have been the first.
+`tv.getValue()` is therefore superseded rather than plumbed, and is in the
+consistency check's exempt list with that reason written down.
+
+`examples/entries` has the demonstration: a filter box in an ordinary window
+that narrows the list on every keystroke, which is the smallest honest thing
+that could not be written before. Two things had to be got right and FINDINGS
+has both — a burst of keystrokes must not outrun the renders that answer them,
+and a value the *model* sets must not select the field the way an initial value
+does, or the user's next keystroke replaces everything they typed.
+
+**What is left of this gap is the keystroke-level half**, which is what a
+`TValidator` is actually for: `TFilterValidator` rejects a character *before* it
+reaches the field, and the model is still never offered that choice. It is now
+the only part of (8) outstanding.
 
 **9. `TMultiCheckBoxes`.** A cluster whose items have more than two states.
 Small, rarely wanted, and a hole in an area the API otherwise covers

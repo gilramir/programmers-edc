@@ -84,6 +84,7 @@ Napi::FunctionReference g_onKey;
 Napi::FunctionReference g_onClick;
 Napi::FunctionReference g_onClose;
 Napi::FunctionReference g_onResize;
+Napi::FunctionReference g_onChange;
 
 // Windows are destroyed wholesale when the application goes away; that is not
 // news anyone needs, and calling into JS from inside the teardown would be a
@@ -478,6 +479,89 @@ static void flushScrolled()
                             Napi::Number::New(env, note.value)});
 }
 
+// A value the user changed, waiting for the safe point. `bits` is only filled
+// in for a cluster; which of the three it is decides what reaches JavaScript.
+struct ChangeNote {
+    std::string id;
+    enum Kind { Text, Flags, Choice } kind;
+    std::string text;
+    uint32_t bits = 0;
+    uint32_t count = 0;
+    int index = 0;
+};
+
+static std::vector<ChangeNote> g_changeNotes;
+
+// Collapsed per id, like the scroll notes: typing a word is one keystroke per
+// letter and the model wants the word, not the letters. What is reported is
+// always the current value, so dropping an older one loses nothing.
+static void pushChange(const ChangeNote &note)
+{
+    if (g_onChange.IsEmpty() || g_shuttingDown)
+        return;
+    for (ChangeNote &existing : g_changeNotes)
+        if (existing.id == note.id)
+            {
+            existing = note;
+            return;
+            }
+    g_changeNotes.push_back(note);
+}
+
+void noteChangedText(const std::string &id, const std::string &text)
+{
+    ChangeNote note;
+    note.id = id;
+    note.kind = ChangeNote::Text;
+    note.text = text;
+    pushChange(note);
+}
+
+void noteChangedFlags(const std::string &id, uint32_t bits, uint32_t count)
+{
+    ChangeNote note;
+    note.id = id;
+    note.kind = ChangeNote::Flags;
+    note.bits = bits;
+    note.count = count;
+    pushChange(note);
+}
+
+void noteChangedChoice(const std::string &id, int index)
+{
+    ChangeNote note;
+    note.id = id;
+    note.kind = ChangeNote::Choice;
+    note.index = index;
+    pushChange(note);
+}
+
+static void flushChanged()
+{
+    if (g_changeNotes.empty() || g_onChange.IsEmpty() || g_hasPendingError)
+        {
+        g_changeNotes.clear();
+        return;
+        }
+
+    std::vector<ChangeNote> notes;
+    notes.swap(g_changeNotes);
+
+    Napi::Env env = g_onChange.Env();
+    Napi::HandleScope scope(env);
+    for (const ChangeNote &note : notes)
+        {
+        Napi::Value value;
+        if (note.kind == ChangeNote::Text)
+            value = Napi::String::New(env, note.text);
+        else if (note.kind == ChangeNote::Flags)
+            value = checkedArray(env, note.bits, note.count);
+        else
+            value = Napi::Number::New(env, note.index);
+        callJs(g_onChange, {Napi::String::New(env, note.id), value});
+        }
+}
+
 // How big the desktop was the last time the model was told. Zero means "never
 // told", which is what makes the first pass after startup report the real size
 // without a special case for it.
@@ -655,7 +739,8 @@ static void prepare(const Napi::Env &env, const Napi::Value &value)
                           std::make_pair("onKey", &g_onKey),
                           std::make_pair("onClick", &g_onClick),
                           std::make_pair("onClose", &g_onClose),
-                          std::make_pair("onResize", &g_onResize)})
+                          std::make_pair("onResize", &g_onResize),
+                          std::make_pair("onChange", &g_onChange)})
         {
         if (!config.Has(binding.first))
             continue;
@@ -698,6 +783,8 @@ static void teardown(const Napi::Env &env)
     g_onClick.Reset();
     g_onClose.Reset();
     g_onResize.Reset();
+    g_onChange.Reset();
+    g_changeNotes.clear();
     g_lastDeskSize = {0, 0};
     g_config = AppConfig();
 }
@@ -814,6 +901,13 @@ static Napi::Value Step(const Napi::CallbackInfo &info)
     flushFocused();
     flushScrolled();
     flushClosedWindows();
+    // Once per pump rather than once per event, unlike the others. A burst of
+    // keystrokes -- a paste, or simply typing quickly -- is read in one pass of
+    // the loop above, and the model wants the word rather than each letter of
+    // it. Collapsing them here means one notification and so one render, which
+    // is also the difference between the model's answer arriving before the
+    // next keystroke and arriving after it.
+    flushChanged();
     // Again outside the loop: the very first pump after tv.start() usually
     // breaks out on evNothing before reaching the safe point above, and the
     // size the application started at is the one every layout needs first.

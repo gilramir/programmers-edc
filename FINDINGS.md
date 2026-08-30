@@ -1750,3 +1750,118 @@ that happen to produce the same picture:
 The second is the better test for exactly that reason, and it is also the one
 that proves the first invariant still holds: the clock guarantees a render a
 second, and none of them undoes the zoom.
+
+## Closing gap 8's read half: the model is told, not asked
+
+`tv.getValue(id)` reads a live input line, list highlight, check box cluster or
+radio button, and had never been reachable — the fifth thing the new
+consistency check found. Making it reachable would have meant the protocol's
+first query-and-response. It does not have one now either: the answer was to
+tell the model instead, with a `Changed` event, which is the shape `Focused`
+and `Scrolled` already set and leaves every message one-way.
+
+So `getValue` is superseded rather than plumbed, and joins `log` and
+`screenSize` in the consistency check's exempt list — three names, three
+written reasons. An exemption that says why is a decision; one that does not is
+a silenced check.
+
+### There is no one method every edit goes through
+
+`TInputLine` has no notification of its own, and no single place to hook: a
+character, Backspace, Ctrl-Y, a paste and a click that moves the caret all land
+in `handleEvent` and nowhere else in common. `TCluster` is the same — a box is
+toggled by Space, by a click, by its hotkey and by the arrows moving the
+selection.
+
+So the comparison is made *around* `handleEvent` rather than inside anything:
+what the value was, let the base class do whatever it does, what the value is
+now. That cannot miss a route because it does not know about routes. Three
+subclasses, four lines each.
+
+`Value` is three shapes because three kinds of control have a value the user
+can move and they are not the same kind of thing: `Text` for an input line,
+`Flags` for a check box cluster, `Choice` for radio buttons. They arrive as a
+JSON string, array and number, which are distinct enough that the wire does not
+have to say which.
+
+### And then the model wrote the user's keystrokes back over them
+
+A model that is told what was typed keeps it — that is the point of being told
+— and renders it straight back. The differ compares that against the value it
+last *applied*, sees a difference, and calls `setValue`, which ended in
+`selectAll(True)`. The field the user is typing in becomes a selected block and
+their next keystroke replaces all of it.
+
+This is the controlled-input problem every virtual DOM has, and the first half
+of the answer is the same one: what the *view* last reported is what the next
+render is compared against. `differ.valueChanged(id, value)` records it before
+the model is asked.
+
+That is correct and it is not sufficient, which the pty test found by typing
+two characters in one write:
+
+```
+VALUECHANGED filter "o"
+VALUECHANGED filter "or"
+SETVALUE filter "or" -> "o"     <- the render for the first keystroke, late
+SETVALUE filter "o" -> "or"
+VALUECHANGED filter ""          <- one backspace, on a field left selected
+```
+
+Both characters were read in one pass of the pump, so two notifications went
+out before either render came back, and the render carrying `"o"` arrived after
+the field already said `"or"`. Renders always lag — a port send does not run
+the model synchronously — so any two keystrokes close enough together race.
+Typing quickly is close enough. So is pasting.
+
+Two fixes, and both are improvements on their own:
+
+**Changes flush once per pump, not once per event.** The other notifications
+drain after every event, deliberately, so that a callback cannot re-enter
+TVision mid-event. Changes are already collapsed per id, so draining them at
+the end of the pump instead makes a burst of keystrokes one notification and
+therefore one render. That is also the difference between the model's answer
+arriving before the next keystroke and arriving after it.
+
+**A value the model sets no longer selects.** `selectAll(True)` is Turbo
+Vision's convention for a value handed to a field the user has not touched, and
+it is right there — `buildItems` still uses it for a field's initial value. It
+is wrong for a value that arrived because the model was echoing back what was
+just typed. `setValue` now writes the text, puts the caret at the end and
+selects nothing, so a stale write costs a repaint and nothing else. It is also
+the right answer for the deliberate case: a model that transforms what was
+typed wants the caret after the transformation, not the whole field selected.
+
+The pty test types both characters in one write on purpose, because that is the
+arrangement that fails.
+
+### A dialog's fields report too, and the id is load-bearing
+
+The first version of the filter box in `examples/entries` matched on the value
+and not on the id. The Add dialog has an input line as well, its keystrokes
+arrive as `Changed` like any others, and typing a new entry filtered the list
+down to the entry being typed. Every event in this API carries an id and this
+is the one where ignoring it is a live bug rather than an untidiness.
+
+Reporting from inside a dialog is right, though: it is where validation as you
+type belongs, and it is what a `TValidator` would have been for. The
+keystroke-level half of gap (8) — rejecting a character outright, before it
+reaches the field — is still missing, and is now the only part of that gap that
+is.
+
+### Where it is demonstrated, and where it was found
+
+`examples/forms` is the port that walked into this: its values are collected
+when the form dialog is answered and at no other moment. Every editable control
+it has is in that dialog, so it has nothing to do with a `Changed` before then,
+and its branch says so.
+
+`examples/entries` is where it is demonstrated, because a filter box is the
+smallest honest thing that could not be written before: a control in an
+ordinary window, driving the list next to it, on every keystroke. Its list is
+keyed by the row's text rather than its index, so narrowing it needs no
+bookkeeping about where a row went.
+
+The three C++ paths are tested one level down, in `tvision-node`'s own
+`drive_form.py`, which already types into a field, toggles a check box by
+hotkey and can move a radio button, and now reads all three out of the log.

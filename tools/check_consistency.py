@@ -271,13 +271,21 @@ def main():
     called = js_binding_calls(tui_js) | js_binding_calls(diff_js)
     require(exported, "could not find module.exports in tvision-node/index.js")
     require(called, "could not find any tv.* call in the runtime")
-    # Two exceptions, each with a reason rather than a shrug. `log` is for the
-    # runtime's own debugging -- the terminal belongs to TVision, so
-    # console.log() draws garbage over the app -- and is not a Gren capability
-    # at all. `screenSize` is superseded: it reports the *screen*, and what a
-    # window's rectangle is written in is the desktop, which the Resized event
-    # carries to the model without being asked.
-    unreachable_on_purpose = {"log", "screenSize"}
+    # Three exceptions, each with a reason rather than a shrug.
+    #
+    #   log        -- for the runtime's own debugging. The terminal belongs to
+    #                 TVision, so console.log() draws garbage over the app.
+    #                 Not a Gren capability at all.
+    #   screenSize -- superseded. It reports the *screen*, and what a window's
+    #                 rectangle is written in is the desktop, which the Resized
+    #                 event carries without being asked.
+    #   getValue   -- superseded, and this one was a decision. It reads a live
+    #                 view's value, and making it reachable would have meant
+    #                 the protocol's first query-and-response. The Changed
+    #                 event answers the same need by telling the model instead,
+    #                 which is the shape Focused and Scrolled already set, and
+    #                 leaves every message one-way.
+    unreachable_on_purpose = {"log", "screenSize", "getValue"}
     for name in sorted(called - exported):
         problems.append(f"the runtime calls tv.{name}(), which index.js does not "
                         f"export -- it would throw the first time it ran")

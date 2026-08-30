@@ -136,6 +136,15 @@ tv.start({
     { text: '', key: 'F10', cmd: 'menu' },
   ],
 
+  // The user moved a value. Turbo Vision keeps a cluster's state in a
+  // protected `value` and an input line's in `data`, and reports neither --
+  // a program reads them when the dialog is answered and not before. This is
+  // the other half: every edit, as it happens, whether the control is in a
+  // dialog or in an ordinary window.
+  onChange(id, value) {
+    tv.log('changed:', id, value);
+  },
+
   async onCommand(cmd) {
     tv.log('command:', cmd);
 

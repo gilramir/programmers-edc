@@ -11,6 +11,7 @@ module Tui exposing
     , Span
     , StatusItem
     , Ui
+    , Value(..)
     , View(..)
     , Window
     , defineProgram
@@ -166,7 +167,7 @@ its own is a pull-down, and one without is a command sitting on the bar.
 @docs Grow, fixed, stretch, stretchWidth, stretchHeight, pinRight, pinBottom
 @docs Span, Hue, line, plain, ink, on
 @docs MenuItem, StatusItem
-@docs Event, DialogSpec
+@docs Event, Value, DialogSpec
 @docs dialog, quit, setEnabled, setDoubleClickDelay, focus
 @docs text, number, flag, flags
 
@@ -211,11 +212,12 @@ Version 6 added the [`Resized`](#Event) event, which is how a program finds
 out how big the terminal is -- the first thing the model is told that it did
 not ask for and cannot cause. Version 7 added [`Grows`](#View), which puts a
 `grow` field on the view it wraps: an older runtime would pass it to a binding
-that ignores unknown fields, and the view would silently not move.
+that ignores unknown fields, and the view would silently not move. Version 8
+added the [`Changed`](#Event) event and [`Value`](#Value).
 -}
 protocolVersion : Int
 protocolVersion =
-    7
+    8
 
 
 -- GEOMETRY
@@ -585,6 +587,13 @@ type alias StatusItem =
     The desktop rather than the screen because that is the coordinate system a
     [`Window`](#Window)'s rectangle is written in: the menu bar and the status
     line are Turbo Vision's and are already subtracted.
+  - `Changed` -- the *user* moved a value: typed in an input line, ticked a
+    check box, chose a radio button. This is the one event about a control
+    whose state Turbo Vision would otherwise keep to itself until a dialog was
+    answered, which is what made a cluster in an ordinary window invisible to
+    the model. It reports what the view says *now*, so a model that stores it
+    and renders it back writes nothing. Not sent for a value the model set
+    itself -- only a change the model did not already know about is news.
   - `DialogClosed` -- a [`dialog`](#dialog) was dismissed. `cmd` is the button
     that closed it (`"cancel"` if it was cancelled or closed from its frame),
     and `values` holds every field in it -- read them with [`text`](#text),
@@ -601,9 +610,28 @@ type Event
     | Clicked { id : String, x : Int, y : Int, isDouble : Bool }
     | Scrolled { id : String, value : Int }
     | Resized { cols : Int, rows : Int }
+    | Changed { id : String, value : Value }
     | DialogClosed { id : String, cmd : String, values : Decode.Value }
     | WindowClosed String
     | Unknown String
+
+
+{-| What a [`Changed`](#Event) event carries. Three shapes because three kinds
+of control have a value the user can move, and they are not the same kind of
+thing:
+
+  - `Text` -- an [`InputLine`](#View)'s contents, after every edit.
+  - `Flags` -- one boolean per box of a [`CheckBoxes`](#View) cluster, in the
+    order the items were given.
+  - `Choice` -- which button of a [`RadioButtons`](#View) cluster is on.
+
+They line up with [`text`](#text), [`flags`](#flags) and [`number`](#number),
+which read the same three out of a dialog's answer.
+-}
+type Value
+    = Text String
+    | Flags (Array Bool)
+    | Choice Int
 
 
 -- COMMANDS
@@ -1177,6 +1205,12 @@ eventDecoder =
                             (Decode.field "cols" Decode.int)
                             (Decode.field "rows" Decode.int)
 
+                    "changed" ->
+                        Decode.map2
+                            (\id value -> Changed { id = id, value = value })
+                            (Decode.field "id" Decode.string)
+                            (Decode.field "value" valueDecoder)
+
                     "dialogClosed" ->
                         Decode.map3
                             (\id command values -> DialogClosed { id = id, cmd = command, values = values })
@@ -1190,3 +1224,15 @@ eventDecoder =
                     other ->
                         Decode.succeed (Unknown other)
             )
+
+
+{-| The three JSON shapes a value arrives as are distinct types, so which one
+it is does not have to be said twice.
+-}
+valueDecoder : Decode.Decoder Value
+valueDecoder =
+    Decode.oneOf
+        [ Decode.map Text Decode.string
+        , Decode.map Flags (Decode.array Decode.bool)
+        , Decode.map Choice Decode.int
+        ]

@@ -14,7 +14,7 @@ const { createDiffer } = require('./diff');
 // Bumped in lockstep with Tui.protocolVersion on the Gren side. A Gren package
 // and an npm package version independently, and they will skew; refusing an
 // unknown version beats rendering nothing and leaving the author to guess.
-const PROTOCOL = 7;
+const PROTOCOL = 8;
 
 /**
  * Drive a compiled Gren program's UI.
@@ -94,6 +94,14 @@ function run(grenModule, options = {}) {
             // numbers are the desktop's, not the screen's: window rectangles
             // are in desktop coordinates.
             onResize: (cols, rows) => send({ type: 'resized', cols, rows }),
+            // The differ is told first and the model second. The order is not
+            // cosmetic: the model's answer is a render, and the render has to
+            // find a description that already agrees with the view, or it
+            // writes the value back into the control the user is using.
+            onChange: (id, value) => {
+              differ.valueChanged(id, value);
+              send({ type: 'changed', id, value });
+            },
             onExit: () => process.exit(0),
             onError: (err) => {
               console.error(err);

@@ -153,6 +153,15 @@ record event model =
         { model | events = Array.takeLast 200 (Array.pushLast (describe event) model.events) }
 
 
+yesNo : Bool -> String
+yesNo on =
+    if on then
+        "on"
+
+    else
+        "off"
+
+
 describe : Event -> String
 describe event =
     when event is
@@ -188,6 +197,21 @@ describe event =
 
         Resized it ->
             "Resized " ++ String.fromInt it.cols ++ "x" ++ String.fromInt it.rows
+
+        Changed it ->
+            "Changed "
+                ++ it.id
+                ++ " = "
+                ++ (when it.value is
+                        Tui.Text text ->
+                            text
+
+                        Tui.Flags bits ->
+                            String.join "," (Array.map yesNo bits)
+
+                        Tui.Choice index ->
+                            String.fromInt index
+                   )
 
         DialogClosed it ->
             "DialogClosed " ++ it.id ++ " " ++ it.cmd

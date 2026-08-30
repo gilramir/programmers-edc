@@ -234,6 +234,15 @@ handleEvent event model =
         Resized _ ->
             { model = model, command = Cmd.none }
 
+        -- Every editable control here is inside the form *dialog*, and its
+        -- values are read from the answer when Save is pressed. So these
+        -- arrive -- a dialog's fields report like any other -- and there is
+        -- nothing this model wants to do with them before then. It is the
+        -- example that found the hole; examples/entries is the one that needed
+        -- it filled, because its filter box is in an ordinary window.
+        Changed _ ->
+            { model = model, command = Cmd.none }
+
         Unknown _ ->
             { model = model, command = Cmd.none }
 

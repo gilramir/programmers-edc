@@ -183,6 +183,32 @@ function createDiffer(tv, onClosed = () => {}) {
     },
 
     /**
+     * The user changed a view's value, so the description we are diffing
+     * against is out of date -- record what the view says now.
+     *
+     * Without this, a model that keeps the value it was told (which is the
+     * point of being told) renders it straight back, the differ compares it
+     * against the value it last *applied*, sees a difference, and writes it
+     * into the view. For an input line that is not merely wasteful: setValue
+     * ends in selectAll(), so the field the user is typing in becomes a
+     * selected block and their next keystroke replaces the lot.
+     *
+     * This is the controlled-input problem every virtual DOM has, and the same
+     * answer: the last thing the *view* reported is what the next render is
+     * compared against.
+     */
+    valueChanged(id, value) {
+      for (const window of current.values()) {
+        for (const view of window.items) {
+          if (view.id === id) {
+            view.value = value;
+            return;
+          }
+        }
+      }
+    },
+
+    /**
      * Apply the menu bar and status line, which are part of the view like
      * anything else -- Turbo Vision lets both be swapped after startup. Sent
      * whole rather than diffed entry by entry: they are small, and rebuilding
