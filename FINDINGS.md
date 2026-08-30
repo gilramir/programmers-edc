@@ -812,7 +812,8 @@ which is right for every year Borland expected to be run in and wrong for 1900
 and 2100; a calendar that can be pointed anywhere has to use the real rule. And
 the header's two arrows are backwards -- clicking the one that points *up*
 moves to the next month. That is faithfully reproduced, because it is what
-`calendar.cpp` does.
+`calendar.cpp` does. Both are reported upstream as
+[magiblot/tvision#229](https://github.com/magiblot/tvision/issues/229).
 
 ### Porting the puzzle: the generator has to be in the model, and that is better
 
