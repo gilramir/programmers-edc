@@ -78,6 +78,7 @@ AppConfig g_config;
 
 Napi::FunctionReference g_onCommand;
 Napi::FunctionReference g_onSelect;
+Napi::FunctionReference g_onFocus;
 Napi::FunctionReference g_onKey;
 Napi::FunctionReference g_onClick;
 Napi::FunctionReference g_onClose;
@@ -88,6 +89,14 @@ Napi::FunctionReference g_onClose;
 bool g_shuttingDown = false;
 
 std::vector<std::string> g_closedWindows;
+
+struct FocusNote {
+    std::string id;
+    int index;
+    std::string text;
+};
+
+std::vector<FocusNote> g_focusNotes;
 
 // node-gyp compiles with -fno-rtti, so there is no dynamic_cast to recover
 // these from TProgram::menuBar / statusLine. We made them; we keep them.
@@ -396,6 +405,35 @@ void dispatchKey(const std::string &id, const std::string &key)
     callJs(g_onKey, {Napi::String::New(env, id), Napi::String::New(env, key)});
 }
 
+void noteFocused(const std::string &id, int index, const std::string &text)
+{
+    if (g_onFocus.IsEmpty() || g_shuttingDown)
+        return;
+    g_focusNotes.push_back({id, index, text});
+}
+
+// Drained by the pump, between events -- see the note in tvnode.h.
+static void flushFocused()
+{
+    if (g_focusNotes.empty() || g_onFocus.IsEmpty() || g_hasPendingError)
+        {
+        g_focusNotes.clear();
+        return;
+        }
+
+    std::vector<FocusNote> notes;
+    notes.swap(g_focusNotes);
+
+    Napi::Env env = g_onFocus.Env();
+    Napi::HandleScope scope(env);
+    for (const FocusNote &note : notes)
+        callJs(g_onFocus, {
+                              Napi::String::New(env, note.id),
+                              Napi::Number::New(env, note.index),
+                              Napi::String::New(env, note.text),
+                          });
+}
+
 void noteWindowClosed(const std::string &id)
 {
     if (g_onClose.IsEmpty() || g_shuttingDown)
@@ -534,6 +572,7 @@ static void prepare(const Napi::Env &env, const Napi::Value &value)
 
     for (auto &binding : {std::make_pair("onCommand", &g_onCommand),
                           std::make_pair("onSelect", &g_onSelect),
+                          std::make_pair("onFocus", &g_onFocus),
                           std::make_pair("onKey", &g_onKey),
                           std::make_pair("onClick", &g_onClick),
                           std::make_pair("onClose", &g_onClose)})
@@ -559,6 +598,7 @@ static void teardown(const Napi::Env &env)
         (*it)->deferred.Resolve(modalResult(env, (*it)->id, 0));
     g_modals.clear();
     g_closedWindows.clear();
+    g_focusNotes.clear();
     TheTopView = nullptr;
 
     g_shuttingDown = true;
@@ -571,6 +611,7 @@ static void teardown(const Napi::Env &env)
     g_views.clear();
     g_onCommand.Reset();
     g_onSelect.Reset();
+    g_onFocus.Reset();
     g_onKey.Reset();
     g_onClick.Reset();
     g_onClose.Reset();
@@ -657,7 +698,11 @@ static Napi::Value Step(const Napi::CallbackInfo &info)
         if (event.what != evNothing)
             target->eventError(event);
 
-        // Safe point: whatever this event destroyed is fully gone by now.
+        // Safe point: this event is finished, so whatever it destroyed is
+        // fully gone and whatever it moved has settled. Both queues are
+        // drained here rather than where they were filled, so that a callback
+        // cannot re-enter TVision in the middle of handling an event.
+        flushFocused();
         flushClosedWindows();
 
         // The outer half of TGroup::execute(): a command the target considers
@@ -680,6 +725,7 @@ static Napi::Value Step(const Napi::CallbackInfo &info)
         }
 
     g_inStep = false;
+    flushFocused();
     flushClosedWindows();
 
     if (finished || g_hasPendingError)
@@ -751,6 +797,7 @@ static Napi::Value Dialog(const Napi::CallbackInfo &info)
 
     beginModal(*session);
     applyInitialFocus(spec, firstSelectable);
+    applyCursors(env, spec.Get("items"));
     Napi::Promise promise = session->deferred.Promise();
     g_modals.push_back(std::move(session));
     return promise;

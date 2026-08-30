@@ -153,6 +153,7 @@ public:
 
     virtual void getText(char *dest, short item, short maxLen) override;
     virtual void selectItem(short item) override;
+    virtual void focusItem(short item) override;
 
     void setItems(std::vector<std::string> newItems);
     const std::vector<std::string> &getItems() const { return items; }
@@ -380,6 +381,13 @@ void dispatchCommand(const std::string &name);
 void dispatchSelect(const std::string &id, int index, const std::string &text);
 void dispatchKey(const std::string &id, const std::string &key);
 
+// Queued, not dispatched, for the same reason ~JsWindow's notification is: a
+// list box's highlight moves both when the user walks through it and when
+// setItems() rebuilds it, and the second of those runs inside a JS call that
+// is itself inside the render. Calling back into JS from there would re-enter
+// the diff while it is halfway through building a window.
+void noteFocused(const std::string &id, int index, const std::string &text);
+
 // Queued, not dispatched. ~JsWindow runs deep inside TVision -- from
 // TWindow::close(), from the desktop's own destructor -- and calling into JS
 // there hands the application a window that is half gone: the id still
@@ -414,6 +422,7 @@ TView *buildItems(const Napi::Env &env, JsWindow *win, const Napi::Value &items,
 // should not inherit an artifact of insertion order, so the first focusable
 // view in the list gets focus instead, and `focus: "<id>"` overrides it.
 void applyInitialFocus(const Napi::Object &spec, TView *firstSelectable);
+void applyCursors(const Napi::Env &env, const Napi::Value &items);
 
 // Values of every addressable input inside a window, as {id: value}.
 Napi::Object collectValues(const Napi::Env &env, const std::string &windowId);

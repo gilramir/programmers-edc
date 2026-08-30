@@ -58,7 +58,9 @@
         "(cd tvision-node && python3 test/drive_form.py)",
         "(cd gren-tvision && python3 test/drive_hello.py)",
         "(cd gren-tvision && python3 test/drive_mmenu.py)",
-        "(cd gren-tvision && python3 test/drive_entries.py)"
+        "(cd gren-tvision && python3 test/drive_entries.py)",
+        "(cd gren-tvision && python3 test/drive_forms.py)",
+        "(cd gren-tvision && python3 test/drive_ascii.py)"
       ],
       "test:asan": [
         "(cd tvision-node && TVNODE_ASAN=1 npx node-gyp rebuild)",
@@ -71,6 +73,8 @@
         "(cd gren-tvision && TVNODE_ASAN=1 python3 test/drive_hello.py)",
         "(cd gren-tvision && TVNODE_ASAN=1 python3 test/drive_mmenu.py)",
         "(cd gren-tvision && TVNODE_ASAN=1 python3 test/drive_entries.py)",
+        "(cd gren-tvision && TVNODE_ASAN=1 python3 test/drive_forms.py)",
+        "(cd gren-tvision && TVNODE_ASAN=1 python3 test/drive_ascii.py)",
         "(cd tvision-node && npx node-gyp rebuild)"
       ],
       "check": [

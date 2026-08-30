@@ -597,8 +597,8 @@ complains -- the widget silently does not appear, or appears and then never
 updates.
 
 `tools/check_consistency.py` walks all four and compares them, plus the event
-names in both directions and the protocol version on both sides of the port. It
-prints a table:
+names in both directions, the callback names the runtime hands the binding, and
+the protocol version on both sides of the port. It prints a table:
 
 ```
 view type    Gren   encoder   patcher   binding
@@ -610,11 +610,121 @@ checkBoxes     --     --        --        ok
 The `--` under *binding* are errors. The `--` under *Gren* are the to-do list,
 generated from the code rather than maintained by hand.
 
+The callback check earned its place immediately. `tv.start()` takes its
+callbacks as an object, and the addon installs the names it knows and ignores
+the rest, so `onFocussed` where `onFocus` was meant is not an error in any
+language: the object is valid JavaScript, the addon is happy, and the event
+simply never arrives.
+
+### Porting tvforms: a highlight has to travel both ways
+
+The widgets tvforms needs -- check boxes, radio buttons, labels -- were already
+in the binding, so the expectation was a morning's work exposing them in `Ui`.
+The morning went elsewhere.
+
+`listdlg.cpp` has Edit and Delete buttons, and what each of them does is
+
+```c++
+f->prevData = dataCollection->at(list->focused);   // edit
+dataCollection->atFree(list->focused);             // delete
+```
+
+**They read the highlight at the moment they need it.** Every C++ example does
+something of this kind, because in C++ a view is an object you can ask. A
+program on the other side of a port cannot ask; it can only be told. And the
+only thing a list box told anyone was `selectItem`, which Turbo Vision calls on
+`Space` and a double click -- not on the arrow keys. So Edit would have opened
+whichever record was last committed rather than the one under the highlight --
+which is not a subtle difference: it is a different record, and Delete would
+have removed it.
+
+`TListViewer` does distinguish the two, and both are virtual:
+
+- `focusItem(short)` -- the highlight moved, for any reason at all
+- `selectItem(short)` -- this one, now, please
+
+Overriding the first gives a `Focused` event, and that is half the fix. The
+other half is the reverse direction, and the sorted collection is what forces
+it: `TDataCollection` is keyed on the name, so renaming a record moves it, and
+`setItems` puts the highlight back on row zero whatever the model wanted. The
+model needs the last word, so `focused` became a field on `ListBox` that the
+diff writes back after the items -- under the same rule as an input line's
+text: **only when it changed in the model**, never merely because it disagrees
+with the screen. A model that ignores the highlight never writes one, and the
+arrow keys are left alone.
+
+Two smaller things:
+
+- **A label makes the order of `views` significant.** `TLabel` takes a pointer
+  to the view it names, so that view has to exist first. Before this, the order
+  of the array decided one thing: who gets focus.
+- **`TCluster` gives out no hotkeys of its own.** It matches `Alt-`*x* against
+  the `~` marks in its own item labels (`tcluster.cpp:258-262`), so items
+  written without tildes claim nothing. That is why the original can put a
+  `~P~hone` field next to a "Personal" check box and have both work.
+
+### Anything a render can trigger must be queued
+
+`setItems` calls `focusItem(0)`. `setItems` is called by the diff, which is
+called from a port subscription, which is inside a JS call into the addon. So a
+`focusItem` notification dispatched straight into JavaScript would re-enter the
+Gren program from inside `tv.window()` -- during `buildItems`, with a window
+half-constructed -- and the update it triggers would render, and the render
+would reach the differ while it is in the middle of applying the previous one.
+
+The differ survives that (it queues a render that arrives while it is
+applying), but the C++ underneath would be reasoning about a view it has not
+finished inserting.
+
+This is the second notification with that shape. The first was `~JsWindow`,
+which runs deep inside TVision's teardown, and the answer was the same: push
+onto a vector and drain it at the pump's safe point, after the event that
+caused it has finished. Worth stating as a rule -- **a notification that a
+JavaScript call can cause must be queued, not dispatched** -- because the
+alternative works in testing and fails on the day the model does something
+interesting in response.
+
+### A cursor cannot be placed on a view that is not on screen yet
+
+The ASCII chart is the first Gren example to use a canvas, and it needed the
+one part of a canvas that is not made of characters: the block cursor that
+shows which cell is selected. A canvas takes it as `cursor = Just { x, y }`.
+
+Setting it while the window is being built does nothing at all, and says
+nothing about it. `TView::showCursor` sets `sfCursorVis` and calls
+`resetCursor`, which is
+
+```c++
+if( (state & (sfVisible|sfCursorVis|sfFocused)) == (sfVisible|sfCursorVis|sfFocused) )
+```
+
+-- so it moves the terminal's cursor only for a view that is *focused*, and a
+view still being constructed has no owner, no `sfVisible` and no focus. The
+position is stored on the object and the terminal never hears about it. Worse,
+it looks like it worked: the object's `cursor` member holds exactly what was
+asked for.
+
+So cursors are a second pass, after `deskTop->insert()` and after the initial
+focus, in both `window()` and `dialog()`. The Gren side cannot see any of this
+-- `cursor` is a field like `lines` -- which is the point.
+
+The regression this leaves behind is easy to write, and only because the test
+harness grew a `cursor()` of its own: a canvas has no highlight and no
+selection bar, so the *only* evidence on screen of which cell is selected is
+where the terminal cursor sits.
+
 ### What is left
 
-`Tui` covers static text, buttons, input lines, list boxes and canvases. Check
-boxes, radio buttons and labels exist in the binding but are not in the Gren
-types yet -- which the consistency checker will keep saying until they are.
-`gren-tvision/examples/README.md` tracks what each of the remaining C++
-examples would force into the API.
+`Tui` now covers static text, buttons, input lines, list boxes, check boxes,
+radio buttons, labels and canvases -- everything the binding can build, cursor
+included. The
+consistency checker's coverage column is all `ok`, so the next widget has to
+start in C++.
+
+The gap the checker cannot see: **a cluster or an input line in a plain window
+holds state the model never sees.** Values are collected when a dialog is
+answered and at no other moment. Turbo Vision programs are shaped that way, so
+nothing has needed it yet -- but it is the same hole `Focused` just filled for
+list boxes. `gren-tvision/examples/README.md` tracks that along with what each
+remaining C++ example would force into the API.
 

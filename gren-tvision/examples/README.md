@@ -13,6 +13,8 @@ Build them all with `../build.sh`, run one with `../run.sh <name>`.
 | `hello` | `tvision/hello.cpp` | menus, status line, modal dialog as a `Cmd`, dialog result as a `Msg` |
 | `mmenu` | `tvision/examples/mmenu` | a menu bar that changes at runtime, and menu bar entries that are commands rather than pull-downs |
 | `entries` | *(ours)* | list boxes, `Time.every` behind a modal dialog, `WindowClosed`, mutable window titles |
+| `forms` | `tvision/examples/tvforms` | check boxes, radio buttons, labels, and a list box highlight the model can both read and move |
+| `ascii` | `tvision/examples/tvdemo` (ascii.cpp) | the canvas, from Gren: a view the model paints itself, and a cursor to select with |
 
 ## What mmenu changed
 
@@ -34,6 +36,55 @@ the bar and the API could not say that.
 Both were API improvements that no amount of staring at the binding would have
 produced. Which is the argument for porting the rest.
 
+## What tvforms changed
+
+The widgets were the expected part: check boxes, radio buttons and labels were
+already in the binding and only had to reach `Ui`. Two things were not
+expected.
+
+**A label makes the order of `views` mean something.** A label names another
+view by id, and the binding has to have built that view already, so a control
+has to come before the label that names it. Until this port the order of the
+array decided one thing only — who gets focus when the window opens.
+
+**The model could watch the highlight but not move it.** `listdlg.cpp` reads
+`list->focused` at the moment Edit is pressed. Gren cannot: it has no way to
+ask, and the only thing a list box reported was `Selected`, which fires on
+`Space` and not on the arrow keys. Edit would have opened whatever record was
+last committed rather than the one the user is looking at.
+
+The answer runs in both directions, and both halves are load-bearing:
+
+  - a `Focused` event as the highlight moves, so the model can act on it;
+  - `focused` as a field on `ListBox`, so the model can put the highlight
+    somewhere — which matters because the collection is *sorted*. Rename a
+    record and it moves; rebuilding a list box drops the highlight back to row
+    zero, and the model needs the last word about where it lands.
+
+Neither is visible when a list box is a menu of choices, which is all `entries`
+asks of one. Porting an example that treats a list as a cursor over a
+collection is what exposed it.
+
+## What the ASCII chart changed
+
+The canvas was in the API from the start and no Gren example used one, which
+turned out to be hiding something: the chart shows which character is selected
+with the terminal's own cursor, and there was no way to say where it should
+go.
+
+So a canvas takes `cursor : Maybe { x : Int, y : Int }`, patched in place like
+its lines. What made it more than a one-line addition is *when* it can be
+applied. Turbo Vision moves the hardware cursor when a view is focused, and a
+view being built is not yet inserted, let alone focused — so setting the cursor
+during construction leaves the position on the C++ object and never on the
+terminal. It has to be applied after the window is on the desktop, which is a
+second pass in the binding rather than part of building the views.
+
+The test is worth a look for a different reason: a canvas has no highlight and
+no selection bar, so the only evidence of the model on screen is where the
+cursor is. `test/drive_ascii.py` asserts on that directly, which the pty
+harness can now report.
+
 ## The C++ examples, triaged
 
 `tvision/examples/` has eight entries. Two of them are not Turbo Vision
@@ -45,7 +96,7 @@ applications at all, and one of them is really eight applications.
 | `mmenu` | **done** | it was not about nested menus at all — see above |
 | `palette` | cheap | per-view palette selection; the example is really an essay on how Turbo Vision palettes work |
 | `tvdemo` | split it up | see below |
-| `tvforms` | port the UI, skip the rest | check boxes and radio buttons (in the binding, not yet in the Gren types). Its other half is `.rsc` resource streaming — `opstream`/`ipstream` serialising views to disk — which has no Gren meaning |
+| `tvforms` | **done** (the UI half) | see above. Its other half is `.rsc` resource streaming — `opstream`/`ipstream` serialising views to disk — which has no Gren meaning |
 | `tvdir` | needs a new widget | `TOutline`, a tree view, plus `TChDirDialog` |
 | `tvedit` | a milestone of its own | `TEditor`/`TFileEditor`: a stateful text buffer with undo and clipboard. See the note below |
 | `tvhc` | **no** | a command-line help *compiler*, not a TUI |
@@ -55,12 +106,12 @@ applications at all, and one of them is really eight applications.
 
 | part | needs |
 |---|---|
-| ASCII chart | canvas + keys — **already ported to JS**, trivial to redo in Gren |
-| calendar | canvas + keys |
+| ASCII chart | **done** — `examples/ascii`; it wanted a cursor, see above |
+| calendar | canvas + keys; the same shape as the chart, so it is now cheap |
 | puzzle | canvas + keys |
 | calculator | canvas + buttons |
 | event viewer | canvas |
-| mouse settings | check boxes, radio buttons, a scroll bar as a first-class view |
+| mouse settings | a scroll bar as a first-class view; the clusters it wants exist now |
 | colours | `TColorDialog` — wrap as a command that answers with the chosen palette |
 | tile / cascade | `cmTile` and `cmCascade` are built-in command names already |
 | help | `.hlp` files compiled by `tvhc`. Reimplementing help as ordinary windows from the model is a better use of the time than porting a binary format |
@@ -83,7 +134,16 @@ windows.
 
 When the C++ examples run out, the coverage gaps left are roughly: scroll bars
 as first-class views, `TOutline`, the standard file and directory dialogs,
-per-view palettes, and validators on input lines. Then a Gren-only example that
-does something the C++ examples never could — the obvious candidate is
-something asynchronous, since that is the thing this binding has that Borland's
-never did.
+per-view palettes, and validators on input lines.
+
+One gap is worth naming on its own, because `forms` walked right up to it: **a
+cluster or an input line in a plain window holds state the model never sees.**
+Values are collected when a *dialog* is answered and at no other moment, so a
+check box ticked in an ordinary window is invisible until something asks. Turbo
+Vision programs are shaped that way — data entry happens in modal forms — so it
+was not in the way here, but it is the same hole the `Focused` event just
+filled for list boxes, and clusters will want the same treatment.
+
+Then a Gren-only example that does something the C++ examples never could — the
+obvious candidate is something asynchronous, since that is the thing this
+binding has that Borland's never did.

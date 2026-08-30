@@ -46,6 +46,7 @@ function start(config) {
     ...config,
     onCommand: guard(config.onCommand),
     onSelect: guard(config.onSelect),
+    onFocus: guard(config.onFocus),
     onKey: guard(config.onKey),
     onClick: guard(config.onClick),
     onClose: guard(config.onClose),

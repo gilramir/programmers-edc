@@ -13,6 +13,7 @@ module Tui exposing
     , defineProgram
     , dialog
     , flag
+    , flags
     , number
     , quit
     , setEnabled
@@ -146,7 +147,7 @@ its own is a pull-down, and one without is a command sitting on the bar.
 @docs MenuItem, StatusItem
 @docs Event, DialogSpec
 @docs dialog, quit, setEnabled
-@docs text, number, flag
+@docs text, number, flag, flags
 
 -}
 
@@ -173,10 +174,16 @@ type alias Ports msg =
 {-| Bumped when the wire format changes. The runtime refuses a version it does
 not know rather than rendering nothing and leaving you to wonder why: a Gren
 package and an npm package version independently, and they will skew.
+
+Version 2 added the cluster and label view types, a list box's `focused` and a
+canvas's `cursor`. An older runtime would not have refused any of those -- it
+would have passed them to the binding and quietly rebuilt the window on every
+change instead of patching it, which is the kind of failure this number exists
+to turn into a sentence.
 -}
 protocolVersion : Int
 protocolVersion =
-    1
+    2
 
 
 -- GEOMETRY
@@ -237,23 +244,45 @@ type alias Window =
     reaches a button with `isDefault = True`.
   - `InputLine` -- a text field. `value` is written to the field only when it
     changes *in the model*, so it never overwrites what the user is typing.
-  - `ListBox` -- gets a scroll bar of its own. Selecting an entry (`Space`, or
-    a double click) sends a [`Selected`](#Event) event.
+  - `ListBox` -- gets a scroll bar of its own. Moving the highlight sends a
+    [`Focused`](#Event) event; committing an entry (`Space`, or a double
+    click) sends a [`Selected`](#Event) one. `focused` is that highlight seen
+    from the other side: it is written to the list only when the model changes
+    it, so it steers without fighting the arrow keys.
+  - `CheckBoxes` -- a group of boxes, ticked with `Space`. `checked` is one
+    flag per item.
+  - `RadioButtons` -- a group of which exactly one is chosen; `selected` is its
+    index.
+  - `Label` -- text bound to another control by its id, so `Alt-`*x* on the
+    label focuses the control. **List the control before its label**: the label
+    has to name a view that already exists.
   - `Canvas` -- paints exactly the lines it is given, and sends
     [`KeyPressed`](#Event) and [`Clicked`](#Event) events while focused. This is
     the escape hatch for anything the stock controls cannot express: Turbo
-    Vision's own calendar and ASCII chart are views of this kind.
+    Vision's own calendar and ASCII chart are views of this kind. `cursor` is
+    the terminal's own block cursor, in the canvas's coordinates -- the only
+    piece of a canvas that is not made of characters. `Nothing` hides it.
 
 The first control in the list gets focus when the window opens. Turbo Vision
 itself focuses the *last* one added, which in a list written top to bottom is
 the Cancel button; this diverges from that deliberately.
+
+A check box the user ticks is state the model cannot see until something asks
+for it, and the only thing that asks is a [`dialog`](#dialog) being answered.
+Put clusters in dialogs, read them out of `values`, and keep the answer in the
+model -- that is the shape every Turbo Vision form has, and it is why
+`checked` and `selected` are written to the screen only when the *model*
+changes them.
 -}
 type View
     = StaticText { id : String, rect : Rect, text : String }
     | Button { id : String, rect : Rect, title : String, cmd : String, isDefault : Bool }
     | InputLine { id : String, rect : Rect, maxLen : Int, value : String }
-    | ListBox { id : String, rect : Rect, items : Array String }
-    | Canvas { id : String, rect : Rect, lines : Array String }
+    | ListBox { id : String, rect : Rect, items : Array String, focused : Int }
+    | CheckBoxes { id : String, rect : Rect, items : Array String, checked : Array Bool }
+    | RadioButtons { id : String, rect : Rect, items : Array String, selected : Int }
+    | Label { id : String, rect : Rect, text : String, for : String }
+    | Canvas { id : String, rect : Rect, lines : Array String, cursor : Maybe { x : Int, y : Int } }
 
 
 -- MENUS
@@ -301,6 +330,11 @@ type alias StatusItem =
 
   - `Command` -- a menu entry, status line entry or button, by its `cmd` name.
   - `Selected` -- an entry in a list box was chosen (`Space` or double click).
+  - `Focused` -- the highlight in a list box moved, by arrow key, mouse or a
+    render that replaced the list. This is how the model learns which entry an
+    "Edit" or "Delete" button should act on; Turbo Vision's own examples read
+    the list's `focused` member at the moment they need it, which a program
+    that cannot call into C++ has no way to do.
   - `KeyPressed` -- a key reached a focused canvas. Names look like `"Left"`,
     `"F5"`, `"Alt-X"`, `"Ctrl-A"` or `"a"`.
   - `Clicked` -- a canvas was clicked, in the canvas's own coordinates.
@@ -315,6 +349,7 @@ type alias StatusItem =
 type Event
     = Command String
     | Selected { id : String, index : Int, text : String }
+    | Focused { id : String, index : Int, text : String }
     | KeyPressed { id : String, key : String }
     | Clicked { id : String, x : Int, y : Int }
     | DialogClosed { id : String, cmd : String, values : Decode.Value }
@@ -435,10 +470,22 @@ within its group. Missing fields give `False`.
 -}
 flag : String -> Int -> Decode.Value -> Bool
 flag field index values =
-    Decode.decodeValue (Decode.field field (Decode.array Decode.bool)) values
-        |> Result.withDefault []
+    flags field values
         |> Array.get index
         |> Maybe.withDefault False
+
+
+{-| Read a whole group of check boxes out of a dialog's `values`, one flag per
+box, in the order they were declared. Missing fields give `[]`.
+
+This is the one to keep in a model: a record that came out of a form holds the
+group as it was ticked, and handing the same array back to
+[`CheckBoxes`](#View) reopens the form on it.
+-}
+flags : String -> Decode.Value -> Array Bool
+flags field values =
+    Decode.decodeValue (Decode.field field (Decode.array Decode.bool)) values
+        |> Result.withDefault []
 
 
 -- PROGRAM
@@ -582,6 +629,34 @@ encodeView view =
                 , { key = "id", value = Encode.string v.id }
                 , { key = "rect", value = encodeRect v.rect }
                 , { key = "items", value = Encode.array Encode.string v.items }
+                , { key = "focused", value = Encode.int v.focused }
+                ]
+
+        CheckBoxes v ->
+            Encode.object
+                [ { key = "type", value = Encode.string "checkBoxes" }
+                , { key = "id", value = Encode.string v.id }
+                , { key = "rect", value = encodeRect v.rect }
+                , { key = "items", value = Encode.array Encode.string v.items }
+                , { key = "value", value = Encode.array Encode.bool v.checked }
+                ]
+
+        RadioButtons v ->
+            Encode.object
+                [ { key = "type", value = Encode.string "radioButtons" }
+                , { key = "id", value = Encode.string v.id }
+                , { key = "rect", value = encodeRect v.rect }
+                , { key = "items", value = Encode.array Encode.string v.items }
+                , { key = "value", value = Encode.int v.selected }
+                ]
+
+        Label v ->
+            Encode.object
+                [ { key = "type", value = Encode.string "label" }
+                , { key = "id", value = Encode.string v.id }
+                , { key = "rect", value = encodeRect v.rect }
+                , { key = "text", value = Encode.string v.text }
+                , { key = "for", value = Encode.string v.for }
                 ]
 
         Canvas v ->
@@ -591,6 +666,15 @@ encodeView view =
                 , { key = "rect", value = encodeRect v.rect }
                 , { key = "lines", value = Encode.array Encode.string v.lines }
                 , { key = "selectable", value = Encode.bool True }
+                , { key = "cursorAt"
+                  , value =
+                        when v.cursor is
+                            Just at ->
+                                Encode.array Encode.int [ at.x, at.y ]
+
+                            Nothing ->
+                                Encode.null
+                  }
                 ]
 
 
@@ -646,6 +730,13 @@ eventDecoder =
                     "select" ->
                         Decode.map3
                             (\id index body -> Selected { id = id, index = index, text = body })
+                            (Decode.field "id" Decode.string)
+                            (Decode.field "index" Decode.int)
+                            (Decode.field "text" Decode.string)
+
+                    "focus" ->
+                        Decode.map3
+                            (\id index body -> Focused { id = id, index = index, text = body })
                             (Decode.field "id" Decode.string)
                             (Decode.field "index" Decode.int)
                             (Decode.field "text" Decode.string)

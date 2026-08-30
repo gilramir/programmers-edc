@@ -110,6 +110,11 @@ handleEvent event model =
         Selected selection ->
             { model = { model | selected = selection.text }, command = Cmd.none }
 
+        -- Where the highlight is sitting is nothing this model needs; the
+        -- forms example is the one that acts on it.
+        Focused _ ->
+            { model = model, command = Cmd.none }
+
         KeyPressed _ ->
             { model = model, command = Cmd.none }
 
@@ -234,6 +239,7 @@ listWindow model =
             { id = "entries"
             , rect = { x1 = 2, y1 = 1, x2 = 41, y2 = 11 }
             , items = model.items
+            , focused = 0
             }
         , StaticText
             { id = "selection"

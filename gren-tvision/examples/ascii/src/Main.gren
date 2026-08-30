@@ -1,0 +1,301 @@
+port module Main exposing (main)
+
+{-| tvdemo's ASCII chart (`tvision/examples/tvdemo/ascii.cpp`), in Gren.
+
+The original is a `TView` subclass with its own `draw()` and `handleEvent()`,
+because nothing in the stock widget set can express a grid of characters you
+can walk around in. That is what a `Canvas` is for: the program hands over the
+lines, Turbo Vision paints them, and every keystroke comes back as a
+`KeyPressed` event. The whole of the state is two numbers in the model.
+
+Two things are worth pointing at.
+
+**The cursor is part of the view.** Which character is selected is shown by the
+terminal's own block cursor, and a canvas takes it as a field like any other:
+`cursor = Just { x, y }`. Moving it is an ordinary model change, and the
+runtime patches it in place rather than rebuilding the chart.
+
+**The chart is not ASCII.** magiblot's Turbo Vision draws Unicode, while the
+1994 original wrote raw code page 437 cells, so `Char.fromCode` is *not* what
+the C++ chart shows: codes 128-159 are C1 controls in Unicode and come out as
+replacement characters. The table below is the translation. Having to write it
+is the point -- what a canvas paints is whatever the model says, down to the
+character.
+
+-}
+
+import Array exposing (Array)
+import Char
+import Init
+import Json.Decode as Decode
+import Json.Encode as Encode
+import Math
+import Node
+import String
+import Tui exposing (Event(..), MenuItem(..), View(..))
+
+
+-- PORTS
+
+
+port tuiOut : Encode.Value -> Cmd msg
+
+
+port tuiIn : (Decode.Value -> msg) -> Sub msg
+
+
+tui : Tui.Ports Msg
+tui =
+    { toJs = tuiOut, fromJs = tuiIn }
+
+
+-- MODEL
+
+
+columns : Int
+columns =
+    32
+
+
+rows : Int
+rows =
+    8
+
+
+type alias Model =
+    { x : Int
+    , y : Int
+    , open : Bool
+    }
+
+
+type Msg
+    = FromTui Event
+
+
+init : Node.Environment -> Init.Task { model : Model, command : Cmd Msg }
+init _ =
+    Node.startProgram
+        { model = { x = 0, y = 0, open = True }
+        , command = Cmd.none
+        }
+
+
+-- THE CHART
+
+
+{-| Code page 437 as Unicode: eight rows of exactly thirty-two, which is also
+how the chart is laid out on screen.
+-}
+chart : Array String
+chart =
+    [ " ☺☻♥♦♣♠•◘○◙♂♀♪♫☼►◄↕‼¶§▬↨↑↓→←∟↔▲▼"
+    , " !\"#$%&'()*+,-./0123456789:;<=>?"
+    , "@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_"
+    , "`abcdefghijklmnopqrstuvwxyz{|}~⌂"
+    , "ÇüéâäàåçêëèïîìÄÅÉæÆôöòûùÿÖÜ¢£¥₧ƒ"
+    , "áíóúñÑªº¿⌐¬½¼¡«»░▒▓│┤╡╢╖╕╣║╗╝╜╛┐"
+    , "└┴┬├─┼╞╟╚╔╩╦╠═╬╧╨╤╥╙╘╒╓╫╪┘┌█▄▌▐▀"
+    , "αßΓπΣσµτΦΘΩδ∞φε∩≡±≥≤⌠⌡÷≈°∙·√ⁿ²■ "
+    ]
+
+
+code : Model -> Int
+code model =
+    model.y * columns + model.x
+
+
+glyph : Int -> String
+glyph at =
+    Array.get (at // columns) chart
+        |> Maybe.map (String.slice (Math.modBy columns at) (Math.modBy columns at + 1))
+        |> Maybe.withDefault " "
+
+
+{-| Clamped, because Home and End and a click on the frame all end up here.
+-}
+moveTo : Int -> Int -> Model -> Model
+moveTo x y model =
+    { model
+        | x = clamp 0 (columns - 1) x
+        , y = clamp 0 (rows - 1) y
+    }
+
+
+-- UPDATE
+
+
+update : Msg -> Model -> { model : Model, command : Cmd Msg }
+update msg model =
+    when msg is
+        FromTui event ->
+            { model = handleEvent event model, command = Cmd.none }
+
+
+handleEvent : Event -> Model -> Model
+handleEvent event model =
+    when event is
+        Command "chart" ->
+            { model | open = True }
+
+        Command _ ->
+            model
+
+        -- Every key the chart sees arrives here by name. Nothing is handled
+        -- inside Turbo Vision, which is what makes the selection a piece of
+        -- the model rather than a piece of a C++ object.
+        KeyPressed pressed ->
+            when pressed.key is
+                "Left" ->
+                    moveTo (model.x - 1) model.y model
+
+                "Right" ->
+                    moveTo (model.x + 1) model.y model
+
+                "Up" ->
+                    moveTo model.x (model.y - 1) model
+
+                "Down" ->
+                    moveTo model.x (model.y + 1) model
+
+                "Home" ->
+                    moveTo 0 0 model
+
+                "End" ->
+                    moveTo (columns - 1) (rows - 1) model
+
+                other ->
+                    -- A printable key jumps to that character, as the original
+                    -- does. Key names for everything else are longer than one
+                    -- character, so this needs no other guard.
+                    when String.popFirst other is
+                        Just { first, rest } ->
+                            if String.isEmpty rest then
+                                let
+                                    at =
+                                        Char.toCode first
+                                in
+                                moveTo (Math.modBy columns at) (at // columns) model
+
+                            else
+                                model
+
+                        Nothing ->
+                            model
+
+        Clicked spot ->
+            moveTo spot.x spot.y model
+
+        Selected _ ->
+            model
+
+        Focused _ ->
+            model
+
+        DialogClosed _ ->
+            model
+
+        WindowClosed "chartWin" ->
+            { model | open = False }
+
+        WindowClosed _ ->
+            model
+
+        Unknown _ ->
+            model
+
+
+-- VIEW
+
+
+view : Model -> Tui.Ui
+view model =
+    { menuBar =
+        [ SubMenu
+            { title = "~C~hart"
+            , key = "Alt-C"
+            , items =
+                [ Item { title = "~A~SCII table", cmd = "chart", key = "Alt-A", shortcut = "Alt-A" }
+                , Separator
+                , Item { title = "E~x~it", cmd = "quit", key = "Alt-X", shortcut = "Alt-X" }
+                ]
+            }
+        ]
+    , statusLine =
+        [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
+        , { text = "~Alt-A~ Chart", key = "Alt-A", cmd = "chart" }
+        , { text = "Arrows move, Home/End jump", key = "", cmd = "" }
+        , { text = "", key = "F10", cmd = "menu" }
+        ]
+    , windows =
+        if model.open then
+            [ chartWindow model ]
+
+        else
+            []
+    }
+
+
+chartWindow : Model -> Tui.Window
+chartWindow model =
+    { id = "chartWin"
+    , title = "ASCII Chart"
+    , rect = { x1 = 8, y1 = 3, x2 = 8 + columns + 4, y2 = 3 + rows + 5 }
+    , views =
+        [ Canvas
+            { id = "chart"
+            , rect = { x1 = 2, y1 = 1, x2 = 2 + columns, y2 = 1 + rows }
+            , lines = chart
+            , cursor = Just { x = model.x, y = model.y }
+            }
+        , StaticText
+            { id = "report"
+            , rect = { x1 = 2, y1 = rows + 2, x2 = 2 + columns, y2 = rows + 3 }
+            , text = report model
+            }
+        ]
+    }
+
+
+{-| Thirty-two columns and not one more: a static text silently drops whatever
+does not fit.
+-}
+report : Model -> String
+report model =
+    let
+        at =
+            code model
+    in
+    "Char "
+        ++ glyph at
+        ++ "  Dec "
+        ++ String.padLeft 3 ' ' (String.fromInt at)
+        ++ "  Hex "
+        ++ String.padLeft 2 '0' (hex at)
+
+
+hex : Int -> String
+hex n =
+    let
+        digit d =
+            String.slice d (d + 1) "0123456789ABCDEF"
+    in
+    if n < 16 then
+        digit n
+
+    else
+        hex (n // 16) ++ digit (Math.modBy 16 n)
+
+
+-- PROGRAM
+
+
+main : Tui.Program Model Msg
+main =
+    Tui.defineProgram tui
+        { init = init
+        , update = update
+        , subscriptions = \_ -> Sub.none
+        , view = view
+        , onEvent = FromTui
+        }

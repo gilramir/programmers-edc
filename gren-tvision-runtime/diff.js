@@ -16,8 +16,10 @@
 const MUTABLE = {
   staticText: ['text'],
   inputLine: ['value'],
-  listBox: ['items'],
-  canvas: ['lines'],
+  listBox: ['items', 'focused'],
+  canvas: ['lines', 'cursorAt'],
+  checkBoxes: ['value'],
+  radioButtons: ['value'],
 };
 
 function skeleton(view) {
@@ -69,11 +71,34 @@ function createDiffer(tv, onClosed = () => {}) {
         if (JSON.stringify(before.items) !== JSON.stringify(after.items)) {
           tv.setItems(after.id, after.items);
         }
+        // After setItems, because rebuilding a list puts the highlight back on
+        // the first row: a model that means to keep it somewhere else has to
+        // get the last word.
+        if (before.focused !== after.focused) tv.setValue(after.id, after.focused);
         break;
       case 'canvas':
         if (JSON.stringify(before.lines) !== JSON.stringify(after.lines)) {
           tv.setLines(after.id, after.lines);
         }
+        if (JSON.stringify(before.cursorAt) !== JSON.stringify(after.cursorAt)) {
+          // null means no cursor. TVision has no "hide" that keeps a position,
+          // so hiding takes one anyway and the position is discarded.
+          if (after.cursorAt) tv.setCursor(after.id, after.cursorAt[0], after.cursorAt[1], true);
+          else tv.setCursor(after.id, 0, 0, false);
+        }
+        break;
+      case 'checkBoxes':
+        // A cluster holds state the model cannot see -- a box the user ticks
+        // is reported only when a dialog is answered -- so the same rule as an
+        // input line applies, and for the same reason: write it back only when
+        // the *model* changed it, never merely because it disagrees with the
+        // screen.
+        if (JSON.stringify(before.value) !== JSON.stringify(after.value)) {
+          tv.setValue(after.id, after.value);
+        }
+        break;
+      case 'radioButtons':
+        if (before.value !== after.value) tv.setValue(after.id, after.value);
         break;
       default:
         break;

@@ -40,6 +40,8 @@ tvision-node/      the binding
 gren-tvision/      the Gren package: gilramir/gren-tvision
   src/Tui.gren       Ui types, encoders, the program wrapper. Pure Gren.
   examples/          one directory per example, each its own application
+                     hello, mmenu, entries, forms, ascii -- and a README that
+                     is the plan of record for what gets ported next
   test/              a pty driver per example
 gren-tvision-runtime/  the npm half: the diff layer + the `gren-tui` bin
   diff.js            one UI description -> calls on the binding (unit tested)
@@ -69,6 +71,8 @@ devbox run ascii
 devbox run form
 devbox run gren           # the entries example, in Gren
 devbox run gren -- hello  # or any other example
+devbox run gren -- forms
+devbox run gren -- ascii
 ```
 
 In `hello`: `Alt-G` or the Hello menu opens the greeting, `Tab` moves between
@@ -91,6 +95,18 @@ In `form`: `Alt-N` opens a record form with check boxes and radio buttons;
 In `gren`: `Alt-A` adds an entry through a modal dialog, the clock is a
 `Time.every` subscription, and closing the entries window tells the Gren model
 so it stays closed until `Alt-L` puts it back.
+
+In `gren -- forms` (tvision's `tvforms`): arrow keys move through a sorted
+collection of records and the window on the right follows, because the model is
+told where the highlight is. `F3` edits the highlighted record in a form with
+labelled fields, check boxes and radio buttons; `F2` adds one; `F8` deletes one,
+and with none left both `F3` and its menu entry go grey. Saving a renamed record
+re-sorts the list and the highlight follows it there.
+
+In `gren -- ascii` (tvdemo's chart): the same chart as `devbox run ascii`, but
+the eight rows of code page 437 come out of a Gren array and the selected cell
+is `cursor = Just { x, y }` on the canvas. Arrows and Home/End move it, any
+printable key jumps to that character, and a click lands where you clicked.
 
 [`gren-tvision/examples/README.md`](gren-tvision/examples/README.md) is the plan
 of record for what gets ported next and what API each one needs.

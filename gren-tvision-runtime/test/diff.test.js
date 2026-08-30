@@ -32,6 +32,7 @@ function fakeTv(initiallyOpen = []) {
     setValue: (id, value) => calls.push(['setValue', id, value]),
     setItems: (id, items) => calls.push(['setItems', id, items]),
     setLines: (id, lines) => calls.push(['setLines', id, lines]),
+    setCursor: (id, x, y, visible) => calls.push(['setCursor', id, x, y, visible]),
   };
 }
 
@@ -130,6 +131,106 @@ test('list and canvas contents are compared by value', () => {
   assert.deepEqual(tv.calls, [], 'equal arrays are not a change');
   differ.apply([listed(['a', 'b', 'c'])]);
   assert.deepEqual(tv.calls, [['setItems', 'l', ['a', 'b', 'c']]]);
+});
+
+// Clusters and the list box highlight: state the user can change behind the
+// model's back, which is exactly the case that must not be written back on
+// every render.
+const form = (over = {}) => ({
+  id: 'f',
+  title: 'Form',
+  rect: [1, 1, 40, 10],
+  items: [
+    { type: 'checkBoxes', id: 'kind', rect: [2, 2, 20, 4], items: ['a', 'b'], value: [true, false] },
+    { type: 'radioButtons', id: 'sex', rect: [22, 2, 38, 4], items: ['m', 'f'], value: 0 },
+    { type: 'listBox', id: 'keys', rect: [2, 5, 20, 8], items: ['x', 'y'], focused: 0 },
+  ],
+  ...over,
+});
+
+const withItem = (index, over) => {
+  const spec = form();
+  spec.items = spec.items.map((view, i) => (i === index ? { ...view, ...over } : view));
+  return spec;
+};
+
+test('cluster values are written only when the model changed them', () => {
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  differ.apply([form()]);
+  tv.calls.length = 0;
+
+  differ.apply([form()]);
+  assert.deepEqual(tv.calls, [], 'a re-render must not undo what the user ticked');
+
+  const ticked = withItem(0, { value: [true, true] });
+  differ.apply([ticked]);
+  assert.deepEqual(tv.calls, [['setValue', 'kind', [true, true]]]);
+
+  tv.calls.length = 0;
+  const chosen = { ...ticked, items: ticked.items.map((v, i) => (i === 1 ? { ...v, value: 1 } : v)) };
+  differ.apply([chosen]);
+  assert.deepEqual(tv.calls, [['setValue', 'sex', 1]], 'only the field that changed');
+});
+
+test('a cluster changing value does not rebuild the window', () => {
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  differ.apply([form()]);
+  tv.calls.length = 0;
+  differ.apply([withItem(0, { value: [false, true] })]);
+  assert.ok(
+    !tv.calls.some(([call]) => call === 'window'),
+    'a ticked box is content, not structure'
+  );
+});
+
+test('the highlight is set after the items that reset it', () => {
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  differ.apply([form()]);
+  tv.calls.length = 0;
+
+  // Both at once: setItems puts the highlight back on row 0, so the model's
+  // choice has to be applied afterwards or it is lost.
+  differ.apply([withItem(2, { items: ['y', 'x'], focused: 1 })]);
+  assert.deepEqual(tv.calls, [
+    ['setItems', 'keys', ['y', 'x']],
+    ['setValue', 'keys', 1],
+  ]);
+});
+
+test('a highlight the model does not move is left alone', () => {
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  differ.apply([form()]);
+  tv.calls.length = 0;
+  differ.apply([form()]);
+  assert.deepEqual(tv.calls, [], 'the arrow keys own the highlight until the model says otherwise');
+});
+
+test('a canvas cursor is moved, and nulling it hides one', () => {
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  const chart = (cursorAt) => ({
+    id: 'w',
+    title: 'Chart',
+    rect: [1, 1, 40, 10],
+    items: [{ type: 'canvas', id: 'c', rect: [2, 1, 34, 9], lines: ['ab'], cursorAt }],
+  });
+
+  differ.apply([chart([0, 0])]);
+  tv.calls.length = 0;
+
+  differ.apply([chart([0, 0])]);
+  assert.deepEqual(tv.calls, [], 'an unmoved cursor is not rewritten');
+
+  differ.apply([chart([3, 2])]);
+  assert.deepEqual(tv.calls, [['setCursor', 'c', 3, 2, true]]);
+
+  tv.calls.length = 0;
+  differ.apply([chart(null)]);
+  assert.deepEqual(tv.calls, [['setCursor', 'c', 0, 0, false]], 'null means no cursor');
 });
 
 test('a window the user closed is reopened by the next render', () => {

@@ -74,6 +74,16 @@ class Pty:
         """
         return Screen().feed(self.buf.decode("utf-8", "replace")).text()
 
+    def cursor(self):
+        """Where the terminal's own cursor is now, as (col, row), zero-based.
+
+        Turbo Vision moves the hardware cursor to whatever the focused view
+        asks for, which for a canvas is the only way its selection shows up at
+        all -- there is nothing on the screen to grep for.
+        """
+        screen = Screen().feed(self.buf.decode("utf-8", "replace"))
+        return (screen.col, screen.row)
+
     def send(self, data, settle=0.6):
         os.write(self.fd, data)
         self.pump(settle)

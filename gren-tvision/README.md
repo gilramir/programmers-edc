@@ -75,6 +75,8 @@ whole of it.
 ./build.sh          # compile them all
 ./run.sh hello      # run one
 ./run.sh entries
+./run.sh forms
+./run.sh ascii
 ```
 
 They build against this working copy rather than a published version — each

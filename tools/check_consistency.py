@@ -7,8 +7,8 @@ omits a branch, or the patcher ignores a type, and the widget silently does not
 appear or silently stops updating. Nothing in any one language can catch that,
 so this walks all four and compares them.
 
-It also checks the event names in both directions and the protocol version on
-both sides of the port.
+It also checks the event names in both directions, the callbacks the runtime
+hands the binding, and the protocol version on both sides of the port.
 
 Exits non-zero on a mismatch. Types the binding supports but the Gren API does
 not expose yet are reported as coverage, not as errors -- that list is the
@@ -25,6 +25,8 @@ TUI_GREN = os.path.join(ROOT, "gren-tvision", "src", "Tui.gren")
 DIFF_JS = os.path.join(ROOT, "gren-tvision-runtime", "diff.js")
 TUI_JS = os.path.join(ROOT, "gren-tvision-runtime", "tui.js")
 VIEWS_CC = os.path.join(ROOT, "tvision-node", "src", "views.cc")
+APP_CC = os.path.join(ROOT, "tvision-node", "src", "app.cc")
+INDEX_JS = os.path.join(ROOT, "tvision-node", "index.js")
 
 
 def read(path):
@@ -74,6 +76,22 @@ def cc_builder_types(src):
     return set(re.findall(r'type == "(\w+)"', block.group(1))) if block else set()
 
 
+def cc_callbacks(src):
+    """The callback names tv.start() knows how to install."""
+    return set(re.findall(r'std::make_pair\("(on\w+)"', src))
+
+
+def js_guarded_callbacks(src):
+    """The ones index.js wraps, so that a rejected promise cannot escape."""
+    return set(re.findall(r"^\s*(on\w+): guard\(", src, re.M))
+
+
+def js_used_callbacks(src):
+    """The ones the Gren runtime actually passes to tv.start()."""
+    block = re.search(r"tv\.start\(\{(.*?)\n          \}\);", src, re.S)
+    return set(re.findall(r"^\s*(on\w+):", block.group(1), re.M)) if block else set()
+
+
 def gren_event_kinds(src):
     # eventDecoder is the last thing in the file, so this runs to the end.
     block = re.search(r"eventDecoder =\n(.*)", src, re.S)
@@ -112,6 +130,8 @@ def main():
     diff_js = read(DIFF_JS)
     tui_js = read(TUI_JS)
     views_cc = read(VIEWS_CC)
+    app_cc = read(APP_CC)
+    index_js = read(INDEX_JS)
 
     variants = gren_view_variants(tui_gren)
     encoded = gren_encoder_types(tui_gren)
@@ -159,7 +179,26 @@ def main():
     for kind in gren_out - js_out:
         problems.append(f"Tui sends '{kind}' but the runtime's switch ignores it")
 
-    # 7. One protocol number, two languages.
+    # 7. Callbacks. A name the binding does not know is not an error anywhere:
+    #    the addon ignores the extra key, the event simply never arrives, and
+    #    nothing at all is reported. Exactly what this file is for.
+    accepted = cc_callbacks(app_cc)
+    guarded = js_guarded_callbacks(index_js)
+    used = js_used_callbacks(tui_js)
+    require(accepted, "could not find the callback table in app.cc")
+    require(used, "could not find the tv.start() call in tui.js")
+
+    # onExit and onError are handled by index.js's pump and never reach C++.
+    for name in used - accepted - {"onExit", "onError"}:
+        problems.append(f"tui.js passes {name} to tv.start(), which app.cc does "
+                        f"not install -- it would silently never fire")
+    for name in accepted - guarded:
+        problems.append(f"index.js does not guard {name} -- a callback of that "
+                        f"name rejecting would go unreported")
+    for name in accepted - used:
+        notes.append(f"the binding offers {name}, the Gren runtime does not use it")
+
+    # 8. One protocol number, two languages.
     gren_protocol = re.search(r"protocolVersion =\n    (\d+)", tui_gren)
     js_protocol = re.search(r"const PROTOCOL = (\d+);", tui_js)
     require(gren_protocol and js_protocol, "could not find the protocol version on both sides")
@@ -168,7 +207,7 @@ def main():
                 f"protocol mismatch: Tui.gren says {gren_protocol.group(1)}, "
                 f"the runtime says {js_protocol.group(1)}")
 
-    # 8. Coverage: what the binding can do that Gren cannot ask for yet.
+    # 9. Coverage: what the binding can do that Gren cannot ask for yet.
     for wire in sorted(built - set(encoded.values())):
         notes.append(f"the binding supports '{wire}', the Gren API does not expose it yet")
 

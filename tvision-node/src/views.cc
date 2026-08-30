@@ -32,12 +32,23 @@ void JsListBox::selectItem(short item)
         dispatchSelect(viewId, item, items[item]);
 }
 
+// The highlight, as opposed to a committed selection. TVision's own examples
+// read `list->focused` whenever they need it -- tvforms' Edit button does
+// exactly that -- and a model that cannot call into C++ has to be told
+// instead.
+void JsListBox::focusItem(short item)
+{
+    TListViewer::focusItem(item);
+    if (item >= 0 && (size_t) item < items.size())
+        noteFocused(viewId, item, items[item]);
+}
+
 void JsListBox::setItems(std::vector<std::string> newItems)
 {
     items = std::move(newItems);
     setRange((short) items.size());
     if (!items.empty())
-        focusItem(0);
+        focusItem(0);   // reported too: the highlight really did move
     drawView();
 }
 
@@ -316,17 +327,22 @@ TView *buildItems(const Napi::Env &env, JsWindow *win, const Napi::Value &value,
                 new JsListBox(getRect(env, it, "listBox"), sb, id);
             if (it.Has("items"))
                 list->setItems(getStringArray(it.Get("items")));
+            if (it.Has("focused"))
+                list->focusItemNum((short) getInt(it, "focused", 0));
             made = list;
             }
         else if (type == "canvas")
             {
             if (id.empty())
                 throw Napi::Error::New(env, "tvision: a canvas needs an id");
+            // A cursor position implies a cursor: asking for one is the only
+            // reason to care what shape it is.
+            Napi::Value at = it.Has("cursorAt") ? it.Get("cursorAt") : env.Null();
             JsCanvas *canvas =
                 new JsCanvas(getRect(env, it, "canvas"), id,
                              getInt(it, "color", 6),
                              getBool(it, "selectable", true),
-                             getString(it, "cursor") == "block");
+                             getString(it, "cursor") == "block" || at.IsArray());
             if (it.Has("lines"))
                 canvas->setLines(getStringArray(it.Get("lines")));
             if (getBool(it, "framed"))
@@ -366,6 +382,35 @@ TView *buildItems(const Napi::Env &env, JsWindow *win, const Napi::Value &value,
         }
 
     return firstSelectable;
+}
+
+// Cursors are placed after the window is on screen, not while it is being
+// built. TVision moves the hardware cursor when a view is *focused*, and a
+// view that has not been inserted yet cannot be: setting it during
+// construction leaves the position on the object and never on the terminal.
+void applyCursors(const Napi::Env &env, const Napi::Value &value)
+{
+    if (!value.IsArray())
+        return;
+
+    Napi::Array items = value.As<Napi::Array>();
+    for (uint32_t i = 0; i < items.Length(); ++i)
+        {
+        Napi::Object it = items.Get(i).As<Napi::Object>();
+        if (getString(it, "type") != "canvas" || !it.Has("cursorAt"))
+            continue;
+        Napi::Value at = it.Get("cursorAt");
+        if (!at.IsArray())
+            continue;
+        ViewRef *ref = g_views.find(getString(it, "id"));
+        if (ref == nullptr || ref->kind != "canvas")
+            continue;
+
+        Napi::Array xy = at.As<Napi::Array>();
+        ((JsCanvas *) ref->view)
+            ->setCursorAt(xy.Get((uint32_t) 0).ToNumber().Int32Value(),
+                          xy.Get((uint32_t) 1).ToNumber().Int32Value(), true);
+        }
 }
 
 void applyInitialFocus(const Napi::Object &spec, TView *firstSelectable)
@@ -458,6 +503,7 @@ static Napi::Value Window(const Napi::CallbackInfo &info)
 
     TProgram::deskTop->insert(win);
     applyInitialFocus(spec, firstSelectable);
+    applyCursors(env, spec.Get("items"));
     return Napi::String::New(env, id);
 }
 
@@ -527,7 +573,8 @@ static Napi::Value GetValue(const Napi::CallbackInfo &info)
     return env.Null();
 }
 
-// tv.setValue(id, text) -- set an input line's text.
+// tv.setValue(id, value) -- an input line's text, a cluster's state, or the
+// highlighted row of a list box.
 static Napi::Value SetValue(const Napi::CallbackInfo &info)
 {
     Napi::Env env = info.Env();
@@ -540,6 +587,14 @@ static Napi::Value SetValue(const Napi::CallbackInfo &info)
         TInputLine *input = (TInputLine *) ref->view;
         setInputText(input, info[1].ToString().Utf8Value());
         input->drawView();
+        return Napi::Boolean::New(env, true);
+        }
+    if (ref->kind == "listBox")
+        {
+        // The other half of onFocus: the highlight is something the model can
+        // read *and* set, which is what makes a re-sorted list able to keep
+        // the record the user was looking at.
+        ((JsListBox *) ref->view)->focusItemNum((short) info[1].ToNumber().Int32Value());
         return Napi::Boolean::New(env, true);
         }
     if (ref->kind == "checkBoxes")
