@@ -9,8 +9,29 @@
 
 #include <string>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace tvnode {
+
+// The canonical name for each key code -- one entry per key, used when
+// reporting a keystroke back to JS. namedKeys() below adds the aliases people
+// write when *binding* a key; naming has to pick exactly one.
+inline const std::vector<std::pair<const char *, ushort>> &canonicalKeys()
+{
+    static const std::vector<std::pair<const char *, ushort>> table = {
+        {"Esc", kbEsc},       {"Enter", kbEnter},   {"Tab", kbTab},
+        {"Space", ' '},       {"Backspace", kbBack},
+        {"Ins", kbIns},       {"Del", kbDel},       {"Home", kbHome},
+        {"End", kbEnd},       {"PgUp", kbPgUp},     {"PgDn", kbPgDn},
+        {"Up", kbUp},         {"Down", kbDown},     {"Left", kbLeft},
+        {"Right", kbRight},
+        {"F1", kbF1},   {"F2", kbF2},   {"F3", kbF3},   {"F4", kbF4},
+        {"F5", kbF5},   {"F6", kbF6},   {"F7", kbF7},   {"F8", kbF8},
+        {"F9", kbF9},   {"F10", kbF10}, {"F11", kbF11}, {"F12", kbF12},
+    };
+    return table;
+}
 
 // Named keys, matched case-insensitively. Aliases are deliberate: people write
 // "Esc" and "Escape", "PgDn" and "PageDown".
@@ -91,6 +112,37 @@ inline bool parseKey(const std::string &spec, TKey &out)
         }
 
     return false;
+}
+
+// The reverse of parseKey: what to call a keystroke when handing it to JS.
+// TKey normalizes, so Ctrl-A arrives as code 'A' with kbCtrlShift set whether
+// the terminal sent 0x0001 or a modifier report.
+inline std::string keyName(const TEvent &event)
+{
+    TKey key(event.keyDown.keyCode, event.keyDown.controlKeyState);
+
+    std::string name;
+    if (key.mods & kbCtrlShift)
+        name += "Ctrl-";
+    if (key.mods & kbAltShift)
+        name += "Alt-";
+    if (key.mods & kbShift)
+        name += "Shift-";
+
+    for (const auto &entry : canonicalKeys())
+        if (entry.second == key.code)
+            return name + entry.first;
+
+    if (key.code >= 32 && key.code < 127)
+        return name + std::string(1, (char) key.code);
+
+    uchar ch = event.keyDown.charScan.charCode;
+    if (ch >= 32 && ch < 127)
+        return name + std::string(1, (char) ch);
+
+    char buf[16];
+    snprintf(buf, sizeof buf, "0x%04x", (unsigned) key.code);
+    return name + buf;
 }
 
 } // namespace tvnode

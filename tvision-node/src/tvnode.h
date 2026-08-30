@@ -10,7 +10,11 @@
 
 #define Uses_TApplication
 #define Uses_TButton
+#define Uses_TCheckBoxes
+#define Uses_TCluster
 #define Uses_TCommandSet
+#define Uses_TDrawBuffer
+#define Uses_TRadioButtons
 #define Uses_TDeskTop
 #define Uses_TDialog
 #define Uses_TEvent
@@ -23,6 +27,7 @@
 #define Uses_TProgram
 #define Uses_TRect
 #define Uses_TScreen
+#define Uses_TSItem
 #define Uses_TScrollBar
 #define Uses_TStaticText
 #define Uses_TStatusDef
@@ -42,11 +47,22 @@ namespace tvnode {
 /*  Commands                                                          */
 /* ------------------------------------------------------------------ */
 
-// JS names commands with strings; TVision wants ushorts. User commands start
-// well clear of TVision's own range. Names of built-ins map to the real
-// constants so that {cmd: 'quit'} does what a Turbo Vision user expects
-// (TApplication handles it) instead of arriving in JS as a mystery.
-constexpr ushort kUserCmdBase = 1000;
+// JS names commands with strings; TVision wants ushorts. Names of built-ins
+// map to the real constants so that {cmd: 'quit'} does what a Turbo Vision
+// user expects (TApplication handles it) instead of arriving in JS as a
+// mystery.
+//
+// The numbering is not free choice: `TView::commandEnabled` is
+//
+//     return Boolean((command > 255) || curCommandSet.has(command));
+//
+// so **a command above 255 can never be disabled**. User commands therefore
+// start at 110 -- clear of TVision's own 0-99 and of cmFileFocused (102), the
+// only one it defines higher -- and only spill over into the always-enabled
+// range once 255 is used up.
+constexpr ushort kUserCmdFirst = 110;
+constexpr ushort kUserCmdLast = 255;
+constexpr ushort kUserCmdOverflow = 1000;
 
 class CommandRegistry {
 public:
@@ -56,7 +72,7 @@ public:
     {
         byName.clear();
         byCode.clear();
-        next = kUserCmdBase;
+        next = kUserCmdFirst;
         static const struct { const char *name; ushort code; } builtins[] = {
             {"quit", cmQuit},     {"close", cmClose},   {"zoom", cmZoom},
             {"resize", cmResize}, {"next", cmNext},     {"prev", cmPrev},
@@ -72,9 +88,16 @@ public:
 
     ushort intern(const std::string &name)
     {
+        // An item with no command -- a status line hint, a submenu header --
+        // gets 0 (cmValid), which nothing dispatches on. Interning "" would
+        // hand out a real user command and deliver stray onCommand('') calls.
+        if (name.empty())
+            return 0;
         auto it = byName.find(name);
         if (it != byName.end())
             return it->second;
+        if (next > kUserCmdLast && next < kUserCmdOverflow)
+            next = kUserCmdOverflow;   // these can no longer be disabled
         ushort code = next++;
         byName[name] = code;
         byCode[code] = name;
@@ -90,7 +113,7 @@ public:
 private:
     std::unordered_map<std::string, ushort> byName;
     std::unordered_map<ushort, std::string> byCode;
-    ushort next = kUserCmdBase;
+    ushort next = kUserCmdFirst;
 };
 
 /* ------------------------------------------------------------------ */
@@ -135,6 +158,59 @@ public:
 private:
     std::vector<std::string> items;
     std::string viewId;
+};
+
+// A view whose contents come from JavaScript.
+//
+// tvdemo's TTable and TCalendarView are plain TView subclasses that implement
+// draw() themselves; nothing in the stock widget set can express them. This is
+// the equivalent hole in the binding, and the one that matters most for Gren:
+// an Elm-architecture app wants to render its own content, not only assemble
+// prefabricated controls.
+class JsCanvas : public TView {
+public:
+    JsCanvas(const TRect &bounds, std::string id, int aColorIndex,
+             bool selectable, bool blockCursorShape) noexcept;
+
+    virtual void draw() override;
+    virtual void handleEvent(TEvent &event) override;
+
+    void setLines(std::vector<std::string> newLines);
+    void setCursorAt(int x, int y, bool visible);
+
+private:
+    std::vector<std::string> lines;
+    std::string viewId;
+    int colorIndex;
+};
+
+// TCluster keeps its state in a protected `value`, so reading and writing a
+// check box from JS means either getData/setData with a raw byte buffer, or a
+// subclass. A subclass is harder to get wrong.
+class JsCheckBoxes : public TCheckBoxes {
+public:
+    JsCheckBoxes(const TRect &bounds, TSItem *items, uint32_t aCount) noexcept
+        : TCheckBoxes(bounds, items), count(aCount)
+    {
+    }
+
+    uint32_t bits() const { return value; }
+    void setBits(uint32_t v) { value = v; drawView(); }
+
+    // TCluster keeps its labels in a protected collection, and JS wants an
+    // array of the right length back.
+    const uint32_t count;
+};
+
+class JsRadioButtons : public TRadioButtons {
+public:
+    JsRadioButtons(const TRect &bounds, TSItem *items) noexcept
+        : TRadioButtons(bounds, items)
+    {
+    }
+
+    uint32_t selected() const { return value; }
+    void setSelected(uint32_t v) { value = v; drawView(); }
 };
 
 class JsWindow : public TDialog {
@@ -237,6 +313,8 @@ extern bool g_running;
 // the terminal in raw mode with a half-drawn dialog on it.
 void dispatchCommand(const std::string &name);
 void dispatchSelect(const std::string &id, int index, const std::string &text);
+void dispatchKey(const std::string &id, const std::string &key);
+void dispatchClick(const std::string &id, int x, int y);
 
 /* ------------------------------------------------------------------ */
 /*  Reading JS values                                                 */

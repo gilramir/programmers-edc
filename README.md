@@ -14,7 +14,7 @@ next to these directories.
 | **0** | Does a Node addon built here load, and can it reach a system library? | done |
 | **1** | `hello.cpp` as a Node app, with the menus and dialog described in JS | done |
 | **2** | A larger demo on a non-blocking event pump, with addressable views | done |
-| **2.5** | Modal dialogs that do not stop Node, and more ported demos | in progress |
+| **2.5** | Modal dialogs that do not stop Node, and more ported demos | done |
 | **3** | Gren on top, through ports | designed, not built |
 
 See [FINDINGS.md](FINDINGS.md) for what we learned doing it, including the
@@ -30,8 +30,10 @@ tvision-node/      the binding
   src/keys.h         "Alt-X" -> TVision key codes
   src/app.cc         application, event pump, module entry
   src/views.cc       widgets, the id registry, mutation
-  examples/hello.js  hello.cpp, with the C++ moved to JS (blocking)
-  examples/demo.js   a clock and a directory browser driven by Node (pumped)
+  examples/hello.js  hello.cpp, with the C++ moved to JS
+  examples/demo.js   a clock and a directory browser driven by Node
+  examples/ascii.js  tvdemo's ASCII chart: a view painted from JavaScript
+  examples/form.js   tvforms/mmenu: clusters, nested submenus, command enabling
   test/harness.py    pty driver + a small terminal emulator
   test/drive*.py     type at the app, assert on what it drew
   test/asan.sh       run node with AddressSanitizer preloaded
@@ -47,8 +49,10 @@ toolchain that will load it (see FINDINGS.md).
 devbox run build    # libtvision.a (PIC) + the addon
 devbox run test     # pty-driven checks, no terminal needed
 devbox run test:asan  # the same, plus memory checks under AddressSanitizer
-devbox run hello    # milestone 1, in your terminal
-devbox run demo     # milestone 2, in your terminal
+devbox run hello    # each of these runs one example in your terminal
+devbox run demo
+devbox run ascii
+devbox run form
 ```
 
 In `hello`: `Alt-G` or the Hello menu opens the greeting, `Tab` moves between
@@ -60,5 +64,13 @@ asynchronously, `../` walks up. `Alt-G` opens a modal dialog — it takes all th
 input, as a modal dialog should, but the clock behind it keeps ticking.
 Modality was hoisted out of `execView`'s nested loop; see FINDINGS.
 
-`Enter` does not press buttons or select list items in Turbo Vision; `Space`
-does. See FINDINGS.
+In `ascii`: arrows and Home/End move the selection, any printable key jumps to
+that character — every keystroke is handled in JavaScript, and the chart itself
+is painted from a JS array of strings.
+
+In `form`: `Alt-N` opens a record form with check boxes and radio buttons;
+`File ▸ Samples ▸ More` is a submenu inside a submenu; `List records` and
+`Clear` are greyed out until there is something to list.
+
+`Enter` does not press buttons, select list items, or tick check boxes in Turbo
+Vision; `Space` does. See FINDINGS.

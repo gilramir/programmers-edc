@@ -34,14 +34,24 @@
       "test": [
         "(cd tvision-node && python3 test/drive_regress.py)",
         "(cd tvision-node && python3 test/drive.py)",
-        "(cd tvision-node && python3 test/drive_demo.py)"
+        "(cd tvision-node && python3 test/drive_demo.py)",
+        "(cd tvision-node && python3 test/drive_ascii.py)",
+        "(cd tvision-node && python3 test/drive_form.py)"
       ],
       "test:asan": [
         "(cd tvision-node && TVNODE_ASAN=1 npx node-gyp rebuild)",
         "(cd tvision-node && TVNODE_ASAN=1 python3 test/drive_regress.py)",
         "(cd tvision-node && TVNODE_ASAN=1 python3 test/drive.py)",
         "(cd tvision-node && TVNODE_ASAN=1 python3 test/drive_demo.py)",
+        "(cd tvision-node && TVNODE_ASAN=1 python3 test/drive_ascii.py)",
+        "(cd tvision-node && TVNODE_ASAN=1 python3 test/drive_form.py)",
         "(cd tvision-node && npx node-gyp rebuild)"
+      ],
+      "ascii": [
+        "(cd tvision-node && node examples/ascii.js)"
+      ],
+      "form": [
+        "(cd tvision-node && node examples/form.js)"
       ]
     }
   }

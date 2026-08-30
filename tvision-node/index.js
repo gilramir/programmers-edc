@@ -46,6 +46,8 @@ function start(config) {
     ...config,
     onCommand: guard(config.onCommand),
     onSelect: guard(config.onSelect),
+    onKey: guard(config.onKey),
+    onClick: guard(config.onClick),
   });
 
   const report = (err) => {
@@ -129,6 +131,9 @@ module.exports = {
   focus: addon.focus,
   setText: addon.setText,
   setItems: addon.setItems,
+  setLines: addon.setLines,
+  setCursor: addon.setCursor,
+  setEnabled: addon.setEnabled,
   getValue: addon.getValue,
   setValue: addon.setValue,
 

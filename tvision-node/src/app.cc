@@ -47,12 +47,17 @@ bool g_running = false;
 
 namespace {
 
+// mmenu's whole point is submenus inside submenus, so an item that has items
+// of its own is one -- the same shape at every level.
 struct MenuItemDef {
     bool separator = false;
     std::string title;
     ushort command = 0;
     TKey key;
     std::string shortcut;   // right-aligned hint text, e.g. "Alt-X"
+    std::vector<MenuItemDef> items;
+
+    bool isSubMenu() const { return !items.empty(); }
 };
 
 struct SubMenuDef {
@@ -76,6 +81,8 @@ AppConfig g_config;
 
 Napi::FunctionReference g_onCommand;
 Napi::FunctionReference g_onSelect;
+Napi::FunctionReference g_onKey;
+Napi::FunctionReference g_onClick;
 
 // Set while a JS callback is throwing, so we can unwind the TVision loop and
 // rethrow into JS once the terminal has been restored.
@@ -124,6 +131,39 @@ std::vector<std::unique_ptr<ModalSession>> g_modals;
 /*  Config parsing                                                    */
 /* ------------------------------------------------------------------ */
 
+static std::vector<MenuItemDef> parseMenuItems(const Napi::Env &env,
+                                               const Napi::Value &value);
+
+static MenuItemDef parseMenuItem(const Napi::Env &env, const Napi::Object &it)
+{
+    MenuItemDef item;
+    if (getBool(it, "separator"))
+        {
+        item.separator = true;
+        return item;
+        }
+    item.title = getString(it, "title");
+    item.key = getKey(env, it, "key", "menu item '" + item.title + "'");
+    item.shortcut = getString(it, "shortcut");
+    if (it.Has("items"))
+        item.items = parseMenuItems(env, it.Get("items"));
+    else
+        item.command = g_commands.intern(getString(it, "cmd"));
+    return item;
+}
+
+static std::vector<MenuItemDef> parseMenuItems(const Napi::Env &env,
+                                               const Napi::Value &value)
+{
+    std::vector<MenuItemDef> items;
+    if (!value.IsArray())
+        throw Napi::Error::New(env, "tvision: menu items must be an array");
+    Napi::Array array = value.As<Napi::Array>();
+    for (uint32_t i = 0; i < array.Length(); ++i)
+        items.push_back(parseMenuItem(env, array.Get(i).As<Napi::Object>()));
+    return items;
+}
+
 static void parseMenuBar(const Napi::Env &env, const Napi::Value &value)
 {
     if (!value.IsArray())
@@ -138,25 +178,7 @@ static void parseMenuBar(const Napi::Env &env, const Napi::Value &value)
         sub.key = getKey(env, m, "key", "menuBar entry '" + sub.title + "'");
 
         if (m.Has("items"))
-            {
-            Napi::Array items = m.Get("items").As<Napi::Array>();
-            for (uint32_t j = 0; j < items.Length(); ++j)
-                {
-                Napi::Object it = items.Get(j).As<Napi::Object>();
-                MenuItemDef item;
-                if (getBool(it, "separator"))
-                    {
-                    item.separator = true;
-                    sub.items.push_back(item);
-                    continue;
-                    }
-                item.title = getString(it, "title");
-                item.command = g_commands.intern(getString(it, "cmd"));
-                item.key = getKey(env, it, "key", "menu item '" + item.title + "'");
-                item.shortcut = getString(it, "shortcut");
-                sub.items.push_back(item);
-                }
-            }
+            sub.items = parseMenuItems(env, m.Get("items"));
         g_config.menus.push_back(std::move(sub));
         }
 }
@@ -198,6 +220,39 @@ public:
 
 static std::unique_ptr<JsApp> g_app;
 
+// Items must be appended while the submenu's `next` is still null: operator+
+// walks to the *last* submenu in the chain before inserting, so building a
+// nested menu bottom-up is the only order that works.
+static void fillSubMenu(TSubMenu *sub, const std::vector<MenuItemDef> &items)
+{
+    for (const MenuItemDef &item : items)
+        {
+        if (item.separator)
+            {
+            *sub + newLine();
+            }
+        else if (item.isSubMenu())
+            {
+            TSubMenu *nested = new TSubMenu(item.title.c_str(), item.key);
+            fillSubMenu(nested, item.items);
+            // The cast is load-bearing. operator+(TSubMenu&, TSubMenu&) appends
+            // a *sibling*, which quietly turns a nested menu into another
+            // top-level one on the menu bar; operator+(TSubMenu&, TMenuItem&)
+            // puts it inside. Both compile, and only the overload chosen tells
+            // you which you meant.
+            *sub + *static_cast<TMenuItem *>(nested);
+            }
+        else
+            {
+            *sub + *new TMenuItem(item.title.c_str(), item.command, item.key,
+                                  hcNoContext,
+                                  item.shortcut.empty()
+                                      ? TStringView()
+                                      : TStringView(item.shortcut.c_str()));
+            }
+        }
+}
+
 TMenuBar *JsApp::initMenuBar(TRect r)
 {
     r.b.y = r.a.y + 1;
@@ -208,19 +263,7 @@ TMenuBar *JsApp::initMenuBar(TRect r)
     for (const SubMenuDef &def : g_config.menus)
         {
         TSubMenu *sub = new TSubMenu(def.title.c_str(), def.key);
-        // Items must be appended while sub->next is still null: operator+
-        // walks to the *last* submenu in the chain before inserting.
-        for (const MenuItemDef &item : def.items)
-            {
-            if (item.separator)
-                *sub + newLine();
-            else
-                *sub + *new TMenuItem(item.title.c_str(), item.command, item.key,
-                                      hcNoContext,
-                                      item.shortcut.empty()
-                                          ? TStringView()
-                                          : TStringView(item.shortcut.c_str()));
-            }
+        fillSubMenu(sub, def.items);
         if (first == nullptr)
             first = sub;
         else
@@ -250,7 +293,7 @@ void JsApp::handleEvent(TEvent &event)
 {
     TApplication::handleEvent(event);
 
-    if (event.what == evCommand && event.message.command >= kUserCmdBase)
+    if (event.what == evCommand && event.message.command >= kUserCmdFirst)
         {
         if (const std::string *name = g_commands.nameOf(event.message.command))
             {
@@ -326,6 +369,27 @@ void dispatchSelect(const std::string &id, int index, const std::string &text)
                            Napi::Number::New(env, index),
                            Napi::String::New(env, text),
                        });
+}
+
+void dispatchKey(const std::string &id, const std::string &key)
+{
+    if (g_onKey.IsEmpty() || g_hasPendingError)
+        return;
+
+    Napi::Env env = g_onKey.Env();
+    Napi::HandleScope scope(env);
+    callJs(g_onKey, {Napi::String::New(env, id), Napi::String::New(env, key)});
+}
+
+void dispatchClick(const std::string &id, int x, int y)
+{
+    if (g_onClick.IsEmpty() || g_hasPendingError)
+        return;
+
+    Napi::Env env = g_onClick.Env();
+    Napi::HandleScope scope(env);
+    callJs(g_onClick, {Napi::String::New(env, id), Napi::Number::New(env, x),
+                       Napi::Number::New(env, y)});
 }
 
 /* ------------------------------------------------------------------ */
@@ -427,7 +491,9 @@ static void prepare(const Napi::Env &env, const Napi::Value &value)
         parseStatusLine(env, config.Get("statusLine"));
 
     for (auto &binding : {std::make_pair("onCommand", &g_onCommand),
-                          std::make_pair("onSelect", &g_onSelect)})
+                          std::make_pair("onSelect", &g_onSelect),
+                          std::make_pair("onKey", &g_onKey),
+                          std::make_pair("onClick", &g_onClick)})
         {
         if (!config.Has(binding.first))
             continue;
@@ -457,6 +523,8 @@ static void teardown(const Napi::Env &env)
     g_views.clear();
     g_onCommand.Reset();
     g_onSelect.Reset();
+    g_onKey.Reset();
+    g_onClick.Reset();
     g_config = AppConfig();
 }
 

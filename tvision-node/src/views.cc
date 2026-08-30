@@ -41,6 +41,68 @@ void JsListBox::setItems(std::vector<std::string> newItems)
     drawView();
 }
 
+JsCanvas::JsCanvas(const TRect &bounds, std::string id, int aColorIndex,
+                   bool selectable, bool blockCursorShape) noexcept
+    : TView(bounds), viewId(std::move(id)), colorIndex(aColorIndex)
+{
+    growMode = 0;
+    if (selectable)
+        {
+        options |= ofSelectable;
+        eventMask |= evKeyboard;   // TView masks keyboard events off by default
+        if (blockCursorShape)
+            blockCursor();
+        }
+}
+
+void JsCanvas::draw()
+{
+    TDrawBuffer b;
+    TColorAttr color = getColor((ushort) colorIndex);
+
+    for (int y = 0; y < size.y; ++y)
+        {
+        b.moveChar(0, ' ', color, (ushort) size.x);
+        if (y < (int) lines.size())
+            b.moveStr(0, TStringView(lines[y]), color);
+        writeLine(0, (short) y, (short) size.x, 1, b);
+        }
+}
+
+void JsCanvas::handleEvent(TEvent &event)
+{
+    TView::handleEvent(event);
+
+    // A focused canvas consumes its keys, the way tvdemo's TTable does. If JS
+    // wants a key to fall through it should not make the canvas selectable.
+    if (event.what == evKeyDown && (state & sfFocused) != 0)
+        {
+        dispatchKey(viewId, keyName(event));
+        clearEvent(event);
+        }
+    else if (event.what == evMouseDown)
+        {
+        TPoint spot = makeLocal(event.mouse.where);
+        dispatchClick(viewId, spot.x, spot.y);
+        clearEvent(event);
+        }
+}
+
+void JsCanvas::setLines(std::vector<std::string> newLines)
+{
+    lines = std::move(newLines);
+    drawView();
+}
+
+void JsCanvas::setCursorAt(int x, int y, bool visible)
+{
+    setCursor(x, y);
+    if (visible)
+        showCursor();
+    else
+        hideCursor();
+}
+
 JsWindow::~JsWindow()
 {
     // The user can close a window from its frame, and TVision destroys the
@@ -57,7 +119,7 @@ void JsWindow::handleEvent(TEvent &event)
     // (tdialog.cpp:77-90), so a button carrying one of our own commands would
     // otherwise do nothing at all. Non-modal windows want the opposite: leave
     // the command alone so it reaches the application and then JS.
-    if (event.what == evCommand && event.message.command >= kUserCmdBase &&
+    if (event.what == evCommand && event.message.command >= kUserCmdFirst &&
         (state & sfModal) != 0)
         {
         endModal(event.message.command);
@@ -150,6 +212,42 @@ static std::vector<std::string> getStringArray(const Napi::Value &v)
     return out;
 }
 
+// TSItem is a singly linked list built back to front.
+// Check boxes are a bitmask in TVision and an array of booleans in JS.
+static uint32_t checkedBits(const Napi::Value &value)
+{
+    uint32_t bits = 0;
+    if (!value.IsArray())
+        return bits;
+    Napi::Array a = value.As<Napi::Array>();
+    for (uint32_t i = 0; i < a.Length() && i < 32; ++i)
+        if (a.Get(i).ToBoolean().Value())
+            bits |= (uint32_t) 1 << i;
+    return bits;
+}
+
+static Napi::Array checkedArray(const Napi::Env &env, uint32_t bits, uint32_t count)
+{
+    Napi::Array out = Napi::Array::New(env, count);
+    for (uint32_t i = 0; i < count; ++i)
+        out.Set(i, Napi::Boolean::New(env, (bits & ((uint32_t) 1 << i)) != 0));
+    return out;
+}
+
+static TSItem *makeItemChain(const Napi::Env &env, const Napi::Value &value,
+                             const char *what, uint32_t &count)
+{
+    std::vector<std::string> labels = getStringArray(value);
+    if (labels.empty())
+        throw Napi::Error::New(env, std::string("tvision: ") + what +
+                                        " needs a non-empty items array");
+    TSItem *head = nullptr;
+    for (size_t i = labels.size(); i-- > 0;)
+        head = new TSItem(labels[i].c_str(), head);
+    count = (uint32_t) labels.size();
+    return head;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Building a window's contents                                      */
 /* ------------------------------------------------------------------ */
@@ -216,6 +314,41 @@ void buildItems(const Napi::Env &env, JsWindow *win, const Napi::Value &value,
                 list->setItems(getStringArray(it.Get("items")));
             made = list;
             }
+        else if (type == "canvas")
+            {
+            if (id.empty())
+                throw Napi::Error::New(env, "tvision: a canvas needs an id");
+            JsCanvas *canvas =
+                new JsCanvas(getRect(env, it, "canvas"), id,
+                             getInt(it, "color", 6),
+                             getBool(it, "selectable", true),
+                             getString(it, "cursor") == "block");
+            if (it.Has("lines"))
+                canvas->setLines(getStringArray(it.Get("lines")));
+            if (getBool(it, "framed"))
+                canvas->options |= ofFramed;
+            made = canvas;
+            }
+        else if (type == "checkBoxes")
+            {
+            uint32_t count = 0;
+            TSItem *chain = makeItemChain(env, it.Get("items"), "checkBoxes", count);
+            JsCheckBoxes *boxes =
+                new JsCheckBoxes(getRect(env, it, "checkBoxes"), chain, count);
+            if (it.Has("value"))
+                boxes->setBits(checkedBits(it.Get("value")));
+            made = boxes;
+            }
+        else if (type == "radioButtons")
+            {
+            uint32_t count = 0;
+            TSItem *chain = makeItemChain(env, it.Get("items"), "radioButtons", count);
+            JsRadioButtons *radio =
+                new JsRadioButtons(getRect(env, it, "radioButtons"), chain);
+            (void) count;
+            radio->setSelected((uint32_t) getInt(it, "value", 0));
+            made = radio;
+            }
         else
             {
             throw Napi::Error::New(env, "tvision: unknown item type '" + type + "'");
@@ -242,10 +375,15 @@ Napi::Object collectValues(const Napi::Env &env, const std::string &windowId)
         if (ref->kind == "inputLine")
             out.Set(id, Napi::String::New(env, ((TInputLine *) ref->view)->data));
         else if (ref->kind == "listBox")
+            out.Set(id, Napi::Number::New(env, ((JsListBox *) ref->view)->focused));
+        else if (ref->kind == "checkBoxes")
             {
-            JsListBox *list = (JsListBox *) ref->view;
-            out.Set(id, Napi::Number::New(env, list->focused));
+            JsCheckBoxes *boxes = (JsCheckBoxes *) ref->view;
+            out.Set(id, checkedArray(env, boxes->bits(), boxes->count));
             }
+        else if (ref->kind == "radioButtons")
+            out.Set(id, Napi::Number::New(env,
+                                          ((JsRadioButtons *) ref->view)->selected()));
         }
     return out;
 }
@@ -334,6 +472,13 @@ static Napi::Value GetValue(const Napi::CallbackInfo &info)
         return Napi::String::New(env, ((TInputLine *) ref->view)->data);
     if (ref->kind == "listBox")
         return Napi::Number::New(env, ((JsListBox *) ref->view)->focused);
+    if (ref->kind == "checkBoxes")
+        {
+        JsCheckBoxes *boxes = (JsCheckBoxes *) ref->view;
+        return checkedArray(env, boxes->bits(), boxes->count);
+        }
+    if (ref->kind == "radioButtons")
+        return Napi::Number::New(env, ((JsRadioButtons *) ref->view)->selected());
     return env.Null();
 }
 
@@ -342,13 +487,28 @@ static Napi::Value SetValue(const Napi::CallbackInfo &info)
 {
     Napi::Env env = info.Env();
     ViewRef *ref = g_views.find(info[0].ToString().Utf8Value());
-    if (ref == nullptr || ref->kind != "inputLine")
+    if (ref == nullptr)
         return Napi::Boolean::New(env, false);
 
-    TInputLine *input = (TInputLine *) ref->view;
-    setInputText(input, info[1].ToString().Utf8Value());
-    input->drawView();
-    return Napi::Boolean::New(env, true);
+    if (ref->kind == "inputLine")
+        {
+        TInputLine *input = (TInputLine *) ref->view;
+        setInputText(input, info[1].ToString().Utf8Value());
+        input->drawView();
+        return Napi::Boolean::New(env, true);
+        }
+    if (ref->kind == "checkBoxes")
+        {
+        ((JsCheckBoxes *) ref->view)->setBits(checkedBits(info[1]));
+        return Napi::Boolean::New(env, true);
+        }
+    if (ref->kind == "radioButtons")
+        {
+        ((JsRadioButtons *) ref->view)
+            ->setSelected((uint32_t) info[1].ToNumber().Uint32Value());
+        return Napi::Boolean::New(env, true);
+        }
+    return Napi::Boolean::New(env, false);
 }
 
 // tv.exists(id) -- ids go away on their own when a window closes, so asking is
@@ -391,8 +551,53 @@ static Napi::Value Close(const Napi::CallbackInfo &info)
     return Napi::Boolean::New(env, true);
 }
 
+// tv.setLines(id, [...]) -- repaint a canvas.
+static Napi::Value SetLines(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    ViewRef *ref = g_views.find(info[0].ToString().Utf8Value());
+    if (ref == nullptr || ref->kind != "canvas")
+        return Napi::Boolean::New(env, false);
+
+    ((JsCanvas *) ref->view)->setLines(getStringArray(info[1]));
+    return Napi::Boolean::New(env, true);
+}
+
+// tv.setCursor(id, x, y, visible) -- the hardware cursor inside a canvas, in
+// the view's own coordinates. This is how tvdemo's ASCII table shows which
+// character is selected.
+static Napi::Value SetCursor(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    ViewRef *ref = g_views.find(info[0].ToString().Utf8Value());
+    if (ref == nullptr || ref->kind != "canvas")
+        return Napi::Boolean::New(env, false);
+
+    bool visible = info.Length() < 4 || info[3].ToBoolean().Value();
+    ((JsCanvas *) ref->view)
+        ->setCursorAt(info[1].ToNumber().Int32Value(),
+                      info[2].ToNumber().Int32Value(), visible);
+    return Napi::Boolean::New(env, true);
+}
+
+// tv.setEnabled(cmd, on) -- grey a command out everywhere it appears. Menus
+// and status lines pick this up on the next idle, via cmCommandSetChanged.
+static Napi::Value SetEnabled(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    ushort cmd = g_commands.intern(info[0].ToString().Utf8Value());
+    if (info[1].ToBoolean().Value())
+        TView::enableCommand(cmd);
+    else
+        TView::disableCommand(cmd);
+    return Napi::Boolean::New(env, true);
+}
+
 void registerViewApi(Napi::Env env, Napi::Object exports)
 {
+    exports.Set("setLines", Napi::Function::New(env, SetLines));
+    exports.Set("setCursor", Napi::Function::New(env, SetCursor));
+    exports.Set("setEnabled", Napi::Function::New(env, SetEnabled));
     exports.Set("window", Napi::Function::New(env, Window));
     exports.Set("setText", Napi::Function::New(env, SetText));
     exports.Set("setItems", Napi::Function::New(env, SetItems));

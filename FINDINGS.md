@@ -289,6 +289,97 @@ small emulator (cursor addressing, relative moves, erases; escape sequences
 parsed just well enough to skip). `app.screen()` is history, `app.render()` is
 the screen. The checks that matter use `render()`.
 
+## Porting more of the C++ demos
+
+The point of porting `tvdemo`'s ASCII chart and something in the shape of
+`tvforms` was to find corner cases before Gren, not to have more demos. It
+worked; here they are.
+
+### Commands above 255 can never be disabled
+
+```c++
+Boolean TView::commandEnabled( ushort command ) noexcept
+{
+    return Boolean((command > 255) || curCommandSet.has(command));
+}
+```
+
+User commands were being allocated from 1000, so `tv.setEnabled(cmd, false)`
+was a silent no-op -- the menu item stayed live and still fired. Turbo Vision
+reserves 0-99 for itself and 100-255 for the application, and `cmFileFocused`
+(102) is the only constant it defines in the upper half. User commands now
+start at **110** and only spill into 1000+ once 255 is exhausted, where the
+restriction returns.
+
+The test for this had to be behavioural: greying a menu item is a *colour*
+change, and colour is exactly what the pty harness strips. What it checks is
+that a disabled command does not fire.
+
+### `operator+` decides whether a submenu nests or not
+
+```c++
+*sub + *nested;                              // sibling: a new top-level menu
+*sub + *static_cast<TMenuItem *>(nested);    // child: a submenu, as intended
+```
+
+`operator+(TSubMenu&, TSubMenu&)` appends to the *sibling* chain;
+`operator+(TSubMenu&, TMenuItem&)` inserts into the submenu. A `TSubMenu` is a
+`TMenuItem`, so both compile, and the first one quietly turned "Samples" and
+"More" into extra entries on the menu bar. The cast is load-bearing.
+
+### Hotkeys are one flat namespace, and the status line wins
+
+Two things collided in the form demo:
+
+- **Inside a dialog**, the first control that claims `Alt-<letter>` gets it.
+  A `~P~hone` label and a `~P~hone` radio button meant the radio took Alt-P and
+  the field was unreachable.
+- **The status line's hotkeys are global** and beat even a modal dialog:
+  `TProgram::getEvent` hands every `evKeyDown` to the status line *before* the
+  event reaches the modal view. The demo's status line offered `Alt-N` for
+  "New", so a `~N~ame` field in a dialog could never be focused by its own
+  label.
+
+Neither is a bug -- it is how Turbo Vision works -- but both are invisible
+until something silently does nothing.
+
+### `Enter` is not the key you think it is, three times now
+
+`TButton` (milestone 1), `TListViewer` (milestone 2), and now `TCluster`: check
+boxes and radio buttons are toggled with **Space**, and Enter means "the
+dialog's default action" everywhere. The pattern is consistent once you see it;
+it just is not what a person raised on other toolkits will type first.
+
+### magiblot's TVision draws Unicode, so an ASCII chart is not an ASCII chart
+
+The C++ `TTable::draw` writes raw code page 437 cells, so the original shows
+all 256 glyphs, dingbats included. A canvas takes a JS string, which is
+Unicode: `String.fromCharCode(n)` gives C1 control characters for 128-159 and
+they come out as replacement characters. `examples/ascii.js` carries a CP437
+table to get the original's alphabet back, and writing it is the demonstration
+-- what a canvas paints is whatever JS decides, down to the character.
+
+### The canvas, and what it means for Gren
+
+`TCalendarView` and `TTable` are plain `TView` subclasses with their own
+`draw()`; nothing in the stock widget set can express them, and until now
+nothing in the binding could either. `JsCanvas` is the hole filled: JS supplies
+the lines, TVision paints them, keystrokes arrive back in JS *by name*
+(`"Left"`, `"Alt-X"`, `"A"`), and the model -- which character is selected --
+lives in a JS variable.
+
+That round trip is the one milestone 3 needs for anything Gren renders itself.
+It is also the only widget so far with no TVision-side state to keep in sync,
+which makes it the easiest thing for a diff layer to drive.
+
+Smaller things from the same pass: `TCluster` keeps its state in a protected
+`value` (a bitmask for check boxes, an index for radio buttons), so a subclass
+beats `getData`/`setData` with a raw byte buffer; text wider than its rect is
+**silently truncated** by both `TStaticText` and the canvas, which cost two
+rounds of confused test failures; and interning an empty command name was
+handing out a real user command, so a status line hint with no `cmd` would have
+delivered stray `onCommand('')` calls.
+
 ## Milestone 3 — Gren, from reading the compiler output
 
 Checked against a compiled Gren 0.6 node app rather than from memory:
