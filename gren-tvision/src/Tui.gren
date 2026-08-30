@@ -539,10 +539,11 @@ changes size. See [`Grow`](#Grow).
         }
 
 It is opt-in because most views do not want it, and a wrapper rather than a
-field on all ten records so that a view that does not care says nothing at
+field on all twelve records so that a view that does not care says nothing at
 all. It takes a record because a Gren variant takes at most one argument, which
-is also what makes it look like every other constructor here. It encodes as a field on the view it wraps, so nothing downstream has a
-`Grows` to handle. Wrapping a wrapper is legal and the outer one wins.
+is also what makes it look like every other constructor here. It encodes as a
+field on the view it wraps, so nothing downstream has a `Grows` to handle.
+Wrapping a wrapper is legal and the outer one wins.
 
 The first control in the list gets focus when the window opens -- the first
 that *can* take it, so a row of `takesFocus = False` buttons is skipped. Turbo
@@ -680,11 +681,11 @@ whichever [`Editor`](#View) has the caret: `"editor.cut"`, `"editor.copy"`,
 `"editor.paste"`, `"editor.clear"`, `"editor.undo"` and `"editor.selectAll"`.
 Turbo Vision handles those itself and they do not arrive as events.
 
-The editor's nine are the only prefixed names here, and the prefix is the
+The editor's six are the only prefixed names here, and the prefix is the
 point: everything else on this list is a word a program is unlikely to want
-for itself, and an editor's vocabulary is nine everyday ones. A built-in name
-takes the event silently, so a program's own Clear and the editor's cannot
-both own the bare name -- and the program should have it.
+for itself, and an editor's vocabulary is made of everyday ones. A built-in
+name takes the event silently, so a program's own Clear and the editor's
+cannot both own the bare name -- and the program should have it.
 
 Which makes the same list a set of names your program may not use for anything
 else. Calling a command `"cancel"` because there is a Cancel entry on the menu
@@ -1722,7 +1723,7 @@ growFields mode =
 
 
 {-| The fields of one view, without any `grow` wrapped around it. Split out so
-that the wrapper contributes its field in one place rather than in nine.
+that the wrapper contributes its field in one place rather than in twelve.
 -}
 encodeViewFields : View -> Array { key : String, value : Encode.Value }
 encodeViewFields view =
