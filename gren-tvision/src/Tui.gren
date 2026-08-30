@@ -25,6 +25,7 @@ module Tui exposing
     , focus
     , ink
     , line
+    , marks
     , messageBox
     , number
     , okButtons
@@ -180,7 +181,7 @@ its own is a pull-down, and one without is a command sitting on the bar.
 @docs dialog, quit, setEnabled, setDoubleClickDelay, focus
 @docs messageBox, MessageButton, okButtons, okCancelButtons, yesNoButtons, yesNoCancelButtons
 @docs fileDialog
-@docs text, number, flag, flags
+@docs text, number, flag, flags, marks
 
 -}
 
@@ -227,11 +228,18 @@ that ignores unknown fields, and the view would silently not move. Version 8
 added the [`Changed`](#Event) event and [`Value`](#Value). Version 9 added
 [`popupMenu`](#popupMenu) and `isRight` on a [`Clicked`](#Event) event, which
 go together: a context menu is opened by the model, and a right click is how
-the model finds out it was asked for one.
+the model finds out it was asked for one. Version 10 added `allowed` on an
+[`InputLine`](#View), the set of characters it will accept -- the last piece
+of the hole the `Changed` event opened, and the only one of the two that
+never has to say anything back. Version 11 added
+[`MultiCheckBoxes`](#View) and the `Marks` shape of [`Value`](#Value), which
+is the last of the stock controls. Version 12 added `overlays` to
+[`Ui`](#Ui) -- views on the application rather than on the desktop, which is
+what `TClockView` has always been and this had no way to say.
 -}
 protocolVersion : Int
 protocolVersion =
-    9
+    12
 
 
 -- GEOMETRY
@@ -325,16 +333,49 @@ pinBottom =
 
 
 {-| Everything that should be on screen right now: the menu bar across the top,
-the status line across the bottom, and the windows in between.
+the status line across the bottom, the windows in between -- and `overlays`,
+which are none of those.
 
 Windows not in this list are closed; windows in it that are not on screen are
 opened. There is no separate "open a window" command -- put it in the view and
 it appears.
+
+**`overlays` are views on the *application*, not on the desktop.** Turbo
+Vision's `TClockView` and `THeapView` are inserted into `TProgram` rather than
+into `TDeskTop`, and that is not an implementation detail: the desktop is the
+patterned area that windows live in, and a clock in the top-right corner is
+not in it. A view here is drawn above every window, cannot be covered by one,
+never takes part in Tile or Cascade, and is in **screen** coordinates -- row 0
+is the menu bar's row, which is where a clock usually goes.
+
+    overlays =
+        [ Grows
+            { grow = Tui.pinRight
+            , view =
+                StaticText
+                    { id = "clock"
+                    , rect = { x1 = cols - 9, y1 = 0, x2 = cols, y2 = 1 }
+                    , text = clock model.now
+                    }
+            }
+        ]
+
+The [`Grows`](#Grow) wrapper is what keeps it in the corner when the terminal
+is resized; `TClockView` sets the same `growMode` in its own constructor.
+Screen coordinates means the width to lay out against is the *screen's*, and
+what [`Resized`](#Event) reports is the **desktop's** -- one row shorter at the
+top and one at the bottom, and the same width.
+
+The set is rebuilt whole when its shape changes and patched by id when it does
+not, exactly as a window's contents are -- which is what lets a clock render
+once a second without repainting the corner every time. Overlays are for
+showing things; put anything the user has to reach in a window.
 -}
 type alias Ui =
     { menuBar : Array MenuItem
     , statusLine : Array StatusItem
     , windows : Array Window
+    , overlays : Array View
     }
 
 
@@ -368,6 +409,16 @@ type alias Window =
     for the same reason.
   - `InputLine` -- a text field. `value` is written to the field only when it
     changes *in the model*, so it never overwrites what the user is typing.
+    `allowed` is the set of characters it will accept, as a string:
+    `Just "0123456789"` is a field only digits can be typed into, and
+    `Nothing` -- which is almost always what you want -- accepts anything.
+    A rejected keystroke does not happen, so nothing is reported and there is
+    nothing for the model to do about it.
+
+    It filters *typing* and only typing. A `value` the model sets goes in
+    whatever it contains: the model put it there, and validating what the
+    model itself produced is the model's job. Turbo Vision would refuse to
+    close the dialog and put up an error box; this does not, deliberately.
   - `History` -- the `\u{25BC}` drop-down beside an input line, holding what was
     typed into it before. It has no rectangle: it occupies the three columns
     immediately to the **right** of the field it names, which is where Turbo
@@ -394,6 +445,16 @@ type alias Window =
     it, so it steers without fighting the arrow keys.
   - `CheckBoxes` -- a group of boxes, ticked with `Space`. `checked` is one
     flag per item.
+  - `MultiCheckBoxes` -- the same cluster with more than two states per box.
+    `marks` is one character per state, in order, drawn between the brackets:
+    `" ?X"` is a box that cycles blank, `?`, `X`. `states` is one index into
+    `marks` per item. Space, a click or the box's hotkey moves an item to the
+    next state and wraps.
+
+    Turbo Vision packs every box's state into one 32-bit word, so
+    *items* × *bits per state* has to fit in 32 -- eight boxes of four states,
+    sixteen of three, and the binding says so rather than dropping the last
+    few.
   - `RadioButtons` -- a group of which exactly one is chosen; `selected` is its
     index.
   - `Label` -- text bound to another control by its id, so `Alt-`*x* on the
@@ -447,10 +508,11 @@ changes them.
 type View
     = StaticText { id : String, rect : Rect, text : String }
     | Button { id : String, rect : Rect, title : String, cmd : String, isDefault : Bool, takesFocus : Bool }
-    | InputLine { id : String, rect : Rect, maxLen : Int, value : String }
+    | InputLine { id : String, rect : Rect, maxLen : Int, value : String, allowed : Maybe String }
     | History { id : String, for : String, items : Array String }
     | ListBox { id : String, rect : Rect, items : Array String, focused : Int }
     | CheckBoxes { id : String, rect : Rect, items : Array String, checked : Array Bool }
+    | MultiCheckBoxes { id : String, rect : Rect, items : Array String, marks : String, states : Array Int }
     | RadioButtons { id : String, rect : Rect, items : Array String, selected : Int }
     | ScrollBar { id : String, rect : Rect, value : Int, min : Int, max : Int, pageStep : Int, arrowStep : Int }
     | Label { id : String, rect : Rect, text : String, for : String }
@@ -658,7 +720,7 @@ type Event
     | Unknown String
 
 
-{-| What a [`Changed`](#Event) event carries. Three shapes because three kinds
+{-| What a [`Changed`](#Event) event carries. Four shapes because four kinds
 of control have a value the user can move, and they are not the same kind of
 thing:
 
@@ -666,14 +728,17 @@ thing:
   - `Flags` -- one boolean per box of a [`CheckBoxes`](#View) cluster, in the
     order the items were given.
   - `Choice` -- which button of a [`RadioButtons`](#View) cluster is on.
+  - `Marks` -- one state index per box of a [`MultiCheckBoxes`](#View)
+    cluster, in the same order.
 
-They line up with [`text`](#text), [`flags`](#flags) and [`number`](#number),
-which read the same three out of a dialog's answer.
+They line up with [`text`](#text), [`flags`](#flags), [`number`](#number) and
+[`marks`](#marks), which read the same four out of a dialog's answer.
 -}
 type Value
     = Text String
     | Flags (Array Bool)
     | Choice Int
+    | Marks (Array Int)
 
 
 -- COMMANDS
@@ -1008,6 +1073,7 @@ fileDialog spec =
                 , rect = { x1 = 3, y1 = 2, x2 = width - 6, y2 = 3 }
                 , maxLen = 255
                 , value = spec.name
+                , allowed = Nothing
                 }
             , History
                 { id = "fileHistory"
@@ -1240,6 +1306,19 @@ flags field values =
         |> Result.withDefault []
 
 
+{-| Read a group of multi-state check boxes out of a dialog's `values`, one
+state index per box, in the order they were declared. Missing fields give `[]`.
+
+The [`MultiCheckBoxes`](#View) counterpart of [`flags`](#flags), and the same
+advice applies: this is the array to keep in the model, and handing it back
+reopens the form on it.
+-}
+marks : String -> Decode.Value -> Array Int
+marks field values =
+    Decode.decodeValue (Decode.field field (Decode.array Decode.int)) values
+        |> Result.withDefault []
+
+
 -- PROGRAM
 
 
@@ -1324,6 +1403,7 @@ render ports config model =
             , { key = "menuBar", value = Encode.array encodeMenuItem ui.menuBar }
             , { key = "statusLine", value = Encode.array encodeStatusItem ui.statusLine }
             , { key = "windows", value = Encode.array encodeWindow ui.windows }
+            , { key = "overlays", value = Encode.array encodeView ui.overlays }
             ]
 
 
@@ -1403,6 +1483,14 @@ encodeViewFields view =
             , { key = "rect", value = encodeRect v.rect }
             , { key = "maxLen", value = Encode.int v.maxLen }
             , { key = "value", value = Encode.string v.value }
+            , { key = "allowed"
+              , value =
+                    -- The empty string and Nothing are the same thing to the
+                    -- binding: a filter that allows nothing is not a filter
+                    -- anybody wants, and sending one shape for one meaning is
+                    -- what keeps the differ from repainting fields.
+                    Encode.string (Maybe.withDefault "" v.allowed)
+              }
             ]
 
         History v ->
@@ -1426,6 +1514,15 @@ encodeViewFields view =
             , { key = "rect", value = encodeRect v.rect }
             , { key = "items", value = Encode.array Encode.string v.items }
             , { key = "value", value = Encode.array Encode.bool v.checked }
+            ]
+
+        MultiCheckBoxes v ->
+            [ { key = "type", value = Encode.string "multiCheckBoxes" }
+            , { key = "id", value = Encode.string v.id }
+            , { key = "rect", value = encodeRect v.rect }
+            , { key = "items", value = Encode.array Encode.string v.items }
+            , { key = "marks", value = Encode.string v.marks }
+            , { key = "value", value = Encode.array Encode.int v.states }
             ]
 
         RadioButtons v ->
@@ -1686,13 +1783,15 @@ eventDecoder =
             )
 
 
-{-| The three JSON shapes a value arrives as are distinct types, so which one
-it is does not have to be said twice.
+{-| The JSON shapes a value arrives as are distinct types, so which one it is
+does not have to be said twice. `Flags` before `Marks` because an array of
+booleans is also an array, and a cluster of check boxes is the commoner one.
 -}
 valueDecoder : Decode.Decoder Value
 valueDecoder =
     Decode.oneOf
         [ Decode.map Text Decode.string
         , Decode.map Flags (Decode.array Decode.bool)
+        , Decode.map Marks (Decode.array Decode.int)
         , Decode.map Choice Decode.int
         ]

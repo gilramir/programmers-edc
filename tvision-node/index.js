@@ -162,6 +162,10 @@ module.exports = {
   // Flat: entries and separators, no submenus. See the note on JsMenuPopup.
   popupMenu: addon.popupMenu,
 
+  // The views that sit on the application rather than on the desktop -- a
+  // clock in the corner, a heap gauge. Screen coordinates, replaced whole.
+  overlays: addon.overlays,
+
   screenSize: addon.screenSize,
   doubleClickDelay: addon.doubleClickDelay,
   log,

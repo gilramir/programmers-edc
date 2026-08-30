@@ -373,6 +373,7 @@ view model =
 
         else
             []
+    , overlays = []
     }
 
 

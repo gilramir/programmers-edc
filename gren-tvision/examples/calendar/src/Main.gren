@@ -332,6 +332,7 @@ view model =
 
             _ ->
                 []
+    , overlays = []
     }
 
 

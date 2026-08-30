@@ -618,6 +618,7 @@ view model =
         , { text = "", key = "F10", cmd = "menu" }
         ]
     , windows = [ dirWindow model ]
+    , overlays = []
     }
 
 

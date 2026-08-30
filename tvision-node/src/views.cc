@@ -83,6 +83,63 @@ void JsCheckBoxes::handleEvent(TEvent &event)
         noteChangedFlags(viewId, value, count);
 }
 
+int JsMultiCheckBoxes::bitsFor(size_t markCount)
+{
+    int bits = 1;
+    while (((size_t) 1 << bits) < markCount)
+        ++bits;
+    return bits;
+}
+
+JsMultiCheckBoxes::JsMultiCheckBoxes(TRect &bounds, TSItem *items,
+                                     uint32_t aCount,
+                                     const std::string &theMarks,
+                                     std::string id) noexcept
+    : TMultiCheckBoxes(bounds, items, (uchar) theMarks.size(),
+                       (ushort) ((bitsFor(theMarks.size()) << 8) |
+                                 ((1 << bitsFor(theMarks.size())) - 1)),
+                       nullptr),
+      count(aCount), bits(bitsFor(theMarks.size())),
+      mask((uint32_t) ((1 << bitsFor(theMarks.size())) - 1)), marks(theMarks),
+      viewId(std::move(id))
+{
+    // nullptr above, not theMarks.c_str(): see the note on the class.
+}
+
+void JsMultiCheckBoxes::draw()
+{
+    drawMultiBox(" [ ] ", marks.c_str());
+}
+
+std::vector<int> JsMultiCheckBoxes::states() const
+{
+    std::vector<int> out;
+    out.reserve(count);
+    for (uint32_t i = 0; i < count; ++i)
+        out.push_back((int) ((value >> (bits * i)) & mask));
+    return out;
+}
+
+void JsMultiCheckBoxes::setStates(const std::vector<int> &wanted)
+{
+    uint32_t packed = 0;
+    for (uint32_t i = 0; i < count && i < wanted.size(); ++i)
+        packed |= ((uint32_t) wanted[i] & mask) << (bits * i);
+    value = packed;
+    drawView();
+}
+
+// The same sandwich as the other two clusters, and for the same reason: a box
+// is cycled by Space, by a click and by its hotkey, and `value` afterwards is
+// the only thing all three have in common.
+void JsMultiCheckBoxes::handleEvent(TEvent &event)
+{
+    uint32_t before = value;
+    TMultiCheckBoxes::handleEvent(event);
+    if (!viewId.empty() && before != value)
+        noteChangedMarks(viewId, states());
+}
+
 void JsRadioButtons::handleEvent(TEvent &event)
 {
     uint32_t before = value;
@@ -492,6 +549,17 @@ std::vector<CanvasLine> getCanvasLines(const Napi::Value &v)
     return out;
 }
 
+static std::vector<int> getIntArray(const Napi::Value &v)
+{
+    std::vector<int> out;
+    if (!v.IsArray())
+        return out;
+    Napi::Array array = v.As<Napi::Array>();
+    for (uint32_t i = 0; i < array.Length(); ++i)
+        out.push_back(array.Get(i).ToNumber().Int32Value());
+    return out;
+}
+
 static std::vector<std::string> getStringArray(const Napi::Value &v)
 {
     std::vector<std::string> out;
@@ -522,6 +590,14 @@ Napi::Array checkedArray(const Napi::Env &env, uint32_t bits, uint32_t count)
     Napi::Array out = Napi::Array::New(env, count);
     for (uint32_t i = 0; i < count; ++i)
         out.Set(i, Napi::Boolean::New(env, (bits & ((uint32_t) 1 << i)) != 0));
+    return out;
+}
+
+Napi::Array markArray(const Napi::Env &env, const std::vector<int> &states)
+{
+    Napi::Array out = Napi::Array::New(env, states.size());
+    for (size_t i = 0; i < states.size(); ++i)
+        out.Set((uint32_t) i, Napi::Number::New(env, states[i]));
     return out;
 }
 
@@ -571,7 +647,7 @@ static uchar growModeOf(const Napi::Object &it)
     return mode;
 }
 
-TView *buildItems(const Napi::Env &env, JsWindow *win, const Napi::Value &value,
+TView *buildItems(const Napi::Env &env, TGroup *win, const Napi::Value &value,
                   const std::string &windowId)
 {
     TView *firstSelectable = nullptr;
@@ -614,6 +690,11 @@ TView *buildItems(const Napi::Env &env, JsWindow *win, const Napi::Value &value,
             int maxLen = getInt(it, "maxLen", 128);
             TInputLine *input =
                 new JsInputLine(getRect(env, it, "inputLine"), maxLen, id);
+            // Structural, like maxLen: a field's filter is part of its shape,
+            // so changing one rebuilds the window rather than being patched.
+            std::string allowed = getString(it, "allowed");
+            if (!allowed.empty())
+                input->setValidator(new JsFilterValidator(allowed));
             std::string initial = getString(it, "value");
             if (!initial.empty())
                 setInputText(input, initial);
@@ -728,6 +809,30 @@ TView *buildItems(const Napi::Env &env, JsWindow *win, const Napi::Value &value,
                 boxes->setBits(checkedBits(it.Get("value")));
             made = boxes;
             }
+        else if (type == "multiCheckBoxes")
+            {
+            uint32_t count = 0;
+            TSItem *chain =
+                makeItemChain(env, it.Get("items"), "multiCheckBoxes", count);
+            std::string marks = getString(it, "marks");
+            if (marks.size() < 2)
+                throw Napi::Error::New(env, "tvision: a multiCheckBoxes needs at "
+                                            "least two marks (one character per "
+                                            "state)");
+            int bits = JsMultiCheckBoxes::bitsFor(marks.size());
+            if ((uint32_t) bits * count > 32)
+                throw Napi::Error::New(
+                    env, "tvision: " + std::to_string(count) + " boxes of " +
+                             std::to_string(marks.size()) +
+                             " states need more than the 32 bits a cluster's "
+                             "value has -- use fewer boxes or fewer states");
+            TRect where = getRect(env, it, "multiCheckBoxes");
+            JsMultiCheckBoxes *boxes =
+                new JsMultiCheckBoxes(where, chain, count, marks, id);
+            if (it.Has("value"))
+                boxes->setStates(getIntArray(it.Get("value")));
+            made = boxes;
+            }
         else if (type == "radioButtons")
             {
             uint32_t count = 0;
@@ -822,6 +927,8 @@ Napi::Object collectValues(const Napi::Env &env, const std::string &windowId)
             JsCheckBoxes *boxes = (JsCheckBoxes *) ref->view;
             out.Set(id, checkedArray(env, boxes->bits(), boxes->count));
             }
+        else if (ref->kind == "multiCheckBoxes")
+            out.Set(id, markArray(env, ((JsMultiCheckBoxes *) ref->view)->states()));
         else if (ref->kind == "radioButtons")
             out.Set(id, Napi::Number::New(env,
                                           ((JsRadioButtons *) ref->view)->selected()));
@@ -952,6 +1059,8 @@ static Napi::Value GetValue(const Napi::CallbackInfo &info)
         JsCheckBoxes *boxes = (JsCheckBoxes *) ref->view;
         return checkedArray(env, boxes->bits(), boxes->count);
         }
+    if (ref->kind == "multiCheckBoxes")
+        return markArray(env, ((JsMultiCheckBoxes *) ref->view)->states());
     if (ref->kind == "radioButtons")
         return Napi::Number::New(env, ((JsRadioButtons *) ref->view)->selected());
     return env.Null();
@@ -983,6 +1092,11 @@ static Napi::Value SetValue(const Napi::CallbackInfo &info)
     if (ref->kind == "checkBoxes")
         {
         ((JsCheckBoxes *) ref->view)->setBits(checkedBits(info[1]));
+        return Napi::Boolean::New(env, true);
+        }
+    if (ref->kind == "multiCheckBoxes")
+        {
+        ((JsMultiCheckBoxes *) ref->view)->setStates(getIntArray(info[1]));
         return Napi::Boolean::New(env, true);
         }
     if (ref->kind == "radioButtons")

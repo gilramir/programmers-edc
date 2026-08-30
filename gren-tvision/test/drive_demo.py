@@ -122,15 +122,34 @@ def main():
     check("two notes and the event viewer are on the desktop",
           len(frames(app)) == 2 and "Event Viewer" in screen, str(frames(app)))
 
-    # The clock is a status item, so it is on the last line and it moves.
-    status = app.render().split("\n")[24]
-    check("the clock is in the status line", re.search(r"\d\d:\d\d:\d\d", status),
-          status)
-    first_time = re.search(r"\d\d:\d\d:\d\d", status).group(0)
+    # The clock is an overlay -- a view on the *application*, which is what
+    # TClockView is. It sits on the menu bar's row, at the right-hand end,
+    # because overlays are in screen coordinates and row 0 is the menu bar's.
+    # It used to be a status item, which worked and rebuilt the status line
+    # once a second; that is the reason Borland made the clock a view.
+    bar = app.render().split("\n")[0]
+    check("the clock is a view on the menu bar's row, not a status item",
+          re.search(r"\d\d:\d\d:\d\d", bar)
+          and not re.search(r"\d\d:\d\d:\d\d", app.render().split("\n")[24]),
+          bar)
+    check("and it is against the right-hand edge",
+          bar.rstrip().endswith(re.search(r"\d\d:\d\d:\d\d", bar).group(0)), bar)
+    first_time = re.search(r"\d\d:\d\d:\d\d", bar).group(0)
     app.pump(1.6)
-    later = re.search(r"\d\d:\d\d:\d\d", app.render().split("\n")[24])
+    later = re.search(r"\d\d:\d\d:\d\d", app.render().split("\n")[0])
     check("and it ticks", later and later.group(0) != first_time,
           f"{first_time} -> {later and later.group(0)}")
+
+    # An overlay cannot be covered by a window, which is the difference between
+    # a view on the application and a view on the desktop. Zooming a note fills
+    # the desktop and leaves the clock where it is.
+    at = note_box(app, "Note 2")
+    app.click(at[0] + 3, at[1] + 2, settle=0.8)
+    app.send(b"\x1b[15~", settle=1.0)          # F5 Zoom
+    zoomed = app.render().split("\n")
+    check("a zoomed window does not cover it",
+          re.search(r"\d\d:\d\d:\d\d", zoomed[0]) is not None, zoomed[0])
+    app.send(b"\x1b[15~", settle=1.0)          # and back
 
     app.send(F2, settle=0.8)
     check("F2 opens another note", len(frames(app)) == 3, str(frames(app)))

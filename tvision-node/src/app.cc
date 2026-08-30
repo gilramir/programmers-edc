@@ -511,11 +511,12 @@ static void flushScrolled()
 // in for a cluster; which of the three it is decides what reaches JavaScript.
 struct ChangeNote {
     std::string id;
-    enum Kind { Text, Flags, Choice } kind;
+    enum Kind { Text, Flags, Choice, Marks } kind;
     std::string text;
     uint32_t bits = 0;
     uint32_t count = 0;
     int index = 0;
+    std::vector<int> states;
 };
 
 static std::vector<ChangeNote> g_changeNotes;
@@ -564,6 +565,15 @@ void noteChangedChoice(const std::string &id, int index)
     pushChange(note);
 }
 
+void noteChangedMarks(const std::string &id, const std::vector<int> &states)
+{
+    ChangeNote note;
+    note.id = id;
+    note.kind = ChangeNote::Marks;
+    note.states = states;
+    pushChange(note);
+}
+
 static void flushChanged()
 {
     if (g_changeNotes.empty() || g_onChange.IsEmpty() || g_hasPendingError)
@@ -584,6 +594,8 @@ static void flushChanged()
             value = Napi::String::New(env, note.text);
         else if (note.kind == ChangeNote::Flags)
             value = checkedArray(env, note.bits, note.count);
+        else if (note.kind == ChangeNote::Marks)
+            value = markArray(env, note.states);
         else
             value = Napi::Number::New(env, note.index);
         callJs(g_onChange, {Napi::String::New(env, note.id), value});
@@ -1331,6 +1343,45 @@ static Napi::Value PopupMenu(const Napi::CallbackInfo &info)
     return env.Undefined();
 }
 
+// tv.overlays([...]) -- the views that sit on the *application*, beside the
+// desktop rather than on it.
+//
+// TClockView and THeapView are inserted into TProgram, not into TDeskTop, and
+// that is not a detail: the desktop is the patterned area windows live in, and
+// a clock in the corner is not in it. tvdemo's clock is a view for exactly
+// this reason, and until now the only way to have one here was to put it in
+// the status line -- which works, and rebuilds the status line once a second,
+// because a status line is replaced whole.
+//
+// Screen coordinates, because that is TProgram's extent: row 0 is the menu
+// bar's row, which is where a clock usually goes. Rebuilt whole rather than
+// diffed in place -- the set is small and there is no z-order or focus to
+// lose -- while the views *inside* it are patched by id like any others.
+static const char *kOverlayOwner = "\x01overlays";
+
+static Napi::Value Overlays(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    requireRunning(env, "overlays");
+
+    // Destroy whatever was there. The registry is what knows which views those
+    // were, and forgetWindow is what stops their ids resolving afterwards.
+    if (const std::vector<std::string> *ids = g_views.idsOf(kOverlayOwner))
+        {
+        std::vector<std::string> doomed = *ids;
+        for (const std::string &id : doomed)
+            if (ViewRef *ref = g_views.find(id))
+                TObject::destroy(ref->view);
+        }
+    g_views.forgetWindow(kOverlayOwner);
+
+    if (!info[0].IsArray())
+        return env.Undefined();
+    buildItems(env, g_app.get(), info[0], kOverlayOwner);
+    applyCursors(env, info[0]);
+    return env.Undefined();
+}
+
 // tv.quit() -- ask the application to exit, as if the user had chosen Exit.
 static Napi::Value Quit(const Napi::CallbackInfo &info)
 {
@@ -1417,6 +1468,7 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports)
     exports.Set("step", Napi::Function::New(env, Step));
     exports.Set("dialog", Napi::Function::New(env, Dialog));
     exports.Set("popupMenu", Napi::Function::New(env, PopupMenu));
+    exports.Set("overlays", Napi::Function::New(env, Overlays));
     exports.Set("quit", Napi::Function::New(env, Quit));
     exports.Set("setMenuBar", Napi::Function::New(env, SetMenuBar));
     exports.Set("setStatusLine", Napi::Function::New(env, SetStatusLine));

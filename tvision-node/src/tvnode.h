@@ -11,6 +11,7 @@
 #define Uses_TApplication
 #define Uses_TButton
 #define Uses_TCheckBoxes
+#define Uses_TMultiCheckBoxes
 #define Uses_TCluster
 #define Uses_TCommandSet
 #define Uses_TDrawBuffer
@@ -20,6 +21,8 @@
 #define Uses_TEvent
 #define Uses_TEventQueue
 #define Uses_TInputLine
+#define Uses_TFilterValidator
+#define Uses_TValidator
 #define Uses_TKeys
 #define Uses_TLabel
 #define Uses_TListViewer
@@ -251,6 +254,32 @@ private:
 // every edit goes through either: typing, Backspace, a paste, a click that
 // moves the cursor and Ctrl-Y all land in handleEvent. So the comparison is
 // made around it, which cannot miss a route.
+// The set of characters a field will accept, and nothing else.
+//
+// TFilterValidator does two jobs, and only one of them belongs here.
+// isValidInput() is called from TInputLine::checkValid after every edit and
+// rejects the whole edit if the result contains a character outside the set --
+// which is Turbo Vision's answer to "reject a keystroke before it reaches the
+// field", and the half of gap (8) that a model told about keystrokes still
+// could not do.
+//
+// isValid() is the other job: TInputLine::valid() calls it when the dialog is
+// answered and, on failure, calls error() -- which is messageBox(), which is
+// execView(), which is a nested event loop. It is overridden away to True for
+// two reasons. The loop is one. The other is that the only way a field can
+// hold a character its own filter rejects is for the *model* to have put it
+// there with setValue, and a value the model set is the model's to validate;
+// blocking a dialog over it would be the binding second-guessing the program.
+class JsFilterValidator : public TFilterValidator {
+public:
+    explicit JsFilterValidator(TStringView allowed) noexcept
+        : TFilterValidator(allowed)
+    {
+    }
+
+    virtual Boolean isValid(const char *) override { return True; }
+};
+
 class JsInputLine : public TInputLine {
 public:
     JsInputLine(const TRect &bounds, int aMaxLen, std::string id) noexcept
@@ -370,6 +399,52 @@ public:
     const uint32_t count;
 
 private:
+    std::string viewId;
+};
+
+// A cluster whose boxes have more than two states.
+//
+// TMultiCheckBoxes packs every item's state into the same `value` word a
+// TCluster already has, which is why its constructor takes a pair of numbers
+// nobody would guess: `selRange` is how many states there are, and `flags` is
+// the low byte's bit mask together with the high byte's bits-per-item. Both
+// are derivable from the marks -- one character per state, drawn between the
+// brackets -- so the model gives the marks and this works the rest out.
+//
+// The packing is the reason for the ceiling: 32 bits of `value`, so
+// items * bitsPerItem must fit, and the builder says so rather than silently
+// dropping the last few boxes.
+class JsMultiCheckBoxes : public TMultiCheckBoxes {
+public:
+    JsMultiCheckBoxes(TRect &bounds, TSItem *items, uint32_t aCount,
+                      const std::string &theMarks, std::string id) noexcept;
+
+    virtual void handleEvent(TEvent &event) override;
+
+    // The marks are kept here and the base class is given none, which is a
+    // workaround for a bug in Turbo Vision rather than a preference:
+    // TMultiCheckBoxes copies its `states` string with newStr() -- `new
+    // char[]` -- and its destructor frees it with plain `delete`
+    // (tmulchkb.cpp:62). AddressSanitizer stops the process over the
+    // mismatch, which is how it was found. Passing a null pointer makes
+    // newStr() return 0, so the destructor deletes nothing, and draw() is
+    // overridden to use the copy above instead.
+    virtual void draw() override;
+
+    std::vector<int> states() const;
+    void setStates(const std::vector<int> &wanted);
+
+    // How many bits one item's state occupies, given how many marks there are.
+    // One for two marks, two for three or four, and so on -- never zero, so
+    // that a single-mark cluster is still addressable.
+    static int bitsFor(size_t markCount);
+
+    const uint32_t count;
+
+private:
+    int bits;
+    uint32_t mask;
+    std::string marks;
     std::string viewId;
 };
 
@@ -624,9 +699,13 @@ void noteFocused(const std::string &id, int index, const std::string &text);
 // A cluster's bitfield as an array of `count` booleans.
 Napi::Array checkedArray(const Napi::Env &env, uint32_t bits, uint32_t count);
 
+// And a multi-state cluster's, as one state index per box.
+Napi::Array markArray(const Napi::Env &env, const std::vector<int> &states);
+
 void noteChangedText(const std::string &id, const std::string &text);
 void noteChangedFlags(const std::string &id, uint32_t bits, uint32_t count);
 void noteChangedChoice(const std::string &id, int index);
+void noteChangedMarks(const std::string &id, const std::vector<int> &states);
 
 // Queued for the same reason, and more urgently: setValue() calls scrollDraw()
 // directly, so a render that moves a scroll bar would call back into JS from
@@ -672,7 +751,7 @@ std::vector<CanvasLine> getCanvasLines(const Napi::Value &v);
 // Fills a window from a JS `items` array; ids are registered against windowId
 // so closing the window forgets them all. Returns the first view that can take
 // focus, in declaration order -- see applyInitialFocus.
-TView *buildItems(const Napi::Env &env, JsWindow *win, const Napi::Value &items,
+TView *buildItems(const Napi::Env &env, TGroup *win, const Napi::Value &items,
                   const std::string &windowId);
 
 // Turbo Vision focuses the *last* view inserted, because insert() prepends and

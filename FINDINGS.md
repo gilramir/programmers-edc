@@ -2256,3 +2256,154 @@ One inherited surprise, and it is the "two clicks, not one" rule again: the
 first right click on an inactive window is spent activating it, because
 `TView::handleEvent` selects on `evMouseDown` whichever button it was. Both
 `drive_demo.py` and anyone using this will click twice.
+
+## Closing gap 8's other half: the model declares, it is not asked
+
+`TFilterValidator` rejects a character before it reaches the field. The gap
+entry framed that as something the model "is still never offered", and the
+framing was the mistake: offering it would have been the first
+question-and-answer this protocol ever carried, and there was no need.
+
+**`allowed` is a set of characters on the view, not a callback.** The model
+says what the field takes; a keystroke outside the set does not happen; nothing
+is reported, because nothing happened. Every other message in this protocol is
+one-way and this one is too — it is a *field*, which is one-way by
+construction.
+
+That is worth stating plainly because the obvious design was the other one: an
+event carrying the keystroke, an answer carrying yes or no, and a field that
+has to sit still until the model replies. It would have worked and it would
+have made every keystroke a round trip through Gren, at which point a slow
+model shows up as a laggy input line.
+
+### Half of TFilterValidator is a nested loop, and it is overridden away
+
+`TValidator` has two jobs and `TInputLine` uses them at two different moments.
+`isValidInput` runs from `checkValid` after every edit and is the filter.
+`isValid` runs from `TInputLine::valid()` when the dialog is answered and, on
+failure, calls `error()` — which for every stock validator is `messageBox()`,
+which is `execView()`, which is the nested loop the menu bar already has too
+much of.
+
+`JsFilterValidator::isValid` returns `True` unconditionally. Two reasons, and
+the second is the better one. The loop is one. The other is that the only way a
+field can hold a character its own filter rejects is for the **model** to have
+put it there with a `value`, and a value the model set is the model's to
+validate — a binding that blocked the dialog over it would be second-guessing
+the program. So `allowed` filters typing and only typing, and the docs say so.
+
+`TRangeValidator` and `TPXPictureValidator` are not wrapped and this is why.
+The *filtering* half of a range validator is `allowed = Just "+-0123456789"`,
+which is already here; the checking half is one `String.toInt` in `update` when
+the dialog is answered, and doing it there gets a message the program wrote
+rather than "Value not in the range 0 to 100" in a box the model cannot see.
+
+## Closing gap 9: TMultiCheckBoxes, and the 32 bits behind it
+
+A cluster whose boxes have more than two states. Small, and listed so it would
+stop being a surprise; it turned out to be exactly as small as advertised, with
+one thing worth knowing.
+
+`TMultiCheckBoxes` reuses `TCluster::value` — a single 32-bit word — for
+*every* box's state at once, which is why its constructor takes two numbers
+nobody would guess. `selRange` is how many states there are, and `flags` packs
+the low byte's bit mask together with the high byte's bits-per-item:
+`(bits << 8) | ((1 << bits) - 1)`. Both are derivable from one thing the model
+was going to give anyway — the marks, one character per state, drawn between
+the brackets — so `JsMultiCheckBoxes` derives them and the Gren side never sees
+either.
+
+The packing is also a real ceiling: *items* × *bits per state* must fit in 32,
+which is eight boxes of four states or sixteen of three. The builder throws
+with both numbers in the message rather than silently dropping the boxes that
+do not fit, which is what the bit shift would otherwise do.
+
+`Value` gained a fourth shape, `Marks (Array Int)`, and `Tui.marks` reads the
+same thing out of a dialog's answer beside `text`, `number` and `flags`. The
+decoder tries `Flags` before `Marks` on purpose: an array of booleans is also
+an array, and check boxes are the commoner control.
+
+### And it found an upstream bug, which is what ASAN is for
+
+`TMultiCheckBoxes` copies its `states` string with `newStr()` -- `new char[]`
+-- and frees it in its destructor with plain `delete` (`tmulchkb.cpp:62`).
+That is an alloc/dealloc mismatch, and AddressSanitizer does not warn about it,
+it *stops the process*: the first ASAN run of `drive_forms.py` failed at
+"Escape closed the form" and at everything after it, because closing the dialog
+killed the program.
+
+Worth knowing for two reasons beyond the fix. It is invisible in an ordinary
+build -- `test` was green through the whole of this and `test:asan` is the only
+thing that could have caught it, which is exactly the argument for running it
+on anything that touches C++. And it is the second thing this port has had to
+report upstream, after [#229](https://github.com/magiblot/tvision/issues/229)
+-- but the first in the *library*: #229 is two findings in `calendar.cpp`,
+which is a demo program.
+
+**It is not one line.** Grepping the library for the same shape -- a pointer
+filled by `newStr()` or `ipstream::readString()`, both of which use
+`new char[]`, and freed with plain `delete` -- finds seven:
+
+    tmulchkb.cpp:62   delete states       (newStr :27, readString :41)
+    tevent.cpp:104    delete pasteText    (new char[] :332)
+    tstatusl.cpp:270  delete t            (readString :264)
+    tdircoll.cpp:167  delete txt          (readString :164)
+    tdircoll.cpp:168  delete dir          (readString :165)
+    colorsel.cpp:573  delete nm           (readString :569)
+    colorsel.cpp:592  delete nm           (readString :588)
+
+`tevent.cpp` is the one that settles what kind of mistake it is: the same
+`pasteText` buffer is freed with `delete[]` at line 328 and with plain `delete`
+at line 104, in the same file. Five of the seven are on `ipstream` read paths
+that a program using the library normally never reaches, which is why they have
+survived; `TMultiCheckBoxes`' is in an ordinary destructor, which is why this
+was the one to fire.
+
+The workaround is in the subclass, and there is no other place for it:
+`tvision/` is an upstream checkout this repo does not own. `JsMultiCheckBoxes`
+passes a **null** `states` to the base -- `newStr(nullptr)` returns 0, so the
+destructor frees nothing -- keeps the marks in a `std::string` of its own, and
+overrides `draw()` to hand that to `drawMultiBox()`. `TMultiCheckBoxes::draw()`
+is one line and that line is what it does, so nothing is lost.
+
+## Closing gap 10: a view on the application
+
+`TClockView` and `THeapView` are inserted into `TProgram`, not into
+`TDeskTop`. That is not an implementation detail — the desktop is the patterned
+area windows live in, and a clock in the corner is not in it — and `Ui` had a
+menu bar, a status line and windows with nothing in between.
+
+`Ui.overlays` is that missing place: an `Array View` in **screen** coordinates,
+drawn above every window, uncoverable by one, never tiled or cascaded. The
+whole of the binding is one function, `tv.overlays(items)`, because
+`buildItems` only ever needed the group to be a `TGroup` rather than a
+`JsWindow` — it was already writing into one.
+
+Three things that fell out.
+
+**The status line was the workaround and it cost a repaint a second.**
+`examples/demo` kept its clock as a status item, which works because a status
+item with no command is a hint. But a status line is replaced *whole* — there
+is no patching an entry — so a clock in one rebuilt the entire status line
+every second. That is precisely why Borland made the clock a view, and the note
+saying so has been in this file since the demo was ported. The clock is now one
+`StaticText` in `overlays`, patched.
+
+**Growing works because `Grows` already did.** `TClockView` sets its own
+`growMode` in its constructor so it stays in the corner when the screen
+changes; here the same thing is `Grows { grow = Tui.pinRight, ... }`, the
+wrapper gap (2) built, applied to a view that is not in a window. Nothing had
+to be added — `growModeOf` runs on every view the builder makes, whatever group
+it is going into.
+
+**Screen coordinates are not desktop coordinates**, and this is the one trap.
+Everything else in this API that has a rectangle is in the desktop's frame, and
+`Resized` reports the desktop's size — which is the same width but two rows
+shorter. An overlay on row 0 is on the menu bar's row, which is where a clock
+goes; an overlay at `rows - 1` would be under the status line. The docs say so
+and `examples/demo` lays out against `cols` and row 0 to make it concrete.
+
+The set is rebuilt whole when its shape changes and patched by id when it does
+not, which is the same rule a window's contents follow. Without the patching
+half, a clock rendering once a second would destroy and rebuild the corner of
+the screen forever — the exact cost the status line was already paying.

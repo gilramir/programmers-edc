@@ -246,6 +246,7 @@ view model =
 
         else
             []
+    , overlays = []
     }
 
 

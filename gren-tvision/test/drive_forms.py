@@ -86,6 +86,18 @@ def main():
     app.send(b"Aardvark, Anne", settle=0.4)
     app.send(b"\x1bc", settle=0.4)
     app.send(b"Zoo", settle=0.4)
+    # The last piece of gap (8), and the only half of it that says nothing
+    # back. Letters typed into the phone field never reach it, so there is no
+    # keystroke to report and no way for the model to have an opinion --
+    # `allowed` says what the field takes and TFilterValidator rejects the rest
+    # before the edit lands. Without it a model told about every value change
+    # still could not have refused a character.
+    app.send(b"\x1bp", settle=0.4)     # Phone
+    app.send(b"555abc123", settle=0.6)
+    check("a filtered field drops the characters it was not given",
+          "555123" in app.render() and "555abc" not in app.render(),
+          app.render())
+
     app.send(b"\x1bt", settle=0.4)     # Type: the check box group
     app.send(DOWN, settle=0.3)
     app.send(b" ", settle=0.3)         # Space ticks it; Enter would not
@@ -96,6 +108,22 @@ def main():
           "Aardvark, Anne" in filled and "Zoo" in filled, filled)
     check("Space ticked the second box", "[X] Personal" in filled, filled)
 
+    # The third kind of cluster, and the one the other two could not express:
+    # three states per box rather than two. Space cycles and wraps, which is
+    # the whole of its behaviour -- and the packing behind it is Turbo
+    # Vision's, one 32-bit word for the lot.
+    app.send(b"\x1bh", settle=0.4)     # Reach: the multi-state group
+    check("a multi-state cluster starts on the state it was given",
+          "[ ] Morning" in app.render(), app.render())
+    app.send(b" ", settle=0.4)
+    check("Space moves a box to the next state, not just on and off",
+          "[?] Morning" in app.render(), app.render())
+    app.send(b" ", settle=0.4)
+    app.send(b" ", settle=0.4)
+    check("and the third press wraps back to the first",
+          "[ ] Morning" in app.render(), app.render())
+    app.send(b" ", settle=0.4)         # leave it on `?`
+
     app.send(b"\r", settle=1.2)        # Enter presses the default button
     saved = app.render()
     check("the form closed", "New record" not in saved)
@@ -103,6 +131,10 @@ def main():
     check("and sorted to the top",
           saved.index("Aardvark, Anne") < saved.index("Helton, Andrew"), saved)
     check("the count in the title followed", "Phone Numbers (5)" in saved, saved)
+    check("and what got through the filter is what was collected",
+          "555123" in saved, saved)
+    check("the multi-state cluster came back as one state per box",
+          "Morning [?]  Evening [ ]" in saved, saved)
 
     # 5. The highlight followed the record to its new row -- the model wrote it
     #    back after the list was rebuilt, which resets it to row 0.

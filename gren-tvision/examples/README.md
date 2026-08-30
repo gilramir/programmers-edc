@@ -13,7 +13,7 @@ Build them all with `../build.sh`, run one with `../run.sh <name>`.
 | `hello` | `tvision/hello.cpp` | menus, status line, modal dialog as a `Cmd`, dialog result as a `Msg` |
 | `mmenu` | `tvision/examples/mmenu` | a menu bar that changes at runtime, and menu bar entries that are commands rather than pull-downs |
 | `entries` | *(ours)* | list boxes, `Time.every` behind a modal dialog, `WindowClosed`, mutable window titles — and later `Tui.focus`, because "show me that window" is the thing a description of the UI cannot say, `Resized`, because it is the first example that does not assume 80x25, `Grows`, because a window that grows and a list box that does not is worse than neither, `Changed`, because a filter box is a control in an ordinary window, `messageBox`, because Clear should ask first, and `History`, because a filter box worth typing into is one worth remembering |
-| `forms` | `tvision/examples/tvforms` | check boxes, radio buttons, labels, and a list box highlight the model can both read and move |
+| `forms` | `tvision/examples/tvforms` | check boxes, radio buttons, labels, and a list box highlight the model can both read and move — later `allowed`, the filter on its phone field, and `MultiCheckBoxes`, the cluster the other two could not express |
 | `ascii` | `tvision/examples/tvdemo` (ascii.cpp) | the canvas, from Gren: a view the model paints itself, and a cursor to select with |
 | `calendar` | `tvision/examples/tvdemo` (calendar.cpp) | colour on a canvas, as spans; and today as a field, because `Time.now` is a task |
 | `puzzle` | `tvision/examples/tvdemo` (puzzle.cpp) | nothing in the API -- but the random seed had to move into the model, which is what let a test win the game |
@@ -21,7 +21,7 @@ Build them all with `../build.sh`, run one with `../run.sh <name>`.
 | `palette` | `tvision/examples/palette` | nothing -- it is the example whose entire subject the port removes, and the write-up says what that costs |
 | `mouse` | `tvision/examples/tvdemo` (mousedlg.cpp) | the scroll bar as a view of its own, `isDouble` on a click, `setDoubleClickDelay`, and `takesFocus` on a canvas |
 | `dir` | `tvision/examples/tvdir` | no widget at all — but it found a real bug in the diff, moved a list box's scroll bar, and is the first example to use the file system; later `Tui.fileDialog`, which finished the port, and the `History` on its field |
-| `demo` | `tvision/examples/tvdemo` (the shell) | real windows: zoom, resize, tile and cascade, which every window had silently been unable to do — and later the first `Tui.messageBox`, which is its About box with fifteen lines taken out, and `popupMenu`, whose right-click menu is three commands it already had |
+| `demo` | `tvision/examples/tvdemo` (the shell) | real windows: zoom, resize, tile and cascade, which every window had silently been unable to do — and later the first `Tui.messageBox`, which is its About box with fifteen lines taken out, `popupMenu`, whose right-click menu is three commands it already had, and `Ui.overlays`, which is where its clock finally belongs |
 | `viewer` | `tvision/examples/tvdemo` (fileview.cpp) | nothing — `TScroller` went the way of `TOutline`; but it is the first horizontal scroll bar doing its own job |
 | `watch` | *(ours)* | not a port: a subscription from outside the program, several children at once, and a run that can be killed. It found a name the binding was silently swallowing |
 
@@ -415,9 +415,12 @@ the four layers, and the stock controls are all there: `TStaticText`, `TLabel`,
 `TListViewer` with `TListBox`, `TScrollBar`, `TMenuBar`/`TMenuBox`/`TSubMenu`,
 `TStatusLine`, `TWindow`/`TDialog`/`TFrame`,
 `THistory`/`THistoryViewer`/`THistoryWindow`, `TMenuBox` as a context menu,
-and the
+`TMultiCheckBoxes`, `TFilterValidator`, and the
 `TGroup`/`TProgram`/`TApplication`/`TDeskTop` scaffolding underneath. `Canvas`
 is the escape hatch for anything the set does not have.
+
+`TValidator`'s other four subclasses were left out with a reason of their own,
+under gap (8) below.
 
 Five more were left out on purpose and each has its reason written up above:
 `TScroller` (`viewer`), `TOutlineViewer` and `TOutline` (`dir`), the
@@ -433,11 +436,11 @@ ordinary `Scrolled`. One caveat inherited from Turbo Vision: `positionalEvents`
 excludes `evMouseWheel` (`views.h`), so a wheel event goes to whatever has
 *focus* rather than to whatever is under the pointer.
 
-### The coverage gaps left
+### The coverage gaps, all closed
 
-Ten, in the order they were listed, seven closed and one half closed. Each says
-what it would take, because "not done", "not decided" and "not needed" are
-three different problems.
+All ten, in the order they were listed, **all closed**. Each entry says what it
+turned out to take, because "not done", "not decided" and "not needed" were
+three different problems and the difference is most of what this list was for.
 
 None of them is reported by `tools/check_consistency.py` any more, which is
 what closing four of these looks like from that end. The port is the only way
@@ -643,8 +646,9 @@ casting every modal view to `TGroup *` and reading `TGroup::endState` off it,
 which had been true of every modal until this one; and the first right click on
 an inactive window is still spent activating it.
 
-**8. Validators on input lines** — the second half of what used to be two
-faces of one hole. The first face is closed; this is what is left of it.
+**8. ~~Validators on input lines~~ Done, in two halves —
+[`Changed`](#Event) at protocol 8 and `allowed` at protocol 10.** This entry
+was two faces of one hole and they were closed a long way apart.
 
 `TValidator` and its five subclasses vet a field *as it is typed* —
 `TFilterValidator` rejects a keystroke outright, `TRangeValidator` and
@@ -671,21 +675,87 @@ has both — a burst of keystrokes must not outrun the renders that answer them,
 and a value the *model* sets must not select the field the way an initial value
 does, or the user's next keystroke replaces everything they typed.
 
-**What is left of this gap is the keystroke-level half**, which is what a
-`TValidator` is actually for: `TFilterValidator` rejects a character *before* it
-reaches the field, and the model is still never offered that choice. It is now
-the only part of (8) outstanding.
+**And so is the keystroke-level half — `allowed` on an
+[`InputLine`](#View), protocol 10.** The entry used to say the model "is still
+never offered that choice", and the framing was the mistake: offering it would
+have been the first question-and-answer this protocol ever carried. `allowed`
+is a *set of characters on the view*. The model says what the field takes, a
+keystroke outside the set does not happen, and nothing is reported because
+nothing happened — one-way by construction rather than by discipline.
 
-**9. `TMultiCheckBoxes`.** A cluster whose items have more than two states.
-Small, rarely wanted, and a hole in an area the API otherwise covers
-completely. Listed so it stops being a surprise.
+The obvious alternative was an event carrying the keystroke and an answer
+carrying yes or no, with the field sitting still until the model replied. It
+would have worked and it would have made every keystroke a round trip through
+Gren.
 
-**10. A view on the application rather than the desktop.** `TClockView` and
-`THeapView` sit beside the desktop, not on it, and `Ui` has a menu bar, a
-status line and windows with nothing in between. `examples/demo` puts its clock
-in the status line instead, which works and rebuilds the status line every
-second; `watch` puts its counters there for the same reason. FINDINGS has the
-note; it is why Borland made the clock a view.
+Half of `TFilterValidator` is overridden away, and FINDINGS says why:
+`isValid` runs when the *dialog* is answered and calls `error()`, which is
+`messageBox`, which is `execView`, which is a nested loop. It is also the wrong
+policy — the only way a field can hold a character its own filter rejects is
+for the model to have set it, and a value the model set is the model's to
+validate.
+
+`TRangeValidator` and `TPXPictureValidator` are not wrapped for the same
+reason. A range validator's filtering half is `allowed = Just "+-0123456789"`
+and its checking half is one `String.toInt` in `update`, which gets a message
+the program wrote rather than Borland's in a box the model cannot see.
+`examples/forms` has the demonstration: its phone field takes digits, spaces,
+brackets, `+`, `-` and `.` and nothing else.
+
+**9. ~~`TMultiCheckBoxes`.~~ Done — [`MultiCheckBoxes`](#View), protocol 11.**
+A cluster whose boxes have more than two states. It was exactly as small as
+this entry said, with one thing worth knowing.
+
+`TMultiCheckBoxes` packs *every* box's state into the one 32-bit
+`TCluster::value`, which is why its constructor takes two numbers nobody would
+guess — `selRange`, and a `flags` word holding a bit mask and a bits-per-item
+count. Both come from something the model was going to give anyway: `marks`,
+one character per state, drawn between the brackets. So the Gren side says
+`marks = " ?X"` and `states = [ 2, 0 ]` and never sees either number.
+
+The packing is a real ceiling — *items* × *bits per state* must fit in 32,
+so eight boxes of four states or sixteen of three — and the builder throws
+with both numbers in the message rather than letting the shift drop the boxes
+that do not fit.
+
+[`Value`](#Value) gained a fourth shape, `Marks`, and [`marks`](#marks) reads
+the same thing out of a dialog's answer beside `text`, `number` and `flags`.
+`examples/forms` has a "Reach" cluster: two boxes, three states each, blank
+`?` `X`.
+
+**And it found an upstream bug** — the second thing this port has had to report
+after [#229](https://github.com/magiblot/tvision/issues/229), and the first in
+the library rather than in a demo. `TMultiCheckBoxes` allocates its `states`
+string with `newStr()` — `new char[]` — and frees it with plain `delete`
+(`tmulchkb.cpp:62`). ASAN does not warn about an alloc/dealloc mismatch, it
+stops the process, so the first `test:asan` run failed at every check after the
+dialog was closed while `test` stayed green throughout. The same shape turns up
+in six more places in the library; FINDINGS lists them. The subclass passes a
+null `states` and draws the marks itself.
+
+**10. ~~A view on the application rather than the desktop.~~ Done —
+[`Ui.overlays`](#Ui), protocol 12.** `TClockView` and `THeapView` are inserted
+into `TProgram`, not into `TDeskTop`, and `Ui` had a menu bar, a status line
+and windows with nothing in between. `overlays` is that place: an
+`Array View` in **screen** coordinates, drawn above every window, uncoverable
+by one, and never tiled or cascaded.
+
+The binding is one function, because `buildItems` only ever needed the group
+to be a `TGroup` rather than a `JsWindow` — it was already writing into one.
+
+Three things fell out, all in FINDINGS. **The status line was the workaround
+and it cost a repaint a second**: `examples/demo`'s clock was a status item,
+and a status line is replaced *whole*, so it rebuilt the entire line every
+second — precisely why Borland made the clock a view. It is now one
+`StaticText` in `overlays`, patched. **Growing works because `Grows` already
+did**: `TClockView` sets its own `growMode`, and here that is
+`Grows { grow = Tui.pinRight, ... }` on a view that is not in a window, with
+nothing added to make it work. And **screen coordinates are not desktop
+coordinates** — the same width, two rows shorter, so row 0 is the menu bar's
+row and that is where a clock goes.
+
+`watch` still puts its counters in the status line, which is a fair place for
+counters that are text; the point is that it is now a choice.
 
 ### And what is not a gap
 
@@ -721,3 +791,18 @@ The Gren-only example is done: `watch`, written up above. It is the answer to
 "what does this have that Borland's did not", and the answer turned out to be
 three things — a subscription, several children at once, and a handle on
 something still running.
+
+### What is left, now that the list is empty
+
+Two things, and neither is a widget.
+
+**`tvedit`**, which is the `TEditor` milestone above rather than a port.
+
+**One known limitation**, written up under gap (7) and in FINDINGS:
+`TMenuView::execute` runs a nested event loop, so the *menu bar* stops the
+program while a pull-down is open. Nothing in this package is built on it —
+the history drop-down and the context menu both avoid it deliberately — and
+undoing it means reimplementing the least documented code in the library to
+buy back a one-second freeze. It is a decision, not an oversight, and it is
+written where somebody would hit it: FINDINGS, this file, and
+`Tui.MenuItem`'s doc comment.

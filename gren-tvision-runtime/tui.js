@@ -14,7 +14,7 @@ const { createDiffer } = require('./diff');
 // Bumped in lockstep with Tui.protocolVersion on the Gren side. A Gren package
 // and an npm package version independently, and they will skew; refusing an
 // unknown version beats rendering nothing and leaving the author to guess.
-const PROTOCOL = 9;
+const PROTOCOL = 12;
 
 /**
  * Drive a compiled Gren program's UI.
@@ -113,6 +113,9 @@ function run(grenModule, options = {}) {
           differ.chrome(message.menuBar, message.statusLine);
         }
         differ.apply(message.windows);
+        // After the windows, because an overlay sits above them and is built
+        // by insertion order like everything else in a group.
+        differ.overlay(message.overlays);
         if (pendingFocus !== null) {
           tv.focus(pendingFocus);
           pendingFocus = null;

@@ -269,7 +269,7 @@ addDialog =
         , rect = { x1 = 16, y1 = 7, x2 = 64, y2 = 15 }
         , views =
             [ StaticText { id = "prompt", rect = { x1 = 3, y1 = 2, x2 = 44, y2 = 3 }, text = "New entry:" }
-            , InputLine { id = "entry", rect = { x1 = 3, y1 = 3, x2 = 44, y2 = 4 }, maxLen = 40, value = "" }
+            , InputLine { id = "entry", rect = { x1 = 3, y1 = 3, x2 = 44, y2 = 4 }, maxLen = 40, value = "", allowed = Nothing }
             , Button { id = "ok", rect = { x1 = 10, y1 = 5, x2 = 22, y2 = 7 }, title = "~O~K", cmd = "ok", isDefault = True, takesFocus = True }
             , Button { id = "cancel", rect = { x1 = 26, y1 = 5, x2 = 38, y2 = 7 }, title = "Cancel", cmd = "cancel", isDefault = False, takesFocus = True }
             ]
@@ -310,6 +310,7 @@ view model =
              else
                 []
             )
+    , overlays = []
     }
 
 
@@ -389,6 +390,7 @@ listWindow model =
                     , rect = { x1 = 10, y1 = 1, x2 = 40, y2 = 2 }
                     , maxLen = 40
                     , value = model.filter
+                    , allowed = Nothing
                     }
             }
         -- The drop-down has no rectangle of its own -- it takes the three

@@ -20,6 +20,7 @@ const MUTABLE = {
   listBox: ['items', 'focused'],
   canvas: ['lines', 'cursorAt'],
   checkBoxes: ['value'],
+  multiCheckBoxes: ['value'],
   radioButtons: ['value'],
   scrollBar: ['value', 'min', 'max', 'pageStep', 'arrowStep'],
 };
@@ -49,6 +50,7 @@ function sameShape(before, after) {
 function createDiffer(tv, onClosed = () => {}) {
   let current = new Map(); // window id -> the spec we last applied
   let chrome = null;       // the menu bar and status line we last applied
+  let overlays = null;     // the views on the application we last applied
 
   // tv.close() destroys the window, which notifies onClose -- but not until the
   // pump reaches a safe point, so the notification arrives *after* the call
@@ -113,6 +115,14 @@ function createDiffer(tv, onClosed = () => {}) {
         // A cluster holds state the model cannot see -- a box the user ticks
         // is reported only when a dialog is answered -- so the same rule as an
         // input line applies, and for the same reason: write it back only when
+        // the *model* changed it, never merely because it disagrees with the
+        // screen.
+        if (JSON.stringify(before.value) !== JSON.stringify(after.value)) {
+          tv.setValue(after.id, after.value);
+        }
+        break;
+      case 'multiCheckBoxes':
+        // Same rule as a cluster of two-state boxes: written back only when
         // the *model* changed it, never merely because it disagrees with the
         // screen.
         if (JSON.stringify(before.value) !== JSON.stringify(after.value)) {
@@ -243,6 +253,26 @@ function createDiffer(tv, onClosed = () => {}) {
       }
       chrome = next;
       return true;
+    },
+
+    /**
+     * Apply the views that sit on the *application* rather than on the
+     * desktop -- a clock in the corner, tvdemo's heap gauge.
+     *
+     * Rebuilt whole when the shape changes and patched by id when it does
+     * not, which is the same rule a window follows and matters for the same
+     * reason: a clock renders once a second, and rebuilding the set every
+     * second would repaint the corner of the screen forever.
+     */
+    overlay(items) {
+      items = items || [];
+      if (overlays !== null && sameShape({ items: overlays }, { items })) {
+        items.forEach((view, i) => patchView(overlays[i], view));
+        overlays = items;
+        return;
+      }
+      tv.overlays(items);
+      overlays = items;
     },
 
     /** Route a close notification: ours is swallowed, the user's is reported. */

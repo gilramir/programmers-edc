@@ -663,6 +663,7 @@ view model =
             |> Array.indexedMap (\index job -> { index = index, job = job })
             |> Array.keepIf (\it -> not it.job.closed)
             |> Array.map (\it -> jobWindow model it.index it.job)
+    , overlays = []
     }
 
 

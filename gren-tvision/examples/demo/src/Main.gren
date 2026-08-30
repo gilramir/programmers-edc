@@ -38,12 +38,13 @@ and from here, because a command from a popup is a command. It is also where
 to watch the clock: it keeps ticking with the menu open, which `TMenuPopup`
 would not have allowed.
 
-**The clock is in the status line, and that costs something.** `TClockView` is
-a view on the application, outside the desktop, which this API has no way to
-express. A status item is close enough -- except that the status line is
-replaced whole rather than patched, so a clock in it rebuilds the status line
-once a second. Cheap, but it is precisely the reason Borland made the clock a
-view.
+**The clock is a view on the application, which is what `TClockView` is.** It
+sat in the status line for a long time here, because `Ui` had a menu bar, a
+status line and windows and nothing in between. That worked and rebuilt the
+status line once a second, since a status line is replaced whole -- and that
+is exactly why Borland made the clock a view. `overlays` is that missing
+place: above every window, uncoverable, never tiled, and in screen
+coordinates. The clock is one `StaticText` in it, patched rather than rebuilt.
 
 -}
 
@@ -228,6 +229,9 @@ describe event =
 
                         Tui.Choice index ->
                             String.fromInt index
+
+                        Tui.Marks states ->
+                            String.join "," (Array.map String.fromInt states)
                    )
 
         DialogClosed it ->
@@ -411,10 +415,6 @@ view model =
         , { text = "~F5~ Zoom", key = "F5", cmd = "zoom" }
         , { text = "~F6~ Next", key = "F6", cmd = "next" }
         , { text = "~Alt-0~ Events", key = "Alt-0", cmd = "events" }
-        -- The clock. A status item is a hint when its command is empty, which
-        -- is what makes this legal; what it costs is a status line rebuilt
-        -- every second, because the status line is replaced whole.
-        , { text = clock model, key = "", cmd = "" }
         ]
     , windows =
         Array.map (noteWindow model) model.notes
@@ -424,6 +424,35 @@ view model =
                 else
                     []
                )
+    -- The clock, and it is a *view* now rather than a status item.
+    --
+    -- TClockView is inserted into TProgram and not into TDeskTop, which is
+    -- what an overlay is: above every window, uncoverable, in screen
+    -- coordinates. It used to live in the status line here, which worked and
+    -- rebuilt the status line once a second because a status line is replaced
+    -- whole -- and that was precisely the reason Borland made the clock a
+    -- view. Now it patches one static text.
+    --
+    -- Screen coordinates, so the width is the *screen's* and `Resized`
+    -- reports the desktop's: same width, two rows shorter. Row 0 is the menu
+    -- bar's row, which is where tvdemo puts it too, and `pinRight` is
+    -- TClockView's own growMode.
+    , overlays =
+        [ Grows
+            { grow = Tui.pinRight
+            , view =
+                StaticText
+                    { id = "clock"
+                    , rect =
+                        { x1 = model.desktop.cols - 9
+                        , y1 = 0
+                        , x2 = model.desktop.cols
+                        , y2 = 1
+                        }
+                    , text = clock model
+                    }
+            }
+        ]
     }
 
 

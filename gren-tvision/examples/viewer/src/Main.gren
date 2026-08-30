@@ -229,6 +229,7 @@ view model =
         , { text = "", key = "F10", cmd = "menu" }
         ]
     , windows = [ viewerWindow model ]
+    , overlays = []
     }
 
 
