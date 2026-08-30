@@ -53,6 +53,7 @@ function start(config) {
     onClose: guard(config.onClose),
     onResize: guard(config.onResize),
     onChange: guard(config.onChange),
+    onEdit: guard(config.onEdit),
   });
 
   const report = (err) => {
@@ -136,6 +137,12 @@ module.exports = {
   focus: addon.focus,
   setText: addon.setText,
   setItems: addon.setItems,
+
+  // An editor's document, which is the one thing in this binding that does not
+  // travel with the render: setEditorText puts one in, readEditor takes it
+  // out. See the note on JsEditor in tvnode.h.
+  setEditorText: addon.setEditorText,
+  readEditor: addon.readEditor,
   setLines: addon.setLines,
   setTitle: addon.setTitle,
   setCursor: addon.setCursor,

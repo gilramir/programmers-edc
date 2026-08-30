@@ -1,0 +1,344 @@
+port module Main exposing (main)
+
+{-| tvision/examples/tvedit, in Gren: a text editor.
+
+This is the milestone the coverage list called "not a gap", and what it forced
+is the only place in this package where state lives somewhere other than the
+model.
+
+Every other example owns its state and re-renders it. A list of names, a
+month, a canvas of a few hundred cells -- all small enough that `view` can
+produce them from scratch on every tick of every subscription, and the differ
+throws away what did not change. A document is the first thing where that is
+false. Not because it is hard, but because `view` runs *often*: a `text` field
+on the editor would serialise the whole file into the render message once per
+render, forever. And the model would then have to implement insert, delete,
+word-left, undo and the clipboard, which is to say implement `TEditor`.
+
+So the boundary moves exactly one step. **The editor owns the buffer and this
+program owns the file.** The document crosses the port twice per file --
+`Tui.setEditorText` on the way in, `Tui.readEditor` on the way out -- and what
+arrives in between is an `Edited` event carrying whether the document is
+modified and where the caret is. Three numbers, on every keystroke, instead of
+a file.
+
+Everything else is ordinary. Cut, Copy, Paste, Undo and Select all are built-in
+command names, so those menu entries never pass through `update` at all. Save
+is not one, because writing a file is a `Task` and therefore this program's
+job -- and neither is Find, for the same shape of reason: a search needs a
+string, and asking for one is a dialog only the model can put up. The Search
+menu is the next piece of work.
+
+Run it on a file: `run.sh edit path/to/file`, or with no argument on a scratch
+buffer.
+
+-}
+
+import Array exposing (Array)
+import Bytes
+import FileSystem
+import FileSystem.Path as Path exposing (Path)
+import Init
+import Json.Decode as Decode
+import Json.Encode as Encode
+import Node
+import String
+import Task
+import Tui exposing (Event(..), MenuItem(..), View(..))
+
+
+-- PORTS
+
+
+port tuiOut : Encode.Value -> Cmd msg
+
+
+port tuiIn : (Decode.Value -> msg) -> Sub msg
+
+
+tui : Tui.Ports Msg
+tui =
+    { toJs = tuiOut, fromJs = tuiIn }
+
+
+-- MODEL
+
+
+type alias Model =
+    { permission : FileSystem.Permission
+    , path : Maybe Path
+    -- What the editor last told us, which is all we know about the document
+    -- between saves -- and all a status line needs.
+    , modified : Bool
+    , line : Int
+    , column : Int
+    , status : String
+    , desk : { cols : Int, rows : Int }
+    }
+
+
+type Msg
+    = Loaded { path : Path, body : String }
+    | Failed String
+    | Saved (Result FileSystem.Error {})
+    | FromTui Event
+
+
+-- INIT
+
+
+init : Node.Environment -> Init.Task { model : Model, command : Cmd Msg }
+init env =
+    Init.await FileSystem.initialize <| \permission ->
+        let
+            wanted =
+                startingPath env.args
+        in
+        Node.startProgram
+            { model =
+                { permission = permission
+                , path = wanted
+                , modified = False
+                , line = 0
+                , column = 0
+                , status =
+                    when wanted is
+                        Just _ ->
+                            "reading..."
+
+                        Nothing ->
+                            "Untitled"
+                , desk = { cols = 80, rows = 23 }
+                }
+            , command =
+                when wanted is
+                    Just path ->
+                        FileSystem.readFile permission path
+                            |> Task.map (\bytes -> Maybe.withDefault "" (Bytes.toString bytes))
+                            |> Task.attempt
+                                (\result ->
+                                    when result is
+                                        Ok body ->
+                                            Loaded { path = path, body = body }
+
+                                        Err error ->
+                                            Failed (FileSystem.errorToString error)
+                                )
+
+                    Nothing ->
+                        Cmd.none
+            }
+
+
+startingPath : Array String -> Maybe Path
+startingPath args =
+    args
+        |> Array.dropFirst 3
+        |> Array.findFirst (\arg -> not (String.startsWith "-" arg))
+        |> Maybe.map (\found -> Path.fromPosixString found.value)
+
+
+-- UPDATE
+
+
+update : Msg -> Model -> { model : Model, command : Cmd Msg }
+update msg model =
+    when msg is
+        -- The one moment a document goes *in*. Not a render: the editor is
+        -- not told what it holds every time something else on screen changes.
+        Loaded it ->
+            { model = { model | path = Just it.path, status = name it.path }
+            , command = Tui.setEditorText tui "body" it.body
+            }
+
+        Failed message ->
+            { model = { model | status = message }, command = Cmd.none }
+
+        Saved (Ok _) ->
+            -- The editor's `modified` flag is Turbo Vision's and we cannot
+            -- clear it from here, so the model keeps its own answer to "is
+            -- there anything to save" and this is where it is answered.
+            { model = { model | modified = False, status = "saved" }
+            , command = Cmd.none
+            }
+
+        Saved (Err error) ->
+            { model = { model | status = FileSystem.errorToString error }
+            , command = Cmd.none
+            }
+
+        FromTui event ->
+            handleEvent event model
+
+
+handleEvent : Event -> Model -> { model : Model, command : Cmd Msg }
+handleEvent event model =
+    when event is
+        -- Every keystroke, and it costs three numbers. The document stays
+        -- where it is.
+        Edited it ->
+            { model =
+                { model
+                    | modified = model.modified || it.isModified
+                    , line = it.line
+                    , column = it.column
+                }
+            , command = Cmd.none
+            }
+
+        -- Saving is two steps for the same reason opening a directory was in
+        -- `dir`: the thing that answers is a Task, so the command asks and the
+        -- answer arrives as a message.
+        Command "save" ->
+            { model = model, command = Tui.readEditor tui "body" }
+
+        EditorText it ->
+            when model.path is
+                Just path ->
+                    { model = model
+                    , command =
+                        Bytes.fromString it.text
+                            |> (\bytes -> FileSystem.writeFile model.permission bytes path)
+                            |> Task.map (\_ -> {})
+                            |> Task.attempt Saved
+                    }
+
+                Nothing ->
+                    { model = { model | status = "no file name" }, command = Cmd.none }
+
+        Resized size ->
+            { model = { model | desk = size }, command = Cmd.none }
+
+        _ ->
+            { model = model, command = Cmd.none }
+
+
+name : Path -> String
+name path =
+    Path.filenameWithExtension path
+
+
+-- VIEW
+
+
+view : Model -> Tui.Ui
+view model =
+    { menuBar =
+        [ SubMenu
+            { title = "~F~ile"
+            , key = "Alt-F"
+            , items =
+                [ Item { title = "~S~ave", cmd = "save", key = "F2", shortcut = "F2" }
+                , Tui.Separator
+                , Item { title = "E~x~it", cmd = "quit", key = "Alt-X", shortcut = "Alt-X" }
+                ]
+            }
+        -- Not one of these reaches `update`. They are built-in command names,
+        -- so Turbo Vision routes them to whichever editor has the caret --
+        -- the same bargain the Windows menu makes in `demo`.
+        , SubMenu
+            { title = "~E~dit"
+            , key = "Alt-E"
+            , items =
+                [ Item { title = "~U~ndo", cmd = "editor.undo", key = "", shortcut = "Ctrl-U" }
+                , Tui.Separator
+                , Item { title = "Cu~t~", cmd = "editor.cut", key = "", shortcut = "Shift-Del" }
+                , Item { title = "~C~opy", cmd = "editor.copy", key = "", shortcut = "Ctrl-Ins" }
+                , Item { title = "~P~aste", cmd = "editor.paste", key = "", shortcut = "Shift-Ins" }
+                , Item { title = "C~l~ear", cmd = "editor.clear", key = "", shortcut = "Ctrl-Del" }
+                , Tui.Separator
+                , Item { title = "Select ~a~ll", cmd = "editor.selectAll", key = "", shortcut = "Ctrl-A" }
+                ]
+            }
+        ]
+    , statusLine =
+        [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
+        , { text = "~F2~ Save", key = "F2", cmd = "save" }
+        , { text = "", key = "F10", cmd = "menu" }
+        ]
+    , windows = [ editorWindow model ]
+    , overlays = []
+    }
+
+
+{-| The window fills the desktop, and the views inside it have **fixed**
+rectangles.
+
+That is not a stylistic choice and it is the one sharp edge of an editor whose
+contents are not in the view. A view's rectangle is structural: change one and
+the differ rebuilds the window. For every other view that is merely wasteful,
+because the next render re-supplies the contents. For an editor it is
+destructive -- the rebuilt one is empty, and the document is gone, because
+there was never a copy of it in the render to put back.
+
+So the rectangles below are the layout at the size the window starts at, and
+the `Grows` wrappers keep them right at every other size, which is what
+`Grows` is for. The *window's* rectangle can follow the desktop freely: that
+one is patched with `setBounds` rather than rebuilt.
+-}
+editorWindow : Model -> Tui.Window
+editorWindow model =
+    { id = "editWin"
+    , title =
+        (when model.path is
+            Just path ->
+                name path
+
+            Nothing ->
+                "Untitled"
+        )
+            ++ (if model.modified then
+                    " *"
+
+                else
+                    ""
+               )
+    , rect =
+        { x1 = 1
+        , y1 = 1
+        , x2 = model.desk.cols - 1
+        , y2 = model.desk.rows - 1
+        }
+    , views =
+        [ Grows
+            { grow = Tui.stretch
+            , view =
+                Editor
+                    { id = "body"
+                    , rect = { x1 = 1, y1 = 1, x2 = 75, y2 = 17 }
+                    }
+            }
+        -- The caption Turbo Vision would have drawn with a TIndicator on the
+        -- window frame. A static text is better here for the reason every
+        -- other display in these examples is: what it says is the model's,
+        -- and the model was told.
+        , Grows
+            { grow = { left = False, top = True, right = True, bottom = True }
+            , view =
+                Tui.StaticText
+                    { id = "where"
+                    , rect = { x1 = 1, y1 = 19, x2 = 76, y2 = 20 }
+                    , text =
+                        String.fromInt (model.line + 1)
+                            ++ ":"
+                            ++ String.fromInt (model.column + 1)
+                            ++ "   "
+                            ++ model.status
+                    }
+            }
+        ]
+    }
+
+
+-- PROGRAM
+
+
+main : Tui.Program Model Msg
+main =
+    Tui.defineProgram tui
+        { init = init
+        , update = update
+        , subscriptions = \_ -> Sub.none
+        , view = view
+        , onEvent = FromTui
+        }

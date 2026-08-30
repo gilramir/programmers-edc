@@ -14,7 +14,7 @@ const { createDiffer } = require('./diff');
 // Bumped in lockstep with Tui.protocolVersion on the Gren side. A Gren package
 // and an npm package version independently, and they will skew; refusing an
 // unknown version beats rendering nothing and leaving the author to guess.
-const PROTOCOL = 12;
+const PROTOCOL = 13;
 
 /**
  * Drive a compiled Gren program's UI.
@@ -98,6 +98,10 @@ function run(grenModule, options = {}) {
             // cosmetic: the model's answer is a render, and the render has to
             // find a description that already agrees with the view, or it
             // writes the value back into the control the user is using.
+            // An editor was edited, or its caret moved. Deliberately without
+            // the document: see `editorText` below for how one travels.
+            onEdit: (id, modified, line, column) =>
+              send({ type: 'edited', id, modified: !!modified, line, column }),
             onChange: (id, value) => {
               differ.valueChanged(id, value);
               send({ type: 'changed', id, value });
@@ -176,6 +180,24 @@ function run(grenModule, options = {}) {
           items: message.items,
         });
         break;
+
+      // The two halves of an editor's document, and the only pair of messages
+      // in this protocol that carry one. A render cannot: `view` runs on every
+      // tick of every subscription, and a file does not belong in it.
+      case 'setEditorText':
+        tv.setEditorText(message.id, message.text);
+        break;
+
+      case 'readEditor': {
+        // A Cmd answered by a Msg, exactly as `dialog` is. The read itself is
+        // synchronous in the binding -- it is a copy out of a buffer -- but
+        // what the model sees is an ordinary event.
+        const text = tv.readEditor(message.id);
+        if (text !== null && text !== undefined) {
+          send({ type: 'editorText', id: message.id, text });
+        }
+        break;
+      }
 
       case 'doubleClickDelay':
         tv.doubleClickDelay(message.ticks);

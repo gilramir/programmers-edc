@@ -23,6 +23,7 @@ Build them all with `../build.sh`, run one with `../run.sh <name>`.
 | `dir` | `tvision/examples/tvdir` | no widget at all — but it found a real bug in the diff, moved a list box's scroll bar, and is the first example to use the file system; later `Tui.fileDialog`, which finished the port, and the `History` on its field |
 | `demo` | `tvision/examples/tvdemo` (the shell) | real windows: zoom, resize, tile and cascade, which every window had silently been unable to do — and later the first `Tui.messageBox`, which is its About box with fifteen lines taken out, `popupMenu`, whose right-click menu is three commands it already had, and `Ui.overlays`, which is where its clock finally belongs |
 | `viewer` | `tvision/examples/tvdemo` (fileview.cpp) | nothing — `TScroller` went the way of `TOutline`; but it is the first horizontal scroll bar doing its own job |
+| `edit` | `tvision/examples/tvedit` | the editor: the first view whose contents do not travel with the render, and the first time the state is not the model's |
 | `watch` | *(ours)* | not a port: a subscription from outside the program, several children at once, and a run that can be killed. It found a name the binding was silently swallowing |
 
 ## What mmenu changed
@@ -363,7 +364,7 @@ applications at all, and one of them is really eight applications.
 | `tvdemo` | **done** except the help system | `examples/demo` is its shell; the demos inside it are `ascii`, `calendar`, `puzzle`, `calc`, `mouse` and `viewer` |
 | `tvforms` | **done** (the UI half) | see above. Its other half is `.rsc` resource streaming — `opstream`/`ipstream` serialising views to disk — which has no Gren meaning |
 | `tvdir` | **done** | `examples/dir` — and it turned out to need no new widget at all, Change Dir included; see above |
-| `tvedit` | a milestone of its own | `TEditor`/`TFileEditor`: a stateful text buffer with undo and clipboard. See the note below |
+| `tvedit` | **ported** | `examples/edit`. `TEditor` is wrapped; `TFileEditor` is not, because reading a file is a `Task`. See the note below |
 | `tvhc` | **no** | a command-line help *compiler*, not a TUI |
 | `avscolor` | **no** | an AviSynth plugin |
 
@@ -384,16 +385,68 @@ applications at all, and one of them is really eight applications.
 
 ### The two genuinely hard ones
 
-**`TEditor`.** A text editor is a stateful buffer with undo, clipboard and
-search. Sending the whole buffer over a port on every keystroke is the Elm
-answer and probably fine for real files, but the diff is per-view, not
-per-character, so every keystroke would resend the document. The pragmatic
-first move is an opaque editor view that owns its buffer, reports changes as
-events, and takes `setText`/`getText` commands — less pure, and it can be
-tightened later if the naive version turns out to be fast enough.
+**~~`TEditor`.~~ Done — [`Editor`](#View), protocol 13, and it is
+`examples/edit`.** This paragraph guessed "an opaque editor view that owns its
+buffer, reports changes as events, and takes `setText`/`getText` commands", and
+that is what it is. What the guess got wrong is which direction the problem
+was in.
 
-Two things learned since this paragraph was written narrow it considerably;
-they are at the end, under **And what is not a gap**.
+It said the trouble was that "every keystroke would resend the document" —
+view to model. That is the smaller half. The bigger half is that **`view` runs
+on every tick of every subscription**: a `text` field on an editor would put
+the whole file in the render message once a second for as long as a clock is
+running, whether anybody touched it or not. And a model that owned the buffer
+would have to implement insert, delete, word-left, undo and a clipboard, which
+is to say implement `TEditor`.
+
+So the boundary moves exactly one step: **the editor owns the buffer and the
+model owns the file.** The document crosses twice per file — in through
+[`setEditorText`](#setEditorText), out through [`readEditor`](#readEditor) —
+and in between the model gets an [`Edited`](#Event) event carrying
+`isModified`, `line` and `column`. Three numbers per keystroke instead of a
+file.
+
+`readEditor` is not the query this protocol has always refused. What was
+refused is a *synchronous read* — `tv.getValue()`, which `Changed` exists to
+replace. This is a `Cmd` producing a `Msg`, the shape `dialog` established:
+the message goes out, the program carries on, the document comes back as an
+ordinary event.
+
+**The one sharp edge**, and `drive_edit.py` caught it on the first run: a
+view's rectangle is structural, so changing one rebuilds the window — and a
+rebuilt editor is an *empty* one, because there is no copy of the document in
+the render to put back. Give an editor a fixed rectangle and let
+[`Grows`](#Grow) resize it, which is what `Grows` is for. FINDINGS says what it
+would take to make that impossible rather than documented.
+
+**And the reserved vocabulary reached its ceiling.** The editor's commands are
+built-in command names, so `examples/edit`'s whole Edit menu has
+no handler behind any of it. The first version of that list interned
+bare `"cut"`, `"copy"`, `"clear"` and the rest — and broke `demo` and
+`entries`, both of which have had a Clear of their own for months. Nothing
+reported it: the button drew, the hotkey worked, and the event simply stopped
+arriving. So they are `"editor.cut"`, `"editor.copy"` and so on, the only
+prefixed names on the list, because everything else on it is a word a program
+is unlikely to want and an editor's vocabulary is made of the most ordinary
+words a menu can contain.
+
+Two are absent for one reason: each needs something only the model has. There
+is no `"editor.save"` because writing a file is a `Task`, and no
+`"editor.find"` because `cmFind` does nothing without a search string —
+`TEditor` asks for one through `editorDialog`, which is disabled here because
+every prompt it raises is a `messageBox`, which is an `execView`. Search is
+therefore the model asking a question and then issuing a command, the shape
+`dir`'s Change Dir already has, and it is the next piece of work.
+
+Two more things worth knowing, both in FINDINGS. `TEditor::setBufSize` does
+not grow the buffer — that is `TFileEditor`'s override and is most of what
+that class is, so `JsEditor` has the same one with the file half left out. And
+`editorDialog` defaults to doing nothing (`editstat.cpp:18` returns
+`cmCancel`), which is the best possible default here: every prompt it would
+otherwise raise is a `messageBox`, which is an `execView`, which is the nested
+loop the menu bar already has too much of. Nothing had to be done to avoid it —
+and it also means Find and Replace are inert until something hands the editor
+a search string, which is the next piece of work rather than a bug.
 
 **The help system.** `THelpFile` reads a binary format produced by `tvhc`.
 Porting the compiler buys nothing a Gren program wants; help screens are just
@@ -401,11 +454,11 @@ windows.
 
 ## Where that leaves it
 
-Every C++ example is ported except `tvedit`, and everything in `tvdemo` except
-the help system. `tvhc` and `avscolor` are not Turbo Vision applications.
+**Every C++ example is ported**, and everything in `tvdemo` except the help
+system. `tvhc` and `avscolor` are not Turbo Vision applications.
 
-`tvedit` is the one left, and it is a milestone rather than a port — see the
-note above. Nothing else in the list is blocked on it.
+`tvedit` was the last, and it was a milestone rather than a port — the note
+above says what it turned out to be about.
 
 ### The widget set is complete; what is left is not widgets
 
@@ -415,7 +468,7 @@ the four layers, and the stock controls are all there: `TStaticText`, `TLabel`,
 `TListViewer` with `TListBox`, `TScrollBar`, `TMenuBar`/`TMenuBox`/`TSubMenu`,
 `TStatusLine`, `TWindow`/`TDialog`/`TFrame`,
 `THistory`/`THistoryViewer`/`THistoryWindow`, `TMenuBox` as a context menu,
-`TMultiCheckBoxes`, `TFilterValidator`, and the
+`TMultiCheckBoxes`, `TFilterValidator`, `TEditor`, and the
 `TGroup`/`TProgram`/`TApplication`/`TDeskTop` scaffolding underneath. `Canvas`
 is the escape hatch for anything the set does not have.
 
@@ -779,17 +832,25 @@ model's job by construction.
 Porting the compiler buys nothing a Gren program wants; help screens are
 windows.
 
-**`TEditor` and its family** — `TFileEditor`, `TEditWindow`, `TMemo`,
-`TIndicator` — are a milestone rather than a gap, and the note above says what
-it would take. Two things learned since that note was written: wrap `TEditor`
-rather than `TFileEditor`, because the file half is already a `Task` in Gren
-and `editorDialog` is a replaceable function pointer, so it drags in neither
-`TFileDialog` nor `.rsc`; and `TEditor` sets `growMode = gfGrowHiX | gfGrowHiY`
-in its constructor (`teditor1.cpp:193`), which wanted gap (2) settled first
-and now is: an editor view would wrap itself in `Grows Tui.stretch` like
-anything else.
-`TMemo` is the cheap way in: a multi-line field in a form, collected when the
-dialog is answered, which keeps the model-owns-the-state invariant intact.
+**`TFileEditor`, `TEditWindow`, `TMemo` and `TIndicator`.** `TEditor` itself is
+wrapped — see `edit` above — and its family is not, each for its own reason.
+
+`TFileEditor` is `TEditor` plus loading, saving and a growing buffer. Only the
+third of those is wanted: reading and writing a file is a `Task` in Gren, so
+`JsEditor` takes `setBufSize` from it and leaves the rest, which is also what
+keeps `TFileDialog` and the `.rsc` prompts out of the picture.
+
+`TEditWindow` is a window with an editor in it and a `TIndicator` on its
+frame. A window is already a value here, and the indicator is better as a
+`StaticText` the model fills in from the [`Edited`](#Event) event — what it
+says is then the model's, like every other display in these examples.
+
+`TMemo` is `TEditor` with `getData`/`setData`, so that a multi-line field can
+be collected when a dialog is answered. That is the one piece of the family
+still worth wanting, and it is not free: a dialog's answer is a small record
+of what the user chose, and putting a document in one would make every
+`DialogClosed` carry it. The honest version is an `Editor` in a dialog plus a
+`readEditor` before it closes, which the API can already express.
 
 The Gren-only example is done: `watch`, written up above. It is the answer to
 "what does this have that Borland's did not", and the answer turned out to be
@@ -797,10 +858,6 @@ three things — a subscription, several children at once, and a handle on
 something still running.
 
 ### What is left, now that the list is empty
-
-Two things, and neither is a widget.
-
-**`tvedit`**, which is the `TEditor` milestone above rather than a port.
 
 **One known limitation**, written up under gap (7) and in FINDINGS:
 `TMenuView::execute` runs a nested event loop, so the *menu bar* stops the

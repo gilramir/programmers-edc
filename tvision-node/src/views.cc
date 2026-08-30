@@ -4,6 +4,7 @@
 #include "keys.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 
 namespace tvnode {
@@ -367,6 +368,115 @@ void JsCanvas::setLines(std::vector<CanvasLine> newLines)
 {
     lines = std::move(newLines);
     drawView();
+}
+
+/* ------------------------------------------------------------------ */
+/*  The editor                                                        */
+/* ------------------------------------------------------------------ */
+
+JsEditor::JsEditor(const TRect &bounds, TScrollBar *hScroll, TScrollBar *vScroll,
+                   std::string id) noexcept
+    : TEditor(bounds, hScroll, vScroll, nullptr, 0x1000), viewId(std::move(id))
+{
+    // The base constructor already ran TEditor::initBuffer(), which is
+    // new char[] -- the virtual call happened before this class existed. Free
+    // it the way it was allocated and start again with ours, which is exactly
+    // what TFileEditor's constructor does (tfiledtr.cpp:56).
+    TEditor::doneBuffer();
+    initBuffer();
+    isValid = buffer != nullptr;
+    setBufLen(0);
+}
+
+void JsEditor::initBuffer()
+{
+    buffer = (char *) malloc(bufSize);
+}
+
+void JsEditor::doneBuffer()
+{
+    free(buffer);
+    buffer = nullptr;
+}
+
+// TFileEditor::setBufSize (tfiledtr.cpp:221), which is the only reason that
+// class is not just a file loader: TEditor's own returns false for anything
+// larger than the buffer it started with, so without this the editor fills up
+// and silently stops accepting text.
+Boolean JsEditor::setBufSize(uint newSize)
+{
+    if (newSize == 0)
+        newSize = 0x1000;
+    else if (newSize > uint(-0x1000))
+        newSize = UINT_MAX - 0x1F;
+    else
+        newSize = (newSize + 0x0FFF) & -0x1000;
+
+    if (newSize != bufSize)
+        {
+        char *old = buffer;
+        if ((buffer = (char *) malloc(newSize)) == nullptr)
+            {
+            free(old);
+            return False;
+            }
+        // The gap is in the middle, so both ends have to survive the move:
+        // everything before the caret from the front, everything after it
+        // from the back.
+        uint tail = bufLen - curPtr + delCount;
+        uint keep = newSize < bufSize ? newSize : bufSize;
+        memcpy(buffer, old, keep);
+        memmove(&buffer[newSize - tail], &old[bufSize - tail], tail);
+        free(old);
+        bufSize = newSize;
+        gapLen = bufSize - bufLen;
+        }
+    return True;
+}
+
+bool JsEditor::setText(const std::string &text)
+{
+    if (setBufSize((uint) text.size()) == False)
+        return false;
+    if (!text.empty())
+        memcpy(&buffer[bufSize - text.size()], text.data(), text.size());
+    // Resets the caret, the selection, the undo counters and `modified`, and
+    // works out the line count and the line-ending style from what is there.
+    setBufLen((uint) text.size());
+    noteEditIfChanged();
+    return true;
+}
+
+std::string JsEditor::getWholeText()
+{
+    std::string out;
+    out.resize(bufLen);
+    if (bufLen > 0)
+        getText(0, TSpan<char>(&out[0], bufLen));
+    return out;
+}
+
+void JsEditor::noteEditIfChanged()
+{
+    bool nowModified = modified == True;
+    if (nowModified == lastModified && curPos.y == lastLine &&
+        curPos.x == lastColumn)
+        return;
+    lastModified = nowModified;
+    lastLine = curPos.y;
+    lastColumn = curPos.x;
+    if (!viewId.empty())
+        noteEdited(viewId, nowModified, curPos.y, curPos.x);
+}
+
+// The same sandwich as every other widget that reports: there is no one method
+// every edit goes through -- typing, Backspace, a click, Ctrl-Y, a paste and
+// an undo all land in handleEvent -- and the state afterwards is the only
+// thing they have in common.
+void JsEditor::handleEvent(TEvent &event)
+{
+    TEditor::handleEvent(event);
+    noteEditIfChanged();
 }
 
 void JsScrollBar::scrollDraw()
@@ -767,6 +877,24 @@ TView *buildItems(const Napi::Env &env, TGroup *win, const Napi::Value &value,
                 list->focusItemNum((short) getInt(it, "focused", 0));
             made = list;
             }
+        else if (type == "editor")
+            {
+            if (id.empty())
+                throw Napi::Error::New(env, "tvision: an editor needs an id");
+            // Its own scroll bars, in the column to the right and the row
+            // below -- the rule a list box already follows, one direction
+            // more. TEditor drives both itself; nothing here has to.
+            TRect box = getRect(env, it, "editor");
+            TScrollBar *down = new TScrollBar(
+                TRect(box.b.x, box.a.y, box.b.x + 1, box.b.y));
+            TScrollBar *across = new TScrollBar(
+                TRect(box.a.x, box.b.y, box.b.x, box.b.y + 1));
+            down->options |= ofPostProcess;
+            across->options |= ofPostProcess;
+            win->insert(down);
+            win->insert(across);
+            made = new JsEditor(box, across, down, id);
+            }
         else if (type == "canvas")
             {
             if (id.empty())
@@ -934,6 +1062,10 @@ Napi::Object collectValues(const Napi::Env &env, const std::string &windowId)
                                           ((JsRadioButtons *) ref->view)->selected()));
         else if (ref->kind == "scrollBar")
             out.Set(id, Napi::Number::New(env, ((JsScrollBar *) ref->view)->value));
+        // An "editor" is deliberately absent: a dialog's answer is a small
+        // record of what the user chose, and putting a document in one would
+        // make every DialogClosed carry it. tv.readEditor() is how a document
+        // leaves, and it is asked for by name.
         }
     return out;
 }
@@ -1113,6 +1245,34 @@ static Napi::Value SetValue(const Napi::CallbackInfo &info)
     return Napi::Boolean::New(env, false);
 }
 
+// tv.setEditorText(id, text) -- replace an editor's document.
+//
+// A command rather than a field on the view: see the note on JsEditor. This is
+// the way in, and readEditor is the way out.
+static Napi::Value SetEditorText(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    ViewRef *ref = g_views.find(info[0].ToString().Utf8Value());
+    if (ref == nullptr || ref->kind != "editor")
+        return Napi::Boolean::New(env, false);
+
+    bool ok = ((JsEditor *) ref->view)->setText(info[1].ToString().Utf8Value());
+    return Napi::Boolean::New(env, ok);
+}
+
+// tv.readEditor(id) -- the document, as a string, or null if there is no such
+// editor. The one call in this binding that hands back something big, which is
+// why it is asked for rather than volunteered.
+static Napi::Value ReadEditor(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    ViewRef *ref = g_views.find(info[0].ToString().Utf8Value());
+    if (ref == nullptr || ref->kind != "editor")
+        return env.Null();
+
+    return Napi::String::New(env, ((JsEditor *) ref->view)->getWholeText());
+}
+
 // tv.setScroll(id, value, min, max, pageStep, arrowStep) -- the whole of a
 // scroll bar at once, because TScrollBar clamps the value against the range
 // and setting the two separately can land the thumb somewhere neither side
@@ -1272,6 +1432,8 @@ void registerViewApi(Napi::Env env, Napi::Object exports)
     exports.Set("window", Napi::Function::New(env, Window));
     exports.Set("setText", Napi::Function::New(env, SetText));
     exports.Set("setItems", Napi::Function::New(env, SetItems));
+    exports.Set("setEditorText", Napi::Function::New(env, SetEditorText));
+    exports.Set("readEditor", Napi::Function::New(env, ReadEditor));
     exports.Set("getValue", Napi::Function::New(env, GetValue));
     exports.Set("setBounds", Napi::Function::New(env, SetBounds));
     exports.Set("setValue", Napi::Function::New(env, SetValue));

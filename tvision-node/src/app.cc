@@ -76,6 +76,18 @@ struct AppConfig {
 
 AppConfig g_config;
 
+// An Editor's edit, queued like the value notes. Separate from ChangeNote
+// because what it carries is not a value: the document stays where it is and
+// what crosses is three numbers.
+struct EditNote {
+    std::string id;
+    bool modified = false;
+    int line = 0;
+    int column = 0;
+};
+
+std::vector<EditNote> g_editNotes;
+
 Napi::FunctionReference g_onCommand;
 Napi::FunctionReference g_onSelect;
 Napi::FunctionReference g_onFocus;
@@ -85,6 +97,7 @@ Napi::FunctionReference g_onClick;
 Napi::FunctionReference g_onClose;
 Napi::FunctionReference g_onResize;
 Napi::FunctionReference g_onChange;
+Napi::FunctionReference g_onEdit;
 
 // Windows are destroyed wholesale when the application goes away; that is not
 // news anyone needs, and calling into JS from inside the teardown would be a
@@ -574,6 +587,39 @@ void noteChangedMarks(const std::string &id, const std::vector<int> &states)
     pushChange(note);
 }
 
+void noteEdited(const std::string &id, bool modified, int line, int column)
+{
+    if (g_onEdit.IsEmpty() || g_shuttingDown)
+        return;
+    for (EditNote &existing : g_editNotes)
+        if (existing.id == id)
+            {
+            existing = EditNote{id, modified, line, column};
+            return;
+            }
+    g_editNotes.push_back(EditNote{id, modified, line, column});
+}
+
+static void flushEdited()
+{
+    if (g_editNotes.empty() || g_onEdit.IsEmpty() || g_hasPendingError)
+        {
+        g_editNotes.clear();
+        return;
+        }
+
+    std::vector<EditNote> notes;
+    notes.swap(g_editNotes);
+
+    Napi::Env env = g_onEdit.Env();
+    Napi::HandleScope scope(env);
+    for (const EditNote &note : notes)
+        callJs(g_onEdit, {Napi::String::New(env, note.id),
+                          Napi::Boolean::New(env, note.modified),
+                          Napi::Number::New(env, note.line),
+                          Napi::Number::New(env, note.column)});
+}
+
 static void flushChanged()
 {
     if (g_changeNotes.empty() || g_onChange.IsEmpty() || g_hasPendingError)
@@ -1007,7 +1053,8 @@ static void prepare(const Napi::Env &env, const Napi::Value &value)
                           std::make_pair("onClick", &g_onClick),
                           std::make_pair("onClose", &g_onClose),
                           std::make_pair("onResize", &g_onResize),
-                          std::make_pair("onChange", &g_onChange)})
+                          std::make_pair("onChange", &g_onChange),
+                          std::make_pair("onEdit", &g_onEdit)})
         {
         if (!config.Has(binding.first))
             continue;
@@ -1052,6 +1099,8 @@ static void teardown(const Napi::Env &env)
     g_onClose.Reset();
     g_onResize.Reset();
     g_onChange.Reset();
+    g_onEdit.Reset();
+    g_editNotes.clear();
     g_changeNotes.clear();
     g_lastDeskSize = {0, 0};
     g_config = AppConfig();
@@ -1190,6 +1239,7 @@ static Napi::Value Step(const Napi::CallbackInfo &info)
     // is also the difference between the model's answer arriving before the
     // next keystroke and arriving after it.
     flushChanged();
+    flushEdited();
     // Again outside the loop: the very first pump after tv.start() usually
     // breaks out on evNothing before reaching the safe point above, and the
     // size the application started at is the one every layout needs first.

@@ -240,6 +240,17 @@ describe event =
         WindowClosed id ->
             "WindowClosed " ++ id
 
+        Edited it ->
+            "Edited "
+                ++ it.id
+                ++ " "
+                ++ String.fromInt (it.line + 1)
+                ++ ":"
+                ++ String.fromInt (it.column + 1)
+
+        EditorText it ->
+            "EditorText " ++ it.id ++ " (" ++ String.fromInt (String.count it.text) ++ " chars)"
+
         Unknown what ->
             "Unknown " ++ what
 

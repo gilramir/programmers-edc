@@ -266,6 +266,12 @@ handleEvent event model =
         Changed _ ->
             { model = model, command = Cmd.none }
 
+        Edited _ ->
+            { model = model, command = Cmd.none }
+
+        EditorText _ ->
+            { model = model, command = Cmd.none }
+
         Unknown _ ->
             { model = model, command = Cmd.none }
 

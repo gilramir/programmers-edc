@@ -123,6 +123,7 @@ The rest of the Gren examples are every remaining C++ one:
 | `gren -- dir` | tvdir. A directory tree with no tree widget: the rows are a fold over the model |
 | `gren -- demo` | tvdemo's shell. `Windows ▸ Tile` and `Cascade` are Turbo Vision's; the event viewer lists what crosses the port |
 | `gren -- viewer` | tvdemo's file viewer, with both scroll bars. Takes a path |
+| `gren -- edit` | tvedit. A text editor: takes a path, F2 saves. The one view whose contents do not travel with the render |
 
 And one that is not a port at all. In `gren -- watch`: give it a directory and
 some commands, and it runs them whenever anything in there changes --

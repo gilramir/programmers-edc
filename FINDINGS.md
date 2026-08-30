@@ -2418,3 +2418,157 @@ The set is rebuilt whole when its shape changes and patched by id when it does
 not, which is the same rule a window's contents follow. Without the patching
 half, a clock rendering once a second would destroy and rebuild the corner of
 the screen forever — the exact cost the status line was already paying.
+
+## The tvedit milestone: where the state stops being the model's
+
+Fourteen examples put the state in the model and re-rendered it, and every one
+of them was an argument that a `TView` subclass is a widget because C++ had
+nowhere else to put its state. `TOutline`, `TScroller`, `TTerminal` and
+`TFileDialog` all went that way. The editor does not, and the reason is not the
+one the coverage list guessed.
+
+The list said: "Sending the whole buffer over a port on every keystroke is the
+Elm answer and probably fine for real files, but the diff is per-view, not
+per-character, so every keystroke would resend the document." That is the
+view→model direction and it is the smaller half. The bigger half is the other
+one: **`view` runs on every tick of every subscription.** A `text` field on an
+editor would serialise the whole file into the render message once a second for
+as long as a clock is running, whether or not anybody touched it. And a model
+that owned the buffer would have to implement insert, delete, word-left, undo
+and a clipboard — which is to say implement `TEditor`.
+
+So the boundary moves exactly one step. **`TEditor` owns the buffer and the
+model owns the file.** The document crosses the port twice per file, in through
+`Tui.setEditorText` and out through `Tui.readEditor`, and what arrives in
+between is an `Edited` event carrying `isModified`, `line` and `column`. Three
+numbers per keystroke, coalesced at the pump like every other note, instead of
+a file.
+
+### `readEditor` is not the query this protocol has always refused
+
+It looks like one, so it is worth being exact about why it is not. The thing
+that was refused was `tv.getValue()` — a *synchronous read* the model would
+have had to be able to call in the middle of deciding something, which Gren
+cannot do and which is why `Changed` exists. `readEditor` is a `Cmd` that
+produces a `Msg`, which is the shape `dialog` established at milestone 2.5 and
+`fileDialog` and `messageBox` have used since. The message goes out, the
+program carries on, and the document comes back as an ordinary event. Nothing
+blocks and nothing is asked and answered inside one `update`.
+
+The rule the protocol actually keeps is that **the render is one-way and the
+model is told rather than asked**. A `Cmd` producing a `Msg` is an effect, and
+effects are how Elm programs read the world.
+
+### The one sharp edge: a rebuilt editor is an empty one
+
+A view's rectangle is structural — change one and the differ closes the window
+and makes it again. For every other view that costs a repaint and nothing else,
+because the next render re-supplies the contents. For an editor it is
+destructive: the new one is empty and the document is gone, because there was
+never a copy of it in the render to put back.
+
+The first version of `examples/edit` had exactly this bug, and
+`drive_edit.py` caught it on the first run: the editor's rectangle was computed
+from `model.desk`, so resizing the terminal silently emptied the buffer and the
+next save wrote nothing. The fix is what gap (2) built `Grows` for — a fixed
+rectangle and a `Grows Tui.stretch` around it — and the docs say so where
+somebody would hit it.
+
+It could be made impossible rather than documented, by teaching the differ to
+patch a view's rectangle with `TView::changeBounds` instead of treating it as
+structural. `sameShape`'s comment currently says "nothing can move one of those
+but a rebuild", which is not true — `changeBounds` does, and it is what
+`Grows` already runs. That is a change to how *every* view is diffed and the
+scroll bars a view owns would have to move with it, so it is written down here
+rather than done.
+
+### What TEditor gave for free, and what it wanted
+
+Free: insert and overwrite, selection, one level of undo, a clipboard shared
+between editors (a `static TEditor *`), auto-indent, word motion, the whole of
+Borland's keymap, Unicode-aware drawing and line-ending detection. The wrapper
+is about a hundred lines and none of it is editing.
+
+Wanted, and each is a decision:
+
+  - **A real `setBufSize`.** `TEditor::setBufSize` returns `newSize <= bufSize`
+    — it does not grow. Without an override the editor fills its initial 4KB
+    and silently stops accepting text. `TFileEditor` has the growing version
+    and that is most of what that class *is*; `JsEditor` has the same one, with
+    the file half left out because reading a file is a `Task` in Gren.
+  - **The buffer's allocator has to be consistent, and the base constructor
+    gets there first.** `TEditor`'s constructor calls the virtual
+    `initBuffer()` before `JsEditor` exists, so the first buffer is
+    `new char[]`; the constructor here frees it with `TEditor::doneBuffer()`
+    and allocates its own with `malloc`, which is exactly what
+    `TFileEditor`'s does (`tfiledtr.cpp:56`) and for exactly that reason.
+  - **`editorDialog` defaults to doing nothing**, which is the best possible
+    default here. `defEditorDialog` returns `cmCancel` (`editstat.cpp:18`), so
+    Find, Replace and the out-of-memory prompt put up nothing at all — and
+    every one of them would otherwise be `messageBox`, which is `execView`,
+    which is the nested loop the menu bar already has too much of. Nothing had
+    to be done to avoid it. It also means Find and Replace are inert until
+    something gives the editor a search string, which is the next piece of work
+    rather than a bug.
+  - **Scroll bars, like a list box's.** One in the column to the right and one
+    in the row below, `ofPostProcess` so the keyboard reaches them. `TEditor`
+    drives both itself.
+  - **No `TIndicator`.** It is the line:column box Turbo Vision draws on the
+    window frame, and the model can now say the same thing in a `StaticText`
+    from the `Edited` event — which is better for the reason every display in
+    these examples is better: what it says is the model's, and the model was
+    told.
+
+### The editor's commands are built-in names
+
+`"editor.cut"`, `"editor.copy"`, `"editor.paste"`, `"editor.clear"`,
+`"editor.undo"` and `"editor.selectAll"` are interned as `cmCut` and friends,
+so a menu entry carrying one reaches whichever editor has the caret and never
+passes through `update`. That is the same bargain `"tile"` and `"cascade"`
+make, and `examples/edit`'s whole Edit menu is made of them: six entries, no
+handler.
+
+Two are deliberately absent, and they are absent for the same reason: each
+needs something only the model has.
+
+There is no `"editor.save"` because writing a file is a `Task` — which is what
+makes `readEditor` necessary and is the clearest statement of where the line
+is. `TFileEditor` is the class that would have handled `cmSave` itself, and not
+wrapping it is the same decision one level up.
+
+And there is no `"editor.find"` because `cmFind` does nothing without a search
+string. `TEditor::find()` asks for one through `editorDialog`, which is
+disabled here and for a good reason — every prompt it raises is a `messageBox`,
+which is an `execView`. So a search is the model asking a question and then
+issuing a command, the shape `dir`'s Change Dir already has. That is the next
+piece of work; the six names above are the ones that work on their own.
+
+### And the reserved vocabulary reached its ceiling
+
+The nine are prefixed, and the first version of them was not. That version
+interned bare `"cut"`, `"copy"`, `"clear"` and the rest — and `devbox run test`
+failed in two examples that have nothing to do with the editor.
+`examples/demo`'s event viewer has a Clear button and `examples/entries` has a
+Clear menu entry, both `cmd = "clear"`, both working for months, and both
+silently stopped: the name interned as `cmClear`, Turbo Vision took the event,
+and no editor existed to act on it. **Nothing reported anything.** The button
+still drew, the hotkey still worked, and the model was simply never told.
+
+That failure mode is not new — `Tui`'s docs have warned about it since the
+built-in list existed, and the tvdemo port found the mirror image when `"tile"`
+and `"cascade"` turned out *not* to be interned. What is new is the scale.
+Everything already on the list is a word a program is unlikely to want for
+itself: `"cascade"`, `"prev"`, `"zoom"`, `"yes"`. An editor's vocabulary is
+nine of the most ordinary words a menu can contain, and taking all nine makes
+the hazard nine times more likely to bite somebody who never asked for an
+editor.
+
+So they are prefixed — the only prefixed names on the list, and the prefix is
+the whole argument. The bare words belong to the program.
+
+Two smaller notes. The check that compares the C++ table against the promise in
+`Tui`'s docs matched `\w+` on both sides and quietly stopped seeing a name once
+a dot appeared; it is `[\w.]+` now, and it caught the first attempt at
+rewording the docs. And the collision was found by *existing* examples rather
+than by the new one, which is the argument for keeping every port in the suite
+forever.

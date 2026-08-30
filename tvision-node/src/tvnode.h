@@ -15,6 +15,7 @@
 #define Uses_TCluster
 #define Uses_TCommandSet
 #define Uses_TDrawBuffer
+#define Uses_TEditor
 #define Uses_TRadioButtons
 #define Uses_TDeskTop
 #define Uses_TDialog
@@ -94,6 +95,29 @@ public:
             // as an ordinary user command, and "tile" arrives in the model as
             // an event instead of tiling the desktop.
             {"tile", cmTile},     {"cascade", cmCascade},
+            // The editor's own, and the reason they are the only prefixed
+            // names on this list. Everything above is a word a program is
+            // unlikely to want -- "cascade", "prev", "yes" -- but an editor's
+            // vocabulary is nine everyday ones, and a built-in name silently
+            // eats the event a program was expecting. The first version of
+            // this list interned bare "clear" and broke two examples that
+            // already had a Clear of their own; nothing reported it, which is
+            // exactly the failure mode the docs warn about.
+            //
+            // Two absences, both deliberate. "editor.save", because writing a
+            // file is a Task and so saving is the model's job -- its command
+            // has to arrive as an event. And find/replace, because cmFind and
+            // cmReplace do nothing without a search string: TEditor asks for
+            // one through editorDialog, which is disabled here (it is
+            // messageBox, which is execView, which is the nested loop the
+            // menu bar already has too much of). A search needs the model to
+            // ask a question, so it is not a name that works on its own.
+            {"editor.cut", cmCut},
+            {"editor.copy", cmCopy},
+            {"editor.paste", cmPaste},
+            {"editor.clear", cmClear},
+            {"editor.undo", cmUndo},
+            {"editor.selectAll", cmSelectAll},
         };
         for (auto &b : builtins)
             {
@@ -563,6 +587,58 @@ private:
     bool armed = false;
 };
 
+// A text editor, and the first view whose contents do not cross the port on
+// every render.
+//
+// Fourteen examples put the state in the model and re-rendered it, and that
+// works because the state is small: a list of names, a calendar's month, a
+// canvas of a few hundred cells. A document is the first thing where it does
+// not. `view` runs on every tick of every subscription, so a `text` field on
+// this view would serialise the whole file into the render message once a
+// second forever -- and the model would also have to implement insert,
+// delete, word-left, undo and the clipboard, which is to say implement
+// TEditor.
+//
+// So the boundary moves, and it moves exactly one step: **TEditor owns the
+// buffer, and the model owns the file.** The document crosses the port twice
+// per file rather than once per render -- in through setEditorText, out
+// through readEditor -- and what the model is told in between is that an edit
+// happened and where the cursor is, which is three numbers.
+//
+// Buffer management is TFileEditor's, without the file: malloc/free/hand-
+// rolled realloc, overriding the three virtuals TEditor calls. The base
+// constructor's initBuffer() runs before this class exists, so it allocates
+// with new[] and the constructor here frees it with TEditor::doneBuffer()
+// before allocating its own -- which is what TFileEditor's constructor does,
+// for the same reason.
+class JsEditor : public TEditor {
+public:
+    JsEditor(const TRect &bounds, TScrollBar *hScroll, TScrollBar *vScroll,
+             std::string id) noexcept;
+
+    virtual void handleEvent(TEvent &event) override;
+    virtual void initBuffer() override;
+    virtual void doneBuffer() override;
+    virtual Boolean setBufSize(uint newSize) override;
+
+    // Replace the whole document, as TFileEditor::loadFile does: size the
+    // buffer, drop the text in at the top of it, and start again with an
+    // empty undo and a clean modified flag.
+    bool setText(const std::string &text);
+    std::string getWholeText();
+
+private:
+    // Queued only when something the model would notice actually changed --
+    // an arrow key that moves the caret within a line reports, one that runs
+    // into the end of the buffer does not.
+    void noteEditIfChanged();
+
+    std::string viewId;
+    bool lastModified = false;
+    int lastLine = -1;
+    int lastColumn = -1;
+};
+
 class JsWindow : public TDialog {
 public:
     JsWindow(const TRect &bounds, TStringView title, std::string id) noexcept
@@ -706,6 +782,11 @@ void noteChangedText(const std::string &id, const std::string &text);
 void noteChangedFlags(const std::string &id, uint32_t bits, uint32_t count);
 void noteChangedChoice(const std::string &id, int index);
 void noteChangedMarks(const std::string &id, const std::vector<int> &states);
+
+// An Editor was edited, or its caret moved. Queued and coalesced per id like
+// the value notes, and for the same reason: typing a word is one note, not one
+// per letter. It deliberately does not carry the document -- see JsEditor.
+void noteEdited(const std::string &id, bool modified, int line, int column);
 
 // Queued for the same reason, and more urgently: setValue() calls scrollDraw()
 // directly, so a render that moves a scroll bar would call back into JS from

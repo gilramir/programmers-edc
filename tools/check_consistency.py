@@ -108,13 +108,13 @@ def js_used_callbacks(src):
 def gren_builtin_commands(src):
     """The command names Tui's docs promise Turbo Vision handles itself."""
     block = re.search(r"Built-in command names work here too:(.*?)Turbo\n", src, re.S)
-    return set(re.findall(r'`"(\w+)"`', block.group(1))) if block else set()
+    return set(re.findall(r'`"([\w.]+)"`', block.group(1))) if block else set()
 
 
 def cc_builtin_commands(src):
     """The ones CommandRegistry::reset actually interns."""
     block = re.search(r"builtins\[\] = \{(.*?)\};", src, re.S)
-    return set(re.findall(r'\{"(\w+)",\s*cm\w+\}', block.group(1))) if block else set()
+    return set(re.findall(r'\{"([\w.]+)",\s*cm\w+\}', block.group(1))) if block else set()
 
 
 def gren_event_kinds(src):

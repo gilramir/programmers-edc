@@ -36,7 +36,9 @@ module Tui exposing
     , plain
     , popupMenu
     , quit
+    , readEditor
     , setDoubleClickDelay
+    , setEditorText
     , setEnabled
     , stretch
     , stretchHeight
@@ -179,6 +181,7 @@ its own is a pull-down, and one without is a command sitting on the bar.
 @docs MenuItem, StatusItem, PopupItem, popupMenu
 @docs Event, Value, DialogSpec
 @docs dialog, quit, setEnabled, setDoubleClickDelay, focus
+@docs setEditorText, readEditor
 @docs messageBox, MessageButton, okButtons, okCancelButtons, yesNoButtons, yesNoCancelButtons
 @docs fileDialog
 @docs text, number, flag, flags, marks
@@ -235,11 +238,15 @@ never has to say anything back. Version 11 added
 [`MultiCheckBoxes`](#View) and the `Marks` shape of [`Value`](#Value), which
 is the last of the stock controls. Version 12 added `overlays` to
 [`Ui`](#Ui) -- views on the application rather than on the desktop, which is
-what `TClockView` has always been and this had no way to say.
+what `TClockView` has always been and this had no way to say. Version 13
+added the [`Editor`](#View) view with [`setEditorText`](#setEditorText),
+[`readEditor`](#readEditor) and the [`Edited`](#Event) and
+[`EditorText`](#Event) events -- the first view whose contents do not travel
+with the render.
 -}
 protocolVersion : Int
 protocolVersion =
-    12
+    13
 
 
 -- GEOMETRY
@@ -478,6 +485,45 @@ type alias Window =
     canvas that is only there to be looked at or clicked should say `False` or
     it will trap the caret. Clicks still arrive either way.
 
+  - `Editor` — a text editor. It gets scroll bars of its own, in the column to
+    the **right** and the row **below** its rectangle, so leave one of each.
+
+    **It is the one view with no contents in it**, and that is the whole
+    design. Everything else here is a function of the model and is re-rendered
+    from it; a document is the first thing too big for that, because `view`
+    runs on every tick of every subscription and a file has no business in a
+    render message. So the editor owns the buffer and the model owns the
+    *file*: [`setEditorText`](#setEditorText) puts a document in,
+    [`readEditor`](#readEditor) asks for it back, and what arrives in between
+    is an [`Edited`](#Event) event carrying whether the document is modified
+    and where the caret is — three numbers, not a file.
+
+    **Give it a fixed rectangle and let [`Grows`](#Grow) resize it.** This is
+    the one sharp edge of a view whose contents are not in the view. A
+    rectangle is structural — change one and the window is rebuilt — and for
+    every other view that is merely wasteful, because the next render
+    re-supplies the contents. A rebuilt editor is an *empty* one, and the
+    document is gone, because there was never a copy of it in the render to
+    put back. A rectangle computed from the model (from
+    [`Resized`](#Event), say) will therefore throw the document away the first
+    time the terminal changes size. The window's own rectangle is safe: that
+    one is patched rather than rebuilt.
+
+    Everything Turbo Vision's editor does, it does here: insert and overwrite,
+    selection, one level of undo, a clipboard shared between editors, auto
+    indent, word-left and word-right, and the block and line commands from
+    Borland's keymap.
+
+    The command names `"editor.cut"`, `"editor.copy"`, `"editor.paste"`,
+    `"editor.clear"`, `"editor.undo"` and `"editor.selectAll"` are built in —
+    put one on a menu and it reaches whichever editor has the caret without
+    passing through `update` at all.
+
+    Two things a menu entry cannot do on its own, both for the same reason:
+    they need something only the model has. Saving needs a file, and writing
+    one is a `Task`. Searching needs a string, and asking for one is a dialog.
+    Both are commands the model handles and answers with a `Cmd` of its own.
+
 `Grows` is the odd one, and the only constructor here that is not a widget: it
 wraps another view to say which of its edges follow the window when the window
 changes size. See [`Grow`](#Grow).
@@ -517,6 +563,7 @@ type View
     | ScrollBar { id : String, rect : Rect, value : Int, min : Int, max : Int, pageStep : Int, arrowStep : Int }
     | Label { id : String, rect : Rect, text : String, for : String }
     | Canvas { id : String, rect : Rect, lines : Array (Array Span), cursor : Maybe { x : Int, y : Int }, takesFocus : Bool }
+    | Editor { id : String, rect : Rect }
     | Grows { grow : Grow, view : View }
 
 
@@ -623,8 +670,16 @@ A `~` in a title marks the highlighted letter: `"~F~ile"` draws as *F*ile.
 
 Built-in command names work here too: `"quit"`, `"close"`, `"zoom"`,
 `"resize"`, `"next"`, `"prev"`, `"menu"`, `"help"`, `"ok"`, `"cancel"`,
-`"yes"`, `"no"`, `"cascade"`, `"tile"`. Turbo Vision
-handles those itself and they do not arrive as events.
+`"yes"`, `"no"`, `"cascade"`, `"tile"` — and the editor's own, which reach
+whichever [`Editor`](#View) has the caret: `"editor.cut"`, `"editor.copy"`,
+`"editor.paste"`, `"editor.clear"`, `"editor.undo"` and `"editor.selectAll"`.
+Turbo Vision handles those itself and they do not arrive as events.
+
+The editor's nine are the only prefixed names here, and the prefix is the
+point: everything else on this list is a word a program is unlikely to want
+for itself, and an editor's vocabulary is nine everyday ones. A built-in name
+takes the event silently, so a program's own Clear and the editor's cannot
+both own the bare name -- and the program should have it.
 
 Which makes the same list a set of names your program may not use for anything
 else. Calling a command `"cancel"` because there is a Cancel entry on the menu
@@ -698,6 +753,14 @@ type alias StatusItem =
     the model. It reports what the view says *now*, so a model that stores it
     and renders it back writes nothing. Not sent for a value the model set
     itself -- only a change the model did not already know about is news.
+  - `Edited` -- an [`Editor`](#View) was edited, or its caret moved. It carries
+    `isModified`, `line` and `column` and **not** the document: a status line
+    saying "12:4" and a Save that lights up when there is something to save are
+    what a program wants on every keystroke, and a file is not. Coalesced per
+    editor at the pump, so typing a word is one event.
+  - `EditorText` -- the answer to [`readEditor`](#readEditor), and the only
+    event that carries a document. Ask for one when you are about to write it
+    to a file.
   - `DialogClosed` -- a [`dialog`](#dialog) was dismissed. `cmd` is the button
     that closed it (`"cancel"` if it was cancelled or closed from its frame),
     and `values` holds every field in it -- read them with [`text`](#text),
@@ -715,6 +778,8 @@ type Event
     | Scrolled { id : String, value : Int }
     | Resized { cols : Int, rows : Int }
     | Changed { id : String, value : Value }
+    | Edited { id : String, isModified : Bool, line : Int, column : Int }
+    | EditorText { id : String, text : String }
     | DialogClosed { id : String, cmd : String, values : Decode.Value }
     | WindowClosed String
     | Unknown String
@@ -1181,6 +1246,69 @@ popupMenu ports spec =
             ]
 
 
+{-| Put a document into an [`Editor`](#View), replacing whatever is there.
+
+    Loaded contents ->
+        { model = { model | path = Just contents.path }
+        , command = Tui.setEditorText tui "body" contents.text
+        }
+
+A `Cmd` and not a field on the view, which is the one place this package puts
+state somewhere other than the model and the reason is in [`View`](#View): a
+render happens on every tick of every subscription, and a document does not
+belong in one. So a document goes in here and comes back through
+[`readEditor`](#readEditor), twice per file rather than once per render.
+
+The caret goes to the top, the selection is cleared, the undo history is
+dropped and the document counts as unmodified -- it is a new document, not an
+edit. Sending it is not an edit either, so no [`Edited`](#Event) event follows
+unless the caret or the modified flag actually moved.
+-}
+setEditorText : Ports msg -> String -> String -> Cmd msg
+setEditorText ports id body =
+    ports.toJs <|
+        Encode.object
+            [ { key = "type", value = Encode.string "setEditorText" }
+            , { key = "id", value = Encode.string id }
+            , { key = "text", value = Encode.string body }
+            ]
+
+
+{-| Ask an [`Editor`](#View) for its document. The answer arrives as an
+[`EditorText`](#Event) event.
+
+    Command "save" ->
+        { model = model, command = Tui.readEditor tui "body" }
+
+    EditorText it ->
+        { model = model
+        , command =
+            when model.path is
+                Just path ->
+                    FileSystem.writeFile permission (Bytes.fromString it.text) path
+                        |> Task.attempt Saved
+
+                Nothing ->
+                    Cmd.none
+        }
+
+A `Cmd` producing a `Msg`, the shape [`dialog`](#dialog) established. Nothing
+about it is a synchronous question: the message goes out, the document comes
+back as an ordinary event, and the program carries on in between.
+
+Ask when you are about to write the file. Asking on every keystroke would put
+the document back on the wire once per character, which is exactly what the
+[`Edited`](#Event) event exists to avoid.
+-}
+readEditor : Ports msg -> String -> Cmd msg
+readEditor ports id =
+    ports.toJs <|
+        Encode.object
+            [ { key = "type", value = Encode.string "readEditor" }
+            , { key = "id", value = Encode.string id }
+            ]
+
+
 {-| Quit. Any open dialog is cancelled on the way out, and the process exits
 once the terminal has been restored.
 
@@ -1552,6 +1680,12 @@ encodeViewFields view =
             , { key = "for", value = Encode.string v.for }
             ]
 
+        Editor v ->
+            [ { key = "type", value = Encode.string "editor" }
+            , { key = "id", value = Encode.string v.id }
+            , { key = "rect", value = encodeRect v.rect }
+            ]
+
         Canvas v ->
             [ { key = "type", value = Encode.string "canvas" }
             , { key = "id", value = Encode.string v.id }
@@ -1749,6 +1883,27 @@ eventDecoder =
                             (Decode.field "y" Decode.int)
                             (Decode.field "doubled" Decode.bool)
                             (Decode.field "right" Decode.bool)
+
+                    "edited" ->
+                        Decode.map4
+                            (\id isModified row col ->
+                                Edited
+                                    { id = id
+                                    , isModified = isModified
+                                    , line = row
+                                    , column = col
+                                    }
+                            )
+                            (Decode.field "id" Decode.string)
+                            (Decode.field "modified" Decode.bool)
+                            (Decode.field "line" Decode.int)
+                            (Decode.field "column" Decode.int)
+
+                    "editorText" ->
+                        Decode.map2
+                            (\id body -> EditorText { id = id, text = body })
+                            (Decode.field "id" Decode.string)
+                            (Decode.field "text" Decode.string)
 
                     "scroll" ->
                         Decode.map2
