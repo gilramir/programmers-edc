@@ -7,6 +7,7 @@
     "gren-version": "0.6.6",
     "dependencies": {
         "direct": {
+            "gilramir/gren-bigint": "local:../../gren-bigint",
             "gilramir/gren-tvision": "local:../gren-tvision",
             "gren-lang/core": "7.4.2",
             "gren-lang/node": "6.1.0"

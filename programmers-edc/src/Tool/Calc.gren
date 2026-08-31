@@ -1,0 +1,961 @@
+module Tool.Calc exposing (Model, command, init, menu, menuItem, update, view, windowId)
+
+{-| An RPN calculator that works in the bases a programmer works in, on
+integers that do not overflow.
+
+Reverse Polish because the alternative is writing an expression parser and a
+precedence table for a window four inches wide, and because a stack you can see
+is easier to trust than a line of text with brackets in it. Type a number,
+press `Enter` to push it, press an operator to consume the top two.
+
+Three things about the design are worth stating.
+
+**It is keyboard-first, and that is why the display is a canvas.** A focused
+canvas consumes every key it is given, which is exactly what a calculator
+wants: `7` is a digit and not a hunt for a button captioned 7. It is also why
+the buttons say `takesFocus = False` -- the trap `TCalculator` avoids by
+clearing `ofSelectable` on all twenty of its keys, with no comment saying why.
+The keys that must still work from in here -- `Alt-X`, `F5`, `F6`, `Alt-F3` --
+do, because the menu bar and the status line are `ofPreProcess` views and are
+offered a key before the focused view is.
+
+**The integers are `BigInt`, so `uint64` arithmetic is exact.** A Gren `Int` is
+a double: `2^64 - 1` is not representable, and `//` is worse than that. The
+width is a *view* rather than a type -- the stack holds exact integers, and
+`u64` or `i64` decides how they are shown and whether they are marked as having
+overflowed. Nothing is silently truncated; if a value does not fit the width
+you are looking through, it says so.
+
+**Division promotes rather than truncating.** `10 2 /` is `5` and stays an
+integer; `7 2 /` is `3.5`, because a calculator that answered `3` would be
+wrong in the way that costs an afternoon. `%` is there for the truncating
+answer, and works on integers only.
+
+-}
+
+import Array exposing (Array)
+import BigInt exposing (BigInt)
+import Char
+import Math
+import String
+import Tui exposing (Hue(..), MenuItem(..), Span, View(..))
+
+
+-- NAMES
+
+
+command : String
+command =
+    "tool.calc"
+
+
+windowId : String
+windowId =
+    "calc"
+
+
+canvasId : String
+canvasId =
+    "calc.display"
+
+
+menuItem : MenuItem
+menuItem =
+    Item { title = "~R~PN calculator", cmd = command, key = "Alt-R", shortcut = "Alt-R" }
+
+
+-- MODEL
+
+
+type Base
+    = Dec
+    | Hex
+    | Oct
+    | Bin
+
+
+type Value
+    = Whole BigInt
+    | Real Float
+
+
+{-| The stack's last element is its top, which is the end everything happens
+at and the end `Array.pushLast` is cheap at.
+-}
+type alias Model =
+    { stack : Array Value
+    , entry : String
+    , base : Base
+    , width : Maybe { bits : Int, signed : Bool }
+    , message : String
+    }
+
+
+init : Model
+init =
+    { stack = []
+    , entry = ""
+    , base = Dec
+    , width = Nothing
+    , message = "Enter pushes; Tab base; w width"
+    }
+
+
+rows : Int
+rows =
+    5
+
+
+-- UPDATE
+
+
+update : Tui.Event -> Model -> Model
+update event model =
+    when event is
+        Tui.KeyPressed pressed ->
+            if pressed.id == canvasId then
+                pressKey pressed.key { model | message = "" }
+
+            else
+                model
+
+        Tui.Command cmd ->
+            if String.startsWith "calc." cmd then
+                runCommand (String.dropFirst 5 cmd) { model | message = "" }
+
+            else
+                model
+
+        _ ->
+            model
+
+
+{-| The menu and the buttons both arrive here. They are the same commands,
+which is the point of having both: a button is a mouse's way of pressing a key.
+-}
+runCommand : String -> Model -> Model
+runCommand name model =
+    when name is
+        "dec" ->
+            { model | base = Dec }
+
+        "hex" ->
+            { model | base = Hex }
+
+        "oct" ->
+            { model | base = Oct }
+
+        "bin" ->
+            { model | base = Bin }
+
+        "width.none" ->
+            { model | width = Nothing }
+
+        "width.u32" ->
+            { model | width = Just { bits = 32, signed = False } }
+
+        "width.i32" ->
+            { model | width = Just { bits = 32, signed = True } }
+
+        "width.u64" ->
+            { model | width = Just { bits = 64, signed = False } }
+
+        "width.i64" ->
+            { model | width = Just { bits = 64, signed = True } }
+
+        "enter" ->
+            enter model
+
+        "drop" ->
+            drop model
+
+        "swap" ->
+            swap model
+
+        "dup" ->
+            dup model
+
+        "clear" ->
+            { model | stack = [], entry = "" }
+
+        _ ->
+            binaryNamed name model
+
+
+binaryNamed : String -> Model -> Model
+binaryNamed name model =
+    when name is
+        "add" ->
+            binary add model
+
+        "sub" ->
+            binary subtract model
+
+        "mul" ->
+            binary multiply model
+
+        "div" ->
+            binary divide model
+
+        "rem" ->
+            binary remainder model
+
+        "and" ->
+            binary (bits BigInt.and) model
+
+        "or" ->
+            binary (bits BigInt.or) model
+
+        "xor" ->
+            binary (bits BigInt.xor) model
+
+        "shl" ->
+            binary (shift True) model
+
+        "shr" ->
+            binary (shift False) model
+
+        "not" ->
+            unary complement model
+
+        "neg" ->
+            unary negate model
+
+        _ ->
+            model
+
+
+pressKey : String -> Model -> Model
+pressKey key model =
+    when key is
+        "Enter" ->
+            enter model
+
+        "Backspace" ->
+            { model | entry = String.dropLast 1 model.entry }
+
+        "Esc" ->
+            { model | entry = "" }
+
+        -- Cycling with Tab rather than binding four keys: in hex the letters
+        -- a to f are digits, so the base cannot be chosen by its initial.
+        -- `w` is free for the same reason -- it is not a hex digit.
+        "Tab" ->
+            { model | base = nextBase model.base }
+
+        "w" ->
+            { model | width = nextWidth model.width }
+
+        "+" ->
+            binary add model
+
+        "-" ->
+            binary subtract model
+
+        "*" ->
+            binary multiply model
+
+        "/" ->
+            binary divide model
+
+        "%" ->
+            binary remainder model
+
+        "&" ->
+            binary (bits BigInt.and) model
+
+        "|" ->
+            binary (bits BigInt.or) model
+
+        "^" ->
+            binary (bits BigInt.xor) model
+
+        "<" ->
+            binary (shift True) model
+
+        ">" ->
+            binary (shift False) model
+
+        "~" ->
+            unary complement model
+
+        "n" ->
+            unary negate model
+
+        "s" ->
+            swap model
+
+        "p" ->
+            drop model
+
+        "u" ->
+            dup model
+
+        "z" ->
+            { model | stack = [], entry = "" }
+
+        other ->
+            when String.popFirst other is
+                Just { first, rest } ->
+                    if String.isEmpty rest && accepts model.base first then
+                        { model | entry = model.entry ++ String.fromChar first }
+
+                    else
+                        model
+
+                Nothing ->
+                    model
+
+
+{-| Exact, then the four widths, then back. A cycle rather than five keys,
+because the menu is where a particular width is chosen and this is for looking
+at the same number through each in turn.
+-}
+nextWidth : Maybe { bits : Int, signed : Bool } -> Maybe { bits : Int, signed : Bool }
+nextWidth width =
+    when width is
+        Nothing ->
+            Just { bits = 64, signed = False }
+
+        Just { bits = 64, signed = False } ->
+            Just { bits = 64, signed = True }
+
+        Just { bits = 64, signed = True } ->
+            Just { bits = 32, signed = False }
+
+        Just { bits = 32, signed = False } ->
+            Just { bits = 32, signed = True }
+
+        _ ->
+            Nothing
+
+
+nextBase : Base -> Base
+nextBase base =
+    when base is
+        Dec ->
+            Hex
+
+        Hex ->
+            Oct
+
+        Oct ->
+            Bin
+
+        Bin ->
+            Dec
+
+
+{-| Which characters may be typed, which depends on the base you are in. `_` is
+allowed everywhere and ignored on the way in, so `dead_beef` can be typed the
+way it would be written; `.` only in decimal, because a hexadecimal float is
+not a thing this calculator has an opinion about.
+-}
+accepts : Base -> Char -> Bool
+accepts base char =
+    let
+        raw =
+            Char.toCode char
+
+        -- Lowercase by arithmetic: `Char` has no `toLower`, and the only
+        -- letters that reach here are A-F.
+        code =
+            if raw >= 0x41 && raw <= 0x5A then
+                raw + 0x20
+
+            else
+                raw
+
+        digit =
+            if code >= 0x30 && code <= 0x39 then
+                code - 0x30
+
+            else if code >= 0x61 && code <= 0x66 then
+                code - 0x61 + 10
+
+            else
+                99
+    in
+    if char == '_' then
+        True
+
+    else if char == '.' then
+        base == Dec
+
+    else
+        digit < radix base
+
+
+radix : Base -> Int
+radix base =
+    when base is
+        Dec ->
+            10
+
+        Hex ->
+            16
+
+        Oct ->
+            8
+
+        Bin ->
+            2
+
+
+-- THE STACK
+
+
+{-| Push what has been typed. With nothing typed, `Enter` duplicates the top,
+which is what every RPN calculator does and what makes `dup` reachable without
+a second key.
+-}
+enter : Model -> Model
+enter model =
+    if String.isEmpty model.entry then
+        dup model
+
+    else
+        when parse model.base model.entry is
+            Just value ->
+                { model | stack = Array.pushLast value model.stack, entry = "" }
+
+            Nothing ->
+                { model | message = "not a number: " ++ model.entry }
+
+
+{-| An operator acts on what is on the stack, so anything half-typed is pushed
+first -- `2 Enter 3 +` and `2 Enter 3 Enter +` mean the same thing.
+-}
+commit : Model -> Model
+commit model =
+    if String.isEmpty model.entry then
+        model
+
+    else
+        enter model
+
+
+drop : Model -> Model
+drop model =
+    { model | stack = Array.dropLast 1 model.stack }
+
+
+dup : Model -> Model
+dup model =
+    when Array.last model.stack is
+        Just top ->
+            { model | stack = Array.pushLast top model.stack }
+
+        Nothing ->
+            model
+
+
+swap : Model -> Model
+swap model =
+    when popTwo model.stack is
+        Just it ->
+            { model | stack = Array.pushLast it.first (Array.pushLast it.second it.rest) }
+
+        Nothing ->
+            { model | message = "swap needs two" }
+
+
+{-| The top two, or nothing at all.
+
+The length is checked before the indices are computed, and that is not
+belt-and-braces: **`Array.get` counts from the end when the index is
+negative**, so a stack of one would answer `get -1` with its own only value
+and every binary operator would quietly work on one number twice.
+-}
+popTwo : Array Value -> Maybe { first : Value, second : Value, rest : Array Value }
+popTwo stack =
+    if Array.length stack < 2 then
+        Nothing
+
+    else
+        when { top = Array.last stack, next = Array.get (Array.length stack - 2) stack } is
+            { top = Just top, next = Just next } ->
+                Just { first = next, second = top, rest = Array.dropLast 2 stack }
+
+            _ ->
+                Nothing
+
+
+binary : (Value -> Value -> Result String Value) -> Model -> Model
+binary operation model =
+    let
+        ready =
+            commit model
+    in
+    when popTwo ready.stack is
+        Just it ->
+            when operation it.first it.second is
+                Ok value ->
+                    { ready | stack = Array.pushLast value it.rest }
+
+                Err problem ->
+                    { ready | message = problem }
+
+        Nothing ->
+            { ready | message = "needs two values" }
+
+
+unary : (Value -> Result String Value) -> Model -> Model
+unary operation model =
+    let
+        ready =
+            commit model
+    in
+    when Array.last ready.stack is
+        Just top ->
+            when operation top is
+                Ok value ->
+                    { ready | stack = Array.pushLast value (Array.dropLast 1 ready.stack) }
+
+                Err problem ->
+                    { ready | message = problem }
+
+        Nothing ->
+            { ready | message = "needs a value" }
+
+
+-- ARITHMETIC
+
+
+{-| Read what was typed, in the base it was typed in. The separators come out
+first: `BigInt` ignores them too, but a `Float` would not.
+-}
+parse : Base -> String -> Maybe Value
+parse base text =
+    let
+        cleaned =
+            String.replace "_" "" text
+    in
+    if base == Dec && String.contains "." cleaned then
+        Maybe.map Real (String.toFloat cleaned)
+
+    else
+        Maybe.map Whole (BigInt.fromStringWithBase (radix base) cleaned)
+
+
+add : Value -> Value -> Result String Value
+add a b =
+    Ok (arithmetic BigInt.add (+) a b)
+
+
+subtract : Value -> Value -> Result String Value
+subtract a b =
+    Ok (arithmetic (\x y -> x |> BigInt.subBy y) (-) a b)
+
+
+multiply : Value -> Value -> Result String Value
+multiply a b =
+    Ok (arithmetic BigInt.mul (*) a b)
+
+
+arithmetic : (BigInt -> BigInt -> BigInt) -> (Float -> Float -> Float) -> Value -> Value -> Value
+arithmetic whole real a b =
+    when { left = a, right = b } is
+        { left = Whole x, right = Whole y } ->
+            Whole (whole x y)
+
+        _ ->
+            Real (real (toFloat a) (toFloat b))
+
+
+{-| Exact when it divides, a `Float` when it does not. A programmer's
+calculator answering `3` to `7 2 /` would be wrong in the expensive way; one
+that answered `3.5` to `10 2 /` would have thrown away the fact that the
+answer is an integer. `%` is the truncating one.
+-}
+divide : Value -> Value -> Result String Value
+divide a b =
+    when { left = a, right = b } is
+        { left = Whole x, right = Whole y } ->
+            when x |> BigInt.quotRemBy y is
+                Just answer ->
+                    if BigInt.isZero answer.remainder then
+                        Ok (Whole answer.quotient)
+
+                    else
+                        Ok (Real (BigInt.toFloat x / BigInt.toFloat y))
+
+                Nothing ->
+                    Err "divide by zero"
+
+        _ ->
+            if toFloat b == 0 then
+                Err "divide by zero"
+
+            else
+                Ok (Real (toFloat a / toFloat b))
+
+
+remainder : Value -> Value -> Result String Value
+remainder a b =
+    when { left = a, right = b } is
+        { left = Whole x, right = Whole y } ->
+            when x |> BigInt.quotRemBy y is
+                Just answer ->
+                    Ok (Whole answer.remainder)
+
+                Nothing ->
+                    Err "divide by zero"
+
+        _ ->
+            Err "% needs whole numbers"
+
+
+bits : (BigInt -> BigInt -> BigInt) -> Value -> Value -> Result String Value
+bits operation a b =
+    when { left = a, right = b } is
+        { left = Whole x, right = Whole y } ->
+            Ok (Whole (operation x y))
+
+        _ ->
+            Err "bitwise needs whole numbers"
+
+
+shift : Bool -> Value -> Value -> Result String Value
+shift left a b =
+    when { value = a, count = b } is
+        { value = Whole x, count = Whole y } ->
+            when BigInt.toInt y is
+                Just count ->
+                    Ok
+                        (Whole
+                            (if left then
+                                x |> BigInt.shiftLeftBy count
+
+                             else
+                                x |> BigInt.shiftRightBy count
+                            )
+                        )
+
+                Nothing ->
+                    Err "shift count is absurd"
+
+        _ ->
+            Err "shifts need whole numbers"
+
+
+complement : Value -> Result String Value
+complement value =
+    when value is
+        Whole x ->
+            Ok (Whole (BigInt.complement x))
+
+        Real _ ->
+            Err "~ needs a whole number"
+
+
+negate : Value -> Result String Value
+negate value =
+    when value is
+        Whole x ->
+            Ok (Whole (BigInt.negate x))
+
+        Real x ->
+            Ok (Real (Basics.negate x))
+
+
+toFloat : Value -> Float
+toFloat value =
+    when value is
+        Whole x ->
+            BigInt.toFloat x
+
+        Real x ->
+            x
+
+
+-- SHOWING
+
+
+{-| What a value looks like in the base and width currently being looked
+through.
+
+The width is a lens and not a cast: the stack keeps the exact number, and this
+shows what a register that wide would hold. When the two differ -- when the
+value would not have fitted -- it says `ovf` rather than quietly showing the
+wrapped one as though it were the answer.
+
+-}
+show : Model -> Value -> String
+show model value =
+    when value is
+        Real x ->
+            String.fromFloat x
+
+        Whole x ->
+            when model.width is
+                Nothing ->
+                    marked model x
+
+                Just width ->
+                    let
+                        viewed =
+                            if width.signed then
+                                BigInt.toSigned width.bits x
+
+                            else
+                                BigInt.maskTo width.bits x
+
+                        fits =
+                            if width.signed then
+                                BigInt.fitsSigned width.bits x
+
+                            else
+                                BigInt.fitsUnsigned width.bits x
+                    in
+                    marked model viewed
+                        ++ (if fits then
+                                ""
+
+                            else
+                                "  ovf"
+                           )
+
+
+marked : Model -> BigInt -> String
+marked model value =
+    let
+        digits =
+            BigInt.toStringWithBase (radix model.base) (BigInt.abs value)
+
+        sign =
+            if BigInt.isNegative value then
+                "-"
+
+            else
+                ""
+    in
+    sign ++ prefix model.base ++ group model.base digits
+
+
+prefix : Base -> String
+prefix base =
+    when base is
+        Dec ->
+            ""
+
+        Hex ->
+            "0x"
+
+        Oct ->
+            "0o"
+
+        Bin ->
+            "0b"
+
+
+{-| Underscores every four digits in the bases where counting them is the
+whole difficulty, and none in decimal where it is not. They are separators the
+calculator will also accept as input, so a value can be read off the screen and
+typed straight back in.
+-}
+group : Base -> String -> String
+group base digits =
+    if base == Dec || String.count digits <= 4 then
+        digits
+
+    else
+        let
+            go rest acc =
+                if String.count rest <= 4 then
+                    rest ++ acc
+
+                else
+                    go (String.dropLast 4 rest) ("_" ++ String.takeLast 4 rest ++ acc)
+        in
+        go digits ""
+
+
+baseName : Base -> String
+baseName base =
+    when base is
+        Dec ->
+            "dec"
+
+        Hex ->
+            "hex"
+
+        Oct ->
+            "oct"
+
+        Bin ->
+            "bin"
+
+
+widthName : Maybe { bits : Int, signed : Bool } -> String
+widthName width =
+    when width is
+        Nothing ->
+            "exact"
+
+        Just it ->
+            (if it.signed then
+                "i"
+
+             else
+                "u"
+            )
+                ++ String.fromInt it.bits
+
+
+-- VIEW
+
+
+menu : Model -> MenuItem
+menu model =
+    SubMenu
+        { title = "~C~alc"
+        , key = ""
+        , items =
+            [ SubMenu
+                { title = "~B~ase"
+                , key = ""
+                , items =
+                    [ Item { title = tick (model.base == Dec) ++ "~D~ecimal", cmd = "calc.dec", key = "", shortcut = "" }
+                    , Item { title = tick (model.base == Hex) ++ "~H~exadecimal", cmd = "calc.hex", key = "", shortcut = "" }
+                    , Item { title = tick (model.base == Oct) ++ "~O~ctal", cmd = "calc.oct", key = "", shortcut = "" }
+                    , Item { title = tick (model.base == Bin) ++ "~B~inary", cmd = "calc.bin", key = "", shortcut = "" }
+                    ]
+                }
+            , SubMenu
+                { title = "~W~idth"
+                , key = ""
+                , items =
+                    [ Item { title = tick (model.width == Nothing) ++ "~E~xact", cmd = "calc.width.none", key = "", shortcut = "" }
+                    , Item { title = tick (model.width == Just { bits = 64, signed = False }) ++ "~u~64", cmd = "calc.width.u64", key = "", shortcut = "" }
+                    , Item { title = tick (model.width == Just { bits = 64, signed = True }) ++ "~i~64", cmd = "calc.width.i64", key = "", shortcut = "" }
+                    , Item { title = tick (model.width == Just { bits = 32, signed = False }) ++ "u3~2~", cmd = "calc.width.u32", key = "", shortcut = "" }
+                    , Item { title = tick (model.width == Just { bits = 32, signed = True }) ++ "i3~2~", cmd = "calc.width.i32", key = "", shortcut = "" }
+                    ]
+                }
+            , Tui.Separator
+            , Item { title = "Dro~p~", cmd = "calc.drop", key = "", shortcut = "p" }
+            , Item { title = "~S~wap", cmd = "calc.swap", key = "", shortcut = "s" }
+            , Item { title = "D~u~plicate", cmd = "calc.dup", key = "", shortcut = "u" }
+            , Item { title = "C~l~ear stack", cmd = "calc.clear", key = "", shortcut = "z" }
+            ]
+        }
+
+
+{-| A menu has no radio buttons, so the current choice is marked in its
+caption. `\u{25CF}` is what Turbo Vision's own checked items use.
+-}
+tick : Bool -> String
+tick on =
+    if on then
+        "● "
+
+    else
+        "  "
+
+
+view : Model -> Tui.Window
+view model =
+    { id = windowId
+    , title = "RPN Calculator"
+    -- Down and to the right of the chart's, so that opening both leaves each
+    -- window's title bar reachable. Where a window *starts* is the only say
+    -- the model has: after that it is the user's, and Turbo Vision's.
+    , rect = { x1 = 20, y1 = 3, x2 = 58, y2 = 22 }
+    , views =
+        [ Canvas
+            { id = canvasId
+            , rect = { x1 = 2, y1 = 1, x2 = 36, y2 = 9 }
+            , lines = display model
+            , cursor = Just { x = 2 + String.count model.entry, y = rows + 1 }
+            , takesFocus = True
+            }
+        , keypadButton "add" "~+~" 2 10
+        , keypadButton "sub" "~-~" 10 10
+        , keypadButton "mul" "~*~" 18 10
+        , keypadButton "div" "~/~" 26 10
+        , keypadButton "and" "~&~" 2 12
+        , keypadButton "or" "~|~" 10 12
+        , keypadButton "xor" "~^~" 18 12
+        , keypadButton "not" "Not" 26 12
+        , keypadButton "enter" "Ent" 2 14
+        , keypadButton "drop" "Drop" 10 14
+        , keypadButton "swap" "Swap" 18 14
+        , keypadButton "dup" "Dup" 26 14
+        ]
+    }
+
+
+{-| `takesFocus = False` is the whole reason a keypad and a keyboard can share
+one window: a button that could hold the caret would eat the next digit typed
+at it. `TCalculator` clears `ofSelectable` on all twenty of its keys for
+exactly this reason and does not say so anywhere.
+-}
+keypadButton : String -> String -> Int -> Int -> View
+keypadButton name title x y =
+    Tui.Button
+        { id = "calc.key." ++ name
+        , rect = { x1 = x, y1 = y, x2 = x + 7, y2 = y + 2 }
+        , title = title
+        , cmd = "calc." ++ name
+        , isDefault = False
+        , takesFocus = False
+        }
+
+
+display : Model -> Array (Array Span)
+display model =
+    Array.pushLast (Tui.line model.message)
+        (Array.pushLast (entryLine model) (stackLines model))
+
+
+{-| The stack, deepest first, so the top of it sits nearest what is being
+typed. Levels that hold nothing are still drawn: a calculator whose display
+changes height as it fills is a calculator you cannot read at a glance.
+-}
+stackLines : Model -> Array (Array Span)
+stackLines model =
+    let
+        depth =
+            Array.length model.stack
+    in
+    Array.range 0 (rows - 1)
+        |> Array.map
+            (\row ->
+                let
+                    level =
+                        rows - row
+
+                    label =
+                        Tui.ink Blue (String.padLeft 2 ' ' (String.fromInt level) ++ ": ")
+
+                    index =
+                        depth - level
+                in
+                -- The guard is the whole of it: `Array.get` counts from the
+                -- end when the index is negative, so an empty level would
+                -- otherwise show the top of the stack again.
+                if index < 0 then
+                    [ label ]
+
+                else
+                    when Array.get index model.stack is
+                        Just value ->
+                            [ label, Tui.plain (show model value) ]
+
+                        Nothing ->
+                            [ label ]
+            )
+
+
+{-| What is being typed, and what base and width it will be read and shown in.
+
+The entry is padded to a fixed width rather than followed by a fixed gap, so
+the mode does not walk to the right as digits are typed.
+-}
+entryLine : Model -> Array Span
+entryLine model =
+    [ Tui.ink Blue "> "
+    , Tui.plain (String.padRight 22 ' ' model.entry)
+    , Tui.ink Blue (String.padLeft 9 ' ' (baseName model.base ++ " " ++ widthName model.width))
+    ]

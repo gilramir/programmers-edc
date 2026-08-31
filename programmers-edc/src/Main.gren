@@ -21,11 +21,13 @@ as short as it is.
 
 -}
 
+import Array exposing (Array)
 import Init
 import Json.Decode as Decode
 import Json.Encode as Encode
 import Node
 import Tool.Ascii
+import Tool.Calc
 import Tui exposing (Event(..), MenuItem(..), View(..))
 
 
@@ -56,6 +58,7 @@ type alias Model =
     -- should not be made to: what they share is the shape of the three
     -- functions the shell calls.
     , ascii : Maybe Tool.Ascii.Model
+    , calc : Maybe Tool.Calc.Model
     }
 
 
@@ -69,6 +72,7 @@ init _ =
         { model =
             { desktop = { cols = 80, rows = 23 }
             , ascii = Nothing
+            , calc = Nothing
             }
         , command = Cmd.none
         }
@@ -110,8 +114,23 @@ handleEvent event model =
                         , command = Tui.focus tui Tool.Ascii.windowId
                         }
 
+            else if cmd == Tool.Calc.command then
+                when model.calc is
+                    Nothing ->
+                        { model = { model | calc = Just Tool.Calc.init }
+                        , command = Cmd.none
+                        }
+
+                    Just _ ->
+                        { model = model
+                        , command = Tui.focus tui Tool.Calc.windowId
+                        }
+
             else
-                { model = model, command = Cmd.none }
+                -- Every other command belongs to a tool: its menu's, or one of
+                -- its buttons'. The shell does not know which, and does not
+                -- need to.
+                toTools event model
 
         -- A window the user closed from its frame has to leave the model, or
         -- the next render puts it straight back -- and here that takes the
@@ -123,16 +142,30 @@ handleEvent event model =
             if id == Tool.Ascii.windowId then
                 { model = { model | ascii = Nothing }, command = Cmd.none }
 
+            else if id == Tool.Calc.windowId then
+                { model = { model | calc = Nothing }, command = Cmd.none }
+
             else
                 { model = model, command = Cmd.none }
 
-        -- Everything else is a tool's business. Each open tool is handed the
-        -- event and answers for its own ids; a closed one is not consulted,
-        -- which is what `Maybe.map` says here.
         _ ->
-            { model = { model | ascii = Maybe.map (Tool.Ascii.update event) model.ascii }
-            , command = Cmd.none
-            }
+            toTools event model
+
+
+{-| Every open tool is handed the event and answers for its own view ids; a
+closed one is not consulted, which is what `Maybe.map` says here. Nothing is
+routed by window, because an event names the *view* it came from and that is
+the finer-grained fact.
+-}
+toTools : Event -> Model -> { model : Model, command : Cmd Msg }
+toTools event model =
+    { model =
+        { model
+            | ascii = Maybe.map (Tool.Ascii.update event) model.ascii
+            , calc = Maybe.map (Tool.Calc.update event) model.calc
+        }
+    , command = Cmd.none
+    }
 
 
 -- SUBSCRIPTIONS
@@ -148,55 +181,90 @@ subscriptions _ =
 
 view : Model -> Tui.Ui
 view model =
-    { menuBar =
-        [ SubMenu
-            { title = "~F~ile"
-            , key = ""
-            , items = [ Item { title = "E~x~it", cmd = "quit", key = "Alt-X", shortcut = "Alt-X" } ]
-            }
-        -- Every one of these is Turbo Vision's own: they move windows around
-        -- and say nothing to the model, which is why `view` can render the
-        -- same rectangle forever without dragging a window back where it
-        -- began.
-        , SubMenu
-            { title = "~T~ools"
-            , key = ""
-            , items = [ Tool.Ascii.menuItem ]
-            }
-        , SubMenu
-            { title = "~W~indow"
-            , key = ""
-            , items =
-                [ Item { title = "~R~esize/move", cmd = "resize", key = "Ctrl-F5", shortcut = "Ctrl-F5" }
-                , Item { title = "~Z~oom", cmd = "zoom", key = "F5", shortcut = "F5" }
-                , Item { title = "~N~ext", cmd = "next", key = "F6", shortcut = "F6" }
-                , Item { title = "~C~lose", cmd = "close", key = "Alt-F3", shortcut = "Alt-F3" }
-                , Item { title = "~T~ile", cmd = "tile", key = "", shortcut = "" }
-                , Item { title = "C~a~scade", cmd = "cascade", key = "", shortcut = "" }
-                ]
-            }
-        , SubMenu
-            { title = "~H~elp"
-            , key = ""
-            , items = [ Item { title = "~A~bout...", cmd = "about", key = "", shortcut = "" } ]
-            }
-        ]
+    { menuBar = menuBar model
     , statusLine =
         [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
         , { text = "~Alt-A~ ASCII", key = "Alt-A", cmd = Tool.Ascii.command }
+        , { text = "~Alt-R~ RPN", key = "Alt-R", cmd = Tool.Calc.command }
         , { text = "~F5~ Zoom", key = "F5", cmd = "zoom" }
         , { text = "~F6~ Next", key = "F6", cmd = "next" }
         , { text = "~Alt-F3~ Close", key = "Alt-F3", cmd = "close" }
         ]
     , windows =
-        when model.ascii is
+        (when model.ascii is
             Just ascii ->
                 [ Tool.Ascii.view ascii ]
 
             Nothing ->
                 []
+        )
+            ++ (when model.calc is
+                    Just calc ->
+                        [ Tool.Calc.view calc ]
+
+                    Nothing ->
+                        []
+               )
     , overlays = []
     }
+
+
+{-| The bar, with each open tool's own menu spliced in between Tools and
+Window.
+
+A tool's menu is present because the tool is *open*, not because it is the one
+in front, and that is forced rather than chosen: nothing tells the model which
+window is active. There is no event for it -- `Focused` is a list box's
+highlight moving, and window order belongs to Turbo Vision. So a menu that
+followed the focus is not expressible, and the honest alternative is a bar that
+grows by one menu per open tool.
+-}
+menuBar : Model -> Array MenuItem
+menuBar model =
+    [ SubMenu
+        { title = "~F~ile"
+        , key = ""
+        , items = [ Item { title = "E~x~it", cmd = "quit", key = "Alt-X", shortcut = "Alt-X" } ]
+        }
+    , SubMenu
+        { title = "~T~ools"
+        , key = ""
+        , items = [ Tool.Ascii.menuItem, Tool.Calc.menuItem ]
+        }
+    ]
+        ++ toolMenus model
+        ++ -- Every one of these is Turbo Vision's own: they move windows
+           -- around and say nothing to the model, which is why `view` can
+           -- render the same rectangle forever without dragging a window back
+           -- to where it began.
+           [ SubMenu
+                { title = "~W~indow"
+                , key = ""
+                , items =
+                    [ Item { title = "~R~esize/move", cmd = "resize", key = "Ctrl-F5", shortcut = "Ctrl-F5" }
+                    , Item { title = "~Z~oom", cmd = "zoom", key = "F5", shortcut = "F5" }
+                    , Item { title = "~N~ext", cmd = "next", key = "F6", shortcut = "F6" }
+                    , Item { title = "~C~lose", cmd = "close", key = "Alt-F3", shortcut = "Alt-F3" }
+                    , Item { title = "~T~ile", cmd = "tile", key = "", shortcut = "" }
+                    , Item { title = "C~a~scade", cmd = "cascade", key = "", shortcut = "" }
+                    ]
+                }
+           , SubMenu
+                { title = "~H~elp"
+                , key = ""
+                , items = [ Item { title = "~A~bout...", cmd = "about", key = "", shortcut = "" } ]
+                }
+           ]
+
+
+toolMenus : Model -> Array MenuItem
+toolMenus model =
+    when model.calc is
+        Just calc ->
+            [ Tool.Calc.menu calc ]
+
+        Nothing ->
+            []
 
 
 aboutDialog : Model -> Tui.DialogSpec

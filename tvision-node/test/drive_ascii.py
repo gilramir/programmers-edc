@@ -50,6 +50,24 @@ def main():
     check("printable keys reach JS", decimal(app.render()) == 65,
           f"got {decimal(app.render())}")
 
+    # ...and it is the character that arrives, not the key. TKey uppercases
+    # letters on purpose -- it identifies a *key*, so that Ctrl-A and Ctrl-a
+    # are one -- and naming the character from that reported every letter as a
+    # capital. The check above uses "A" and could never have noticed.
+    app.send(b"a", settle=0.5)
+    check("a lowercase key is lowercase", decimal(app.render()) == 97,
+          f"got {decimal(app.render())}")
+
+    # Three or more printable characters in a row are a *paste* as far as
+    # TVision is concerned (minPasteEventCount, config.h), and it blanks the
+    # key code of every event it decides that about, so that pasted text cannot
+    # trigger menu accelerators. The character is then only in `keyDown.text`.
+    # Before keyName() read that, a burst arrived as three "0x0000"s and
+    # nothing moved -- which is anybody typing quickly, not just the clipboard.
+    app.send(b"abc", settle=0.7)
+    check("a burst of printable keys arrives as characters, not 0x0000",
+          decimal(app.render()) == 99, f"got {decimal(app.render())}")
+
     app.send(b"\x1b[H", settle=0.5)   # Home
     check("named keys reach JS", decimal(app.render()) == 0,
           f"got {decimal(app.render())}")

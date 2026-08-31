@@ -133,12 +133,44 @@ inline std::string keyName(const TEvent &event)
         if (entry.second == key.code)
             return name + entry.first;
 
-    if (key.code >= 32 && key.code < 127)
-        return name + std::string(1, (char) key.code);
-
+    // The character the event carries, *before* the key code it was
+    // normalised into. `TKey` uppercases letters on purpose (tkey.cpp): it is
+    // a key identity, so that Ctrl-A and Ctrl-a are one key. That is right for
+    // a shortcut table and wrong for a program being typed at -- reading the
+    // character off `key.code` reported every letter as a capital, which no
+    // example noticed because the one that types a letter types "A".
+    //
+    // Modified keys are unaffected: Alt-X arrives as kbAltX, whose low byte is
+    // zero, so it falls through to the key code below and keeps its name.
     uchar ch = event.keyDown.charScan.charCode;
     if (ch >= 32 && ch < 127)
         return name + std::string(1, (char) ch);
+
+    if (key.code >= 32 && key.code < 127)
+        return name + std::string(1, (char) key.code);
+
+    // A key event can carry its character in `text` and nowhere else, and this
+    // is not a rare case. TVision decides that three consecutive printable
+    // characters are a paste (`minPasteEventCount`, config.h) and then blanks
+    // the key code of every event it flagged -- `keyDown.keyCode = 0`,
+    // tevent.cpp -- so that pasted text cannot trigger menu accelerators. The
+    // character survives only in `text`.
+    //
+    // Three is a low bar: anybody typing quickly trips it, and so does a pty
+    // test that writes more than two bytes at once. Without this, the whole
+    // burst arrives as "0x0000".
+    TStringView text = event.keyDown.getText();
+    if (text.size() > 0)
+        {
+        // CR and CRLF become LF on that path (tevent.cpp again), so name those
+        // the way the same keys are named when nobody called them a paste.
+        if (text.size() == 1 && text[0] == '\n')
+            return name + "Enter";
+        if (text.size() == 1 && text[0] == '\t')
+            return name + "Tab";
+        if (text.size() > 1 || (uchar) text[0] >= 32)
+            return name + std::string(text.data(), text.size());
+        }
 
     char buf[16];
     snprintf(buf, sizeof buf, "0x%04x", (unsigned) key.code);
