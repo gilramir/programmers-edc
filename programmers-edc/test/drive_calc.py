@@ -76,6 +76,18 @@ def set_base(app, want):
     return False
 
 
+def press(app, label):
+    """Click a keypad button by its caption. The window is already the active
+    one everywhere this is used, so one click is enough -- on an inactive
+    window the first click is spent raising it."""
+    for row, line in enumerate(app.render().split("\n")):
+        at = line.find(label)
+        if at >= 0:
+            app.click(at + 2, row + 1, settle=0.9)
+            return True
+    return False
+
+
 def message(app):
     """The last line of the display: an error, or the standing hint that says
     how to change the two modes above it."""
@@ -179,18 +191,27 @@ def main():
     check("u duplicates", stack(app) == {1: "3", 2: "3", 3: "1"}, str(stack(app)))
 
     # A button acts, and does not take the caret with it: the digit typed
-    # straight afterwards still reaches the canvas.
+    # straight afterwards still reaches the canvas. `takesFocus = False` is the
+    # whole of that, and it is the trap TCalculator avoids by clearing
+    # ofSelectable on all twenty of its keys without saying why.
     before = stack(app)
-    for row, line in enumerate(app.render().split("\n")):
-        at = line.find(" + ")
-        if at >= 0:
-            app.click(at + 2, row + 1, settle=0.9)
-            break
-    check("the + button added", top(app) == "6", f"{before} -> {stack(app)}")
+    check("the + button is there", press(app, " + "))
+    check("and it added", top(app) == "6", f"{before} -> {stack(app)}")
     app.send(b"9", settle=0.7)
     check("and the keyboard still owns the caret",
           "> 9" in app.render(), app.render())
     app.send(b"\x1b", settle=0.5)
+
+    # `Not` is the one button whose caption is a word rather than the symbol
+    # it stands for -- `~` was rejected as a caption because at button size it
+    # is a hair away from `-`, and complement-instead-of-subtract is a silent
+    # wrong answer. Being the least obvious button, it is the one most worth a
+    # check: it complements, so 6 becomes -7, which is what ~x means where no
+    # width has been declared.
+    check("the Not button is there", press(app, "Not"))
+    check("and it complements: ~6 is -7", top(app) == "-7", str(stack(app)))
+    check("and it is its own inverse", press(app, "Not") and top(app) == "6",
+          str(stack(app)))
 
     # Two tools at once, which is the case the whole program exists for. They
     # overlap -- where a window starts is the model's only say -- so this
