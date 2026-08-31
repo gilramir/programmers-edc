@@ -54,9 +54,12 @@ def top(app):
 
 
 def mode(app):
-    """The base and width shown at the right of the entry line."""
+    """The two modes, off the line that labels them.
+
+    They used to be a bare `dec exact` at the end of the entry line, and the
+    first person to see the calculator asked what the two words meant."""
     for line in app.render().split("\n"):
-        m = re.search(r"(dec|hex|oct|bin) +(exact|[ui]\d+)", line)
+        m = re.search(r"base (\w+) +width (\S+)", line)
         if m:
             return (m.group(1), m.group(2))
     return None
@@ -74,10 +77,11 @@ def set_base(app, want):
 
 
 def message(app):
-    """The line under the entry, which is where errors land."""
-    rows = app.render().split("\n")
-    for row in rows:
-        if "║" in row and ("needs" in row or "divide" in row or "not a number" in row):
+    """The last line of the display: an error, or the standing hint that says
+    how to change the two modes above it."""
+    for row in app.render().split("\n"):
+        if "║" in row and ("needs" in row or "divide" in row or "not a number" in row
+                           or "changes base" in row):
             return row.split("║")[1].strip()
     return ""
 
@@ -93,8 +97,16 @@ def main():
     check("and it brought its own menu with it", "Calc" in app.render().split("\n")[0],
           app.render().split("\n")[0])
 
+    # The two modes are labelled, and the line under them says how to change
+    # them -- standing, not shown once. The version of this that wiped the hint
+    # on the first keystroke left two unexplained words on screen.
+    check("the modes say what they are", mode(app) == ("dec", "exact"), str(mode(app)))
+    check("and how to change them", "changes base" in message(app), message(app))
+
     # RPN: type, push, operate. Nothing here is a button.
     app.send(b"255\r16\r*", settle=1.0)
+    check("the hint is still there after typing", "changes base" in message(app),
+          message(app))
     check("255 16 * is 4080", top(app) == "4080", str(stack(app)))
     check("and the operands are gone", stack(app).get(2) is None, str(stack(app)))
 

@@ -97,7 +97,7 @@ init =
     , entry = ""
     , base = Dec
     , width = Nothing
-    , message = "Enter pushes; Tab base; w width"
+    , message = ""
     }
 
 
@@ -905,8 +905,8 @@ keypadButton name title x y =
 
 display : Model -> Array (Array Span)
 display model =
-    Array.pushLast (Tui.line model.message)
-        (Array.pushLast (entryLine model) (stackLines model))
+    stackLines model
+        ++ [ entryLine model, modeLine model, messageLine model ]
 
 
 {-| The stack, deepest first, so the top of it sits nearest what is being
@@ -948,14 +948,36 @@ stackLines model =
             )
 
 
-{-| What is being typed, and what base and width it will be read and shown in.
-
-The entry is padded to a fixed width rather than followed by a fixed gap, so
-the mode does not walk to the right as digits are typed.
--}
 entryLine : Model -> Array Span
 entryLine model =
-    [ Tui.ink Blue "> "
-    , Tui.plain (String.padRight 22 ' ' model.entry)
-    , Tui.ink Blue (String.padLeft 9 ' ' (baseName model.base ++ " " ++ widthName model.width))
+    [ Tui.ink Blue "> ", Tui.plain model.entry ]
+
+
+{-| The two modes, labelled.
+
+They were an unlabelled `dec exact` at the right-hand end of the entry line,
+and the first person to look at the calculator asked what they were -- fairly,
+since the only thing that explained them was a hint that `update` wiped on the
+next keystroke. A word that has to be remembered from a message that is gone is
+not a label.
+-}
+modeLine : Model -> Array Span
+modeLine model =
+    [ Tui.ink Blue "base "
+    , Tui.plain (String.padRight 8 ' ' (baseName model.base))
+    , Tui.ink Blue "width "
+    , Tui.plain (widthName model.width)
     ]
+
+
+{-| Whatever went wrong, or -- when nothing has -- how to change the two modes
+above. The hint is *standing* rather than shown once: it costs a line that has
+nothing else to do, and it is the answer to the question the mode line raises.
+-}
+messageLine : Model -> Array Span
+messageLine model =
+    if String.isEmpty model.message then
+        [ Tui.ink DarkGray "Tab changes base, w changes width" ]
+
+    else
+        [ Tui.ink Red model.message ]
