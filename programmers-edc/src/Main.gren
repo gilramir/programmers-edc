@@ -25,6 +25,7 @@ import Init
 import Json.Decode as Decode
 import Json.Encode as Encode
 import Node
+import Tool.Ascii
 import Tui exposing (Event(..), MenuItem(..), View(..))
 
 
@@ -50,6 +51,11 @@ type alias Model =
       -- coordinates, so the shell has to know how big the desktop is. It is
       -- also the only thing here that needs the `Resized` event.
       desktop : { cols : Int, rows : Int }
+    -- One field per tool, `Nothing` when its window is not open. A field
+    -- rather than a list because the tools do not share a model type and
+    -- should not be made to: what they share is the shape of the three
+    -- functions the shell calls.
+    , ascii : Maybe Tool.Ascii.Model
     }
 
 
@@ -60,7 +66,10 @@ type Msg
 init : Node.Environment -> Init.Task { model : Model, command : Cmd Msg }
 init _ =
     Node.startProgram
-        { model = { desktop = { cols = 80, rows = 23 } }
+        { model =
+            { desktop = { cols = 80, rows = 23 }
+            , ascii = Nothing
+            }
         , command = Cmd.none
         }
 
@@ -84,8 +93,46 @@ handleEvent event model =
         Command "about" ->
             { model = model, command = Tui.dialog tui (aboutDialog model) }
 
+        -- Opening a tool that is already open raises its window instead of
+        -- doing nothing, which is what the user meant by asking for it twice.
+        -- `Tui.focus` is the only way to say it: which windows exist is the
+        -- model's, and which one is in front is not.
+        Command cmd ->
+            if cmd == Tool.Ascii.command then
+                when model.ascii is
+                    Nothing ->
+                        { model = { model | ascii = Just Tool.Ascii.init }
+                        , command = Cmd.none
+                        }
+
+                    Just _ ->
+                        { model = model
+                        , command = Tui.focus tui Tool.Ascii.windowId
+                        }
+
+            else
+                { model = model, command = Cmd.none }
+
+        -- A window the user closed from its frame has to leave the model, or
+        -- the next render puts it straight back -- and here that takes the
+        -- tool's state with it, which is `Maybe` read literally: a closed tool
+        -- is a tool you are done with, and reopening it starts fresh. A tool
+        -- holding something the user *made* rather than merely where they were
+        -- looking can keep its model behind a flag of its own instead.
+        WindowClosed id ->
+            if id == Tool.Ascii.windowId then
+                { model = { model | ascii = Nothing }, command = Cmd.none }
+
+            else
+                { model = model, command = Cmd.none }
+
+        -- Everything else is a tool's business. Each open tool is handed the
+        -- event and answers for its own ids; a closed one is not consulted,
+        -- which is what `Maybe.map` says here.
         _ ->
-            { model = model, command = Cmd.none }
+            { model = { model | ascii = Maybe.map (Tool.Ascii.update event) model.ascii }
+            , command = Cmd.none
+            }
 
 
 -- SUBSCRIPTIONS
@@ -112,6 +159,11 @@ view model =
         -- same rectangle forever without dragging a window back where it
         -- began.
         , SubMenu
+            { title = "~T~ools"
+            , key = ""
+            , items = [ Tool.Ascii.menuItem ]
+            }
+        , SubMenu
             { title = "~W~indow"
             , key = ""
             , items =
@@ -131,11 +183,18 @@ view model =
         ]
     , statusLine =
         [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
+        , { text = "~Alt-A~ ASCII", key = "Alt-A", cmd = Tool.Ascii.command }
         , { text = "~F5~ Zoom", key = "F5", cmd = "zoom" }
         , { text = "~F6~ Next", key = "F6", cmd = "next" }
         , { text = "~Alt-F3~ Close", key = "Alt-F3", cmd = "close" }
         ]
-    , windows = []
+    , windows =
+        when model.ascii is
+            Just ascii ->
+                [ Tool.Ascii.view ascii ]
+
+            Nothing ->
+                []
     , overlays = []
     }
 

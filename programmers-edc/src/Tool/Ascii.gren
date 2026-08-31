@@ -1,0 +1,456 @@
+module Tool.Ascii exposing (Model, command, init, menuItem, update, view, windowId)
+
+{-| The ASCII chart: 128 codes in a grid you can walk around in, and a line
+underneath saying what the selected one is in every base a programmer asks for.
+
+gren-tvision has an ASCII chart of its own -- `examples/ascii`, a port of
+tvdemo's -- and this is deliberately not that one. Three differences, each of
+which is the point:
+
+**It is ASCII.** The original chart is code page 437: 256 cells of smiley
+faces and box drawing, because that is what an IBM PC could put on a screen in
+1994. What a programmer wants today is 0 to 127 and nothing else.
+
+**Control codes have names.** Which is the whole reason to reach for this
+rather than count on your fingers: the cell for 7 cannot show a glyph, but the
+line underneath can say `BEL  bell  Ctrl-G  \a`, and that is the answer you
+came for. The grid shows a `·` in every cell that has nothing to draw, and the
+names carry the meaning.
+
+**It is a window, not a program.** `examples/ascii` *is* an application: it
+owns the menu bar, the status line and the event loop. Here it is one tool
+among several -- a `Model`, an `update` that is handed the events the shell
+received, and a `view` returning one `Tui.Window`. Nothing else about it
+changes, which is the thing worth knowing: a Turbo Vision program written as
+`view : Model -> Ui` demotes to a component by deleting its `main`.
+
+One rule this file has to respect, and it is Turbo Vision's rather than ours.
+A focused canvas consumes every key it is given -- `JsCanvas::handleEvent`
+clears the event -- so the arrows, `Home`, `End` and every printable character
+belong to the chart while it has focus. What still works is anything the menu
+bar or the status line claims first: both are `ofPreProcess` views
+(`tmenubar.cpp:32`, `tstatusl.cpp:35`), so their hotkeys are seen *before* the
+focused view. That is why `F6`, `Alt-F3` and `Alt-X` still get you out of here,
+and it is the reason every key predc must not lose is on the menu or the
+status line.
+
+-}
+
+import Array exposing (Array)
+import Char
+import Math
+import String
+import Tui exposing (Hue(..), MenuItem(..), Span, View(..))
+
+
+-- NAMES
+
+
+command : String
+command =
+    "tool.ascii"
+
+
+windowId : String
+windowId =
+    "ascii"
+
+
+canvasId : String
+canvasId =
+    "ascii.grid"
+
+
+menuItem : MenuItem
+menuItem =
+    Item { title = "~A~SCII chart", cmd = command, key = "Alt-A", shortcut = "Alt-A" }
+
+
+-- MODEL
+
+
+{-| One number. The chart is a pure function of which code is selected, which
+is what made the C++ original's `draw()` and `handleEvent()` unnecessary.
+-}
+type alias Model =
+    { code : Int }
+
+
+init : Model
+init =
+    { code = 0 }
+
+
+columns : Int
+columns =
+    16
+
+
+{-| Two columns per cell, so the grid is legible rather than a wall.
+-}
+cellWidth : Int
+cellWidth =
+    2
+
+
+{-| `0_ ` down the left-hand side.
+-}
+labelWidth : Int
+labelWidth =
+    3
+
+
+moveTo : Int -> Model -> Model
+moveTo code model =
+    { model | code = clamp 0 127 code }
+
+
+-- UPDATE
+
+
+{-| The shell hands over every event it was given; a tool answers for its own
+ids and ignores the rest. Nothing is routed by window, because an event knows
+which *view* it came from and that is the finer-grained fact.
+-}
+update : Tui.Event -> Model -> Model
+update event model =
+    when event is
+        Tui.KeyPressed pressed ->
+            if pressed.id == canvasId then
+                pressKey pressed.key model
+
+            else
+                model
+
+        Tui.Clicked spot ->
+            if spot.id == canvasId then
+                click spot.x spot.y model
+
+            else
+                model
+
+        _ ->
+            model
+
+
+pressKey : String -> Model -> Model
+pressKey key model =
+    when key is
+        "Left" ->
+            moveTo (model.code - 1) model
+
+        "Right" ->
+            moveTo (model.code + 1) model
+
+        "Up" ->
+            moveTo (model.code - columns) model
+
+        "Down" ->
+            moveTo (model.code + columns) model
+
+        "Home" ->
+            moveTo 0 model
+
+        "End" ->
+            moveTo 127 model
+
+        "PgUp" ->
+            moveTo (model.code - 4 * columns) model
+
+        "PgDn" ->
+            moveTo (model.code + 4 * columns) model
+
+        other ->
+            -- A printable key jumps to itself, which is the fastest way to ask
+            -- "what is the code for this character". Every other key's name is
+            -- longer than one character, so this needs no other guard -- and
+            -- the ones outside ASCII are simply not on the chart.
+            when String.popFirst other is
+                Just { first, rest } ->
+                    if String.isEmpty rest && Char.toCode first < 128 then
+                        moveTo (Char.toCode first) model
+
+                    else
+                        model
+
+                Nothing ->
+                    model
+
+
+{-| A click arrives in the canvas's own coordinates, so undoing the header row
+and the row labels is all there is to it. A click on either of them lands on
+the nearest cell rather than being ignored: the user pointed at a row, and the
+row is the answer.
+-}
+click : Int -> Int -> Model -> Model
+click x y model =
+    let
+        atColumn =
+            clamp 0 (columns - 1) ((x - labelWidth) // cellWidth)
+
+        atRow =
+            clamp 0 7 (y - 1)
+    in
+    moveTo (atRow * columns + atColumn) model
+
+
+-- THE CHART
+
+
+{-| The header row and eight rows of sixteen. Control codes are drawn in their
+own colour, which is the only way to see at a glance where the unprintable
+third of the table stops.
+-}
+grid : Array (Array Span)
+grid =
+    Array.pushFirst header (Array.map row (Array.range 0 7))
+
+
+header : Array Span
+header =
+    [ Tui.ink Yellow
+        (String.repeat labelWidth " "
+            ++ String.join " " (Array.map hexDigit (Array.range 0 (columns - 1)))
+        )
+    ]
+
+
+row : Int -> Array Span
+row r =
+    Array.pushFirst
+        (Tui.ink Yellow (hexDigit r ++ "_ "))
+        (Array.map (\c -> cell (r * columns + c)) (Array.range 0 (columns - 1)))
+
+
+cell : Int -> Span
+cell code =
+    let
+        body =
+            glyph code ++ " "
+    in
+    if isControl code then
+        Tui.ink Cyan body
+
+    else
+        Tui.plain body
+
+
+{-| What a cell draws. A control code has no glyph, and neither does `DEL`; a
+space has one and it is blank, which is the truthful thing to show even though
+it makes 0x20 look empty. The line underneath is what disambiguates them.
+-}
+glyph : Int -> String
+glyph code =
+    if isControl code then
+        "·"
+
+    else
+        String.fromChar (Char.fromCode code)
+
+
+isControl : Int -> Bool
+isControl code =
+    code < 32 || code == 127
+
+
+cursorAt : Model -> { x : Int, y : Int }
+cursorAt model =
+    { x = labelWidth + Math.modBy columns model.code * cellWidth
+    , y = 1 + model.code // columns
+    }
+
+
+-- WHAT IT IS
+
+
+{-| Codes 0 to 32, by their ASCII names. `DEL` is the odd one out at 127 and is
+handled beside them.
+-}
+names : Array { name : String, meaning : String }
+names =
+    [ { name = "NUL", meaning = "null" }
+    , { name = "SOH", meaning = "start of heading" }
+    , { name = "STX", meaning = "start of text" }
+    , { name = "ETX", meaning = "end of text" }
+    , { name = "EOT", meaning = "end of transmission" }
+    , { name = "ENQ", meaning = "enquiry" }
+    , { name = "ACK", meaning = "acknowledge" }
+    , { name = "BEL", meaning = "bell" }
+    , { name = "BS", meaning = "backspace" }
+    , { name = "HT", meaning = "horizontal tab" }
+    , { name = "LF", meaning = "line feed" }
+    , { name = "VT", meaning = "vertical tab" }
+    , { name = "FF", meaning = "form feed" }
+    , { name = "CR", meaning = "carriage return" }
+    , { name = "SO", meaning = "shift out" }
+    , { name = "SI", meaning = "shift in" }
+    , { name = "DLE", meaning = "data link escape" }
+    , { name = "DC1", meaning = "device control 1 (XON)" }
+    , { name = "DC2", meaning = "device control 2" }
+    , { name = "DC3", meaning = "device control 3 (XOFF)" }
+    , { name = "DC4", meaning = "device control 4" }
+    , { name = "NAK", meaning = "negative acknowledge" }
+    , { name = "SYN", meaning = "synchronous idle" }
+    , { name = "ETB", meaning = "end of transmission block" }
+    , { name = "CAN", meaning = "cancel" }
+    , { name = "EM", meaning = "end of medium" }
+    , { name = "SUB", meaning = "substitute" }
+    , { name = "ESC", meaning = "escape" }
+    , { name = "FS", meaning = "file separator" }
+    , { name = "GS", meaning = "group separator" }
+    , { name = "RS", meaning = "record separator" }
+    , { name = "US", meaning = "unit separator" }
+    , { name = "SP", meaning = "space" }
+    ]
+
+
+named : Int -> Maybe { name : String, meaning : String }
+named code =
+    if code == 127 then
+        Just { name = "DEL", meaning = "delete" }
+
+    else
+        Array.get code names
+
+
+{-| The C escape, for the eight codes that have one. `\e` is not in the C
+standard -- it is GCC's and everyone else's -- and it is here because a
+programmer looking up 27 wants to be told about it.
+-}
+escape : Int -> String
+escape code =
+    when code is
+        0 ->
+            "\\0"
+
+        7 ->
+            "\\a"
+
+        8 ->
+            "\\b"
+
+        9 ->
+            "\\t"
+
+        10 ->
+            "\\n"
+
+        11 ->
+            "\\v"
+
+        12 ->
+            "\\f"
+
+        13 ->
+            "\\r"
+
+        27 ->
+            "\\e"
+
+        _ ->
+            ""
+
+
+{-| Which `Ctrl-` chord types this code, which is the other half of what the
+control third of the table is for. `Ctrl-@` through `Ctrl-_` is the whole of
+it: the terminal strips bit 6 and bit 7, so the chord for code *n* is the
+character at `n + 64`. `DEL` is `Ctrl-?` by the same arithmetic and is the
+reason Backspace and Delete have argued for forty years.
+-}
+chord : Int -> String
+chord code =
+    if code < 32 then
+        "Ctrl-" ++ String.fromChar (Char.fromCode (code + 64))
+
+    else if code == 127 then
+        "Ctrl-?"
+
+    else
+        ""
+
+
+{-| `Dec 65  Hex 41  Oct 101  Bin 0100 0001` -- every base at once, because
+the reason to have this open is that you are converting between them.
+-}
+bases : Model -> String
+bases model =
+    "Dec "
+        ++ String.padRight 5 ' ' (String.fromInt model.code)
+        ++ "Hex "
+        ++ String.padRight 4 ' ' (String.padLeft 2 '0' (radix 16 model.code))
+        ++ "Oct "
+        ++ String.padRight 5 ' ' (String.padLeft 3 '0' (radix 8 model.code))
+        ++ "Bin "
+        ++ nibbles model.code
+
+
+{-| Eight bits, split in the middle, because nobody can count to eight.
+-}
+nibbles : Int -> String
+nibbles code =
+    let
+        bits =
+            String.padLeft 8 '0' (radix 2 code)
+    in
+    String.slice 0 4 bits ++ " " ++ String.slice 4 8 bits
+
+
+radix : Int -> Int -> String
+radix base n =
+    if n < base then
+        hexDigit n
+
+    else
+        radix base (n // base) ++ hexDigit (Math.modBy base n)
+
+
+{-| One digit of a base up to sixteen, which is every base this chart shows.
+-}
+hexDigit : Int -> String
+hexDigit n =
+    String.slice n (n + 1) "0123456789ABCDEF"
+
+
+{-| The name line: what this code is called, and the two ways to type it.
+-}
+naming : Model -> String
+naming model =
+    when named model.code is
+        Just it ->
+            String.padRight 5 ' ' it.name
+                ++ String.padRight 27 ' ' it.meaning
+                ++ String.padRight 9 ' ' (chord model.code)
+                ++ escape model.code
+
+        Nothing ->
+            "Char " ++ String.fromChar (Char.fromCode model.code)
+
+
+-- VIEW
+
+
+view : Model -> Tui.Window
+view model =
+    { id = windowId
+    , title = "ASCII Chart"
+    , rect = { x1 = 6, y1 = 2, x2 = 54, y2 = 17 }
+    , views =
+        [ Canvas
+            { id = canvasId
+            , rect = { x1 = 2, y1 = 1, x2 = 46, y2 = 10 }
+            , lines = grid
+            , cursor = Just (cursorAt model)
+            , takesFocus = True
+            }
+        , StaticText
+            { id = "ascii.bases"
+            , rect = { x1 = 2, y1 = 11, x2 = 46, y2 = 12 }
+            , text = bases model
+            }
+        , StaticText
+            { id = "ascii.naming"
+            , rect = { x1 = 2, y1 = 12, x2 = 46, y2 = 13 }
+            , text = naming model
+            }
+        ]
+    }

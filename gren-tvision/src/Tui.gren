@@ -489,6 +489,14 @@ type alias Window =
     canvas that is only there to be looked at or clicked should say `False` or
     it will trap the caret. Clicks still arrive either way.
 
+    What it does *not* eat is anything the menu bar or the status line claims
+    first. Both are `ofPreProcess` views (`tmenubar.cpp`, `tstatusl.cpp`), so
+    their hotkeys are offered the key before the focused view is -- which is
+    why `Alt-X`, `F5` and `Alt-F3` still work with a canvas focused, and why a
+    program built around one should put every key the user must not lose on
+    the menu bar or the status line. A key that is on neither belongs to the
+    canvas for as long as it has the caret.
+
   - `Editor` — a text editor. It gets scroll bars of its own, in the column to
     the **right** and the row **below** its rectangle, so leave one of each.
 
