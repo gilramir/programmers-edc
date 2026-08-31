@@ -8,9 +8,18 @@ separate processes, separate ptys, separate `mkdtemp` scratch directories -- so
 the wall clock is the only thing that has to be spent in order.
 
 Drivers are discovered rather than listed: any `test/drive*.py` under
-`tvision-node` or `gren-tvision` is a suite. Adding one used to mean
-remembering to register it in two lists in `devbox.json`, which is exactly the
-kind of bookkeeping this repo has been bitten by before.
+`tvision-node`, `gren-tvision` or `programmers-edc` is a suite. Adding one used
+to mean remembering to register it in two lists in `devbox.json`, which is
+exactly the kind of bookkeeping this repo has been bitten by before.
+
+`programmers-edc` is on that list for a reason worth writing down, because it
+is a compromise. predc is meant to be an *independent* application -- it
+depends on the package the way anyone else's program would -- and an
+independent application does not have this runner, or `harness.py`, which lives
+in `tvision-node/test`. Nothing distributable drives a Turbo Vision program
+through a pty yet. Until something is, predc borrows both from the repo it
+happens to sit in, and the borrowing is the finding: shipping the binding means
+answering "how does a consumer test their own TUI app".
 
     tools/run_tests.py             # every suite
     tools/run_tests.py --asan      # the same, with TVNODE_ASAN=1
@@ -32,6 +41,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SUITE_DIRS = [
     os.path.join(ROOT, "tvision-node"),
     os.path.join(ROOT, "gren-tvision"),
+    os.path.join(ROOT, "programmers-edc"),
 ]
 
 # drive_regress.py deletes every `build/asan.*` before it starts and globs for

@@ -1,0 +1,12 @@
+{
+  "name": "predc",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The programmer's every-day carry: small tools, one terminal window.",
+  "bin": {
+    "predc": "bin/predc.js"
+  },
+  "dependencies": {
+    "gren-tvision": "file:../gren-tvision-runtime"
+  }
+}

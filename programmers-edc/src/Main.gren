@@ -1,0 +1,165 @@
+port module Main exposing (main)
+
+{-| **predc** -- the programmer's every-day carry.
+
+A pocket knife: several small tools that a programmer wants two or three times
+a week and never wants to go looking for. Each one is an ordinary window on the
+desktop, so two of them can be on screen at once -- which is the case the thing
+exists for. You convert a timestamp *while* reading the hex dump that contains
+it.
+
+This file is the shell: the menu bar, the status line, the About box, and
+nothing else. The tools live in `Tool/`, each a small self-contained
+model-update-view that hands back a `Tui.Window`, and this module owns only
+which of them are open.
+
+Window *management* is deliberately not here. Zoom, resize, tile, cascade and
+close are Turbo Vision's own commands and never reach the model; a window's
+rectangle in `view` is where it starts, not where it is. `examples/demo` in
+gren-tvision makes the same point at length and it is the reason this shell is
+as short as it is.
+
+-}
+
+import Init
+import Json.Decode as Decode
+import Json.Encode as Encode
+import Node
+import Tui exposing (Event(..), MenuItem(..), View(..))
+
+
+-- PORTS
+
+
+port tuiOut : Encode.Value -> Cmd msg
+
+
+port tuiIn : (Decode.Value -> msg) -> Sub msg
+
+
+tui : Tui.Ports Msg
+tui =
+    { toJs = tuiOut, fromJs = tuiIn }
+
+
+-- MODEL
+
+
+type alias Model =
+    { -- The About box centres itself, and a rectangle is in desktop
+      -- coordinates, so the shell has to know how big the desktop is. It is
+      -- also the only thing here that needs the `Resized` event.
+      desktop : { cols : Int, rows : Int }
+    }
+
+
+type Msg
+    = FromTui Event
+
+
+init : Node.Environment -> Init.Task { model : Model, command : Cmd Msg }
+init _ =
+    Node.startProgram
+        { model = { desktop = { cols = 80, rows = 23 } }
+        , command = Cmd.none
+        }
+
+
+-- UPDATE
+
+
+update : Msg -> Model -> { model : Model, command : Cmd Msg }
+update msg model =
+    when msg is
+        FromTui event ->
+            handleEvent event model
+
+
+handleEvent : Event -> Model -> { model : Model, command : Cmd Msg }
+handleEvent event model =
+    when event is
+        Resized size ->
+            { model = { model | desktop = size }, command = Cmd.none }
+
+        Command "about" ->
+            { model = model, command = Tui.dialog tui (aboutDialog model) }
+
+        _ ->
+            { model = model, command = Cmd.none }
+
+
+-- SUBSCRIPTIONS
+
+
+subscriptions : Model -> Sub Msg
+subscriptions _ =
+    Sub.none
+
+
+-- VIEW
+
+
+view : Model -> Tui.Ui
+view model =
+    { menuBar =
+        [ SubMenu
+            { title = "~F~ile"
+            , key = ""
+            , items = [ Item { title = "E~x~it", cmd = "quit", key = "Alt-X", shortcut = "Alt-X" } ]
+            }
+        -- Every one of these is Turbo Vision's own: they move windows around
+        -- and say nothing to the model, which is why `view` can render the
+        -- same rectangle forever without dragging a window back where it
+        -- began.
+        , SubMenu
+            { title = "~W~indow"
+            , key = ""
+            , items =
+                [ Item { title = "~R~esize/move", cmd = "resize", key = "Ctrl-F5", shortcut = "Ctrl-F5" }
+                , Item { title = "~Z~oom", cmd = "zoom", key = "F5", shortcut = "F5" }
+                , Item { title = "~N~ext", cmd = "next", key = "F6", shortcut = "F6" }
+                , Item { title = "~C~lose", cmd = "close", key = "Alt-F3", shortcut = "Alt-F3" }
+                , Item { title = "~T~ile", cmd = "tile", key = "", shortcut = "" }
+                , Item { title = "C~a~scade", cmd = "cascade", key = "", shortcut = "" }
+                ]
+            }
+        , SubMenu
+            { title = "~H~elp"
+            , key = ""
+            , items = [ Item { title = "~A~bout...", cmd = "about", key = "", shortcut = "" } ]
+            }
+        ]
+    , statusLine =
+        [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
+        , { text = "~F5~ Zoom", key = "F5", cmd = "zoom" }
+        , { text = "~F6~ Next", key = "F6", cmd = "next" }
+        , { text = "~Alt-F3~ Close", key = "Alt-F3", cmd = "close" }
+        ]
+    , windows = []
+    , overlays = []
+    }
+
+
+aboutDialog : Model -> Tui.DialogSpec
+aboutDialog model =
+    Tui.messageBox
+        { id = "about"
+        , title = "About"
+        , text = "\n\u{0003}predc\n \n\u{0003}the programmer's every-day carry\n \n\u{0003}small tools, one terminal window\n"
+        , buttons = Tui.okButtons
+        , desktop = model.desktop
+        }
+
+
+-- PROGRAM
+
+
+main : Tui.Program Model Msg
+main =
+    Tui.defineProgram tui
+        { init = init
+        , update = update
+        , subscriptions = subscriptions
+        , view = view
+        , onEvent = FromTui
+        }

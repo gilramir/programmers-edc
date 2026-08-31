@@ -95,7 +95,10 @@ Nothing here calls into C++ and nothing here blocks, including modal dialogs.
             , onEvent = FromTui
             , view =
                 \model ->
-                    { windows =
+                    { menuBar = []
+                    , statusLine =
+                        [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" } ]
+                    , windows =
                         [ { id = "counter"
                           , title = "Counter"
                           , rect = { x1 = 2, y1 = 2, x2 = 40, y2 = 8 }
@@ -108,10 +111,8 @@ Nothing here calls into C++ and nothing here blocks, including modal dialogs.
                                 ]
                           }
                         ]
+                    , overlays = []
                     }
-            , menuBar = []
-            , statusLine =
-                [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" } ]
             }
 
 Build and run it with:

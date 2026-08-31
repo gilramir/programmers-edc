@@ -25,7 +25,9 @@
         "tvision-node/scripts/build-tvision.sh",
         "(cd tvision-node && npm install --no-audit --no-fund && npx node-gyp rebuild)",
         "(cd gren-tvision-runtime && npm install --no-audit --no-fund)",
-        "gren-tvision/build.sh"
+        "(cd programmers-edc && npm install --no-audit --no-fund)",
+        "gren-tvision/build.sh",
+        "programmers-edc/build.sh"
       ],
       "hello": [
         "cd tvision-node && node examples/hello.js"
@@ -45,17 +47,22 @@
       "gren:build": [
         "gren-tvision/build.sh"
       ],
+      "predc": [
+        "programmers-edc/run.sh \"$@\""
+      ],
       "test": [
         "python3 tools/check_consistency.py",
         "(cd gren-tvision && gren docs --output=/dev/null)",
         "(cd gren-tvision-runtime && node --test test/*.test.js)",
         "(cd gren-tvision/tests && ./run.sh)",
         "gren-tvision/build.sh",
+        "programmers-edc/build.sh",
         "python3 tools/run_tests.py"
       ],
       "test:asan": [
         "(cd tvision-node && TVNODE_ASAN=1 npx node-gyp rebuild)",
         "gren-tvision/build.sh",
+        "programmers-edc/build.sh",
         "python3 tools/run_tests.py --asan; rc=$?; (cd tvision-node && npx node-gyp rebuild) && exit $rc"
       ],
       "check": [
