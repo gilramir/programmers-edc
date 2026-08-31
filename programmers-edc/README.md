@@ -85,4 +85,5 @@ Two things about it are temporary, and both are temporary for the same reason
     bin/predc.js      the launcher: resolves main.js against itself, not the cwd
     src/Main.gren     the shell -- menu bar, status line, About, which tools are open
     src/Tool/         one module per tool, each handing back a Tui.Window
+    src/Ascii.gren    what ASCII says about a byte, shared by two of the tools
     test/drive_*.py   one pty driver per tool, plus one for the shell

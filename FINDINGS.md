@@ -2609,3 +2609,138 @@ a dot appeared; it is `[\w.]+` now, and it caught the first attempt at
 rewording the docs. And the collision was found by *existing* examples rather
 than by the new one, which is the argument for keeping every port in the suite
 forever.
+
+## What the hex viewer found, from outside the package
+
+`programmers-edc` is written the way anybody else's program would be — it
+depends on `gren-tvision` through `gren.json` and calls nothing else — so what
+its tools run into is what a consumer runs into. The hex dump viewer is the
+first of them that reads a file, and it found one real bug, one shape the
+shell had to grow, and one trap that is nobody's fault but is worth writing
+down.
+
+### A file viewer needs no size limit, only a range
+
+The obvious way to open a file is `FileSystem.readFile`, and the obvious
+question straight after is what happens when somebody points it at a four
+gigabyte core dump. The obvious answer is `FileSystem.metadata` for the size
+and a refusal above some number, which works and costs a dialog explaining a
+limit that nobody can defend.
+
+There is a better one and it was already in `gren-lang/node`.
+`FileSystem.readFileStream` takes a `Between { start, end }`, which is Node's
+`createReadStream({ start, end })` — so a window showing sixteen rows of
+sixteen bytes can read the two hundred and fifty-six bytes it is showing. The
+model keeps the size, from `metadata`, and one 16 KB chunk around wherever the
+cursor is. A file of any size opens instantly, a file under 16 KB is a single
+read, and the limit question stops existing.
+
+Three things follow, and they are all in `Tool/Hex.gren`:
+
+  - **A chunk is a cache, so a late answer must be dropped.** Every read
+    carries the range it asked for, and one that is not the range still wanted
+    is ignored. Without that, two fast `PgDn`s can leave the older answer on
+    screen.
+  - **`Array.pushLast` is `toSpliced`** — a copy of the whole array — so
+    decoding sixteen thousand bytes one push at a time is a hundred and thirty
+    million element writes. `Array.Builder` is what makes a chunk that size
+    affordable, and it is the first place in this repo that has needed it.
+  - **`//` truncates its result to 32 bits.** Byte five billion over sixteen is
+    not a number an `Int32` holds, so every offset here divides through
+    `Math.truncate (toFloat n / toFloat d)`. `Ascii.radix` had the same fault
+    and would have printed nonsense for any offset past four gigabytes — the
+    one place in the ASCII chart's arithmetic where the chart could never have
+    noticed, because it counts to 127.
+
+Nothing in `gren-tvision` had to change for any of it, which is the finding: a
+tool that reads files is a model with a `Cmd`, and the package already had that
+shape.
+
+### The first tool with a `Cmd` changed the shell, not the package
+
+predc's tools were `update : Event -> Model -> Model`. A chart and a
+calculator answer an event with a new model and nothing else, so `Main.toTools`
+mapped over them and returned `Cmd.none` — and the hex viewer, which has three
+tasks, does not fit that. It needs a `Msg` type of its own, the shell needs a
+branch that routes those messages back into it, and `toTools` has to lift the
+tool's `Cmd Tool.Hex.Msg` into the shell's.
+
+Two smaller things came with it, both worth knowing before writing the third
+program that does this:
+
+  - **`FileSystem.initialize` is an `Init.Task`**, so the permission is the
+    program's first act and nothing later can ask for one. The shell holds it
+    and hands it over when the tool opens. A shell that never expected a tool
+    to read a file would have to change its `init` to let one.
+  - **A tool that opens a dialog needs a `Tui.Ports` record at *its* message
+    type**, because `Tui.dialog` produces a `Cmd msg` and the tool's `Cmd`s are
+    its own. Ports are polymorphic — `port tuiOut : Encode.Value -> Cmd msg` —
+    so this is one four-line binding in `Main` and no change anywhere else. It
+    has to be in `Main` because ports may only be declared in a `port module`.
+
+The quiet tools were left alone. Making every tool return a `Cmd` it would
+always fill with `Cmd.none` buys nothing but noise.
+
+### A modal dialog opens with the caret in the wrong place
+
+This one is a bug, it is in the binding, and every program that uses
+`Tui.fileDialog` has it.
+
+`applyInitialFocus` (`views.cc`) exists precisely to undo Turbo Vision's
+"whatever was inserted last has the caret" — `insert()` prepends, so in a list
+written top to bottom the Cancel button wins, and a declarative API should not
+inherit an artifact of insertion order. It is called on both paths: for a
+window (`views.cc`, after `deskTop->insert`) and for a modal dialog
+(`app.cc`, after `beginModal`).
+
+For a window it works. The calculator's canvas has the caret the moment it
+opens, which is why typing digits at it does anything.
+
+For a modal dialog with a list in it, it does not. `Tui.fileDialog` opens with
+the caret on the *file list*: the `Name` field is two Tabs away, and typing a
+path — the thing the field is for — does nothing at all. `examples/dir` has
+had this since the day the dialog was written and never noticed, because its
+test drives the list with the arrow keys and never types.
+
+What is verified, and it narrows the fault usefully:
+
+  - A dialog of a field, a label and two buttons is **fine**. predc's Go To
+    Offset dialog takes what is typed at it the moment it opens, and
+    `examples/entries` has been typing into its Add dialog for months.
+  - A dialog with a `ListBox` and a `History` in it is **not**. Both the
+    programs that have one are affected.
+  - It is not a render arriving behind the dialog and stealing the caret: it
+    reproduces with an `update` that changes no part of the model.
+  - **The same focus, sent one message later, sticks.** `Cmd.batch
+    [ Tui.dialog ports spec, Tui.focus ports "fileName" ]` puts the caret in
+    the field and leaves it there. So the call is being undone rather than
+    refused, by something between `beginModal` and the dialog reaching the
+    screen.
+
+The root cause is not found yet. The suspect is `TView::setState(sfVisible,
+True)`, which calls `owner->resetCurrent()` for any selectable view being
+shown, and a list box brings a scroll bar of its own into the group — but that
+happens inside `buildItems`, which runs *before* `applyInitialFocus`, so the
+order does not obviously explain it.
+
+`Tool.Hex` carries the one-line workaround with a comment saying why, and
+`drive_hex.py` asserts that the field takes what is typed at it, which is a
+check that stays true and stays useful after the binding is fixed. **It should
+be fixed before anything is published**: a file dialog that ignores the
+keyboard is the first thing a new user of this package will meet.
+
+### And one documented rule whose failure mode is silence
+
+A `Label` names a view that has to have been built already, and `View`'s doc
+comment says so in bold -- *list the control before its label*. Writing the
+label first anyway, because the label is drawn above the field and reads better
+written above it, does not produce a message. The builder throws part way
+through the dialog, the throw goes back through the port handler, and the
+program simply stops: the terminal keeps the last frame Turbo Vision drew, the
+menu bar still looks like a menu bar, and nothing responds again. The rule was
+read afterwards, in the docs, where it had been all along.
+
+A builder that dies leaves the application in a state where the *only* symptom
+is that the screen stopped changing. That is worth a look on its own: an
+exception raised while building a window or a dialog should end up somewhere a
+person can see it, and today it does not.

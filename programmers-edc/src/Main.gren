@@ -22,12 +22,14 @@ as short as it is.
 -}
 
 import Array exposing (Array)
+import FileSystem
 import Init
 import Json.Decode as Decode
 import Json.Encode as Encode
 import Node
 import Tool.Ascii
 import Tool.Calc
+import Tool.Hex
 import Tui exposing (Event(..), MenuItem(..), View(..))
 
 
@@ -45,6 +47,20 @@ tui =
     { toJs = tuiOut, fromJs = tuiIn }
 
 
+{-| The same two port functions, at the hex viewer's message type.
+
+A port is polymorphic in its message -- `port tuiOut : Encode.Value -> Cmd msg`
+-- and the annotation is what pins one down. So a tool that opens a dialog of
+its own needs a record at *its* type, and that is the entire cost of a tool
+having messages the shell knows nothing about. It is four lines, and it is here
+rather than in `Tool/Hex.gren` because ports may only be declared in a `port
+module` and there is exactly one of those.
+-}
+hexPorts : Tui.Ports Tool.Hex.Msg
+hexPorts =
+    { toJs = tuiOut, fromJs = tuiIn }
+
+
 -- MODEL
 
 
@@ -53,29 +69,41 @@ type alias Model =
       -- coordinates, so the shell has to know how big the desktop is. It is
       -- also the only thing here that needs the `Resized` event.
       desktop : { cols : Int, rows : Int }
+    -- Held so that a tool which reads files can be handed it when it opens.
+    -- `FileSystem.initialize` is an `Init.Task` and therefore the program's
+    -- first act; nothing later can ask for one.
+    , permission : FileSystem.Permission
     -- One field per tool, `Nothing` when its window is not open. A field
     -- rather than a list because the tools do not share a model type and
     -- should not be made to: what they share is the shape of the three
     -- functions the shell calls.
     , ascii : Maybe Tool.Ascii.Model
     , calc : Maybe Tool.Calc.Model
+    , hex : Maybe Tool.Hex.Model
     }
 
 
 type Msg
     = FromTui Event
+    -- A tool with tasks of its own has messages of its own, and they come
+    -- back through the shell because `update` is the shell's. This is the
+    -- first tool that needed either.
+    | FromHex Tool.Hex.Msg
 
 
 init : Node.Environment -> Init.Task { model : Model, command : Cmd Msg }
 init _ =
-    Node.startProgram
-        { model =
-            { desktop = { cols = 80, rows = 23 }
-            , ascii = Nothing
-            , calc = Nothing
+    Init.await FileSystem.initialize <| \permission ->
+        Node.startProgram
+            { model =
+                { desktop = { cols = 80, rows = 23 }
+                , permission = permission
+                , ascii = Nothing
+                , calc = Nothing
+                , hex = Nothing
+                }
+            , command = Cmd.none
             }
-        , command = Cmd.none
-        }
 
 
 -- UPDATE
@@ -86,6 +114,20 @@ update msg model =
     when msg is
         FromTui event ->
             handleEvent event model
+
+        FromHex sub ->
+            when model.hex is
+                Just hex ->
+                    let
+                        step =
+                            Tool.Hex.receive hexPorts sub hex
+                    in
+                    { model = { model | hex = Just step.model }
+                    , command = Cmd.map FromHex step.command
+                    }
+
+                Nothing ->
+                    { model = model, command = Cmd.none }
 
 
 handleEvent : Event -> Model -> { model : Model, command : Cmd Msg }
@@ -126,6 +168,18 @@ handleEvent event model =
                         , command = Tui.focus tui Tool.Calc.windowId
                         }
 
+            else if cmd == Tool.Hex.command then
+                when model.hex is
+                    Nothing ->
+                        { model = { model | hex = Just (Tool.Hex.init model.permission) }
+                        , command = Cmd.none
+                        }
+
+                    Just _ ->
+                        { model = model
+                        , command = Tui.focus tui Tool.Hex.windowId
+                        }
+
             else
                 -- Every other command belongs to a tool: its menu's, or one of
                 -- its buttons'. The shell does not know which, and does not
@@ -145,6 +199,9 @@ handleEvent event model =
             else if id == Tool.Calc.windowId then
                 { model = { model | calc = Nothing }, command = Cmd.none }
 
+            else if id == Tool.Hex.windowId then
+                { model = { model | hex = Nothing }, command = Cmd.none }
+
             else
                 { model = model, command = Cmd.none }
 
@@ -156,15 +213,33 @@ handleEvent event model =
 closed one is not consulted, which is what `Maybe.map` says here. Nothing is
 routed by window, because an event names the *view* it came from and that is
 the finer-grained fact.
+
+The hex viewer is the one that reads a file, and so the first tool to answer an
+event with anything but a new model. That is the whole difference between the
+two shapes here: a tool with no tasks is a `Model -> Model` and needs no
+mapping, and a tool with tasks hands back a command that has to be lifted into
+the shell's `Msg` before it can be returned. Nothing forces the quiet ones to
+grow a `Cmd Msg` they would only ever fill with `Cmd.none`.
 -}
 toTools : Event -> Model -> { model : Model, command : Cmd Msg }
 toTools event model =
+    let
+        hex =
+            Maybe.map (Tool.Hex.update hexPorts event) model.hex
+    in
     { model =
         { model
             | ascii = Maybe.map (Tool.Ascii.update event) model.ascii
             , calc = Maybe.map (Tool.Calc.update event) model.calc
+            , hex = Maybe.map .model hex
         }
-    , command = Cmd.none
+    , command =
+        when hex is
+            Just step ->
+                Cmd.map FromHex step.command
+
+            Nothing ->
+                Cmd.none
     }
 
 
@@ -186,6 +261,7 @@ view model =
         [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
         , { text = "~Alt-A~ ASCII", key = "Alt-A", cmd = Tool.Ascii.command }
         , { text = "~Alt-R~ RPN", key = "Alt-R", cmd = Tool.Calc.command }
+        , { text = "~Alt-D~ Hex", key = "Alt-D", cmd = Tool.Hex.command }
         , { text = "~F5~ Zoom", key = "F5", cmd = "zoom" }
         , { text = "~F6~ Next", key = "F6", cmd = "next" }
         , { text = "~Alt-F3~ Close", key = "Alt-F3", cmd = "close" }
@@ -201,6 +277,13 @@ view model =
             ++ (when model.calc is
                     Just calc ->
                         [ Tool.Calc.view calc ]
+
+                    Nothing ->
+                        []
+               )
+            ++ (when model.hex is
+                    Just hex ->
+                        [ Tool.Hex.view hex ]
 
                     Nothing ->
                         []
@@ -229,7 +312,7 @@ menuBar model =
     , SubMenu
         { title = "~T~ools"
         , key = ""
-        , items = [ Tool.Ascii.menuItem, Tool.Calc.menuItem ]
+        , items = [ Tool.Ascii.menuItem, Tool.Calc.menuItem, Tool.Hex.menuItem ]
         }
     ]
         ++ toolMenus model
@@ -259,12 +342,20 @@ menuBar model =
 
 toolMenus : Model -> Array MenuItem
 toolMenus model =
-    when model.calc is
+    (when model.calc is
         Just calc ->
             [ Tool.Calc.menu calc ]
 
         Nothing ->
             []
+    )
+        ++ (when model.hex is
+                Just _ ->
+                    [ Tool.Hex.menu ]
+
+                Nothing ->
+                    []
+           )
 
 
 aboutDialog : Model -> Tui.DialogSpec

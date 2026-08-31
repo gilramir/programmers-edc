@@ -1,0 +1,1321 @@
+module Tool.Hex exposing (Model, Msg, command, init, menu, menuItem, receive, update, view, windowId)
+
+{-| The hex dump viewer: offsets, sixteen bytes a row, and the printable
+rendering beside them.
+
+**It never holds the file.** A window shows sixteen rows of sixteen bytes --
+two hundred and fifty-six of them -- and `FileSystem.readFileStream` takes a
+`Between { start, end }`, which is Node's `createReadStream({start, end})` and
+reads exactly the range asked for. So the model keeps the file's *size*, from
+`FileSystem.metadata`, and one 16 KB chunk around wherever the view is. A file
+of any size opens at once; a file under 16 KB is a single read and behaves as
+if it had been loaded whole.
+
+That is the answer to a question this tool could not avoid -- what happens when
+somebody opens a four gigabyte core dump -- and it is a better answer than the
+obvious one. The obvious one is `metadata` for the size and a refusal above
+some number: it works, it costs a dialog explaining a limit, and it puts a
+number in the program that nobody can defend. Reading only the window removes
+the question instead of answering it.
+
+Three things follow, and they are the interesting part:
+
+**The chunk is a cache, so a read that arrives late must be ignored.** Scrolling
+asks for bytes; scrolling again before they land asks for others. Every answer
+carries the range it was asked for, and one that is not the range still wanted
+is dropped -- without which a fast `PgDn PgDn` can leave the older answer on
+screen.
+
+**A tool that does I/O hands a `Cmd` back to the shell**, which no tool did
+before this one: `Main.toTools` mapped over the tools and threw commands away,
+because a chart and a calculator never had one. It needs a `Msg` type of its
+own as well, and therefore a `Tui.Ports` record at that type -- which is one
+extra binding in `Main` and nothing more, because port functions are
+polymorphic.
+
+**Sixteen bytes a row is forced, not preferred.** `Resized` reports the
+*desktop*, never a window, so nothing tells a model that the user widened this
+one -- and a canvas's lines are the model's. A dump that reflowed to its window
+would need a fact the program cannot have.
+
+Highlighting -- the reason to build a viewer instead of running `xxd` -- is not
+here yet, and neither is pasted input. This is the navigation.
+
+-}
+
+import Array exposing (Array)
+import Array.Builder as Builder
+import Ascii
+import Bytes exposing (Bytes)
+import Bytes.Decode as Decode
+import FileSystem
+import FileSystem.Path as Path exposing (Path)
+import Json.Decode
+import Math
+import Stream
+import String
+import Task exposing (Task)
+import Tui exposing (Hue(..), MenuItem(..), Span, View(..))
+
+
+-- NAMES
+
+
+command : String
+command =
+    "tool.hex"
+
+
+windowId : String
+windowId =
+    "hex"
+
+
+canvasId : String
+canvasId =
+    "hex.dump"
+
+
+scrollId : String
+scrollId =
+    "hex.scroll"
+
+
+{-| The file dialog's id and the goto dialog's, deliberately not the same
+strings as the commands that open them. A `DialogClosed` is keyed by the
+dialog and a `Command` by the menu entry, and `update` is easier to read when
+the two cannot be mistaken for each other.
+-}
+fileDialogId : String
+fileDialogId =
+    "hex.file"
+
+
+gotoDialogId : String
+gotoDialogId =
+    "hex.goto.dialog"
+
+
+gotoFieldId : String
+gotoFieldId =
+    "hex.goto.offset"
+
+
+menuItem : MenuItem
+menuItem =
+    Item { title = "Hex ~d~ump viewer", cmd = command, key = "Alt-D", shortcut = "Alt-D" }
+
+
+-- SHAPE
+
+
+{-| Sixteen, and forced -- see the note at the top of the file.
+-}
+bytesPerRow : Int
+bytesPerRow =
+    16
+
+
+visibleRows : Int
+visibleRows =
+    16
+
+
+{-| One screenful: what `PgUp` moves by, and how much has to be in memory for
+the window to draw.
+-}
+page : Int
+page =
+    visibleRows * bytesPerRow
+
+
+{-| How much is read at a time. Sixty-four screenfuls, so scrolling crosses a
+chunk boundary about once every five hundred rows, and small enough that
+decoding it into an `Array Int` is not something anybody notices.
+-}
+chunkSize : Int
+chunkSize =
+    16384
+
+
+{-| Where the columns are, in the canvas's own coordinates. Each of these is
+used twice -- once to draw and once to work out which byte a click landed on --
+which is why they are named rather than written into both.
+
+    00000010  48 65 6C 6C 6F 20 77 6F  72 6C 64 21 0A 00 01 02  Hello world!····
+
+-}
+hexStart : Int
+hexStart =
+    10
+
+
+asciiStart : Int
+asciiStart =
+    60
+
+
+lineWidth : Int
+lineWidth =
+    76
+
+
+-- MODEL
+
+
+type alias Model =
+    { permission : FileSystem.Permission
+    -- Dialogs centre themselves, so a tool that opens one needs the desktop's
+    -- size the same way the shell does. It arrives as an event, and every open
+    -- tool is handed every event, so this costs nothing but the field.
+    , desktop : { cols : Int, rows : Int }
+    , file : Maybe File
+    -- The offset of the first byte on screen, always a multiple of sixteen.
+    , top : Int
+    , cursor : Int
+    , chunk : Chunk
+    -- The read in flight, by the range it asked for -- which is also the
+    -- guard: an answer that is not this range answers a question no longer
+    -- being asked.
+    , wanted : Maybe Range
+    , browsing : Maybe { path : Path, entries : Array Entry }
+    , recent : Array String
+    , message : String
+    }
+
+
+type alias File =
+    { path : Path, size : Int }
+
+
+type alias Chunk =
+    { start : Int, bytes : Array Int }
+
+
+{-| Half open: `start` up to but not including `end`, which is how every range
+in this file is written and not how `readFileStream` takes one. The conversion
+happens in exactly one place, in [`read`](#read).
+-}
+type alias Range =
+    { start : Int, end : Int }
+
+
+type alias Entry =
+    { name : String, path : Path, isDir : Bool }
+
+
+type Msg
+    = Listed { path : Path, entries : Array { path : Path, entityType : FileSystem.EntityType } }
+    | Statted { path : Path, meta : FileSystem.Metadata }
+    | ReadBack { range : Range, bytes : Bytes }
+    | Failed String
+
+
+type alias Step =
+    { model : Model, command : Cmd Msg }
+
+
+init : FileSystem.Permission -> Model
+init permission =
+    { permission = permission
+    , desktop = { cols = 80, rows = 23 }
+    , file = Nothing
+    , top = 0
+    , cursor = 0
+    , chunk = { start = 0, bytes = [] }
+    , wanted = Nothing
+    , browsing = Nothing
+    , recent = []
+    , message = ""
+    }
+
+
+still : Model -> Step
+still model =
+    { model = model, command = Cmd.none }
+
+
+-- UPDATE
+
+
+{-| The shell hands over every event it was given; a tool answers for its own
+ids and ignores the rest.
+
+`ports` is here because two of these branches open a dialog, and `Tui.dialog`
+takes the port record at the type of the message it will eventually produce.
+The shell's is at the shell's `Msg`; this one is at ours, and `Main` builds it
+from the same two port functions.
+-}
+update : Tui.Ports Msg -> Tui.Event -> Model -> Step
+update ports event model =
+    when event is
+        Tui.Resized size ->
+            still { model | desktop = size }
+
+        Tui.KeyPressed pressed ->
+            if pressed.id == canvasId then
+                pressKey pressed.key model
+
+            else
+                still model
+
+        Tui.Clicked spot ->
+            if spot.id == canvasId then
+                clickAt spot.x spot.y model
+
+            else
+                still model
+
+        -- A drag reports only where it ended, so this is one move and not a
+        -- dozen. The cursor comes along with the view rather than being left
+        -- behind: it is what the two lines under the dump describe, and a
+        -- description of a byte nobody can see is worse than none.
+        Tui.Scrolled bar ->
+            if bar.id == scrollId then
+                scrollTo (bar.value * bytesPerRow) model
+
+            else
+                still model
+
+        Tui.Command "hex.open" ->
+            { model = { model | message = "" }, command = browseFrom model }
+
+        Tui.Command "hex.goto" ->
+            when model.file is
+                Nothing ->
+                    still { model | message = "Nothing is open." }
+
+                Just _ ->
+                    { model = model, command = Tui.dialog ports (gotoDialog model) }
+
+        Tui.Command "hex.top" ->
+            moveTo 0 model
+
+        Tui.Command "hex.end" ->
+            when model.file is
+                Nothing ->
+                    still model
+
+                Just file ->
+                    moveTo (file.size - 1) model
+
+        Tui.DialogClosed closed ->
+            if closed.id == fileDialogId then
+                answerFile closed model
+
+            else if closed.id == gotoDialogId then
+                answerGoto closed model
+
+            else
+                still model
+
+        _ ->
+            still model
+
+
+{-| The tool's own messages: what the three tasks it starts answer with.
+-}
+receive : Tui.Ports Msg -> Msg -> Model -> Step
+receive ports msg model =
+    when msg is
+        Listed listed ->
+            let
+                browsing =
+                    { path = listed.path, entries = entriesOf listed }
+            in
+            { model = { model | browsing = Just browsing }
+            , command =
+                Cmd.batch
+                    [ Tui.dialog ports (fileDialog model browsing)
+                    -- Which should not be necessary, and is. A dialog is
+                    -- supposed to open with the caret on the first view in it
+                    -- that can hold one -- `applyInitialFocus`, views.cc --
+                    -- and for a *modal* it does not happen: the file dialog
+                    -- opens with its list focused and the Name field takes two
+                    -- Tabs to reach, so typing a path does nothing. The same
+                    -- focus, sent one message later, sticks. `examples/dir`
+                    -- has the same defect and never noticed, because it drives
+                    -- its dialog with the arrow keys.
+                    , Tui.focus ports "fileName"
+                    ]
+            }
+
+        -- Which of the two a name is, is a question about the file system and
+        -- not about the name, so it is answered here rather than by reading
+        -- what the dialog said. A directory reopens the dialog one level down,
+        -- which is what the user meant by choosing it.
+        Statted it ->
+            when it.meta.entityType is
+                FileSystem.Directory ->
+                    { model = model, command = browse model it.path }
+
+                FileSystem.File ->
+                    load
+                        { model
+                            | file = Just { path = it.path, size = it.meta.byteSize }
+                            , top = 0
+                            , cursor = 0
+                            , chunk = { start = 0, bytes = [] }
+                            , wanted = Nothing
+                            , browsing = Nothing
+                            , recent = remember (Path.toPosixString it.path) model.recent
+                            , message =
+                                if it.meta.byteSize == 0 then
+                                    "The file is empty."
+
+                                else
+                                    ""
+                        }
+
+                _ ->
+                    still
+                        { model
+                            | message = "Not a regular file: " ++ Path.toPosixString it.path
+                            , browsing = Nothing
+                        }
+
+        ReadBack it ->
+            if model.wanted == Just it.range then
+                load
+                    { model
+                        | chunk = { start = it.range.start, bytes = toByteArray it.bytes }
+                        , wanted = Nothing
+                    }
+
+            else
+                still model
+
+        Failed reason ->
+            still { model | message = reason }
+
+
+-- MOVING
+
+
+pressKey : String -> Model -> Step
+pressKey key model =
+    when model.file is
+        Nothing ->
+            still model
+
+        Just file ->
+            when key is
+                "Left" ->
+                    moveTo (model.cursor - 1) model
+
+                "Right" ->
+                    moveTo (model.cursor + 1) model
+
+                "Up" ->
+                    moveTo (model.cursor - bytesPerRow) model
+
+                "Down" ->
+                    moveTo (model.cursor + bytesPerRow) model
+
+                "PgUp" ->
+                    pageBy -1 model
+
+                "PgDn" ->
+                    pageBy 1 model
+
+                "Home" ->
+                    moveTo (rowStart model.cursor) model
+
+                "End" ->
+                    moveTo (rowStart model.cursor + bytesPerRow - 1) model
+
+                "Ctrl-Home" ->
+                    moveTo 0 model
+
+                "Ctrl-End" ->
+                    moveTo (file.size - 1) model
+
+                _ ->
+                    still model
+
+
+{-| A click on the hex column and a click on the printable one pick the same
+byte, which is the point of drawing them side by side. A click to the left of
+both lands on the first byte of the row: the user pointed at a row, and the row
+is an answer.
+-}
+clickAt : Int -> Int -> Model -> Step
+clickAt x y model =
+    let
+        line =
+            clamp 0 (visibleRows - 1) y
+
+        column =
+            if x >= asciiStart then
+                clamp 0 (bytesPerRow - 1) (x - asciiStart)
+
+            else if x >= hexStart then
+                clamp 0 (bytesPerRow - 1) (byteOfColumn (x - hexStart))
+
+            else
+                0
+    in
+    moveTo (model.top + line * bytesPerRow + column) model
+
+
+{-| Undo [`hexColumn`](#hexColumn): three columns to a byte, and one more from
+the gap that splits the row in two.
+-}
+byteOfColumn : Int -> Int
+byteOfColumn dx =
+    if dx >= 25 then
+        8 + ((dx - 25) // 3)
+
+    else
+        dx // 3
+
+
+{-| A screenful moves the view *and* the cursor, which is not what falling
+back on `moveTo` would do: that scrolls the smallest amount that keeps the
+cursor visible, so a `PgDn` would leave the cursor pinned to the bottom row and
+the next one would scroll by a row. A page means the same byte stays under the
+same line of the window.
+-}
+pageBy : Int -> Model -> Step
+pageBy direction model =
+    when model.file is
+        Nothing ->
+            still model
+
+        Just file ->
+            let
+                top =
+                    clamp 0 (maxTop file) (model.top + direction * page)
+            in
+            load
+                { model
+                    | top = top
+                    , cursor = clamp 0 (max 0 (file.size - 1)) (top + Math.modBy page (model.cursor - model.top))
+                }
+
+
+moveTo : Int -> Model -> Step
+moveTo offset model =
+    when model.file is
+        Nothing ->
+            still model
+
+        Just file ->
+            let
+                cursor =
+                    clamp 0 (max 0 (file.size - 1)) offset
+            in
+            load { model | cursor = cursor, top = keepInView file cursor model.top }
+
+
+{-| The smallest scroll that puts the cursor back on screen, which is what
+every editor does and the only behaviour that survives holding an arrow key
+down.
+-}
+keepInView : File -> Int -> Int -> Int
+keepInView file cursor top =
+    if cursor < top then
+        rowStart cursor
+
+    else if cursor >= top + page then
+        min (maxTop file) (rowStart cursor - page + bytesPerRow)
+
+    else
+        top
+
+
+scrollTo : Int -> Model -> Step
+scrollTo offset model =
+    when model.file is
+        Nothing ->
+            still model
+
+        Just file ->
+            let
+                top =
+                    clamp 0 (maxTop file) (rowStart offset)
+
+                cursor =
+                    clamp top (min (max 0 (file.size - 1)) (top + page - 1)) model.cursor
+            in
+            load { model | top = top, cursor = cursor }
+
+
+{-| Somebody who asked for an offset wants to see what is around it, so the row
+lands a third of the way down rather than at the top.
+-}
+goTo : Int -> Model -> Step
+goTo offset model =
+    when model.file is
+        Nothing ->
+            still model
+
+        Just file ->
+            let
+                cursor =
+                    clamp 0 (max 0 (file.size - 1)) offset
+            in
+            load
+                { model
+                    | cursor = cursor
+                    , top = clamp 0 (maxTop file) (rowStart cursor - 5 * bytesPerRow)
+                }
+
+
+rowStart : Int -> Int
+rowStart offset =
+    offset - Math.modBy bytesPerRow offset
+
+
+{-| The last `top` there is: the one that puts the final row on the bottom line
+of the window.
+-}
+maxTop : File -> Int
+maxTop file =
+    max 0 (rowStart (max 0 (file.size - 1)) - page + bytesPerRow)
+
+
+{-| `//` truncates its *result* to 32 bits, which is fine for a column and
+wrong for a file: byte 5,000,000,000 over sixteen is not a number an `Int32`
+holds. Every offset in this file divides through here.
+-}
+divideBy : Int -> Int -> Int
+divideBy divisor n =
+    Math.truncate (toFloat n / toFloat divisor)
+
+
+-- READING
+
+
+{-| Make sure the bytes on screen are in memory, and ask for them if they are
+not. Everything that moves the view ends here.
+-}
+load : Model -> Step
+load model =
+    when model.file is
+        Nothing ->
+            still model
+
+        Just file ->
+            let
+                needed =
+                    { start = model.top, end = min file.size (model.top + page) }
+            in
+            if covers model.chunk needed then
+                still model
+
+            else
+                let
+                    range =
+                        chunkAround file model.top
+                in
+                if model.wanted == Just range then
+                    -- Already asked. Asking again would be one read of the
+                    -- same bytes per keystroke while the first is in flight.
+                    still model
+
+                else
+                    { model = { model | wanted = Just range }
+                    , command = read model.permission file.path range
+                    }
+
+
+covers : Chunk -> Range -> Bool
+covers chunk range =
+    (range.end <= range.start)
+        || (range.start >= chunk.start && range.end <= chunk.start + Array.length chunk.bytes)
+
+
+{-| A chunk with the view in the middle of it, so that scrolling either way
+from where the user is has the same room before the next read.
+-}
+chunkAround : File -> Int -> Range
+chunkAround file top =
+    let
+        start =
+            clamp 0 (max 0 (file.size - chunkSize)) (rowStart (top - divideBy 2 chunkSize))
+    in
+    { start = start, end = min file.size (start + chunkSize) }
+
+
+{-| The one place a half open range becomes Node's inclusive one.
+
+`readFileStream` hands back a `Stream.Readable Bytes` rather than the bytes,
+because a range can be any size and a stream is how Node says so. The pieces
+come back in whatever sizes the operating system felt like; `Bytes.flatten`
+puts them together.
+-}
+read : FileSystem.Permission -> Path -> Range -> Cmd Msg
+read permission path range =
+    FileSystem.readFileStream permission (FileSystem.Between { start = range.start, end = range.end - 1 }) path
+        |> Task.mapError FileSystem.errorToString
+        |> Task.andThen
+            (\stream ->
+                Stream.readUntilClosed (\part sofar -> Ok (Builder.pushLast part sofar)) (Builder.empty 4) stream
+                    |> Task.mapError Stream.errorToString
+            )
+        |> Task.map (\parts -> Bytes.flatten (Builder.toArray parts))
+        |> Task.attempt
+            (\result ->
+                when result is
+                    Ok bytes ->
+                        ReadBack { range = range, bytes = bytes }
+
+                    Err reason ->
+                        Failed reason
+            )
+
+
+{-| `Bytes` cannot be indexed, so a chunk is decoded into numbers once rather
+than a byte at a time on every render.
+
+`Array.Builder` and not `Array.pushLast`: `pushLast` is `toSpliced`, a copy of
+the whole array, so building sixteen thousand of them one at a time is sixteen
+thousand copies -- a hundred and thirty million element writes for one scroll.
+The builder is the reason a chunk can be this size.
+-}
+toByteArray : Bytes -> Array Int
+toByteArray bites =
+    Decode.decode (byteArray (Bytes.length bites)) bites
+        |> Maybe.withDefault []
+
+
+byteArray : Int -> Decode.Decoder (Array Int)
+byteArray count =
+    Decode.loop
+        { left = count, sofar = Builder.empty count }
+        (\state ->
+            if state.left <= 0 then
+                Decode.succeed (Decode.Done (Builder.toArray state.sofar))
+
+            else
+                Decode.map
+                    (\byte ->
+                        Decode.Loop
+                            { left = state.left - 1
+                            , sofar = Builder.pushLast byte state.sofar
+                            }
+                    )
+                    Decode.unsignedInt8
+        )
+
+
+byteAt : Model -> Int -> Maybe Int
+byteAt model offset =
+    at (offset - model.chunk.start) model.chunk.bytes
+
+
+-- OPENING
+
+
+{-| Where a browse starts: the directory already being browsed, else the one
+the open file is in, else wherever the program was run.
+-}
+startingPoint : Model -> Task FileSystem.Error Path
+startingPoint model =
+    when model.browsing is
+        Just browsing ->
+            Task.succeed browsing.path
+
+        Nothing ->
+            when model.file is
+                Just file ->
+                    Task.succeed
+                        (Maybe.withDefault (Path.fromPosixString ".") (Path.parentPath file.path))
+
+                Nothing ->
+                    FileSystem.currentWorkingDirectory model.permission
+
+
+browseFrom : Model -> Cmd Msg
+browseFrom model =
+    listing model (startingPoint model)
+
+
+browse : Model -> Path -> Cmd Msg
+browse model path =
+    listing model (Task.succeed path)
+
+
+{-| `TFileDialog` reads the directory from inside itself; nothing here can,
+because listing one is a `Task`. So opening a file is two steps -- read, then
+show -- and walking into a directory is those same two steps again, which is
+why `Statted` can answer a directory by starting over.
+-}
+listing : Model -> Task FileSystem.Error Path -> Cmd Msg
+listing model start =
+    start
+        |> Task.andThen
+            (\path ->
+                FileSystem.listDirectory model.permission path
+                    |> Task.map (\entries -> { path = path, entries = entries })
+            )
+        |> Task.attempt
+            (\result ->
+                when result is
+                    Ok found ->
+                        Listed found
+
+                    Err error ->
+                        Failed (FileSystem.errorToString error)
+            )
+
+
+statFile : Model -> Path -> Cmd Msg
+statFile model path =
+    FileSystem.metadata model.permission { resolveLink = True } path
+        |> Task.attempt
+            (\result ->
+                when result is
+                    Ok meta ->
+                        Statted { path = path, meta = meta }
+
+                    Err error ->
+                        Failed (FileSystem.errorToString error)
+            )
+
+
+{-| Directories first and each marked with a slash, because the list is the
+only place the dialog can say which rows go somewhere and which open something.
+-}
+entriesOf :
+    { path : Path, entries : Array { path : Path, entityType : FileSystem.EntityType } }
+    -> Array Entry
+entriesOf listed =
+    let
+        named =
+            listed.entries
+                |> Array.map
+                    (\entry ->
+                        { name = Path.filenameWithExtension entry.path
+                        , path = Path.append entry.path listed.path
+                        , isDir = entry.entityType == FileSystem.Directory
+                        }
+                    )
+                |> Array.sortWith
+                    (\a b ->
+                        if a.isDir == b.isDir then
+                            compare a.name b.name
+
+                        else if a.isDir then
+                            LT
+
+                        else
+                            GT
+                    )
+                |> Array.map
+                    (\entry ->
+                        if entry.isDir then
+                            { entry | name = entry.name ++ "/" }
+
+                        else
+                            entry
+                    )
+    in
+    when Path.parentPath listed.path is
+        Just up ->
+            Array.pushFirst { name = "../", path = up, isDir = True } named
+
+        Nothing ->
+            named
+
+
+fileDialog : Model -> { path : Path, entries : Array Entry } -> Tui.DialogSpec
+fileDialog model browsing =
+    Tui.fileDialog
+        { id = fileDialogId
+        , title = "Open file"
+        , path = Path.toPosixString browsing.path
+        , name = ""
+        , entries = Array.map .name browsing.entries
+        , history = model.recent
+        , buttons = Tui.okCancelButtons
+        , desktop = model.desktop
+        }
+
+
+answerFile : { id : String, cmd : String, values : Json.Decode.Value } -> Model -> Step
+answerFile closed model =
+    when model.browsing is
+        Nothing ->
+            still model
+
+        Just browsing ->
+            if closed.cmd /= "ok" then
+                still { model | browsing = Nothing }
+
+            else
+                let
+                    typed =
+                        Tui.text "fileName" closed.values
+
+                    chosen =
+                        if typed /= "" then
+                            -- The field wins when there is anything in it,
+                            -- which is what makes the history drop-down mean
+                            -- anything: what it puts back is a path, and a
+                            -- path is not a row of the list beside it.
+                            Path.fromPosixString typed
+
+                        else
+                            when at (Tui.number "fileList" closed.values) browsing.entries is
+                                Just entry ->
+                                    entry.path
+
+                                Nothing ->
+                                    browsing.path
+                in
+                { model = { model | message = "" }, command = statFile model chosen }
+
+
+{-| `Array.get` counts from the end when the index is negative, so an index
+that came from anywhere else is checked before it is used.
+-}
+at : Int -> Array a -> Maybe a
+at index array =
+    if index < 0 then
+        Nothing
+
+    else
+        Array.get index array
+
+
+remember : String -> Array String -> Array String
+remember path history =
+    Array.pushFirst path (Array.keepIf (\old -> old /= path) history)
+        |> Array.takeFirst 8
+
+
+-- GOING TO AN OFFSET
+
+
+{-| Turbo Vision has no "ask for one number" dialog and neither does this
+package: `messageBox` and `fileDialog` are helpers over `DialogSpec`, and a
+`DialogSpec` is a window's worth of ordinary views. So this is one, written
+out. It is a dozen lines of layout and it is the whole mechanism.
+
+The field takes hex digits and an `x` as well as decimal, and `allowed` is what
+says so -- a `TFilterValidator`, so a rejected keystroke never happens rather
+than being complained about afterwards.
+-}
+gotoDialog : Model -> Tui.DialogSpec
+gotoDialog model =
+    let
+        width =
+            clamp 24 model.desktop.cols 46
+
+        height =
+            clamp 8 model.desktop.rows 10
+
+        left =
+            max 0 ((model.desktop.cols - width) // 2)
+
+        top =
+            max 0 ((model.desktop.rows - height) // 2)
+    in
+    { id = gotoDialogId
+    , title = "Go to offset"
+    , rect = { x1 = left, y1 = top, x2 = left + width, y2 = top + height }
+    , views =
+        -- The field before the label, and not for looks: a `Label` names a
+        -- view that has to exist already, so listing them the other way round
+        -- throws out of the builder and takes the dialog with it.
+        [ InputLine
+            { id = gotoFieldId
+            , rect = { x1 = 11, y1 = 2, x2 = width - 3, y2 = 3 }
+            , maxLen = 20
+            , value = ""
+            , allowed = Just "0123456789abcdefABCDEFxX"
+            }
+        , Label
+            { id = "hex.goto.label"
+            , rect = { x1 = 3, y1 = 2, x2 = 11, y2 = 3 }
+            , text = "O~f~fset"
+            , for = gotoFieldId
+            }
+        , StaticText
+            { id = "hex.goto.hint"
+            , rect = { x1 = 3, y1 = 4, x2 = width - 3, y2 = 5 }
+            , text = "decimal, or 0x1F00 for hex"
+            }
+        , Button
+            { id = "hex.goto.ok"
+            , rect = { x1 = width - 28, y1 = height - 4, x2 = width - 16, y2 = height - 2 }
+            , title = "~O~K"
+            , cmd = "ok"
+            , isDefault = True
+            , takesFocus = True
+            }
+        , Button
+            { id = "hex.goto.cancel"
+            , rect = { x1 = width - 15, y1 = height - 4, x2 = width - 3, y2 = height - 2 }
+            , title = "Cancel"
+            , cmd = "cancel"
+            , isDefault = False
+            , takesFocus = True
+            }
+        ]
+    }
+
+
+answerGoto : { id : String, cmd : String, values : Json.Decode.Value } -> Model -> Step
+answerGoto closed model =
+    if closed.cmd /= "ok" then
+        still model
+
+    else
+        let
+            typed =
+                Tui.text gotoFieldId closed.values
+        in
+        when parseOffset typed is
+            Just offset ->
+                goTo offset { model | message = "" }
+
+            Nothing ->
+                still { model | message = "Not an offset: " ++ typed }
+
+
+parseOffset : String -> Maybe Int
+parseOffset raw =
+    let
+        text =
+            String.trim raw
+    in
+    if String.startsWith "0x" (String.toLower text) then
+        fromHex (String.dropFirst 2 text)
+
+    else
+        String.toInt text
+
+
+fromHex : String -> Maybe Int
+fromHex text =
+    if String.isEmpty text then
+        Nothing
+
+    else
+        Array.foldl
+            (\char sofar ->
+                when sofar is
+                    Nothing ->
+                        Nothing
+
+                    Just total ->
+                        when String.firstIndexOf (String.toUpper (String.fromChar char)) "0123456789ABCDEF" is
+                            Just digit ->
+                                Just (total * 16 + digit)
+
+                            Nothing ->
+                                Nothing
+            )
+            (Just 0)
+            (String.toArray text)
+
+
+-- MENU
+
+
+menu : MenuItem
+menu =
+    SubMenu
+        { title = "~B~ytes"
+        , key = ""
+        , items =
+            [ Item { title = "~O~pen file...", cmd = "hex.open", key = "", shortcut = "" }
+            , Item { title = "~G~o to offset...", cmd = "hex.goto", key = "", shortcut = "" }
+            , Separator
+            , Item { title = "~T~op of file", cmd = "hex.top", key = "", shortcut = "Ctrl-Home" }
+            , Item { title = "~E~nd of file", cmd = "hex.end", key = "", shortcut = "Ctrl-End" }
+            ]
+        }
+
+
+-- VIEW
+
+
+view : Model -> Tui.Window
+view model =
+    { id = windowId
+    , title = title model
+    -- The widest window in the program, and it has to be: a dump row is
+    -- seventy-six columns and cannot be narrower.
+    , rect = { x1 = 0, y1 = 0, x2 = 79, y2 = 22 }
+    , views =
+        [ Canvas
+            { id = "hex.header"
+            , rect = { x1 = 1, y1 = 1, x2 = 1 + lineWidth, y2 = 2 }
+            , lines = [ header ]
+            , cursor = Nothing
+            , takesFocus = False
+            }
+        , Canvas
+            { id = canvasId
+            , rect = { x1 = 1, y1 = 2, x2 = 1 + lineWidth, y2 = 2 + visibleRows }
+            , lines = dump model
+            , cursor = cursorAt model
+            , takesFocus = True
+            }
+        , ScrollBar
+            { id = scrollId
+            , rect = { x1 = 1 + lineWidth, y1 = 2, x2 = 2 + lineWidth, y2 = 2 + visibleRows }
+            , value = divideBy bytesPerRow model.top
+            , min = 0
+            , max =
+                when model.file is
+                    Just file ->
+                        divideBy bytesPerRow (maxTop file)
+
+                    Nothing ->
+                        0
+            , pageStep = visibleRows
+            , arrowStep = 1
+            }
+        , StaticText
+            { id = "hex.where"
+            , rect = { x1 = 1, y1 = 19, x2 = 1 + lineWidth, y2 = 20 }
+            , text = whereItIs model
+            }
+        , Canvas
+            { id = "hex.status"
+            , rect = { x1 = 1, y1 = 20, x2 = 1 + lineWidth, y2 = 21 }
+            , lines = [ status model ]
+            , cursor = Nothing
+            , takesFocus = False
+            }
+        ]
+    }
+
+
+title : Model -> String
+title model =
+    when model.file is
+        Nothing ->
+            "Hex Dump"
+
+        Just file ->
+            "Hex Dump - "
+                ++ Path.filenameWithExtension file.path
+                ++ " ("
+                ++ String.fromInt file.size
+                ++ " bytes)"
+
+
+header : Array Span
+header =
+    [ Tui.plain (String.repeat hexStart " ")
+    , Tui.ink Blue (String.join " " (Array.map columnLabel (Array.range 0 7)))
+    , Tui.plain "  "
+    , Tui.ink Blue (String.join " " (Array.map columnLabel (Array.range 8 15)))
+    , Tui.plain "  "
+    , Tui.ink Blue (String.join "" (Array.map Ascii.hexDigit (Array.range 0 15)))
+    ]
+
+
+columnLabel : Int -> String
+columnLabel column =
+    "0" ++ Ascii.hexDigit column
+
+
+{-| Sixteen rows, whatever the file is. A dump that grew and shrank as it ran
+off the end would move the two lines under it every time somebody pressed Down,
+and there is nothing past the last row worth reading anyway.
+-}
+dump : Model -> Array (Array Span)
+dump model =
+    when model.file is
+        Nothing ->
+            Array.map
+                (\index ->
+                    if index == 2 then
+                        [ Tui.plain (String.repeat 20 " " ++ "Nothing open.  Bytes ▸ Open file...") ]
+
+                    else
+                        [ Tui.plain "" ]
+                )
+                (Array.range 0 (visibleRows - 1))
+
+        Just file ->
+            Array.map (row model file) (Array.range 0 (visibleRows - 1))
+
+
+row : Model -> File -> Int -> Array Span
+row model file index =
+    let
+        base =
+            model.top + index * bytesPerRow
+    in
+    if base >= file.size then
+        [ Tui.plain "" ]
+
+    else
+        [ Tui.ink Blue (offsetText base), Tui.plain "  " ]
+            ++ hexCells model file base
+            ++ [ Tui.plain "  " ]
+            ++ asciiCells model file base
+
+
+{-| Eight bytes, a wider gap, eight bytes. The gap is what makes a row
+countable without counting: everything past it is at offset eight or more.
+-}
+hexCells : Model -> File -> Int -> Array Span
+hexCells model file base =
+    Array.mapAndFlatten
+        (\column ->
+            (if column == 0 then
+                []
+
+             else if column == 8 then
+                [ Tui.plain "  " ]
+
+             else
+                [ Tui.plain " " ]
+            )
+                ++ [ paint model (base + column) (pairText model file (base + column)) ]
+        )
+        (Array.range 0 (bytesPerRow - 1))
+
+
+asciiCells : Model -> File -> Int -> Array Span
+asciiCells model file base =
+    Array.map
+        (\column ->
+            let
+                offset =
+                    base + column
+            in
+            if offset >= file.size then
+                Tui.plain " "
+
+            else
+                when byteAt model offset is
+                    Just code ->
+                        if offset == model.cursor then
+                            Tui.on Blue (Tui.ink White (Ascii.glyph code))
+
+                        else if code >= 32 && code < 127 then
+                            Tui.plain (Ascii.glyph code)
+
+                        else
+                            Tui.ink DarkGray (Ascii.glyph code)
+
+                    Nothing ->
+                        Tui.ink DarkGray " "
+        )
+        (Array.range 0 (bytesPerRow - 1))
+
+
+{-| The byte in hex, or what to draw where a byte is not: past the end of the
+file, nothing at all; inside it but not yet read, two dots. The second lasts
+for one frame, and it is the only place in the program that admits the file is
+not in memory.
+-}
+pairText : Model -> File -> Int -> String
+pairText model file offset =
+    if offset >= file.size then
+        "  "
+
+    else
+        when byteAt model offset is
+            Just code ->
+                String.padLeft 2 '0' (Ascii.radix 16 code)
+
+            Nothing ->
+                ".."
+
+
+{-| The selected byte is painted rather than merely pointed at, for the reason
+the ASCII chart's is: whether a terminal shows its cursor at all is the
+terminal's business. The hardware cursor is kept in step underneath, for the
+ones that do and for the tests.
+-}
+paint : Model -> Int -> String -> Span
+paint model offset text =
+    if offset == model.cursor then
+        Tui.on Blue (Tui.ink White text)
+
+    else
+        Tui.plain text
+
+
+offsetText : Int -> String
+offsetText offset =
+    String.padLeft 8 '0' (Ascii.radix 16 offset)
+
+
+hexColumn : Int -> Int
+hexColumn column =
+    hexStart
+        + (column * 3)
+        + (if column >= 8 then
+            1
+
+           else
+            0
+          )
+
+
+cursorAt : Model -> Maybe { x : Int, y : Int }
+cursorAt model =
+    when model.file is
+        Nothing ->
+            Nothing
+
+        Just _ ->
+            let
+                line =
+                    divideBy bytesPerRow (model.cursor - model.top)
+            in
+            if line >= 0 && line < visibleRows then
+                Just
+                    { x = hexColumn (Math.modBy bytesPerRow model.cursor)
+                    , y = line
+                    }
+
+            else
+                Nothing
+
+
+whereItIs : Model -> String
+whereItIs model =
+    when model.file is
+        Nothing ->
+            ""
+
+        Just _ ->
+            "Offset "
+                ++ offsetText model.cursor
+                ++ String.padRight 14 ' ' (" (" ++ String.fromInt model.cursor ++ ")")
+                ++ (when byteAt model model.cursor is
+                        Just code ->
+                            Ascii.bases code
+
+                        Nothing ->
+                            ""
+                   )
+
+
+{-| The message line, and the byte's name when there is no message.
+
+A message is not cleared by the next keystroke. The calculator taught that one:
+`update` was wiping its hint on every key, so the only line explaining the tool
+was gone before anybody could read it. This one goes when the next thing the
+user asks for succeeds.
+-}
+status : Model -> Array Span
+status model =
+    if model.message /= "" then
+        [ Tui.ink Red model.message ]
+
+    else
+        when model.file is
+            Nothing ->
+                [ Tui.plain "" ]
+
+            Just _ ->
+                when byteAt model model.cursor is
+                    Just code ->
+                        [ Tui.plain (Ascii.naming code) ]
+
+                    Nothing ->
+                        [ Tui.plain "" ]

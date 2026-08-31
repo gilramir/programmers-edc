@@ -37,6 +37,7 @@ status line.
 -}
 
 import Array exposing (Array)
+import Ascii
 import Char
 import Math
 import String
@@ -218,7 +219,7 @@ header : Array Span
 header =
     [ Tui.ink Blue
         (String.repeat labelWidth " "
-            ++ String.join " " (Array.map hexDigit (Array.range 0 (columns - 1)))
+            ++ String.join " " (Array.map Ascii.hexDigit (Array.range 0 (columns - 1)))
         )
     ]
 
@@ -231,7 +232,7 @@ half over the next character.
 row : Model -> Int -> Array Span
 row model r =
     Array.pushFirst
-        (Tui.ink Blue (hexDigit r ++ "_ "))
+        (Tui.ink Blue (Ascii.hexDigit r ++ "_ "))
         (Array.intersperse (Tui.plain " ")
             (Array.map (\c -> cell model (r * columns + c)) (Array.range 0 (columns - 1)))
         )
@@ -251,31 +252,13 @@ tests, which can read a cursor position but not a highlight's meaning.
 cell : Model -> Int -> Span
 cell model code =
     if code == model.code then
-        Tui.on Blue (Tui.ink White (glyph code))
+        Tui.on Blue (Tui.ink White (Ascii.glyph code))
 
-    else if isControl code then
-        Tui.ink DarkGray (glyph code)
-
-    else
-        Tui.plain (glyph code)
-
-
-{-| What a cell draws. A control code has no glyph, and neither does `DEL`; a
-space has one and it is blank, which is the truthful thing to show even though
-it makes 0x20 look empty. The line underneath is what disambiguates them.
--}
-glyph : Int -> String
-glyph code =
-    if isControl code then
-        "·"
+    else if Ascii.isControl code then
+        Tui.ink DarkGray (Ascii.glyph code)
 
     else
-        String.fromChar (Char.fromCode code)
-
-
-isControl : Int -> Bool
-isControl code =
-    code < 32 || code == 127
+        Tui.plain (Ascii.glyph code)
 
 
 cursorAt : Model -> { x : Int, y : Int }
@@ -283,172 +266,6 @@ cursorAt model =
     { x = labelWidth + Math.modBy columns model.code * cellWidth
     , y = 1 + model.code // columns
     }
-
-
--- WHAT IT IS
-
-
-{-| Codes 0 to 32, by their ASCII names. `DEL` is the odd one out at 127 and is
-handled beside them.
--}
-names : Array { name : String, meaning : String }
-names =
-    [ { name = "NUL", meaning = "null" }
-    , { name = "SOH", meaning = "start of heading" }
-    , { name = "STX", meaning = "start of text" }
-    , { name = "ETX", meaning = "end of text" }
-    , { name = "EOT", meaning = "end of transmission" }
-    , { name = "ENQ", meaning = "enquiry" }
-    , { name = "ACK", meaning = "acknowledge" }
-    , { name = "BEL", meaning = "bell" }
-    , { name = "BS", meaning = "backspace" }
-    , { name = "HT", meaning = "horizontal tab" }
-    , { name = "LF", meaning = "line feed" }
-    , { name = "VT", meaning = "vertical tab" }
-    , { name = "FF", meaning = "form feed" }
-    , { name = "CR", meaning = "carriage return" }
-    , { name = "SO", meaning = "shift out" }
-    , { name = "SI", meaning = "shift in" }
-    , { name = "DLE", meaning = "data link escape" }
-    , { name = "DC1", meaning = "device control 1 (XON)" }
-    , { name = "DC2", meaning = "device control 2" }
-    , { name = "DC3", meaning = "device control 3 (XOFF)" }
-    , { name = "DC4", meaning = "device control 4" }
-    , { name = "NAK", meaning = "negative acknowledge" }
-    , { name = "SYN", meaning = "synchronous idle" }
-    , { name = "ETB", meaning = "end of transmission block" }
-    , { name = "CAN", meaning = "cancel" }
-    , { name = "EM", meaning = "end of medium" }
-    , { name = "SUB", meaning = "substitute" }
-    , { name = "ESC", meaning = "escape" }
-    , { name = "FS", meaning = "file separator" }
-    , { name = "GS", meaning = "group separator" }
-    , { name = "RS", meaning = "record separator" }
-    , { name = "US", meaning = "unit separator" }
-    , { name = "SP", meaning = "space" }
-    ]
-
-
-named : Int -> Maybe { name : String, meaning : String }
-named code =
-    if code == 127 then
-        Just { name = "DEL", meaning = "delete" }
-
-    else
-        Array.get code names
-
-
-{-| The C escape, for the eight codes that have one. `\e` is not in the C
-standard -- it is GCC's and everyone else's -- and it is here because a
-programmer looking up 27 wants to be told about it.
--}
-escape : Int -> String
-escape code =
-    when code is
-        0 ->
-            "\\0"
-
-        7 ->
-            "\\a"
-
-        8 ->
-            "\\b"
-
-        9 ->
-            "\\t"
-
-        10 ->
-            "\\n"
-
-        11 ->
-            "\\v"
-
-        12 ->
-            "\\f"
-
-        13 ->
-            "\\r"
-
-        27 ->
-            "\\e"
-
-        _ ->
-            ""
-
-
-{-| Which `Ctrl-` chord types this code, which is the other half of what the
-control third of the table is for. `Ctrl-@` through `Ctrl-_` is the whole of
-it: the terminal strips bit 6 and bit 7, so the chord for code *n* is the
-character at `n + 64`. `DEL` is `Ctrl-?` by the same arithmetic and is the
-reason Backspace and Delete have argued for forty years.
--}
-chord : Int -> String
-chord code =
-    if code < 32 then
-        "Ctrl-" ++ String.fromChar (Char.fromCode (code + 64))
-
-    else if code == 127 then
-        "Ctrl-?"
-
-    else
-        ""
-
-
-{-| `Dec 65  Hex 41  Oct 101  Bin 0100 0001` -- every base at once, because
-the reason to have this open is that you are converting between them.
--}
-bases : Model -> String
-bases model =
-    "Dec "
-        ++ String.padRight 5 ' ' (String.fromInt model.code)
-        ++ "Hex "
-        ++ String.padRight 4 ' ' (String.padLeft 2 '0' (radix 16 model.code))
-        ++ "Oct "
-        ++ String.padRight 5 ' ' (String.padLeft 3 '0' (radix 8 model.code))
-        ++ "Bin "
-        ++ nibbles model.code
-
-
-{-| Eight bits, split in the middle, because nobody can count to eight.
--}
-nibbles : Int -> String
-nibbles code =
-    let
-        bits =
-            String.padLeft 8 '0' (radix 2 code)
-    in
-    String.slice 0 4 bits ++ " " ++ String.slice 4 8 bits
-
-
-radix : Int -> Int -> String
-radix base n =
-    if n < base then
-        hexDigit n
-
-    else
-        radix base (n // base) ++ hexDigit (Math.modBy base n)
-
-
-{-| One digit of a base up to sixteen, which is every base this chart shows.
--}
-hexDigit : Int -> String
-hexDigit n =
-    String.slice n (n + 1) "0123456789ABCDEF"
-
-
-{-| The name line: what this code is called, and the two ways to type it.
--}
-naming : Model -> String
-naming model =
-    when named model.code is
-        Just it ->
-            String.padRight 5 ' ' it.name
-                ++ String.padRight 27 ' ' it.meaning
-                ++ String.padRight 9 ' ' (chord model.code)
-                ++ escape model.code
-
-        Nothing ->
-            "Char " ++ String.fromChar (Char.fromCode model.code)
 
 
 -- VIEW
@@ -470,12 +287,12 @@ view model =
         , StaticText
             { id = "ascii.bases"
             , rect = { x1 = 2, y1 = 11, x2 = 46, y2 = 12 }
-            , text = bases model
+            , text = Ascii.bases model.code
             }
         , StaticText
             { id = "ascii.naming"
             , rect = { x1 = 2, y1 = 12, x2 = 46, y2 = 13 }
-            , text = naming model
+            , text = Ascii.naming model.code
             }
         ]
     }

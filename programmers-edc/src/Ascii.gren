@@ -1,0 +1,230 @@
+module Ascii exposing (bases, chord, escape, glyph, hexDigit, isControl, named, naming, nibbles, radix)
+
+{-| What ASCII says about a byte.
+
+This started inside the ASCII chart, which is where it belongs conceptually and
+not where it can stay: the hex dump viewer asks exactly the same questions of
+the byte under its cursor -- what is this in every base, and what is code 7
+called -- and a second copy of the names table would be a second copy to get
+wrong. So the facts live here and the two tools share them.
+
+Everything in here is a pure function of one number. Nothing knows about a
+window, a colour, or which tool is asking. That is the test for whether
+something belongs in this module rather than in the tool that wanted it.
+
+-}
+
+import Array exposing (Array)
+import Char
+import Math
+import String
+
+
+-- WHAT A BYTE LOOKS LIKE
+
+
+{-| A control code, which is the third of the table with no glyph to draw.
+-}
+isControl : Int -> Bool
+isControl code =
+    code < 32 || code == 127
+
+
+{-| What a cell draws for this byte. A control code has none, neither does
+`DEL`, and neither does anything above 127 -- this is ASCII, and a byte with
+the top bit set is not a character until somebody says which encoding it is in.
+A space *has* a glyph and it is blank, which is the truthful thing to show even
+though it makes 0x20 look empty; the naming line is what disambiguates them.
+-}
+glyph : Int -> String
+glyph code =
+    if code >= 32 && code < 127 then
+        String.fromChar (Char.fromCode code)
+
+    else
+        "·"
+
+
+-- WHAT A BYTE IS CALLED
+
+
+{-| Codes 0 to 32, by their ASCII names. `DEL` is the odd one out at 127 and is
+handled beside them in [`named`](#named).
+-}
+names : Array { name : String, meaning : String }
+names =
+    [ { name = "NUL", meaning = "null" }
+    , { name = "SOH", meaning = "start of heading" }
+    , { name = "STX", meaning = "start of text" }
+    , { name = "ETX", meaning = "end of text" }
+    , { name = "EOT", meaning = "end of transmission" }
+    , { name = "ENQ", meaning = "enquiry" }
+    , { name = "ACK", meaning = "acknowledge" }
+    , { name = "BEL", meaning = "bell" }
+    , { name = "BS", meaning = "backspace" }
+    , { name = "HT", meaning = "horizontal tab" }
+    , { name = "LF", meaning = "line feed" }
+    , { name = "VT", meaning = "vertical tab" }
+    , { name = "FF", meaning = "form feed" }
+    , { name = "CR", meaning = "carriage return" }
+    , { name = "SO", meaning = "shift out" }
+    , { name = "SI", meaning = "shift in" }
+    , { name = "DLE", meaning = "data link escape" }
+    , { name = "DC1", meaning = "device control 1 (XON)" }
+    , { name = "DC2", meaning = "device control 2" }
+    , { name = "DC3", meaning = "device control 3 (XOFF)" }
+    , { name = "DC4", meaning = "device control 4" }
+    , { name = "NAK", meaning = "negative acknowledge" }
+    , { name = "SYN", meaning = "synchronous idle" }
+    , { name = "ETB", meaning = "end of transmission block" }
+    , { name = "CAN", meaning = "cancel" }
+    , { name = "EM", meaning = "end of medium" }
+    , { name = "SUB", meaning = "substitute" }
+    , { name = "ESC", meaning = "escape" }
+    , { name = "FS", meaning = "file separator" }
+    , { name = "GS", meaning = "group separator" }
+    , { name = "RS", meaning = "record separator" }
+    , { name = "US", meaning = "unit separator" }
+    , { name = "SP", meaning = "space" }
+    ]
+
+
+named : Int -> Maybe { name : String, meaning : String }
+named code =
+    if code == 127 then
+        Just { name = "DEL", meaning = "delete" }
+
+    else
+        Array.get code names
+
+
+{-| The C escape, for the eight codes that have one. `\e` is not in the C
+standard -- it is GCC's and everyone else's -- and it is here because a
+programmer looking up 27 wants to be told about it.
+-}
+escape : Int -> String
+escape code =
+    when code is
+        0 ->
+            "\\0"
+
+        7 ->
+            "\\a"
+
+        8 ->
+            "\\b"
+
+        9 ->
+            "\\t"
+
+        10 ->
+            "\\n"
+
+        11 ->
+            "\\v"
+
+        12 ->
+            "\\f"
+
+        13 ->
+            "\\r"
+
+        27 ->
+            "\\e"
+
+        _ ->
+            ""
+
+
+{-| Which `Ctrl-` chord types this code, which is the other half of what the
+control third of the table is for. `Ctrl-@` through `Ctrl-_` is the whole of
+it: the terminal strips bit 6 and bit 7, so the chord for code *n* is the
+character at `n + 64`. `DEL` is `Ctrl-?` by the same arithmetic and is the
+reason Backspace and Delete have argued for forty years.
+-}
+chord : Int -> String
+chord code =
+    if code < 32 then
+        "Ctrl-" ++ String.fromChar (Char.fromCode (code + 64))
+
+    else if code == 127 then
+        "Ctrl-?"
+
+    else
+        ""
+
+
+{-| The name line: what this code is called, and the two ways to type it.
+
+A byte above 127 gets the one honest answer there is. It is not a character
+here, it is half of one somewhere else, and the hex viewer is the tool that
+asks -- the chart never has anything above 127 to ask about.
+-}
+naming : Int -> String
+naming code =
+    when named code is
+        Just it ->
+            String.padRight 5 ' ' it.name
+                ++ String.padRight 27 ' ' it.meaning
+                ++ String.padRight 9 ' ' (chord code)
+                ++ escape code
+
+        Nothing ->
+            if code < 128 then
+                "Char " ++ glyph code
+
+            else
+                "not ASCII -- the top bit is set"
+
+
+-- WHAT A BYTE IS WORTH
+
+
+{-| `Dec 65  Hex 41  Oct 101  Bin 0100 0001` -- every base at once, because the
+reason to have either of these tools open is that you are converting between
+them.
+-}
+bases : Int -> String
+bases code =
+    "Dec "
+        ++ String.padRight 5 ' ' (String.fromInt code)
+        ++ "Hex "
+        ++ String.padRight 4 ' ' (String.padLeft 2 '0' (radix 16 code))
+        ++ "Oct "
+        ++ String.padRight 5 ' ' (String.padLeft 3 '0' (radix 8 code))
+        ++ "Bin "
+        ++ nibbles code
+
+
+{-| Eight bits, split in the middle, because nobody can count to eight.
+-}
+nibbles : Int -> String
+nibbles code =
+    let
+        bits =
+            String.padLeft 8 '0' (radix 2 code)
+    in
+    String.slice 0 4 bits ++ " " ++ String.slice 4 8 bits
+
+
+{-| A number in a base up to sixteen.
+
+`Math.truncate (toFloat n / toFloat base)` and not `n // base`, which is not
+pedantry: `//` truncates its *result* to 32 bits, so an offset past four
+gigabytes -- which the hex viewer's 8-digit offset column is sized for --
+divides to a negative number and prints nonsense. `modBy` is fine either way.
+-}
+radix : Int -> Int -> String
+radix base n =
+    if n < base then
+        hexDigit n
+
+    else
+        radix base (Math.truncate (toFloat n / toFloat base)) ++ hexDigit (Math.modBy base n)
+
+
+{-| One digit of a base up to sixteen, which is every base these tools show.
+-}
+hexDigit : Int -> String
+hexDigit n =
+    String.slice n (n + 1) "0123456789ABCDEF"

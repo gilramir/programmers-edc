@@ -872,6 +872,20 @@ something still running.
 
 ### What is left, now that the list is empty
 
+**One known bug, found from outside.** `programmers-edc`'s hex dump viewer --
+written as an ordinary consumer of this package -- opened `Tui.fileDialog` and
+typed a path into it, which is what the `Name` field is for, and nothing
+happened. A modal dialog with a list in it opens with the caret on the list;
+the field is two Tabs away. `applyInitialFocus` exists to prevent exactly this
+and works for windows. A dialog of a field and two buttons is fine, so it is
+something a `ListBox` or its scroll bar does; sending the same `Tui.focus` one
+message later fixes it, so the call is being undone rather than refused. The
+whole reproduction is in FINDINGS, the workaround is one line in
+`Tool/Hex.gren`, and `programmers-edc/test/drive_hex.py` pins it. **This should
+be fixed before anything is published** -- `examples/dir` has had it since the
+day the dialog was written and never noticed, because its test drives the
+dialog with the arrow keys.
+
 **One known limitation**, written up under gap (7) and in FINDINGS:
 `TMenuView::execute` runs a nested event loop, so the *menu bar* stops the
 program while a pull-down is open. Nothing in this package is built on it —
