@@ -106,6 +106,18 @@ def main():
     check("control codes are painted in their own colour", control != printable,
           f"control fg {control}, printable fg {printable}")
 
+    # And the colours have to be ones a light grey window can carry. `Hue`
+    # names an absolute colour, so the model is the only thing that can get
+    # this wrong, and the first version did: bright yellow labels (93) and
+    # bright cyan dots on a 47 background, both around 1.5:1. These pin the
+    # readable pair -- dark blue labels, dark grey dots -- so that reaching for
+    # a bright hue fails here rather than in someone's eyes.
+    check("the row and column labels are dark blue, not a bright hue",
+          grid.fg_at(11, 4) == 34 and grid.fg_at(8, 5) == 34,
+          f"header fg {grid.fg_at(11, 4)}, label fg {grid.fg_at(8, 5)}")
+    check("and the placeholder dots are dark grey", control == 90,
+          f"control fg {control}")
+
     # Seven to the right is BEL, which is the entry that makes the whole tool
     # worth having: no glyph, a name, a chord and an escape.
     app.send(b"\x1b[C" * 7, settle=0.9)

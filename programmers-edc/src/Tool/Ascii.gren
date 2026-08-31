@@ -200,6 +200,14 @@ click x y model =
 {-| The header row and eight rows of sixteen. Control codes are drawn in their
 own colour, which is the only way to see at a glance where the unprintable
 third of the table stops.
+
+Which colours, though, is a question `Hue` makes the model answer, and
+`examples/palette` in gren-tvision is the essay on what that costs: naming a
+colour outright means knowing what it lands on. A window's interior here is
+light grey, so the first pass -- yellow labels, cyan dots, both bright -- was
+close to invisible. Dark blue for the labels and dark grey for the dots is
+what light grey can carry, and the dots being the dim ones is right anyway:
+`·` is a placeholder, and the line below is where the meaning is.
 -}
 grid : Array (Array Span)
 grid =
@@ -208,7 +216,7 @@ grid =
 
 header : Array Span
 header =
-    [ Tui.ink Yellow
+    [ Tui.ink Blue
         (String.repeat labelWidth " "
             ++ String.join " " (Array.map hexDigit (Array.range 0 (columns - 1)))
         )
@@ -218,7 +226,7 @@ header =
 row : Int -> Array Span
 row r =
     Array.pushFirst
-        (Tui.ink Yellow (hexDigit r ++ "_ "))
+        (Tui.ink Blue (hexDigit r ++ "_ "))
         (Array.map (\c -> cell (r * columns + c)) (Array.range 0 (columns - 1)))
 
 
@@ -229,7 +237,7 @@ cell code =
             glyph code ++ " "
     in
     if isControl code then
-        Tui.ink Cyan body
+        Tui.ink DarkGray body
 
     else
         Tui.plain body
