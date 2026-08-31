@@ -209,9 +209,9 @@ close to invisible. Dark blue for the labels and dark grey for the dots is
 what light grey can carry, and the dots being the dim ones is right anyway:
 `·` is a placeholder, and the line below is where the meaning is.
 -}
-grid : Array (Array Span)
-grid =
-    Array.pushFirst header (Array.map row (Array.range 0 7))
+grid : Model -> Array (Array Span)
+grid model =
+    Array.pushFirst header (Array.map (row model) (Array.range 0 7))
 
 
 header : Array Span
@@ -223,24 +223,41 @@ header =
     ]
 
 
-row : Int -> Array Span
-row r =
+{-| A label, then sixteen one-character cells with a space between them. The
+gaps are spans of their own so that the selected cell can be exactly one column
+wide: a highlight that swallowed the gap would be a two-column block sitting
+half over the next character.
+-}
+row : Model -> Int -> Array Span
+row model r =
     Array.pushFirst
         (Tui.ink Blue (hexDigit r ++ "_ "))
-        (Array.map (\c -> cell (r * columns + c)) (Array.range 0 (columns - 1)))
+        (Array.intersperse (Tui.plain " ")
+            (Array.map (\c -> cell model (r * columns + c)) (Array.range 0 (columns - 1)))
+        )
 
 
-cell : Int -> Span
-cell code =
-    let
-        body =
-            glyph code ++ " "
-    in
-    if isControl code then
-        Tui.ink DarkGray body
+{-| The selected cell is painted rather than merely pointed at.
+
+`examples/ascii` shows its selection with the terminal's own block cursor and
+nothing else, which is honest for a demonstration of what `cursor` does and
+not enough for a tool. Whether that cursor is visible at all belongs to the
+terminal: a thin bar, a hollow box, a blink somebody turned off, a multiplexer
+that hides it. So the chart says which cell is selected in the only way that
+is certainly on screen -- white on blue, painted by the model -- and keeps the
+hardware cursor there as well, for the terminals that do show it and for the
+tests, which can read a cursor position but not a highlight's meaning.
+-}
+cell : Model -> Int -> Span
+cell model code =
+    if code == model.code then
+        Tui.on Blue (Tui.ink White (glyph code))
+
+    else if isControl code then
+        Tui.ink DarkGray (glyph code)
 
     else
-        Tui.plain body
+        Tui.plain (glyph code)
 
 
 {-| What a cell draws. A control code has no glyph, and neither does `DEL`; a
@@ -446,7 +463,7 @@ view model =
         [ Canvas
             { id = canvasId
             , rect = { x1 = 2, y1 = 1, x2 = 46, y2 = 10 }
-            , lines = grid
+            , lines = grid model
             , cursor = Just (cursorAt model)
             , takesFocus = True
             }

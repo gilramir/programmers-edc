@@ -97,11 +97,25 @@ def main():
     check("the cursor is on the first cell", app.cursor() == cell(0),
           f"{app.cursor()} != {cell(0)}")
 
+    # ...and the selection is painted, not merely pointed at. The terminal's
+    # own cursor is the example's only way of showing which cell is selected,
+    # and whether it is visible at all is the terminal's business -- a thin
+    # bar, a hollow box, a blink turned off. So the model paints the cell.
+    d = app.display()
+    check("the selected cell is painted, not just under the cursor",
+          d.bg_at(*cell(0)) == 44 and d.fg_at(*cell(0)) == 97,
+          f"fg {d.fg_at(*cell(0))} on bg {d.bg_at(*cell(0))}")
+    check("and only that cell", d.bg_at(*cell(1)) == 47
+          and d.bg_at(cell(0)[0] + 1, cell(0)[1]) == 47,
+          "the highlight leaked into the gap or the next cell")
+
     # The control third of the table is painted in a colour of its own, which
     # is a canvas drawing itself in spans. Cell 0 is a control and cell 0x41
     # is not; whatever the two colours are, they must differ.
+    # Cell 1 and not cell 0: cell 0 is the selected one, and a highlight would
+    # make this pass for the wrong reason.
     grid = app.display()
-    control = grid.fg_at(*cell(0))
+    control = grid.fg_at(*cell(1))
     printable = grid.fg_at(*cell(0x41))
     check("control codes are painted in their own colour", control != printable,
           f"control fg {control}, printable fg {printable}")
@@ -128,6 +142,11 @@ def main():
           naming(app.render()))
     check("the cursor followed", app.cursor() == cell(7),
           f"{app.cursor()} != {cell(7)}")
+
+    d = app.display()
+    check("and so did the highlight",
+          d.bg_at(*cell(7)) == 44 and d.bg_at(*cell(0)) == 47,
+          f"cell 7 bg {d.bg_at(*cell(7))}, cell 0 bg {d.bg_at(*cell(0))}")
 
     # A printable key jumps to itself: the fastest way to ask "what is the code
     # for this character", and the reason the canvas has to eat the keystroke.
