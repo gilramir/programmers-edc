@@ -381,6 +381,16 @@ def main():
           display.bg_at(HEX_AT + 9, FIRST_ROW) == 47,
           str(display.bg_at(HEX_AT + 9, FIRST_ROW)))
 
+    #     The six keys are drawn wearing what they paint, which is the only
+    #     way a line can answer "which one is yellow". Reading the colours off
+    #     the digits is also the only assertion that could tell this legend
+    #     from the words it replaced.
+    legend = line_at(app, STATUS_ROW).find("1  2  3  4  5  6")
+    swatches = ([display.bg_at(legend + 3 * i, STATUS_ROW) for i in range(6)]
+                if legend > 0 else [])
+    check("the legend paints the number keys rather than naming a range of them",
+          swatches == [41, 42, 43, 45, 46, 100], f"at {legend}: {swatches}")
+
     app.send(b"1", settle=0.6)
     display = app.display()
     check("a number paints the mark and ends the mode",

@@ -1823,18 +1823,36 @@ markLine inks marking range =
             ++ "  "
             ++ String.fromInt (range.end - range.start)
             ++ (if range.end - range.start == 1 then
-                    " byte"
+                    " byte "
 
                 else
-                    " bytes"
+                    " bytes "
                )
         )
-    , Tui.ink inks.dim
-        ("   1-"
-            ++ String.fromInt (Array.length Theme.highlightNames)
-            ++ " paint   Esc cancel"
-        )
     ]
+        ++ swatches inks
+        ++ [ Tui.ink inks.dim "  Esc cancel" ]
+
+
+{-| The six keys, each wearing what it paints.
+
+It said `1-6 paint` before this, which is a range of numbers and not an answer
+to the question somebody in the mode is actually asking -- *which one is
+yellow*. A key cap is the one place a colour can be named by being it, and it
+costs eighteen columns on a line that had them.
+
+The order is the array's, so a scheme that reordered its grounds would reorder
+the legend without being asked to, and the number on the cap is the number the
+key sends -- both because there is only one place, [`inkOf`](#inkOf), that
+knows the six are numbered from one.
+-}
+swatches : Inks -> Array Span
+swatches inks =
+    Array.indexedMap
+        (\index pair ->
+            Tui.on pair.bg (Tui.ink pair.fg (" " ++ String.fromInt (index + 1) ++ " "))
+        )
+        inks.highlights
 
 
 {-| The swatch is the colour itself rather than its name in the theme's words,
@@ -1851,7 +1869,13 @@ inkNote inks model =
             [ Tui.plain "  "
             , when Array.get index inks.highlights is
                 Just pair ->
-                    Tui.on pair.bg (Tui.ink pair.fg (" " ++ inkName index ++ " "))
+                    -- The number as well as the name, because this is the
+                    -- other place the two are both available and the legend
+                    -- above is the one somebody has to read them off.
+                    Tui.on pair.bg
+                        (Tui.ink pair.fg
+                            (" " ++ String.fromInt (index + 1) ++ " " ++ inkName index ++ " ")
+                        )
 
                 Nothing ->
                     Tui.plain ""

@@ -94,7 +94,9 @@ Two things about it are temporary, and both are temporary for the same reason
 
 `v` marks from the cursor, `V` marks whole rows, and one of `1`-`6` paints what
 is marked; `Esc` drops the mark and `d` takes the paint off the range under the
-cursor. Everything that moves the cursor -- arrows, `PgDn`, `Ctrl-End`, a click
+cursor. While a mark is out, the line under the dump carries the six keys
+drawn in the colours they paint, because `1-6` is a range of numbers and not an
+answer to which one is yellow. Everything that moves the cursor -- arrows, `PgDn`, `Ctrl-End`, a click
 on either column, **Bytes | Go to offset** -- moves the far end of the mark,
 because the far end *is* the cursor. **Bytes | Highlight** is the same six
 things on a menu, for finding them the first time.

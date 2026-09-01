@@ -3335,6 +3335,18 @@ event loop this package refuses everywhere else -- so if this is ever added, it
 should be a plain forward of motion-while-a-button-is-down, not the loop. It is
 a second entry for the sweep that starts with the unbound clipboard.
 
+### A key that picks a colour has to wear it
+
+The line the mode puts on the screen first read `1-6 paint`, which is a range
+of numbers and not an answer to the question somebody in the mode is asking:
+*which one is yellow*. It says the six digits in the six grounds instead --
+eighteen columns, on a line that had them -- and the same swatch, with its
+number in it, is what the byte under the cursor wears when it is inside a
+range. This is the calculator's lesson from the other side. There the finding
+was that a control's face has to be *readable* (`~` was rejected as a button
+because at that size it is a hair from `-`); here it is that a control's face
+can carry the answer instead of describing where to find it.
+
 ### And one off-by-one that only the menu could have
 
 The six colours are a key each (`1`-`6`) and a menu entry each, and the menu
