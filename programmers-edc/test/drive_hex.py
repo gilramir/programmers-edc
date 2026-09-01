@@ -91,6 +91,19 @@ def copied(app, mark):
     return base64.b64decode(found[-1]).decode() if found else ""
 
 
+def paste(app, text, key=b"p", settle=1.1):
+    """Press a paste key and answer the OSC 52 it sends.
+
+    Only works once the driver has claimed OSC 52 support, which is what makes
+    the clipboard the *terminal's* -- and the terminal is this file, so it can
+    put anything it likes on it. Returns whether predc actually asked."""
+    mark = len(app.buf)
+    app.send(key, settle=0.7)
+    asked = b"\x1b]52;;?\x07" in app.buf[mark:]
+    app.send(b"\x1b]52;;" + base64.b64encode(text.encode()) + b"\x07", settle=settle)
+    return asked
+
+
 def bytes_menu(app, keys, settle=0.9):
     """Open the Bytes pull-down and drive it with the letters it underlines.
 
@@ -557,7 +570,57 @@ def main():
     app.send(b"\x1b", settle=0.5)
     bytes_menu(app, b"hc", settle=1.0)
 
-    # 15. A file smaller than the window, and one with nothing in it at all.
+    # 15. Pasting, which is the other half of the clipboard and the second way
+    #     of getting something to look at. The driver has claimed OSC 52
+    #     support by now, so the clipboard is the terminal's -- and the
+    #     terminal is this file, which can put whatever it likes on it.
+    asked = paste(app, "Hello, hex!")
+    check("p asks the clipboard for text", asked)
+    check("and what comes back is shown as its bytes",
+          rows(app)[0].startswith("00000000  48 65 6C 6C 6F 2C 20 68  65 78 21"), rows(app)[0])
+    check("with the printable column to match",
+          rows(app)[0].rstrip().endswith("Hello, hex!"), rows(app)[0])
+    check("the title says what it is looking at and how big it is",
+          "pasted text" in line_at(app, 1) and "(11 bytes)" in line_at(app, 1),
+          line_at(app, 1))
+    check("and the rows past the end of it are blank",
+          rows(app)[1].strip() == "", repr(rows(app)[1]))
+
+    #     The same text read the other way. Two commands and no sniffing:
+    #     `beef` and `cafe` and `decade` are words as well as hex, so a program
+    #     that guesses is a program that is silently wrong about what it shows.
+    paste(app, "de ad be ef", key=b"P")
+    check("P reads the clipboard as hex digits rather than as characters",
+          rows(app)[0].startswith("00000000  DE AD BE EF"), rows(app)[0])
+    check("and says so in the title",
+          "pasted hex" in line_at(app, 1) and "(4 bytes)" in line_at(app, 1),
+          line_at(app, 1))
+
+    #     Separators are whatever produced the text felt like using.
+    paste(app, "0x48,0x69", key=b"P")
+    check("commas and 0x are separators, not data",
+          rows(app)[0].startswith("00000000  48 69") and "(2 bytes)" in line_at(app, 1),
+          rows(app)[0])
+
+    #     And what it will not do, which is the interesting half: a dump with
+    #     its offsets and its printable column still on it is *nearly* hex, and
+    #     keeping the hex and dropping the rest would read both columns as
+    #     data. It refuses and says which character stopped it.
+    paste(app, "00000000  48 65 6C 6C  Hell", key=b"P")
+    check("a dump pasted as hex is refused rather than half read",
+          "not a hex digit" in status(app), status(app))
+    check("and what was on the screen is still on the screen",
+          "(2 bytes)" in line_at(app, 1), line_at(app, 1))
+
+    paste(app, "abc", key=b"P")
+    check("an odd number of digits is refused too, with the count",
+          "3 hex digits" in status(app), status(app))
+
+    paste(app, "")
+    check("and an empty clipboard says that instead of showing nothing",
+          "nothing on the clipboard" in status(app), status(app))
+
+    # 16. A file smaller than the window, and one with nothing in it at all.
     open_file(app, os.path.join(work, "small.bin"))
     check("a small file is one row", rows(app)[0].startswith("00000000  48 65 6C 6C 6F"),
           rows(app)[0])
@@ -576,7 +639,7 @@ def main():
     check("and draws no rows at all", all(row.strip() == "" for row in rows(app)),
           repr(rows(app)[0]))
 
-    # 16. It is a window like any other: closing it forgets it, and the menu
+    # 17. It is a window like any other: closing it forgets it, and the menu
     #     it brought with it goes too.
     app.send(ALT_F3, settle=1.2)
     check("Alt-F3 closed the window", "Hex Dump" not in app.render(), app.render())
@@ -584,6 +647,15 @@ def main():
           "Bytes" not in app.render().split("\n")[0], app.render().split("\n")[0])
     app.send(b"\x1bd", settle=1.0)
     check("reopening starts fresh", "Nothing open" in app.render(), app.render())
+    check("and says the two ways of giving it something",
+          "Open file" in app.render() and "paste" in app.render(), app.render())
+
+    #     Which is the case a paste has to work in: it is one of the two ways
+    #     of opening something, so it cannot be a thing you can only do to a
+    #     file that is already open.
+    paste(app, "hi")
+    check("a paste with nothing open opens something",
+          rows(app)[0].startswith("00000000  68 69"), rows(app)[0])
 
     app.send(b"\x1bx", settle=1.0)
     code = app.wait(timeout=6)

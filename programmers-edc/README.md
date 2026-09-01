@@ -111,6 +111,25 @@ them, and closing the window drops the whole tool the way it drops every other
 one here. Where two overlap the newer one shows; taking it off puts the older
 one back.
 
+## Pasting
+
+`p` fills the window from the clipboard as text -- the bytes the string is made
+of -- and `P` reads the same clipboard as *hex digits*, so `de ad be ef` and
+`0x48,0x69` and a line of `48656C6C6F` all become the bytes they spell. Both
+are on **Bytes**, and both work with nothing open, because pasting is one of
+the two ways of giving this thing something to look at.
+
+Two commands rather than one that decides for itself, and that is deliberate:
+`beef`, `cafe`, `decade` and `0123456789` are all words somebody might paste
+and all valid hex. A program that guesses is a program that is sometimes
+silently wrong about what it is showing you, which is the one thing a hex dump
+must never be.
+
+For the same reason `P` refuses anything that is not hex rather than keeping
+the hex and dropping the rest -- so a whole `xxd` dump, offsets and printable
+column included, is refused with the character that stopped it rather than read
+as data in three places at once.
+
 ## Copying
 
 `y` copies what is marked as hex -- `00 01 02 03` -- and **Bytes | Copy as a

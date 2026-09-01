@@ -75,7 +75,15 @@ a feature that was written: a click already goes through
 marking moves it. What is not free is dragging -- the binding forwards
 `evMouseDown` and nothing else, so there is no press-move-release to hear.
 
-Pasted input is still not here.
+**And there are two of it now.** `p` and `P` fill the window from the
+clipboard instead of from a file -- as the text's own bytes, or as the bytes
+its hex digits spell out. That is a second *source*, and the surprise was how
+little of this file it reached: a pasted buffer is a source whose every byte is
+already in the chunk, so `covers` says yes to every range, `load` never reads,
+and the dump, the scrolling, the marking, the highlighting and the copying were
+all already written against a size and a chunk. The union is
+[`Origin`](#Origin) and it has exactly one job, which is answering "where do
+more bytes come from".
 
 -}
 
@@ -84,6 +92,7 @@ import Array.Builder as Builder
 import Ascii
 import Bytes exposing (Bytes)
 import Bytes.Decode as Decode
+import Char
 import FileSystem
 import FileSystem.Path as Path exposing (Path)
 import Json.Decode
@@ -227,7 +236,7 @@ type alias Model =
     -- size the same way the shell does. It arrives as an event, and every open
     -- tool is handed every event, so this costs nothing but the field.
     , desktop : { cols : Int, rows : Int }
-    , file : Maybe File
+    , open : Maybe Source
     -- The offset of the first byte on screen, always a multiple of sixteen.
     , top : Int
     , cursor : Int
@@ -255,6 +264,10 @@ type alias Model =
     -- somewhere for it: `Copied` says whether the system clipboard took the
     -- text and nothing about what the text *was*.
     , yanked : Maybe String
+    -- A paste asked for and not yet answered, and how the answer is to be
+    -- read. The clipboard replies with an event and every open tool is handed
+    -- every event, so without this a paste in another tool would land here.
+    , awaiting : Maybe Reading
     , message : String
     }
 
@@ -300,8 +313,41 @@ type Shape
     | AsDump
 
 
-type alias File =
-    { path : Path, size : Int }
+{-| What the text on the clipboard is taken to *be*.
+
+Two commands rather than one that decides for itself, and the reason is that
+deciding is not possible. `beef`, `cafe`, `decade` and `0123456789` are all
+words somebody might paste and all valid hex, so a program that sniffs is a
+program that is sometimes silently wrong about what it is showing -- and the
+whole point of a hex dump is that you are looking at it to find out what is
+really there.
+-}
+type Reading
+    = Characters
+    | HexDigits
+
+
+{-| What is on the screen: how big it is, what to call it, and where more of
+it comes from.
+
+The third of those is the only thing that differs between the two, and it is
+worth being a union rather than a `Maybe Path`. A file is read a chunk at a
+time and a paste is *all here* -- so the question "can I have the bytes at
+offset n" has a different answer for each, and every place that asks has to
+say which it is dealing with. A `Maybe Path` would let a missing path mean
+"do nothing", which is what a bug looks like from the inside.
+
+Everything else about them is the same, and that is the useful half: the model
+holds a size and one chunk of bytes either way, so the dump, the scrolling, the
+marking and the copying were all written once and did not notice this arriving.
+-}
+type alias Source =
+    { name : String, size : Int, from : Origin }
+
+
+type Origin
+    = OnDisk Path
+    | Pasted
 
 
 type alias Chunk =
@@ -335,7 +381,7 @@ init : FileSystem.Permission -> Model
 init permission =
     { permission = permission
     , desktop = { cols = 80, rows = 23 }
-    , file = Nothing
+    , open = Nothing
     , top = 0
     , cursor = 0
     , chunk = { start = 0, bytes = [] }
@@ -346,6 +392,7 @@ init permission =
     , highlights = []
     , marking = Nothing
     , yanked = Nothing
+    , awaiting = Nothing
     , message = ""
     }
 
@@ -424,7 +471,7 @@ update ports event model =
             { model = { model | message = "" }, command = browseFrom model }
 
         Tui.Command "hex.goto" ->
-            when model.file is
+            when model.open is
                 Nothing ->
                     still { model | message = "Nothing is open." }
 
@@ -453,6 +500,23 @@ update ports event model =
                 Nothing ->
                     still model
 
+        -- Same guard as `Copied`, and it earns itself here: `awaiting` is
+        -- what says this tool asked, and it carries what to do with the
+        -- answer, which nothing in the event says.
+        Tui.ClipboardText it ->
+            when model.awaiting is
+                Just reading ->
+                    paste reading it.text { model | awaiting = Nothing }
+
+                Nothing ->
+                    still model
+
+        Tui.Command "hex.pasteText" ->
+            askClipboard ports Characters model
+
+        Tui.Command "hex.pasteHex" ->
+            askClipboard ports HexDigits model
+
         Tui.Command "hex.copyHex" ->
             yank ports AsHex model
 
@@ -479,12 +543,12 @@ update ports event model =
             moveTo 0 model
 
         Tui.Command "hex.end" ->
-            when model.file is
+            when model.open is
                 Nothing ->
                     still model
 
-                Just file ->
-                    moveTo (file.size - 1) model
+                Just source ->
+                    moveTo (source.size - 1) model
 
         Tui.DialogClosed closed ->
             if closed.id == fileDialogId then
@@ -541,7 +605,12 @@ receive ports msg model =
                 FileSystem.File ->
                     load
                         { model
-                            | file = Just { path = it.path, size = it.meta.byteSize }
+                            | open =
+                                Just
+                                    { name = Path.filenameWithExtension it.path
+                                    , size = it.meta.byteSize
+                                    , from = OnDisk it.path
+                                    }
                             , top = 0
                             , cursor = 0
                             , chunk = { start = 0, bytes = [] }
@@ -550,6 +619,7 @@ receive ports msg model =
                             , highlights = []
                             , marking = Nothing
                             , yanked = Nothing
+                            , awaiting = Nothing
                             , browsing = Nothing
                             , recent = remember (Path.toPosixString it.path) model.recent
                             , message =
@@ -587,11 +657,26 @@ receive ports msg model =
 
 pressKey : Tui.Ports Msg -> String -> Model -> Step
 pressKey ports key model =
-    when model.file is
+    when key is
+        -- The two keys that need nothing open, because they are one of the
+        -- two ways of opening something.
+        "p" ->
+            askClipboard ports Characters model
+
+        "P" ->
+            askClipboard ports HexDigits model
+
+        _ ->
+            whenOpen ports key model
+
+
+whenOpen : Tui.Ports Msg -> String -> Model -> Step
+whenOpen ports key model =
+    when model.open is
         Nothing ->
             still model
 
-        Just file ->
+        Just source ->
             when key is
                 "Left" ->
                     moveTo (model.cursor - 1) model
@@ -621,7 +706,7 @@ pressKey ports key model =
                     moveTo 0 model
 
                 "Ctrl-End" ->
-                    moveTo (file.size - 1) model
+                    moveTo (source.size - 1) model
 
                 -- vim's two visual modes, and vim's answer to pressing the
                 -- same one twice.
@@ -697,7 +782,7 @@ widens to rows, which is what vim does with the same two keys.
 -}
 mark : Grain -> Model -> Step
 mark grain model =
-    when model.file is
+    when model.open is
         Nothing ->
             still { model | message = "Nothing is open." }
 
@@ -748,9 +833,9 @@ markedRange model =
                             { start = rowStart low, end = rowStart high + bytesPerRow }
 
                 size =
-                    when model.file is
-                        Just file ->
-                            file.size
+                    when model.open is
+                        Just source ->
+                            source.size
 
                         Nothing ->
                             0
@@ -819,6 +904,127 @@ within range offset =
 
         Nothing ->
             False
+
+
+-- PASTING
+
+
+{-| Ask for the clipboard, and remember what the answer is for.
+
+The message is not decoration. `readClipboard` is a request, and on a terminal
+that owns the clipboard the reply comes back through the input stream and may
+take a moment or never come at all -- so the one state this program can be in
+that it cannot draw is "waiting for an answer". Saying so costs a line that the
+answer clears, and leaves the right thing on the screen in the case where
+nothing arrives.
+-}
+askClipboard : Tui.Ports Msg -> Reading -> Model -> Step
+askClipboard ports reading model =
+    { model = { model | awaiting = Just reading, message = "Asking for the clipboard..." }
+    , command = Tui.readClipboard ports
+    }
+
+
+paste : Reading -> String -> Model -> Step
+paste reading text model =
+    if text == "" then
+        still { model | message = "There is nothing on the clipboard." }
+
+    else
+        when reading is
+            Characters ->
+                showBytes (toByteArray (Bytes.fromString text)) "pasted text" model
+
+            HexDigits ->
+                when hexBytes text is
+                    Err reason ->
+                        still { model | message = reason }
+
+                    Ok codes ->
+                        if Array.isEmpty codes then
+                            still { model | message = "There are no hex digits on the clipboard." }
+
+                        else
+                            showBytes codes "pasted hex" model
+
+
+{-| A pasted buffer is a file whose every byte is already in the chunk, which
+is why so little of this program had to learn about it: `covers` says yes to
+every range, so `load` never reads, and everything else was already written
+against a size and a chunk.
+-}
+showBytes : Array Int -> String -> Model -> Step
+showBytes codes name model =
+    still
+        { model
+            | open = Just { name = name, size = Array.length codes, from = Pasted }
+            , chunk = { start = 0, bytes = codes }
+            , wanted = Nothing
+            , top = 0
+            , cursor = 0
+            , highlights = []
+            , marking = Nothing
+            , yanked = Nothing
+            , message = ""
+        }
+
+
+{-| Hex digits, in whatever the thing that produced them used between the
+pairs: spaces, newlines, commas, colons, semicolons, hyphens, and `0x` in front
+of each byte. `48 65 6C`, `48,65,6c`, `0x48 0x65` and `48656C` are all the same
+three bytes.
+
+**Anything else is refused, and named.** The temptation is to keep the hex and
+drop the rest, which would let a whole `xxd` dump be pasted -- and would read
+its offset column and its printable column as data, and produce a buffer that
+is wrong in a way nobody can see. Refusing means the one thing this cannot
+currently take is a dump with its offsets still on it, and the message says so
+rather than leaving somebody to work it out from a screen of plausible
+rubbish.
+-}
+hexBytes : String -> Result String (Array Int)
+hexBytes text =
+    let
+        stripped =
+            text
+                |> String.replace "0x" ""
+                |> String.replace "0X" ""
+
+        strays =
+            String.keepIf
+                (\char -> not (Char.isHexDigit char || isSeparator char))
+                stripped
+
+        digits =
+            String.keepIf Char.isHexDigit stripped
+    in
+    when String.popFirst strays is
+        Just stray ->
+            Err
+                ("That is not hex: '"
+                    ++ String.fromChar stray.first
+                    ++ "' is not a hex digit. Offsets and a printable column have to come off first."
+                )
+
+        Nothing ->
+            if Math.modBy 2 (String.count digits) /= 0 then
+                Err
+                    ("That is "
+                        ++ String.fromInt (String.count digits)
+                        ++ " hex digits, and a byte takes two."
+                    )
+
+            else
+                Ok
+                    (Array.mapAndKeepJust
+                        (\index -> fromHex (String.slice (index * 2) (index * 2 + 2) digits))
+                        (Array.range 0 (divideBy 2 (String.count digits) - 1))
+                    )
+
+
+isSeparator : Char -> Bool
+isSeparator char =
+    String.contains (String.fromChar char) " \t\n\r,;:-"
 
 
 -- COPYING
@@ -901,9 +1107,9 @@ shaped shape model range =
         AsDump ->
             let
                 size =
-                    when model.file is
-                        Just file ->
-                            file.size
+                    when model.open is
+                        Just source ->
+                            source.size
 
                         Nothing ->
                             range.end
@@ -1060,50 +1266,50 @@ same line of the window.
 -}
 pageBy : Int -> Model -> Step
 pageBy direction model =
-    when model.file is
+    when model.open is
         Nothing ->
             still model
 
-        Just file ->
+        Just source ->
             let
                 top =
-                    clamp 0 (maxTop model file) (model.top + direction * page model)
+                    clamp 0 (maxTop model source) (model.top + direction * page model)
             in
             load
                 { model
                     | top = top
                     , cursor =
                         clamp 0
-                            (max 0 (file.size - 1))
+                            (max 0 (source.size - 1))
                             (top + Math.modBy (page model) (model.cursor - model.top))
                 }
 
 
 moveTo : Int -> Model -> Step
 moveTo offset model =
-    when model.file is
+    when model.open is
         Nothing ->
             still model
 
-        Just file ->
+        Just source ->
             let
                 cursor =
-                    clamp 0 (max 0 (file.size - 1)) offset
+                    clamp 0 (max 0 (source.size - 1)) offset
             in
-            load { model | cursor = cursor, top = keepInView model file cursor model.top }
+            load { model | cursor = cursor, top = keepInView model source cursor model.top }
 
 
 {-| The smallest scroll that puts the cursor back on screen, which is what
 every editor does and the only behaviour that survives holding an arrow key
 down.
 -}
-keepInView : Model -> File -> Int -> Int -> Int
-keepInView model file cursor top =
+keepInView : Model -> Source -> Int -> Int -> Int
+keepInView model source cursor top =
     if cursor < top then
         rowStart cursor
 
     else if cursor >= top + page model then
-        min (maxTop model file) (rowStart cursor - page model + bytesPerRow)
+        min (maxTop model source) (rowStart cursor - page model + bytesPerRow)
 
     else
         top
@@ -1111,17 +1317,17 @@ keepInView model file cursor top =
 
 scrollTo : Int -> Model -> Step
 scrollTo offset model =
-    when model.file is
+    when model.open is
         Nothing ->
             still model
 
-        Just file ->
+        Just source ->
             let
                 top =
-                    clamp 0 (maxTop model file) (rowStart offset)
+                    clamp 0 (maxTop model source) (rowStart offset)
 
                 cursor =
-                    clamp top (min (max 0 (file.size - 1)) (top + page model - 1)) model.cursor
+                    clamp top (min (max 0 (source.size - 1)) (top + page model - 1)) model.cursor
             in
             load { model | top = top, cursor = cursor }
 
@@ -1131,19 +1337,19 @@ lands a third of the way down rather than at the top.
 -}
 goTo : Int -> Model -> Step
 goTo offset model =
-    when model.file is
+    when model.open is
         Nothing ->
             still model
 
-        Just file ->
+        Just source ->
             let
                 cursor =
-                    clamp 0 (max 0 (file.size - 1)) offset
+                    clamp 0 (max 0 (source.size - 1)) offset
             in
             load
                 { model
                     | cursor = cursor
-                    , top = clamp 0 (maxTop model file) (rowStart cursor - 5 * bytesPerRow)
+                    , top = clamp 0 (maxTop model source) (rowStart cursor - 5 * bytesPerRow)
                 }
 
 
@@ -1155,9 +1361,9 @@ rowStart offset =
 {-| The last `top` there is: the one that puts the final row on the bottom line
 of the window.
 -}
-maxTop : Model -> File -> Int
-maxTop model file =
-    max 0 (rowStart (max 0 (file.size - 1)) - page model + bytesPerRow)
+maxTop : Model -> Source -> Int
+maxTop model source =
+    max 0 (rowStart (max 0 (source.size - 1)) - page model + bytesPerRow)
 
 
 {-| `//` truncates its *result* to 32 bits, which is fine for a column and
@@ -1177,14 +1383,14 @@ not. Everything that moves the view ends here.
 -}
 load : Model -> Step
 load model =
-    when model.file is
+    when model.open is
         Nothing ->
             still model
 
-        Just file ->
+        Just source ->
             let
                 needed =
-                    { start = model.top, end = min file.size (model.top + page model) }
+                    { start = model.top, end = min source.size (model.top + page model) }
             in
             if covers model.chunk needed then
                 still model
@@ -1192,7 +1398,7 @@ load model =
             else
                 let
                     range =
-                        chunkAround file model.top
+                        chunkAround source model.top
                 in
                 if model.wanted == Just range then
                     -- Already asked. Asking again would be one read of the
@@ -1200,9 +1406,18 @@ load model =
                     still model
 
                 else
-                    { model = { model | wanted = Just range }
-                    , command = read model.permission file.path range
-                    }
+                    when source.from is
+                        -- Unreachable rather than defensive: a pasted buffer
+                        -- *is* its chunk, so `covers` above answered yes and
+                        -- this branch is not on the way there. There is
+                        -- nowhere to read from either.
+                        Pasted ->
+                            still model
+
+                        OnDisk path ->
+                            { model = { model | wanted = Just range }
+                            , command = read model.permission path range
+                            }
 
 
 covers : Chunk -> Range -> Bool
@@ -1214,13 +1429,13 @@ covers chunk range =
 {-| A chunk with the view in the middle of it, so that scrolling either way
 from where the user is has the same room before the next read.
 -}
-chunkAround : File -> Int -> Range
-chunkAround file top =
+chunkAround : Source -> Int -> Range
+chunkAround source top =
     let
         start =
-            clamp 0 (max 0 (file.size - chunkSize)) (rowStart (top - divideBy 2 chunkSize))
+            clamp 0 (max 0 (source.size - chunkSize)) (rowStart (top - divideBy 2 chunkSize))
     in
-    { start = start, end = min file.size (start + chunkSize) }
+    { start = start, end = min source.size (start + chunkSize) }
 
 
 {-| The one place a half open range becomes Node's inclusive one.
@@ -1303,10 +1518,16 @@ startingPoint model =
             Task.succeed browsing.path
 
         Nothing ->
-            when model.file is
-                Just file ->
+            when model.open is
+                Just source ->
                     Task.succeed
-                        (Maybe.withDefault (Path.fromPosixString ".") (Path.parentPath file.path))
+                        (when source.from is
+                            OnDisk path ->
+                                Maybe.withDefault (Path.fromPosixString ".") (Path.parentPath path)
+
+                            Pasted ->
+                                Path.fromPosixString "."
+                        )
 
                 Nothing ->
                     FileSystem.currentWorkingDirectory model.permission
@@ -1607,17 +1828,21 @@ menu =
         { title = "~B~ytes"
         , key = ""
         , items =
+            -- Three ways to get something to look at, then the ways of
+            -- moving around it, then the ways of taking part of it with you.
             [ Item { title = "~O~pen file...", cmd = "hex.open", key = "", shortcut = "" }
+            , Item { title = "~P~aste as text", cmd = "hex.pasteText", key = "", shortcut = "p" }
+            , Item { title = "Paste he~x~ bytes", cmd = "hex.pasteHex", key = "", shortcut = "P" }
+            , Separator
             , Item { title = "~G~o to offset...", cmd = "hex.goto", key = "", shortcut = "" }
-            , Separator
-            -- What is marked, or the highlight under the cursor. Both entries
-            -- name `y` as far as the eye is concerned, and neither binds it:
-            -- the canvas has focus and the key goes there.
-            , Item { title = "Cop~y~ bytes", cmd = "hex.copyHex", key = "", shortcut = "y" }
-            , Item { title = "Copy as a ~d~ump", cmd = "hex.copyDump", key = "", shortcut = "" }
-            , Separator
             , Item { title = "~T~op of file", cmd = "hex.top", key = "", shortcut = "Ctrl-Home" }
             , Item { title = "~E~nd of file", cmd = "hex.end", key = "", shortcut = "Ctrl-End" }
+            , Separator
+            -- What is marked, or the highlight under the cursor. Both entries
+            -- name their key as far as the eye is concerned, and neither binds
+            -- one: the canvas has focus and the key goes there.
+            , Item { title = "Cop~y~ bytes", cmd = "hex.copyHex", key = "", shortcut = "y" }
+            , Item { title = "Copy as a ~d~ump", cmd = "hex.copyDump", key = "", shortcut = "" }
             , Separator
             , SubMenu
                 { title = "~H~ighlight"
@@ -1732,9 +1957,9 @@ view inks model =
                     , value = divideBy bytesPerRow model.top
                     , min = 0
                     , max =
-                        when model.file is
-                            Just file ->
-                                divideBy bytesPerRow (maxTop model file)
+                        when model.open is
+                            Just source ->
+                                divideBy bytesPerRow (maxTop model source)
 
                             Nothing ->
                                 0
@@ -1768,15 +1993,15 @@ view inks model =
 
 title : Model -> String
 title model =
-    when model.file is
+    when model.open is
         Nothing ->
             "Hex Dump"
 
-        Just file ->
+        Just source ->
             "Hex Dump - "
-                ++ Path.filenameWithExtension file.path
+                ++ source.name
                 ++ " ("
-                ++ String.fromInt file.size
+                ++ String.fromInt source.size
                 ++ " bytes)"
 
 
@@ -1802,43 +2027,43 @@ and there is nothing past the last row worth reading anyway.
 -}
 dump : Inks -> Model -> Array (Array Span)
 dump inks model =
-    when model.file is
+    when model.open is
         Nothing ->
             Array.map
                 (\index ->
                     if index == 2 then
-                        [ Tui.plain (String.repeat 20 " " ++ "Nothing open.  Bytes ▸ Open file...") ]
+                        [ Tui.plain (String.repeat 14 " " ++ "Nothing open.  Bytes ▸ Open file, or p to paste.") ]
 
                     else
                         [ Tui.plain "" ]
                 )
                 (Array.range 0 (model.rows - 1))
 
-        Just file ->
-            Array.map (row inks model file) (Array.range 0 (model.rows - 1))
+        Just source ->
+            Array.map (row inks model source) (Array.range 0 (model.rows - 1))
 
 
-row : Inks -> Model -> File -> Int -> Array Span
-row inks model file index =
+row : Inks -> Model -> Source -> Int -> Array Span
+row inks model source index =
     let
         base =
             model.top + index * bytesPerRow
     in
-    if base >= file.size then
+    if base >= source.size then
         [ Tui.plain "" ]
 
     else
         [ Tui.ink inks.ruler (offsetText base), Tui.plain "  " ]
-            ++ hexCells inks model file base
+            ++ hexCells inks model source base
             ++ [ Tui.plain "  " ]
-            ++ asciiCells inks model file base
+            ++ asciiCells inks model source base
 
 
 {-| Eight bytes, a wider gap, eight bytes. The gap is what makes a row
 countable without counting: everything past it is at offset eight or more.
 -}
-hexCells : Inks -> Model -> File -> Int -> Array Span
-hexCells inks model file base =
+hexCells : Inks -> Model -> Source -> Int -> Array Span
+hexCells inks model source base =
     Array.mapAndFlatten
         (\column ->
             (if column == 0 then
@@ -1850,20 +2075,20 @@ hexCells inks model file base =
              else
                 [ Tui.plain " " ]
             )
-                ++ [ paint inks model (base + column) (pairText model file (base + column)) ]
+                ++ [ paint inks model (base + column) (pairText model source (base + column)) ]
         )
         (Array.range 0 (bytesPerRow - 1))
 
 
-asciiCells : Inks -> Model -> File -> Int -> Array Span
-asciiCells inks model file base =
+asciiCells : Inks -> Model -> Source -> Int -> Array Span
+asciiCells inks model source base =
     Array.map
         (\column ->
             let
                 offset =
                     base + column
             in
-            if offset >= file.size then
+            if offset >= source.size then
                 Tui.plain " "
 
             else
@@ -1895,9 +2120,9 @@ file, nothing at all; inside it but not yet read, two dots. The second lasts
 for one frame, and it is the only place in the program that admits the file is
 not in memory.
 -}
-pairText : Model -> File -> Int -> String
-pairText model file offset =
-    if offset >= file.size then
+pairText : Model -> Source -> Int -> String
+pairText model source offset =
+    if offset >= source.size then
         "  "
 
     else
@@ -1972,7 +2197,7 @@ hexColumn column =
 
 cursorAt : Model -> Maybe { x : Int, y : Int }
 cursorAt model =
-    when model.file is
+    when model.open is
         Nothing ->
             Nothing
 
@@ -1993,7 +2218,7 @@ cursorAt model =
 
 whereItIs : Model -> String
 whereItIs model =
-    when model.file is
+    when model.open is
         Nothing ->
             ""
 
@@ -2039,7 +2264,7 @@ status inks model =
                         [ Tui.plain "" ]
 
             Nothing ->
-                when model.file is
+                when model.open is
                     Nothing ->
                         [ Tui.plain "" ]
 

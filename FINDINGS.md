@@ -3495,3 +3495,75 @@ knowing where the second box lands, and checks the hot keys while it is there.
 The general form: **in a pty test, name the thing rather than its position.**
 The same rule already applies to rows and columns, where it is obvious; a menu
 is the case where the position looks stable and is not.
+
+## The second source, and how little of the program noticed
+
+predc's hex viewer takes a paste now -- `p` for the clipboard's own bytes, `P`
+for the bytes its hex digits spell -- which was the last thing on the README's
+v1 list for that tool and the one that looked like a rewrite. `Model.file` was
+`Maybe { path, size }`, `load` read a chunk around the cursor through
+`readFileStream`, and eleven functions took a `File` to ask it how big it was.
+
+It was not a rewrite, and the reason is worth keeping: **a pasted buffer is a
+source whose every byte is already in the chunk.** The model was holding a
+size and one 16 KB window of bytes, and a paste is a size and a window that
+happens to be all of it -- so `covers` answers yes to every range, `load` never
+reaches a read, and the dump, the scrolling, the marking, the highlighting and
+both kinds of copy did not have to learn anything. The type became:
+
+```gren
+type alias Source =
+    { name : String, size : Int, from : Origin }
+
+type Origin
+    = OnDisk Path
+    | Pasted
+```
+
+and the union has exactly one job -- answering "where do more bytes come
+from". It is a union rather than a `Maybe Path` on purpose: with a `Maybe`, the
+absent case reads as "then do not read anything", which is also what a bug
+looks like from the inside. With a union, the two places that need a path say
+which source they are dealing with and the compiler asks the other one what it
+means. Both turned out to be interesting -- the read that cannot happen, and
+the file dialog's starting directory, which for a paste is the working
+directory because there is nothing better to say.
+
+The renaming was most of the work: eighteen `model.file`, sixteen `file.size`,
+seven signatures. All of it mechanical, and all of it caught by the compiler
+in three builds.
+
+### Two commands, because sniffing is being silently wrong
+
+`p` and `P` differ only in how the same clipboard is read, and the temptation
+to have one command that works it out is strong and wrong. `beef`, `cafe`,
+`decade` and `0123456789` are all words somebody might paste and all valid
+hex. A program that guesses is a program that is sometimes silently wrong
+about what it is showing -- and looking at what is really there is the entire
+reason to open a hex viewer.
+
+The same argument decides what `P` does with input that is *nearly* hex. An
+`xxd` dump is hex digits, whitespace, an offset column that is also hex digits,
+and a printable column that is sometimes hex digits. Keeping the hex and
+dropping the rest would read all three as data and produce a buffer that is
+wrong in a way nobody can see. So it refuses, and names the character that
+stopped it:
+
+    That is not hex: 'H' is not a hex digit. Offsets and a printable column
+    have to come off first.
+
+Which leaves a real gap -- a dump cannot be pasted back in -- and it is a
+better gap than a silent misreading. The separators it *does* take are the ones
+that carry no data: whitespace, `,`, `;`, `:`, `-`, and `0x` in front of each
+byte.
+
+### The paste is where the clipboard's shape finally shows
+
+`readClipboard` is a request answered by an event, and this is the first
+program to feel it. The tool keeps `awaiting : Maybe Reading` -- both to know
+that *it* asked (every open tool is handed every event) and to remember what
+the answer is for, which nothing in the event says. And because the answer may
+take a moment or never arrive, asking puts `Asking for the clipboard...` on the
+message line: the one state this program can be in that it cannot draw. The
+answer clears it, and a terminal that never replies leaves the right thing on
+the screen.
