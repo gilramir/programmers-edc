@@ -628,6 +628,7 @@ dirWindow model =
     , title = model.status
     , rect = { x1 = 1, y1 = 1, x2 = 78, y2 = 21 }
     , resize = Tui.resizable
+    , palette = Tui.BlueWindow
     , views =
         [ Tui.ListBox
             { id = "tree"

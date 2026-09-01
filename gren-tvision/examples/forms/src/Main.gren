@@ -478,6 +478,7 @@ listWindow model =
     -- Either one resized would overlap the other, and neither has a `Grows`
     -- to make the space useful, so neither is resizable.
     , resize = Tui.fixedSize
+    , palette = Tui.BlueWindow
     , views =
         [ ListBox
             { id = "keys"
@@ -528,6 +529,7 @@ detailWindow model =
     , title = "Record"
     , rect = { x1 = 46, y1 = 0, x2 = 79, y2 = 17 }
     , resize = Tui.fixedSize
+    , palette = Tui.BlueWindow
     , views =
         [ field 1 "Name" record.name
         , field 3 "Company" record.company

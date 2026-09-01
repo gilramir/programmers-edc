@@ -81,6 +81,35 @@ def main():
     check("a canvas that names no colour follows the window",
           plain not in seen and plain != BYPASS, str(plain))
 
+    # Alt-W cycles that window through Turbo Vision's three window colour
+    # sets. Two things have to be true at once and only one of them is
+    # obvious: the *lines* must not change, because they say nothing about
+    # colour, and their colour must, because the window's did. The window
+    # above must not move at all -- every line in it names both halves, which
+    # is the trade the example is about.
+    def plain_at(row):
+        d = app.display()
+        return (d.fg_at(FIRST[0], row), d.bg_at(FIRST[0], row))
+
+    above = (display.fg_at(*FIRST), display.bg_at(*FIRST))
+    tones = [plain_at(15)]
+    for _ in range(3):
+        app.send(b"\x1bw", settle=0.9)
+        tones.append(plain_at(15))
+
+    check("Alt-W recolours the window that says nothing",
+          len(set(tones[:3])) == 3, str(tones[:3]))
+    check("and three of them brings the first one back",
+          tones[3] == tones[0], f"{tones[3]} != {tones[0]}")
+    check("the window whose spans name their own colours did not move",
+          (app.display().fg_at(*FIRST), app.display().bg_at(*FIRST)) == above,
+          str(above))
+    check("and the lines themselves are untouched",
+          " A span that names no colour follows" in app.render(), app.render())
+    check("the title says which set it is in",
+          "Saying nothing (blue)" in app.render(),
+          [r for r in app.render().split("\n") if "Saying nothing" in r])
+
     # The original's About box, `\003` centring markers and all.
     app.send(b"\x1ba", settle=1.2)
     about = app.render()

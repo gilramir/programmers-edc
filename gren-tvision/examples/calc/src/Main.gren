@@ -397,6 +397,7 @@ calculatorWindow model =
     -- The display comes first so that it, and not a button, is what the
     -- window focuses when it opens.
     , resize = Tui.resizable
+    , palette = Tui.BlueWindow
     , views =
         Array.pushFirst
             (Canvas

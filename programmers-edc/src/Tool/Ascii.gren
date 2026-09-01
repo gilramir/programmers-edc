@@ -281,6 +281,7 @@ view model =
     -- with space around it, so the frame is told not to offer one: no resize
     -- handle, no zoom box.
     , resize = Tui.fixedSize
+    , palette = Tui.BlueWindow
     , views =
         [ Canvas
             { id = canvasId

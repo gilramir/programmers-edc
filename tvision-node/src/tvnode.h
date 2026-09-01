@@ -691,6 +691,23 @@ public:
             }
     }
 
+    // Which of Turbo Vision's three colour sets this window is drawn in.
+    // Unlike sizeLimits, this is read afresh every time a view asks for a
+    // colour -- getPalette switches on it -- so it can be changed in place.
+    //
+    // redraw() and not drawView(). A group that has a buffer draws by blitting
+    // it (TGroup::draw, tgroup.cpp:128), so drawView() on a window whose
+    // colours just changed paints the cached ones straight back and nothing
+    // appears to happen. redraw() is drawSubViews, which asks every child for
+    // its colour again -- which is the only thing that reaches a palette.
+    void setWindowPalette(short which)
+    {
+        if (palette == which)
+            return;
+        palette = which;
+        redraw();
+    }
+
     // Which of the two dimensions the user is allowed to change.
     //
     // Turbo Vision asks a view for its own limits rather than keeping a rule
@@ -734,18 +751,26 @@ public:
     // wpBlueWindow TWindow's own constructor had just set.
     //
     // That last one is why every window in every program built on this was
-    // drawn in the *dialog* palette: white on light grey, the colours of the
-    // Find box in tvedit's screenshot rather than of the editor behind it. A
-    // window on the desktop should zoom, resize, grow with the terminal, take
-    // part in Tile and Cascade, and be blue, so a non-modal one puts all five
-    // back. Modal dialogs never come through here and stay grey, which is the
-    // distinction Turbo Vision has always drawn between the two.
+    // white on light grey: the colours of the Find box in tvedit's screenshot
+    // rather than of the editor behind it. A window on the desktop should
+    // zoom, resize, grow with the terminal, take part in Tile and Cascade, and
+    // be blue, so a non-modal one puts all five back. Modal dialogs never come
+    // through here and stay grey, which is the distinction Turbo Vision has
+    // always drawn between the two.
+    //
+    // dpBlueDialog and not wpBlueWindow, though the two are both 0 and either
+    // would compile to the same thing. getPalette() here is TDialog's, which
+    // switches on the dp* names, and it has to be: a JsWindow can hold buttons,
+    // input lines and list boxes, and those ask for palette entries past the
+    // eight a cpBlueWindow has. The window sets are the right *idea* and the
+    // wrong length, and Borland made the first entries of cpBlueDialog agree
+    // with cpBlueWindow precisely so that a dialog could look like a window.
     void beWindow()
     {
         flags = wfMove | wfGrow | wfClose | wfZoom;
         growMode = gfGrowAll | gfGrowRel;
         options |= ofTileable;
-        palette = wpBlueWindow;
+        palette = dpBlueDialog;
         zoomRect = getBounds();
         builtSize = size;
         lastReported = getBounds();

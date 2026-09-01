@@ -173,6 +173,7 @@ mouseWindow model =
     , title = "Mouse options"
     , rect = { x1 = 20, y1 = 4, x2 = 54, y2 = 16 }
     , resize = Tui.resizable
+    , palette = Tui.BlueWindow
     , views =
         -- The tester says takesFocus = False, and it has to: a focused canvas
         -- eats every key it is given, Tab included, so a canvas that is only

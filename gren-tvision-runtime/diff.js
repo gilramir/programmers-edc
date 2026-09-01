@@ -38,6 +38,9 @@ function skeleton(view) {
 // resolves a child view's growMode. A view's own rect is still structural:
 // nothing can move one of those but a rebuild.
 //
+// `palette` is patched too, for the same reason: TWindow::getPalette reads the
+// member on every draw, so recolouring a window is a redraw and not a rebuild.
+//
 // `resize` is a third thing again: the one window-level field with no call that
 // changes it in place. It is read once, by tv.window(), because it becomes the
 // window's own sizeLimits and those are answered against the size it was built
@@ -192,6 +195,9 @@ function createDiffer(tv, onClosed = () => {}) {
             } else {
               const before = current.get(window.id);
               if (before.title !== window.title) tv.setTitle(window.id, window.title);
+              if (before.palette !== window.palette) {
+                tv.setWindowPalette(window.id, window.palette);
+              }
               // Before the contents, so that a view which grew with the window
               // is written at the size it has now.
               if (JSON.stringify(before.rect) !== JSON.stringify(window.rect)) {

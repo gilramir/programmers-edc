@@ -529,6 +529,7 @@ editorWindow model =
         , y2 = model.desk.rows - 1
         }
     , resize = Tui.resizable
+    , palette = Tui.BlueWindow
     , views =
         [ Grows
             { grow = Tui.stretch

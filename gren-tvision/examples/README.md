@@ -937,6 +937,27 @@ window's text already is; both are repainted, and both drivers caught it
 because both assert that some cell differs from the body colour. The full
 account, and the colour vocabulary that came out of it, is in FINDINGS.
 
+### What the palette example changed, the second time
+
+`examples/palette` was written as the one port whose whole subject disappears
+in translation: three layers of indirection replaced by a span that names its
+colour. `WindowPalette` is the piece that came back, and this is where it is
+demonstrated, because the example is already an argument about exactly this.
+
+`Alt-W` cycles the lower window through Turbo Vision's three colour sets. The
+upper window does not move, because every line in it names both halves of its
+colour; the lower one follows, because its lines name nothing. That is the
+whole trade on one screen and a single keystroke -- say the colour and it is
+yours to keep, say nothing and it is the window's to change.
+
+Two things it taught. The three sets a window can have are the *dialog*
+palettes and not the window ones -- a window here can hold a button, and a
+button asks for entries past the eight a window palette has. And a `TGroup`
+with a buffer draws by blitting it, so recolouring a window and calling
+`drawView` paints the cached colours back and looks like nothing happened;
+`redraw` is what asks the children for their colours again. Both are in
+FINDINGS.
+
 ### What is left, now that the list is empty
 
 **One known bug, found from outside.** `programmers-edc`'s hex dump viewer --

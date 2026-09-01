@@ -17,6 +17,7 @@ module Tui exposing
     , Value(..)
     , View(..)
     , Window
+    , WindowPalette(..)
     , defineProgram
     , dialog
     , fileDialog
@@ -185,6 +186,7 @@ its own is a pull-down, and one without is a command sitting on the bar.
 @docs Program, ProgramConfiguration, defineProgram
 @docs Ui, Window, View, Rect
 @docs Resize, resizable, resizeHeight, resizeWidth, fixedSize
+@docs WindowPalette
 @docs Grow, fixed, stretch, stretchWidth, stretchHeight, pinRight, pinBottom
 @docs Span, Hue, line, plain, ink, on
 @docs MenuItem, StatusItem, PopupItem, popupMenu
@@ -259,10 +261,13 @@ one says which of a window's dimensions the user may change, and the other is
 how the model finds out that they did. Until then a window's size was a fact
 only Turbo Vision had, and a view that filled one could grow with it -- see
 [`Grows`](#Grow) -- but the model could not know by how much.
+Version 16 added [`WindowPalette`](#WindowPalette), which is the one piece of
+Turbo Vision's palette machinery that survives being asked to name a colour
+instead of an index into a table.
 -}
 protocolVersion : Int
 protocolVersion =
-    15
+    16
 
 
 -- GEOMETRY
@@ -424,8 +429,48 @@ type alias Window =
     , title : String
     , rect : Rect
     , resize : Resize
+    , palette : WindowPalette
     , views : Array View
     }
+
+
+{-| Which of Turbo Vision's three window colour sets a window is drawn in.
+
+`BlueWindow` is what a window on the desktop has been since 1990 and what
+almost every window here wants: white on blue for the frame, yellow on blue for
+the text inside it. The other two exist because Turbo Vision has always had
+them, and they are how a program says *this window is a different kind of
+thing* without inventing a colour of its own -- Borland's own editor used blue
+for source and cyan for a watch window.
+
+`GrayWindow` is the colour a modal [`dialog`](#dialog) is drawn in, and a
+window that wants to look like one is the only reason to reach for it. It is
+also, for one release, what every window in this package was drawn in by
+mistake -- see `beWindow` in `tvnode.h`, which is where the fifth thing it
+should have been putting back now is.
+
+These are Turbo Vision's three *dialog* palettes rather than its three window
+ones, and the difference matters for exactly one reason: a window here can hold
+buttons, input lines and list boxes, which ask for palette entries past the
+eight a window palette has. Borland made the first entries of the blue dialog
+agree with the blue window precisely so that the two could look alike, so this
+is the window colours with room for a form in them.
+
+Patched in place, like `title` and `rect` -- but the redraw it needs is
+`TGroup::redraw` and not `drawView`. A group that has a buffer draws by
+blitting it, so asking a recoloured window to draw itself paints the cached
+colours straight back and nothing appears to happen. The caret, the z-order and
+every scroll position survive either way.
+
+Note what this is **not**. It does not reach a [`Span`](#Span) that names a
+[`Hue`](#Hue): those are absolute colours with nothing in between, deliberately
+-- `examples/palette` makes the case. Recolouring a window and keeping its
+canvases legible is two jobs, and this is only the first.
+-}
+type WindowPalette
+    = BlueWindow
+    | CyanWindow
+    | GrayWindow
 
 
 {-| Which of a window's two dimensions the user is allowed to change.
@@ -1825,6 +1870,19 @@ encodeWindow window =
                     [ { key = "width", value = Encode.bool window.resize.width }
                     , { key = "height", value = Encode.bool window.resize.height }
                     ]
+          }
+        , { key = "palette"
+          , value =
+                Encode.string <|
+                    when window.palette is
+                        BlueWindow ->
+                            "blue"
+
+                        CyanWindow ->
+                            "cyan"
+
+                        GrayWindow ->
+                            "gray"
           }
         , { key = "items", value = Encode.array encodeView window.views }
         ]

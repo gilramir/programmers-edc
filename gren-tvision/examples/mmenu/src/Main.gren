@@ -167,6 +167,7 @@ view model =
           , title = "Multiple menu bars"
           , rect = { x1 = 8, y1 = 4, x2 = 62, y2 = 13 }
           , resize = Tui.resizable
+          , palette = Tui.BlueWindow
           , views =
                 [ StaticText
                     { id = "which"

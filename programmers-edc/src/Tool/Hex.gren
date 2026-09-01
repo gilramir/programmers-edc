@@ -1133,6 +1133,7 @@ view model =
     -- beside them, because sixteen bytes to a row is the format and not a
     -- layout choice -- so the frame does not offer it.
     , resize = Tui.resizeHeight
+    , palette = Tui.BlueWindow
     , views =
         [ Canvas
             { id = "hex.header"

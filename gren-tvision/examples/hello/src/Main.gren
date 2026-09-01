@@ -115,6 +115,7 @@ view model =
               , title = "You said"
               , rect = { x1 = 22, y1 = 8, x2 = 58, y2 = 13 }
               , resize = Tui.resizable
+              , palette = Tui.BlueWindow
               , views =
                     [ StaticText
                         { id = "answerText"

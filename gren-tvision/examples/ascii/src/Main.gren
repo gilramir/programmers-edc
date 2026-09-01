@@ -275,6 +275,7 @@ chartWindow model =
     -- takes the resize handle and the zoom box off the frame, so the window
     -- stops offering something that cannot happen.
     , resize = Tui.fixedSize
+    , palette = Tui.BlueWindow
     , views =
         [ Canvas
             { id = "chart"

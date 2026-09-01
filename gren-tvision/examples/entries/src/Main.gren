@@ -345,6 +345,7 @@ clockWindow model =
         , y2 = 9
         }
     , resize = Tui.resizable
+    , palette = Tui.BlueWindow
     , views =
         [ StaticText
             { id = "clockTime"
@@ -386,6 +387,7 @@ listWindow model =
     -- because the terminal did or because the user dragged its corner -- and
     -- the model is not told about the second one at all.
     , resize = Tui.resizable
+    , palette = Tui.BlueWindow
     , views =
         -- A control in an ordinary window, which is the thing this API could
         -- not see until protocol 8. Turbo Vision reports neither a keystroke

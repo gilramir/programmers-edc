@@ -867,6 +867,7 @@ view model =
     -- text are what this window holds, all of them a fixed size, and a bigger
     -- window would be the same keypad with a gap beside it.
     , resize = Tui.fixedSize
+    , palette = Tui.BlueWindow
     , views =
         [ Canvas
             { id = canvasId

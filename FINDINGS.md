@@ -2885,6 +2885,47 @@ entry is drawn in rather than on any text, because greying is the entire
 visible difference -- the same reason the chart's own colour checks read
 attributes.
 
+## A window's colour set, and the buffer that hid the change
+
+`WindowPalette` on a [`Window`](Tui#Window) is the small half of the colour
+work and the one piece of Turbo Vision's palette machinery that survives being
+asked to name a colour instead of an index into a table -- because there are
+three of them and they have names, rather than a hundred and thirty-five of
+them and byte offsets.
+
+Two things were not obvious.
+
+**They are the *dialog* palettes, not the window ones.** `JsWindow` derives
+from `TDialog`, so `getPalette()` is `TDialog::getPalette`, which switches on
+`dpBlueDialog | dpCyanDialog | dpGrayDialog` and never looks at
+`wpBlueWindow | wpCyanWindow | wpGrayWindow`. The two sets are 0, 1, 2 either
+way, so the first version compiled and worked while naming the wrong constants.
+
+It also has to be that way. A window here can hold buttons, input lines and
+list boxes, and those ask for palette entries past the eight that a
+`cpBlueWindow` has; the dialog palettes are thirty-two long. Borland made the
+first entries of `cpBlueDialog` agree with `cpBlueWindow` exactly so that a
+dialog could be made to look like a window, which is what makes this work at
+all -- and which means the fix in the previous section was, strictly, selecting
+the blue *dialog* palette. The colours are the same; the length is not, and the
+length is the reason.
+
+**`drawView()` is not enough, and fails silently.** Setting `palette` and
+asking the window to draw itself changed nothing on screen -- while the same
+render's `setTitle` visibly worked, which is what made it confusing. A
+`TGroup` that has a buffer draws by blitting it (`tgroup.cpp:128`), so
+`drawView()` on a recoloured window paints the cached colours straight back.
+`redraw()` is `drawSubViews`, which asks every child for its colour again, and
+that is the only route to a palette. The check that found it asserts the body
+colour of a canvas that names no colour -- three sets, three different
+attributes, and the third `Alt-W` bringing the first back.
+
+`examples/palette` is where this is demonstrated, and it is the right place
+rather than a convenient one: that example exists to show the trade between
+naming a colour and inheriting one, and `Alt-W` now shows both halves at once.
+The window whose spans name both halves of their colour does not move; the
+window whose spans name nothing follows. Same screen, same keystroke.
+
 ## The window palette, which was grey because nobody set it
 
 Reviewing predc's colours turned up a bug that had been on screen since the

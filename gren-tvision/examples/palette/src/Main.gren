@@ -64,6 +64,11 @@ tui =
 type alias Model =
     { showing : Bool
     , showingPlain : Bool
+    -- Which of Turbo Vision's three window colour sets the second window is
+    -- drawn in. The one piece of the palette machinery that survives into an
+    -- API where a colour is named rather than looked up -- see the note on
+    -- `plainWindow` -- so this example is where it belongs.
+    , tone : Tui.WindowPalette
     }
 
 
@@ -74,7 +79,9 @@ type Msg
 init : Node.Environment -> Init.Task { model : Model, command : Cmd Msg }
 init _ =
     Node.startProgram
-        { model = { showing = True, showingPlain = True }, command = Cmd.none }
+        { model = { showing = True, showingPlain = True, tone = Tui.BlueWindow }
+        , command = Cmd.none
+        }
 
 
 -- THE COLOURS
@@ -111,6 +118,9 @@ update msg model =
         FromTui (Command "palette") ->
             { model = { model | showing = True, showingPlain = True }, command = Cmd.none }
 
+        FromTui (Command "tone") ->
+            { model = { model | tone = nextTone model.tone }, command = Cmd.none }
+
         FromTui (WindowClosed "paletteWin") ->
             { model = { model | showing = False }, command = Cmd.none }
 
@@ -119,6 +129,32 @@ update msg model =
 
         FromTui _ ->
             { model = model, command = Cmd.none }
+
+
+nextTone : Tui.WindowPalette -> Tui.WindowPalette
+nextTone tone =
+    when tone is
+        Tui.BlueWindow ->
+            Tui.CyanWindow
+
+        Tui.CyanWindow ->
+            Tui.GrayWindow
+
+        Tui.GrayWindow ->
+            Tui.BlueWindow
+
+
+toneName : Tui.WindowPalette -> String
+toneName tone =
+    when tone is
+        Tui.BlueWindow ->
+            "blue"
+
+        Tui.CyanWindow ->
+            "cyan"
+
+        Tui.GrayWindow ->
+            "gray"
 
 
 {-| The original's About box, which is a `TStaticText` full of `\003` centring
@@ -159,6 +195,7 @@ view model =
             , items =
                 [ Item { title = "~A~bout...", cmd = "about", key = "Alt-A", shortcut = "Alt-A" }
                 , Item { title = "~P~alette", cmd = "palette", key = "Alt-P", shortcut = "Alt-P" }
+                , Item { title = "~W~indow colour", cmd = "tone", key = "Alt-W", shortcut = "Alt-W" }
                 , Tui.Separator
                 , Item { title = "E~x~it", cmd = "quit", key = "Alt-X", shortcut = "Alt-X" }
                 ]
@@ -167,6 +204,7 @@ view model =
     , statusLine =
         [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
         , { text = "~Alt-P~ Palette", key = "Alt-P", cmd = "palette" }
+        , { text = "~Alt-W~ Window colour", key = "Alt-W", cmd = "tone" }
         , { text = "", key = "F10", cmd = "menu" }
         ]
     , windows =
@@ -177,7 +215,7 @@ view model =
             []
         )
             ++ (if model.showingPlain then
-                    [ plainWindow ]
+                    [ plainWindow model ]
 
                 else
                     []
@@ -194,6 +232,7 @@ paletteWindow =
     , title = "Colours, said out loud"
     , rect = { x1 = 4, y1 = 1, x2 = 46, y2 = 12 }
     , resize = Tui.resizable
+    , palette = Tui.BlueWindow
     , views =
         [ Canvas
             { id = "colours"
@@ -231,13 +270,26 @@ bypass =
 {-| ...and this is what a canvas looks like when it says nothing about colour:
 it takes the window's, which is what you want everywhere the colour is not the
 point.
+
+`Alt-W` is the proof, and the reason this example is where
+[`WindowPalette`](Tui#WindowPalette) is demonstrated. Turbo Vision's three
+window colour sets are the one part of the palette indirection that survives
+being asked to name a colour rather than an index -- because there are three of
+them and they have names, rather than a hundred and thirty-five of them and
+byte offsets. Cycling it repaints every line above **without the lines
+changing**: they say nothing about colour, so they follow.
+
+The window above it does not follow, because every line in it names both halves
+of its colour. That is the whole trade, on one screen: say the colour and it is
+yours to keep; say nothing and it is the window's to change.
 -}
-plainWindow : Tui.Window
-plainWindow =
+plainWindow : Model -> Tui.Window
+plainWindow model =
     { id = "plainWin"
-    , title = "Saying nothing"
+    , title = "Saying nothing (" ++ toneName model.tone ++ ")"
     , rect = { x1 = 4, y1 = 13, x2 = 46, y2 = 18 }
     , resize = Tui.resizable
+    , palette = model.tone
     , views =
         [ Canvas
             { id = "plain"

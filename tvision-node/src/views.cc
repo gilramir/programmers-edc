@@ -1083,6 +1083,27 @@ static void applyResize(const Napi::Object &spec, JsWindow *win)
     win->setResize(getBool(r, "width", true), getBool(r, "height", true));
 }
 
+// A window's `palette` field: "blue", "cyan" or "gray". Absent means blue,
+// which is what beWindow() has already set and what a window on the desktop
+// has been since Turbo Vision.
+//
+// The dp* names rather than the wp* ones, for the reason beWindow() gives:
+// getPalette() here is TDialog's. The two sets have the same three values, and
+// the dialog ones are the thirty-two-entry palettes a window with a button in
+// it actually needs.
+static void applyWindowPalette(const Napi::Object &spec, JsWindow *win)
+{
+    std::string which = getString(spec, "palette");
+    if (which.empty())
+        return;
+    if (which == "blue")
+        win->setWindowPalette(dpBlueDialog);
+    else if (which == "cyan")
+        win->setWindowPalette(dpCyanDialog);
+    else if (which == "gray")
+        win->setWindowPalette(dpGrayDialog);
+}
+
 void applyInitialFocus(const Napi::Object &spec, TView *firstSelectable)
 {
     std::string wanted = getString(spec, "focus");
@@ -1167,6 +1188,7 @@ static Napi::Value Window(const Napi::CallbackInfo &info)
                                  getString(spec, "title").c_str(), id);
     win->beWindow();
     applyResize(spec, win);
+    applyWindowPalette(spec, win);
     g_views.addWindow(id, win);
 
     TView *firstSelectable = nullptr;
@@ -1461,6 +1483,26 @@ static Napi::Value SetBounds(const Napi::CallbackInfo &info)
     return Napi::Boolean::New(env, true);
 }
 
+// tv.setWindowPalette(id, name) -- which of the three window colour sets a
+// window is drawn in, in place.
+//
+// Patched rather than structural for the same reason as the title: rebuilding
+// a window to recolour it would lose the caret, the z-order and every scroll
+// position in it, and TWindow::getPalette reads the member on every draw, so
+// there is nothing to rebuild for.
+static Napi::Value SetWindowPalette(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    JsWindow *win = g_views.findWindow(info[0].ToString().Utf8Value());
+    if (win == nullptr)
+        return Napi::Boolean::New(env, false);
+
+    Napi::Object spec = Napi::Object::New(env);
+    spec.Set("palette", info[1]);
+    applyWindowPalette(spec, win);
+    return Napi::Boolean::New(env, true);
+}
+
 // tv.close(id) -- close a window, as its close box would.
 static Napi::Value Close(const Napi::CallbackInfo &info)
 {
@@ -1519,6 +1561,7 @@ void registerViewApi(Napi::Env env, Napi::Object exports)
 {
     exports.Set("setLines", Napi::Function::New(env, SetLines));
     exports.Set("setTitle", Napi::Function::New(env, SetTitle));
+    exports.Set("setWindowPalette", Napi::Function::New(env, SetWindowPalette));
     exports.Set("setCursor", Napi::Function::New(env, SetCursor));
     exports.Set("setScroll", Napi::Function::New(env, SetScroll));
     exports.Set("setEnabled", Napi::Function::New(env, SetEnabled));
