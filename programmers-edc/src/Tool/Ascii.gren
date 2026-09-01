@@ -41,6 +41,7 @@ import Ascii
 import Char
 import Math
 import String
+import Theme exposing (Inks)
 import Tui exposing (Hue(..), MenuItem(..), Span, View(..))
 
 
@@ -204,20 +205,24 @@ third of the table stops.
 
 Which colours, though, is a question `Hue` makes the model answer, and
 `examples/palette` in gren-tvision is the essay on what that costs: naming a
-colour outright means knowing what it lands on. A window's interior here is
-light grey, so the first pass -- yellow labels, cyan dots, both bright -- was
-close to invisible. Dark blue for the labels and dark grey for the dots is
-what light grey can carry, and the dots being the dim ones is right anyway:
-`·` is a placeholder, and the line below is where the meaning is.
+colour outright means knowing what it lands on. Which is why they arrive as
+`Inks` rather than being written here. This chart has now been repainted twice
+for that exact reason -- once when the window's interior turned out to be light
+grey by accident, and again when fixing that made it blue -- and a program with
+three themes cannot be repainted a third time by hand. `Theme.Inks` names the
+four roles a canvas here needs and every theme answers for its own ground.
+
+The dots being the dim ones is right whatever the ground: `·` is a placeholder,
+and the line below is where the meaning is.
 -}
-grid : Model -> Array (Array Span)
-grid model =
-    Array.pushFirst header (Array.map (row model) (Array.range 0 7))
+grid : Inks -> Model -> Array (Array Span)
+grid inks model =
+    Array.pushFirst (header inks) (Array.map (row inks model) (Array.range 0 7))
 
 
-header : Array Span
-header =
-    [ Tui.ink LightCyan
+header : Inks -> Array Span
+header inks =
+    [ Tui.ink inks.ruler
         (String.repeat labelWidth " "
             ++ String.join " " (Array.map Ascii.hexDigit (Array.range 0 (columns - 1)))
         )
@@ -229,12 +234,12 @@ gaps are spans of their own so that the selected cell can be exactly one column
 wide: a highlight that swallowed the gap would be a two-column block sitting
 half over the next character.
 -}
-row : Model -> Int -> Array Span
-row model r =
+row : Inks -> Model -> Int -> Array Span
+row inks model r =
     Array.pushFirst
-        (Tui.ink LightCyan (Ascii.hexDigit r ++ "_ "))
+        (Tui.ink inks.ruler (Ascii.hexDigit r ++ "_ "))
         (Array.intersperse (Tui.plain " ")
-            (Array.map (\c -> cell model (r * columns + c)) (Array.range 0 (columns - 1)))
+            (Array.map (\c -> cell inks model (r * columns + c)) (Array.range 0 (columns - 1)))
         )
 
 
@@ -249,13 +254,13 @@ is certainly on screen -- white on blue, painted by the model -- and keeps the
 hardware cursor there as well, for the terminals that do show it and for the
 tests, which can read a cursor position but not a highlight's meaning.
 -}
-cell : Model -> Int -> Span
-cell model code =
+cell : Inks -> Model -> Int -> Span
+cell inks model code =
     if code == model.code then
-        Tui.on LightGray (Tui.ink Blue (Ascii.glyph code))
+        Tui.on inks.selected.bg (Tui.ink inks.selected.fg (Ascii.glyph code))
 
     else if Ascii.isControl code then
-        Tui.ink Cyan (Ascii.glyph code)
+        Tui.ink inks.dim (Ascii.glyph code)
 
     else
         Tui.plain (Ascii.glyph code)
@@ -271,8 +276,8 @@ cursorAt model =
 -- VIEW
 
 
-view : Model -> Tui.Window
-view model =
+view : Inks -> Model -> Tui.Window
+view inks model =
     { id = windowId
     , title = "ASCII Chart"
     , rect = { x1 = 6, y1 = 2, x2 = 54, y2 = 17 }
@@ -286,7 +291,7 @@ view model =
         [ Canvas
             { id = canvasId
             , rect = { x1 = 2, y1 = 1, x2 = 46, y2 = 10 }
-            , lines = grid model
+            , lines = grid inks model
             , cursor = Just (cursorAt model)
             , takesFocus = True
             }

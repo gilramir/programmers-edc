@@ -86,4 +86,21 @@ Two things about it are temporary, and both are temporary for the same reason
     src/Main.gren     the shell -- menu bar, status line, About, which tools are open
     src/Tool/         one module per tool, each handing back a Tui.Window
     src/Ascii.gren    what ASCII says about a byte, shared by two of the tools
-    test/drive_*.py   one pty driver per tool, plus one for the shell
+    src/Theme.gren    the three colour schemes, and the inks the tools paint with
+    src/Config.gren   the one thing predc remembers between runs
+    test/drive_*.py   one pty driver per tool, plus the shell and the themes
+
+## Colours
+
+Three schemes, on **Tools | Colours**: Borland, Dark and Gren. The choice is
+written to `$XDG_CONFIG_HOME/predc/config.json` (or `~/.config/predc/`) the
+moment it is made, and read back before the first frame of the next run.
+
+A scheme is two things, and `src/Theme.gren` is where the split is explained.
+`Tui.Theme` is everything gren-tvision draws -- the desktop, the menu bar, the
+frames, the dialogs -- and can be 24-bit. `Theme.Inks` is what the tools' own
+canvases paint with, which a theme cannot reach and which is one of the sixteen
+colours a terminal has always had. Borland's is built out of those sixteen, so
+it follows whatever the terminal is set to; Dark and Gren name their colours
+exactly, because "whatever this terminal calls black" is not a foundation for a
+dark scheme.

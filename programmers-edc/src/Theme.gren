@@ -1,0 +1,267 @@
+module Theme exposing (Inks, Name(..), all, decode, encode, inks, next, palette, title)
+
+{-| predc's colour schemes, and the two halves every one of them has.
+
+A theme here is two things that are not the same thing, and the split is forced
+rather than chosen. `Tui.Theme` is the *application palette*: every colour on
+the screen that gren-tvision draws -- frames, titles, the menu bar, the status
+line, buttons, dialogs, scroll bars. `Inks` is what the tools' own canvases
+paint with, and a theme cannot reach those: a `Tui.Span` names a `Tui.Hue` and
+there is nothing between it and the terminal, deliberately, which is the
+argument `gren-tvision/examples/palette` makes at length.
+
+So the model holds a `Name` and the two functions below turn it into the two
+halves. Which is the same principle one level up from where the package makes
+it: **the colour is a model decision**, made by the thing that decides what to
+draw.
+
+There is a seam in it worth knowing about. A palette can be 24-bit and an ink
+cannot -- `Tui.Tint` has `Rgb`, `Tui.Hue` has sixteen names -- so a theme with
+a hand-picked ground has canvases painted in whatever the terminal calls
+`LightCyan`, and the two have to be chosen to sit together. That is the reason
+`Inks` is a record per theme rather than one set shared by all three: the hues
+that read on Borland's blue are the hues that disappear on a light ground.
+
+-}
+
+import Json.Decode as Decode
+import Json.Encode as Encode
+import Tui exposing (Hue(..))
+
+
+{-| Which scheme. Stored in the config file as the strings [`encode`](#encode)
+writes, so renaming one of these renames what is on disk.
+-}
+type Name
+    = Borland
+    | Dark
+    | Gren
+
+
+{-| In the order they appear on the menu, which is also the order
+[`next`](#next) cycles them in.
+-}
+all : Array Name
+all =
+    [ Borland, Dark, Gren ]
+
+
+title : Name -> String
+title name =
+    when name is
+        Borland ->
+            "Borland"
+
+        Dark ->
+            "Dark"
+
+        Gren ->
+            "Gren"
+
+
+next : Name -> Name
+next name =
+    when name is
+        Borland ->
+            Dark
+
+        Dark ->
+            Gren
+
+        Gren ->
+            Borland
+
+
+-- WHAT THE TOOLS PAINT WITH
+
+
+{-| The four things every canvas in this program needs to say, named for what
+they mean rather than for what colour they are -- which is the entire point,
+since what colour they are is what a theme changes.
+
+  - `ruler` -- a column header, an offset, a label on a value: the scaffolding
+    around the data, and quieter than it.
+  - `dim` -- a placeholder for something that is not there, and a standing
+    hint. Quieter still.
+  - `alert` -- something went wrong and the line under the window says so.
+  - `selected` -- the byte, cell or row the caret is on, painted rather than
+    merely pointed at, because whether a terminal shows its cursor at all is
+    the terminal's business.
+
+-}
+type alias Inks =
+    { ruler : Hue
+    , dim : Hue
+    , alert : Hue
+    , selected : { fg : Hue, bg : Hue }
+    }
+
+
+inks : Name -> Inks
+inks name =
+    when name is
+        Borland ->
+            -- On Turbo Vision's blue, where the body text is already yellow.
+            -- `Blue` and `DarkGray` are the two that vanish here, and they are
+            -- exactly what the first version of these used.
+            { ruler = LightCyan
+            , dim = Cyan
+            , alert = LightRed
+            , selected = { fg = Blue, bg = LightGray }
+            }
+
+        Dark ->
+            -- On a near-black ground. `Cyan` rather than `DarkGray` for the
+            -- placeholders: bright black on a dark ground is the one pair the
+            -- sixteen colours cannot make legible.
+            { ruler = LightCyan
+            , dim = Cyan
+            , alert = LightRed
+            , selected = { fg = Black, bg = LightGray }
+            }
+
+        Gren ->
+            -- And on a light one, where the whole set inverts: the dark hues
+            -- are the readable ones and the bright ones are the ones that
+            -- disappear.
+            { ruler = Blue
+            , dim = DarkGray
+            , alert = Red
+            , selected = { fg = White, bg = Blue }
+            }
+
+
+-- WHAT THE PACKAGE PAINTS WITH
+
+
+palette : Name -> Tui.Theme
+palette name =
+    when name is
+        Borland ->
+            Tui.borland
+
+        Dark ->
+            dark
+
+        Gren ->
+            gren
+
+
+{-| The orange from gren-lang.org -- its logo, and the highlights on the
+package index. One constant, so that correcting it is one edit and not
+seventeen.
+-}
+orange : Tui.Tint
+orange =
+    Tui.Rgb 0xE8801A
+
+
+{-| Near-black, and `Rgb` throughout for a reason: a dark scheme built out of
+"whatever this terminal calls black" is at the mercy of a terminal whose black
+is not dark. `Black` and `DarkGray` is the only dark pair the sixteen colours
+offer, and it is at once too far apart to read as one surface and too close to
+be a border.
+
+The window ground is lifted off the desktop rather than equal to it, which is
+the whole trick: the frame is then a change of colour rather than a line drawn
+around nothing.
+-}
+dark : Tui.Theme
+dark =
+    { desktop = { fg = Tui.Rgb 0x2A2A33, bg = Tui.Rgb 0x121218 }
+    , bar = { fg = Tui.Rgb 0xC8C8D2, bg = Tui.Rgb 0x24242E }
+    , barAccent = orange
+    , barDisabled = Tui.Rgb 0x62626E
+    , barSelected = { fg = Tui.Rgb 0x121218, bg = Tui.Rgb 0x8AA9C8 }
+    , barSelectedAccent = Tui.Rgb 0x3A1A00
+    , window = darkPanel (Tui.Rgb 0x1E1E26)
+    , alternate = darkPanel (Tui.Rgb 0x1A2430)
+    , dialog = darkPanel (Tui.Rgb 0x282833)
+    }
+
+
+darkPanel : Tui.Tint -> Tui.ThemePanel
+darkPanel ground =
+    { frame = { fg = Tui.Rgb 0x5A5A6A, bg = ground }
+    , frameActive = Tui.Rgb 0xE8E8F0
+    , text = { fg = Tui.Rgb 0xC8C8D2, bg = ground }
+    , accent = orange
+    , selected = { fg = Tui.Rgb 0x121218, bg = Tui.Rgb 0x8AA9C8 }
+    , disabled = Tui.Rgb 0x62626E
+    , control = { fg = Tui.Rgb 0xE8E8F0, bg = Tui.Rgb 0x3A3A48 }
+    , controlAccent = orange
+    , scrollBar = { fg = Tui.Rgb 0x4A4A58, bg = Tui.Rgb 0x24242E }
+    }
+
+
+{-| Paper, slate and the orange -- gren-lang.org's own three. A light scheme,
+and the one that makes the point that these are not three variations on
+Borland's.
+
+It is also the one that proves `Inks` had to exist. Every hue the other two
+paint with is a bright one, and every bright hue is invisible here.
+-}
+gren : Tui.Theme
+gren =
+    { desktop = { fg = Tui.Rgb 0xC4BFB6, bg = Tui.Rgb 0xE4DFD6 }
+    , bar = { fg = Tui.Rgb 0x2A2622, bg = Tui.Rgb 0xF4F1EA }
+    , barAccent = Tui.Rgb 0xB85C00
+    , barDisabled = Tui.Rgb 0x9A948A
+    , barSelected = { fg = Tui.Rgb 0xFFFFFF, bg = orange }
+    , barSelectedAccent = Tui.Rgb 0x3A1A00
+    , window = grenPanel (Tui.Rgb 0xFAF8F3)
+    , alternate = grenPanel (Tui.Rgb 0xF0EEE6)
+    , dialog = grenPanel (Tui.Rgb 0xF4F1EA)
+    }
+
+
+grenPanel : Tui.Tint -> Tui.ThemePanel
+grenPanel ground =
+    { frame = { fg = Tui.Rgb 0x8A857C, bg = ground }
+    , frameActive = Tui.Rgb 0x2A2622
+    , text = { fg = Tui.Rgb 0x2A2622, bg = ground }
+    , accent = Tui.Rgb 0xB85C00
+    , selected = { fg = Tui.Rgb 0xFFFFFF, bg = orange }
+    , disabled = Tui.Rgb 0x9A948A
+    , control = { fg = Tui.Rgb 0x2A2622, bg = Tui.Rgb 0xDCD7CC }
+    , controlAccent = Tui.Rgb 0xB85C00
+    , scrollBar = { fg = Tui.Rgb 0xB0AAA0, bg = Tui.Rgb 0xEAE6DD }
+    }
+
+
+-- ON DISK
+
+
+encode : Name -> Encode.Value
+encode name =
+    Encode.string <|
+        when name is
+            Borland ->
+                "borland"
+
+            Dark ->
+                "dark"
+
+            Gren ->
+                "gren"
+
+
+{-| A name this version does not know is not an error worth showing anybody: a
+config file written by a later predc should start, in the scheme predc started
+in before there was a config file at all.
+-}
+decode : Decode.Decoder Name
+decode =
+    Decode.string
+        |> Decode.map
+            (\text ->
+                when text is
+                    "dark" ->
+                        Dark
+
+                    "gren" ->
+                        Gren
+
+                    _ ->
+                        Borland
+            )

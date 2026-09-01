@@ -3064,3 +3064,80 @@ one window between the three sets a theme defines. `Alt-T` changes what those
 three sets are, and takes the desktop and the menu bar with it -- which no
 window palette can reach. And through both of them the window whose spans name
 both halves of their colour does not move at all.
+
+## predc's three schemes, and the seam between the two halves of a theme
+
+The application palette is the package's half. predc is where the other half
+turned up, and it turned up as a compile error rather than as an idea: making
+the tools follow a theme meant changing `view : Model -> Tui.Window` to
+`view : Inks -> Model -> Tui.Window` in all three of them, because a
+`Tui.Theme` cannot reach a `Tui.Span`.
+
+That is not a gap to close. It is the same trade `examples/palette` has always
+been about, one level up: a span names a `Hue` and there is nothing between it
+and the terminal, deliberately, so the colour is a model decision. What predc
+adds is the shape that decision takes in a program with more than one scheme --
+`Theme.Inks`, four fields named for what they *mean*:
+
+  - `ruler` -- column headers, offsets, labels: the scaffolding, quieter than
+    the data.
+  - `dim` -- placeholders and standing hints, quieter still.
+  - `alert` -- the line under the window when something went wrong.
+  - `selected` -- the cell the caret is on, painted rather than pointed at.
+
+Each theme answers for its own ground, and that is the point rather than an
+inconvenience: the hues that read on Borland's blue are the hues that vanish on
+a light one. The ASCII chart has now been repainted twice by hand for exactly
+this reason -- once when its window's interior turned out to be light grey by
+accident, once when fixing that made it blue -- and a program with three
+schemes cannot be repainted a third time.
+
+### The seam is that a palette is 24-bit and an ink is not
+
+`Tui.Tint` has `Rgb`; `Tui.Hue` has sixteen names. So predc's Dark theme is a
+hand-picked near-black ground with `LightCyan` painted on it, and the two have
+to be chosen to sit together. That asymmetry is deliberate -- a span colour is
+resolved against a view's palette and giving it 24 bits would mean giving up
+`TColorBIOS` in the one place where the point is to agree with whatever the
+window is already using -- but it is the thing to know before writing a theme,
+and `Theme.gren`'s doc comment says so where somebody would hit it.
+
+### Two smaller things
+
+**The config file reports nothing, ever.** A missing file is a first run, an
+unreadable one is a directory somebody made read-only, a corrupt one is a
+half-written file from a machine that lost power, and all three have the same
+right answer: start in the defaults. `Config.load` is a `Task Never Config` and
+every failure funnels into `default`. The write is fire-and-forget for the
+mirror-image reason: a theme that failed to save is a theme that comes back
+next time, which the user will notice and can act on, and a modal box saying so
+in front of somebody who opened predc to read a hex dump is the worse outcome.
+
+**It is loaded during `init`, not after it.** `Node.getEnvironmentVariables`
+and `FileSystem.readFile` are both ordinary `Task`s and `Init.awaitTask` takes
+a `Task Never a`, so the whole load happens before the first frame. Doing it
+afterwards works and costs a visible flash -- the first frame in Borland,
+repainted into the saved theme a moment later, once, every single run. `init`
+is now three awaits deep and the order is forced: the file system permission is
+an `Init.Task` and has to come first, the environment says where the file is,
+and the file says which theme to start in.
+
+Saving happens on the change and not at exit, which is the same argument: predc
+is a program people leave open and close with `Alt-X` or from the window, and a
+setting that survives only a tidy exit is a setting that gets lost.
+
+### And the test harness could not see any of it
+
+`drive_theme.py` asserts on colours, and the first version of it reported that
+nothing had changed. The harness's SGR parser understood 30-37, 90-97, 40-47
+and 100-107 and skipped anything else -- so `38;2;240;140;0` was read as four
+separate codes, matched none of them, and left the *previous* colour in place.
+Every cell of a truecolor screen came back as whatever was last set from the
+sixteen, which is indistinguishable from a screen that did not repaint.
+
+It now stores a 24-bit colour as an `(r, g, b)` tuple, which keeps every
+existing `== 34` meaning what it meant and lets a check say
+`isinstance(bg, tuple)` for "this really is the colour that was asked for and
+not the nearest of sixteen". The driver sets `COLORTERM=truecolor` for the same
+reason, and `HOME` to a fresh temporary directory so that the first-run case is
+actually a first run.

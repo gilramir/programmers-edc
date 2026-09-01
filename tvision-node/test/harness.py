@@ -372,8 +372,38 @@ class Screen:
         90-97 for foregrounds, 40-47 and 100-107 for backgrounds -- so there is
         no need to interpret bold as brightness. `ESC[m` with no parameters is
         a reset, exactly like `ESC[0m`.
+
+        It also emits `38;2;r;g;b` for a 24-bit colour, which is what a
+        `Tui.Rgb` in a theme becomes. Those are stored as an `(r, g, b)` tuple
+        rather than a number, so a test can tell one from an indexed colour by
+        its type and every existing `== 34` goes on meaning what it meant.
+        **Parsing them is not optional.** A parser that skips the parameters it
+        does not recognise reads `2`, `240`, `140` and `0` as four separate
+        codes, matches none of them, and leaves the *previous* colour in place
+        -- so every cell of a truecolor screen reports whatever was last set
+        from the sixteen, which looks exactly like a screen that did not
+        repaint.
         """
-        for num in [int(p) if p.isdigit() else 0 for p in (params or "0").split(";")]:
+        codes = [int(p) if p.isdigit() else 0 for p in (params or "0").split(";")]
+        i = 0
+        while i < len(codes):
+            num = codes[i]
+            if num in (38, 48) and i + 1 < len(codes):
+                kind = codes[i + 1]
+                if kind == 2 and i + 4 < len(codes):
+                    value = (codes[i + 2], codes[i + 3], codes[i + 4])
+                    i += 5
+                elif kind == 5 and i + 2 < len(codes):
+                    value = ("xterm", codes[i + 2])
+                    i += 3
+                else:
+                    i += 2
+                    continue
+                if num == 38:
+                    self.fg = value
+                else:
+                    self.bg = value
+                continue
             if num == 0:
                 self.fg = self.bg = None
             elif 30 <= num <= 37 or 90 <= num <= 97:
@@ -384,6 +414,7 @@ class Screen:
                 self.fg = None
             elif num == 49:
                 self.bg = None
+            i += 1
 
     def text(self):
         return "\n".join("".join(row).rstrip() for row in self.grid)

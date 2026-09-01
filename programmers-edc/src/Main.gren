@@ -22,11 +22,15 @@ as short as it is.
 -}
 
 import Array exposing (Array)
+import Config
 import FileSystem
+import FileSystem.Path exposing (Path)
 import Init
 import Json.Decode as Decode
 import Json.Encode as Encode
 import Node
+import Task
+import Theme
 import Tool.Ascii
 import Tool.Calc
 import Tool.Hex
@@ -80,6 +84,11 @@ type alias Model =
     , ascii : Maybe Tool.Ascii.Model
     , calc : Maybe Tool.Calc.Model
     , hex : Maybe Tool.Hex.Model
+    -- Which colour scheme, and where to write it down. The theme is a shell
+    -- concern in the same way the menu bar is: it belongs to the program
+    -- rather than to any tool, and every tool has to be told.
+    , theme : Theme.Name
+    , configPath : Maybe Path
     }
 
 
@@ -89,21 +98,44 @@ type Msg
     -- back through the shell because `update` is the shell's. This is the
     -- first tool that needed either.
     | FromHex Tool.Hex.Msg
+    -- The config file was written, or was not. Either way there is nothing to
+    -- do about it -- see `Config` for why -- and this exists only because a
+    -- `Task` has to be turned into a `Cmd Msg` by something.
+    | Saved
 
 
+{-| Three awaits, and the order is the only thing about them worth saying: the
+file system permission is an `Init.Task` and therefore has to be first, the
+environment says where the config file is, and the config file says which
+theme to start in.
+
+All of it before `startProgram`, which is what `Init.awaitTask` is for -- it
+takes the ordinary `Task Never a` that `getEnvironmentVariables` and
+`Config.load` are. Loading afterwards would work and would cost a visible
+flash: the first frame in Borland, repainted into the saved theme once, every
+single run.
+-}
 init : Node.Environment -> Init.Task { model : Model, command : Cmd Msg }
 init _ =
     Init.await FileSystem.initialize <| \permission ->
-        Node.startProgram
-            { model =
-                { desktop = { cols = 80, rows = 23 }
-                , permission = permission
-                , ascii = Nothing
-                , calc = Nothing
-                , hex = Nothing
+    Init.awaitTask Node.getEnvironmentVariables <| \env ->
+        let
+            path =
+                Config.where_ env
+        in
+        Init.awaitTask (Config.load permission path) <| \config ->
+            Node.startProgram
+                { model =
+                    { desktop = { cols = 80, rows = 23 }
+                    , permission = permission
+                    , ascii = Nothing
+                    , calc = Nothing
+                    , hex = Nothing
+                    , theme = config.theme
+                    , configPath = path
+                    }
+                , command = Cmd.none
                 }
-            , command = Cmd.none
-            }
 
 
 -- UPDATE
@@ -114,6 +146,9 @@ update msg model =
     when msg is
         FromTui event ->
             handleEvent event model
+
+        Saved ->
+            { model = model, command = Cmd.none }
 
         FromHex sub ->
             when model.hex is
@@ -138,6 +173,20 @@ handleEvent event model =
 
         Command "about" ->
             { model = model, command = Tui.dialog tui (aboutDialog model) }
+
+        -- One command per scheme rather than a cycling one, so that the menu
+        -- can say which is which and a person can go straight to the one they
+        -- want. Saving on every change and not on exit: predc is a program
+        -- people leave open and close with Alt-X or with the window, and a
+        -- setting that survives only a tidy exit is a setting that gets lost.
+        Command "theme.borland" ->
+            chooseTheme Theme.Borland model
+
+        Command "theme.dark" ->
+            chooseTheme Theme.Dark model
+
+        Command "theme.gren" ->
+            chooseTheme Theme.Gren model
 
         -- Opening a tool that is already open raises its window instead of
         -- doing nothing, which is what the user meant by asking for it twice.
@@ -209,6 +258,19 @@ handleEvent event model =
             toTools event model
 
 
+chooseTheme : Theme.Name -> Model -> { model : Model, command : Cmd Msg }
+chooseTheme name model =
+    if name == model.theme then
+        { model = model, command = Cmd.none }
+
+    else
+        { model = { model | theme = name }
+        , command =
+            Config.save model.permission model.configPath { theme = name }
+                |> Task.perform (\_ -> Saved)
+        }
+
+
 {-| Every open tool is handed the event and answers for its own view ids; a
 closed one is not consulted, which is what `Maybe.map` says here. Nothing is
 routed by window, because an event names the *view* it came from and that is
@@ -257,7 +319,7 @@ subscriptions _ =
 view : Model -> Tui.Ui
 view model =
     { menuBar = menuBar model
-    , theme = Tui.borland
+    , theme = Theme.palette model.theme
     , statusLine =
         [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
         , { text = "~Alt-A~ ASCII", key = "Alt-A", cmd = Tool.Ascii.command }
@@ -270,21 +332,21 @@ view model =
     , windows =
         (when model.ascii is
             Just ascii ->
-                [ Tool.Ascii.view ascii ]
+                [ Tool.Ascii.view (Theme.inks model.theme) ascii ]
 
             Nothing ->
                 []
         )
             ++ (when model.calc is
                     Just calc ->
-                        [ Tool.Calc.view calc ]
+                        [ Tool.Calc.view (Theme.inks model.theme) calc ]
 
                     Nothing ->
                         []
                )
             ++ (when model.hex is
                     Just hex ->
-                        [ Tool.Hex.view hex ]
+                        [ Tool.Hex.view (Theme.inks model.theme) hex ]
 
                     Nothing ->
                         []
@@ -313,7 +375,17 @@ menuBar model =
     , SubMenu
         { title = "~T~ools"
         , key = ""
-        , items = [ Tool.Ascii.menuItem, Tool.Calc.menuItem, Tool.Hex.menuItem ]
+        , items =
+            [ Tool.Ascii.menuItem
+            , Tool.Calc.menuItem
+            , Tool.Hex.menuItem
+            , Tui.Separator
+            , SubMenu
+                { title = "~C~olours"
+                , key = ""
+                , items = Array.map (themeItem model.theme) Theme.all
+                }
+            ]
         }
     ]
         ++ toolMenus model
@@ -339,6 +411,28 @@ menuBar model =
                 , items = [ Item { title = "~A~bout...", cmd = "about", key = "", shortcut = "" } ]
                 }
            ]
+
+
+{-| A tick beside the one in use, because a menu is the only place this
+program says which theme it is in -- there is no status line room for it and
+the answer is on the screen anyway. Turbo Vision has no checkable menu item,
+so it is a character in the title, which is what its own examples do.
+-}
+themeItem : Theme.Name -> Theme.Name -> MenuItem
+themeItem current name =
+    Item
+        { title =
+            (if name == current then
+                "√ "
+
+             else
+                "  "
+            )
+                ++ Theme.title name
+        , cmd = "theme." ++ String.toLower (Theme.title name)
+        , key = ""
+        , shortcut = ""
+        }
 
 
 toolMenus : Model -> Array MenuItem

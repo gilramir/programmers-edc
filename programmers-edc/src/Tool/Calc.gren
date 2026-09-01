@@ -38,6 +38,7 @@ import BigInt exposing (BigInt)
 import Char
 import Math
 import String
+import Theme exposing (Inks)
 import Tui exposing (Hue(..), MenuItem(..), Span, View(..))
 
 
@@ -854,8 +855,8 @@ tick on =
         "  "
 
 
-view : Model -> Tui.Window
-view model =
+view : Inks -> Model -> Tui.Window
+view inks model =
     { id = windowId
     , title = "RPN Calculator"
     -- Down and to the right of the chart's, so that opening both leaves each
@@ -872,7 +873,7 @@ view model =
         [ Canvas
             { id = canvasId
             , rect = { x1 = 2, y1 = 1, x2 = 36, y2 = 9 }
-            , lines = display model
+            , lines = display inks model
             , cursor = Just { x = 2 + String.count model.entry, y = rows + 1 }
             , takesFocus = True
             }
@@ -909,18 +910,18 @@ keypadButton name title x y =
         }
 
 
-display : Model -> Array (Array Span)
-display model =
-    stackLines model
-        ++ [ entryLine model, modeLine model, messageLine model ]
+display : Inks -> Model -> Array (Array Span)
+display inks model =
+    stackLines inks model
+        ++ [ entryLine inks model, modeLine inks model, messageLine inks model ]
 
 
 {-| The stack, deepest first, so the top of it sits nearest what is being
 typed. Levels that hold nothing are still drawn: a calculator whose display
 changes height as it fills is a calculator you cannot read at a glance.
 -}
-stackLines : Model -> Array (Array Span)
-stackLines model =
+stackLines : Inks -> Model -> Array (Array Span)
+stackLines inks model =
     let
         depth =
             Array.length model.stack
@@ -933,7 +934,7 @@ stackLines model =
                         rows - row
 
                     label =
-                        Tui.ink LightCyan (String.padLeft 2 ' ' (String.fromInt level) ++ ": ")
+                        Tui.ink inks.ruler (String.padLeft 2 ' ' (String.fromInt level) ++ ": ")
 
                     index =
                         depth - level
@@ -954,9 +955,9 @@ stackLines model =
             )
 
 
-entryLine : Model -> Array Span
-entryLine model =
-    [ Tui.ink LightCyan "> ", Tui.plain model.entry ]
+entryLine : Inks -> Model -> Array Span
+entryLine inks model =
+    [ Tui.ink inks.ruler "> ", Tui.plain model.entry ]
 
 
 {-| The two modes, labelled.
@@ -967,11 +968,11 @@ since the only thing that explained them was a hint that `update` wiped on the
 next keystroke. A word that has to be remembered from a message that is gone is
 not a label.
 -}
-modeLine : Model -> Array Span
-modeLine model =
-    [ Tui.ink LightCyan "base "
+modeLine : Inks -> Model -> Array Span
+modeLine inks model =
+    [ Tui.ink inks.ruler "base "
     , Tui.plain (String.padRight 8 ' ' (baseName model.base))
-    , Tui.ink LightCyan "width "
+    , Tui.ink inks.ruler "width "
     , Tui.plain (widthName model.width)
     ]
 
@@ -980,10 +981,10 @@ modeLine model =
 above. The hint is *standing* rather than shown once: it costs a line that has
 nothing else to do, and it is the answer to the question the mode line raises.
 -}
-messageLine : Model -> Array Span
-messageLine model =
+messageLine : Inks -> Model -> Array Span
+messageLine inks model =
     if String.isEmpty model.message then
-        [ Tui.ink Cyan "Tab changes base, w changes width" ]
+        [ Tui.ink inks.dim "Tab changes base, w changes width" ]
 
     else
-        [ Tui.ink LightRed model.message ]
+        [ Tui.ink inks.alert model.message ]

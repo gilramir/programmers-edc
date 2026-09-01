@@ -75,6 +75,7 @@ import Math
 import Stream
 import String
 import Task exposing (Task)
+import Theme exposing (Inks)
 import Tui exposing (Hue(..), MenuItem(..), Span, View(..))
 
 
@@ -1108,8 +1109,8 @@ menu =
 -- VIEW
 
 
-view : Model -> Tui.Window
-view model =
+view : Inks -> Model -> Tui.Window
+view inks model =
     { id = windowId
     , title = title model
     -- The widest window in the program, and it has to be: a dump row is
@@ -1138,7 +1139,7 @@ view model =
         [ Canvas
             { id = "hex.header"
             , rect = { x1 = 1, y1 = 1, x2 = 1 + lineWidth, y2 = 2 }
-            , lines = [ header ]
+            , lines = [ header inks ]
             , cursor = Nothing
             , takesFocus = False
             }
@@ -1148,7 +1149,7 @@ view model =
                 Canvas
                     { id = canvasId
                     , rect = { x1 = 1, y1 = 2, x2 = 1 + lineWidth, y2 = 2 + openRows }
-                    , lines = dump model
+                    , lines = dump inks model
                     , cursor = cursorAt model
                     , takesFocus = True
                     }
@@ -1190,7 +1191,7 @@ view model =
                 Canvas
                     { id = "hex.status"
                     , rect = { x1 = 1, y1 = 4 + openRows, x2 = 1 + lineWidth, y2 = 5 + openRows }
-                    , lines = [ status model ]
+                    , lines = [ status inks model ]
                     , cursor = Nothing
                     , takesFocus = False
                     }
@@ -1213,14 +1214,14 @@ title model =
                 ++ " bytes)"
 
 
-header : Array Span
-header =
+header : Inks -> Array Span
+header inks =
     [ Tui.plain (String.repeat hexStart " ")
-    , Tui.ink LightCyan (String.join " " (Array.map columnLabel (Array.range 0 7)))
+    , Tui.ink inks.ruler (String.join " " (Array.map columnLabel (Array.range 0 7)))
     , Tui.plain "  "
-    , Tui.ink LightCyan (String.join " " (Array.map columnLabel (Array.range 8 15)))
+    , Tui.ink inks.ruler (String.join " " (Array.map columnLabel (Array.range 8 15)))
     , Tui.plain "  "
-    , Tui.ink LightCyan (String.join "" (Array.map Ascii.hexDigit (Array.range 0 15)))
+    , Tui.ink inks.ruler (String.join "" (Array.map Ascii.hexDigit (Array.range 0 15)))
     ]
 
 
@@ -1233,8 +1234,8 @@ columnLabel column =
 off the end would move the two lines under it every time somebody pressed Down,
 and there is nothing past the last row worth reading anyway.
 -}
-dump : Model -> Array (Array Span)
-dump model =
+dump : Inks -> Model -> Array (Array Span)
+dump inks model =
     when model.file is
         Nothing ->
             Array.map
@@ -1248,11 +1249,11 @@ dump model =
                 (Array.range 0 (model.rows - 1))
 
         Just file ->
-            Array.map (row model file) (Array.range 0 (model.rows - 1))
+            Array.map (row inks model file) (Array.range 0 (model.rows - 1))
 
 
-row : Model -> File -> Int -> Array Span
-row model file index =
+row : Inks -> Model -> File -> Int -> Array Span
+row inks model file index =
     let
         base =
             model.top + index * bytesPerRow
@@ -1261,17 +1262,17 @@ row model file index =
         [ Tui.plain "" ]
 
     else
-        [ Tui.ink LightCyan (offsetText base), Tui.plain "  " ]
-            ++ hexCells model file base
+        [ Tui.ink inks.ruler (offsetText base), Tui.plain "  " ]
+            ++ hexCells inks model file base
             ++ [ Tui.plain "  " ]
-            ++ asciiCells model file base
+            ++ asciiCells inks model file base
 
 
 {-| Eight bytes, a wider gap, eight bytes. The gap is what makes a row
 countable without counting: everything past it is at offset eight or more.
 -}
-hexCells : Model -> File -> Int -> Array Span
-hexCells model file base =
+hexCells : Inks -> Model -> File -> Int -> Array Span
+hexCells inks model file base =
     Array.mapAndFlatten
         (\column ->
             (if column == 0 then
@@ -1283,13 +1284,13 @@ hexCells model file base =
              else
                 [ Tui.plain " " ]
             )
-                ++ [ paint model (base + column) (pairText model file (base + column)) ]
+                ++ [ paint inks model (base + column) (pairText model file (base + column)) ]
         )
         (Array.range 0 (bytesPerRow - 1))
 
 
-asciiCells : Model -> File -> Int -> Array Span
-asciiCells model file base =
+asciiCells : Inks -> Model -> File -> Int -> Array Span
+asciiCells inks model file base =
     Array.map
         (\column ->
             let
@@ -1303,16 +1304,16 @@ asciiCells model file base =
                 when byteAt model offset is
                     Just code ->
                         if offset == model.cursor then
-                            Tui.on LightGray (Tui.ink Blue (Ascii.glyph code))
+                            Tui.on inks.selected.bg (Tui.ink inks.selected.fg (Ascii.glyph code))
 
                         else if code >= 32 && code < 127 then
                             Tui.plain (Ascii.glyph code)
 
                         else
-                            Tui.ink Cyan (Ascii.glyph code)
+                            Tui.ink inks.dim (Ascii.glyph code)
 
                     Nothing ->
-                        Tui.ink Cyan " "
+                        Tui.ink inks.dim " "
         )
         (Array.range 0 (bytesPerRow - 1))
 
@@ -1341,10 +1342,10 @@ the ASCII chart's is: whether a terminal shows its cursor at all is the
 terminal's business. The hardware cursor is kept in step underneath, for the
 ones that do and for the tests.
 -}
-paint : Model -> Int -> String -> Span
-paint model offset text =
+paint : Inks -> Model -> Int -> String -> Span
+paint inks model offset text =
     if offset == model.cursor then
-        Tui.on LightGray (Tui.ink Blue text)
+        Tui.on inks.selected.bg (Tui.ink inks.selected.fg text)
 
     else
         Tui.plain text
@@ -1414,10 +1415,10 @@ A message is not cleared by the next keystroke. The calculator taught that one:
 was gone before anybody could read it. This one goes when the next thing the
 user asks for succeeds.
 -}
-status : Model -> Array Span
-status model =
+status : Inks -> Model -> Array Span
+status inks model =
     if model.message /= "" then
-        [ Tui.ink LightRed model.message ]
+        [ Tui.ink inks.alert model.message ]
 
     else
         when model.file is

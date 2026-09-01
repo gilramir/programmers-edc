@@ -1,0 +1,123 @@
+module Config exposing (Config, default, load, save, where_)
+
+{-| What predc remembers between runs, which is one field and was always going
+to be more than one eventually.
+
+Three decisions, and the first two are about what *not* to do.
+
+**Nothing here reports an error.** A missing config file is the normal case on
+a first run; an unreadable one is a directory somebody made read-only; a
+corrupt one is a half-written file from a machine that lost power. All three
+have the same right answer -- start in the defaults -- and none of them is
+worth a dialog in front of a program somebody opened to look at a hex dump.
+`load` therefore returns a `Task Never Config` and every failure funnels into
+[`default`](#default).
+
+**The write is fire-and-forget too**, and for the same reason turned around: a
+theme that failed to save is a theme that comes back next time, which the user
+will notice and can act on. A modal box saying so is the worse outcome.
+
+**It is read during `init`, not after it.** `Node.getEnvironmentVariables` and
+`FileSystem.readFile` are both `Task`s and `Init.awaitTask` takes a
+`Task Never a`, so the whole load happens before the first frame is drawn.
+Doing it afterwards works and costs a visible flash: the program would open in
+Borland and repaint into the saved theme a moment later, once, every time.
+
+-}
+
+import Bytes exposing (Bytes)
+import Dict exposing (Dict)
+import FileSystem
+import FileSystem.Path as Path exposing (Path)
+import Json.Decode as Decode
+import Json.Encode as Encode
+import Task exposing (Task)
+import Theme
+
+
+type alias Config =
+    { theme : Theme.Name }
+
+
+default : Config
+default =
+    { theme = Theme.Borland }
+
+
+{-| `$XDG_CONFIG_HOME/predc/config.json`, or `~/.config/predc/config.json`
+when that is not set, which is what the XDG base directory specification says
+to do and what everything else on a Linux machine already does.
+
+`Nothing` when neither variable is set -- a program run by something with no
+environment at all -- and the caller treats that as "no config", which is the
+same as not having one.
+-}
+where_ : Dict String String -> Maybe Path
+where_ env =
+    let
+        base =
+            when Dict.get "XDG_CONFIG_HOME" env is
+                Just dir ->
+                    if String.isEmpty dir then
+                        Maybe.map (\home -> home ++ "/.config") (Dict.get "HOME" env)
+
+                    else
+                        Just dir
+
+                Nothing ->
+                    Maybe.map (\home -> home ++ "/.config") (Dict.get "HOME" env)
+    in
+    Maybe.map (\dir -> Path.fromPosixString (dir ++ "/predc/config.json")) base
+
+
+load : FileSystem.Permission -> Maybe Path -> Task Never Config
+load permission path =
+    when path is
+        Nothing ->
+            Task.succeed default
+
+        Just it ->
+            FileSystem.readFile permission it
+                |> Task.map parse
+                |> Task.onError (\_ -> Task.succeed default)
+
+
+parse : Bytes -> Config
+parse bytes =
+    Bytes.toString bytes
+        |> Maybe.andThen (\text -> Result.toMaybe (Decode.decodeString decoder text))
+        |> Maybe.withDefault default
+
+
+decoder : Decode.Decoder Config
+decoder =
+    Decode.map (\theme -> { theme = theme })
+        (Decode.field "theme" Theme.decode)
+
+
+{-| Make the directory, then write the file, and ignore whichever of the two
+went wrong. `recursive = True` so that a first run creates `~/.config/predc`
+as well as the file in it, and so that an existing directory is not an error.
+-}
+save : FileSystem.Permission -> Maybe Path -> Config -> Task Never {}
+save permission path config =
+    when path is
+        Nothing ->
+            Task.succeed {}
+
+        Just it ->
+            FileSystem.makeDirectory permission { recursive = True } (Path.parentPath it |> Maybe.withDefault it)
+                |> Task.andThen
+                    (\_ ->
+                        FileSystem.writeFile permission
+                            (Bytes.fromString (Encode.encode 2 (encode config) ++ "\n"))
+                            it
+                    )
+                |> Task.map (\_ -> {})
+                |> Task.onError (\_ -> Task.succeed {})
+
+
+encode : Config -> Encode.Value
+encode config =
+    Encode.object
+        [ { key = "theme", value = Theme.encode config.theme } ]
