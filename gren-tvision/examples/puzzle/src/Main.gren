@@ -438,7 +438,9 @@ tile model letter =
         Tui.plain body
 
     else
-        Tui.ink Yellow body
+        -- Not yellow: a blue window's ordinary text is yellow, so a
+        -- checkerboard painted in it would have no squares.
+        Tui.ink LightCyan body
 
 
 letterIndex : String -> Int

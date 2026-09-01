@@ -134,10 +134,10 @@ def main():
     # bar, a hollow box, a blink turned off. So the model paints the cell.
     d = app.display()
     check("the selected cell is painted, not just under the cursor",
-          d.bg_at(*cell(0)) == 44 and d.fg_at(*cell(0)) == 97,
+          d.bg_at(*cell(0)) == 47 and d.fg_at(*cell(0)) == 34,
           f"fg {d.fg_at(*cell(0))} on bg {d.bg_at(*cell(0))}")
-    check("and only that cell", d.bg_at(*cell(1)) == 47
-          and d.bg_at(cell(0)[0] + 1, cell(0)[1]) == 47,
+    check("and only that cell", d.bg_at(*cell(1)) == 44
+          and d.bg_at(cell(0)[0] + 1, cell(0)[1]) == 44,
           "the highlight leaked into the gap or the next cell")
 
     # The control third of the table is painted in a colour of its own, which
@@ -151,16 +151,20 @@ def main():
     check("control codes are painted in their own colour", control != printable,
           f"control fg {control}, printable fg {printable}")
 
-    # And the colours have to be ones a light grey window can carry. `Hue`
-    # names an absolute colour, so the model is the only thing that can get
-    # this wrong, and the first version did: bright yellow labels (93) and
-    # bright cyan dots on a 47 background, both around 1.5:1. These pin the
-    # readable pair -- dark blue labels, dark grey dots -- so that reaching for
-    # a bright hue fails here rather than in someone's eyes.
-    check("the row and column labels are dark blue, not a bright hue",
-          grid.fg_at(11, 4) == 34 and grid.fg_at(8, 5) == 34,
+    # And the colours have to be ones a *blue* window can carry. `Hue` names an
+    # absolute colour with nothing between it and the terminal, so the model is
+    # the only thing that can get this wrong -- and it got it wrong twice, once
+    # in each direction. The first version painted bright yellow labels on the
+    # light grey ground a window had by accident, around 1.5:1. The second kept
+    # the dark blue and dark grey that fixed *that* and then the window became
+    # blue, which is where dark blue labels go to disappear entirely. These pin
+    # the pair that is readable on blue -- light cyan for the ruler, cyan for
+    # the placeholders -- so that a dark hue fails here rather than in
+    # someone's eyes.
+    check("the row and column labels are light cyan, not a dark hue",
+          grid.fg_at(11, 4) == 96 and grid.fg_at(8, 5) == 96,
           f"header fg {grid.fg_at(11, 4)}, label fg {grid.fg_at(8, 5)}")
-    check("and the placeholder dots are dark grey", control == 90,
+    check("and the placeholder dots are cyan", control == 36,
           f"control fg {control}")
 
     # Seven to the right is BEL, which is the entry that makes the whole tool
@@ -176,7 +180,7 @@ def main():
 
     d = app.display()
     check("and so did the highlight",
-          d.bg_at(*cell(7)) == 44 and d.bg_at(*cell(0)) == 47,
+          d.bg_at(*cell(7)) == 47 and d.bg_at(*cell(0)) == 44,
           f"cell 7 bg {d.bg_at(*cell(7))}, cell 0 bg {d.bg_at(*cell(0))}")
 
     # A printable key jumps to itself: the fastest way to ask "what is the code

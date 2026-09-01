@@ -918,6 +918,25 @@ along with the rule this made concrete: a *view's* rectangle is structural, so
 a layout must be written once and grown by `Grows`, never recomputed from the
 new height.
 
+### The windows were the wrong colour, and had been all along
+
+Not a gap -- a bug, and one that had been on screen since the first window this
+package drew. `JsWindow` derives from `TDialog`; `TDialog`'s constructor
+overwrites the `wpBlueWindow` palette `TWindow`'s had just set with
+`dpGrayDialog`; and `beWindow()`, which exists to put back what that
+constructor takes out, put back four things and missed the fifth. So every
+window on every desktop was painted in the *dialog* palette, white on light
+grey, and it looked deliberate because it was uniform.
+
+Windows are blue now and dialogs are still grey, which is the distinction Turbo
+Vision has always drawn. The cost lands on the spans: `Hue` is an absolute
+colour, so every `ink` in the repo had been chosen against a ground that was
+grey by accident. `examples/calendar` marked today in yellow and
+`examples/puzzle` drew its checkerboard in it, and yellow is what a blue
+window's text already is; both are repainted, and both drivers caught it
+because both assert that some cell differs from the body colour. The full
+account, and the colour vocabulary that came out of it, is in FINDINGS.
+
 ### What is left, now that the list is empty
 
 **One known bug, found from outside.** `programmers-edc`'s hex dump viewer --

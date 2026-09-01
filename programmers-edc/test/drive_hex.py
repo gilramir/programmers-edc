@@ -210,12 +210,12 @@ def main():
           str(app.cursor()))
     display = app.display()
     check("the selected byte is painted, not merely pointed at",
-          display.bg_at(HEX_AT + 3, FIRST_ROW + 1) == 44
-          and display.fg_at(HEX_AT + 3, FIRST_ROW + 1) == 97,
+          display.bg_at(HEX_AT + 3, FIRST_ROW + 1) == 47
+          and display.fg_at(HEX_AT + 3, FIRST_ROW + 1) == 34,
           f"fg={display.fg_at(HEX_AT + 3, FIRST_ROW + 1)} "
           f"bg={display.bg_at(HEX_AT + 3, FIRST_ROW + 1)}")
     check("and so is its half of the printable column",
-          display.bg_at(ASCII_AT + 1, FIRST_ROW + 1) == 44,
+          display.bg_at(ASCII_AT + 1, FIRST_ROW + 1) == 47,
           str(display.bg_at(ASCII_AT + 1, FIRST_ROW + 1)))
 
     # 6. A screenful at a time. Sixteen rows of sixteen is 256 bytes, so a

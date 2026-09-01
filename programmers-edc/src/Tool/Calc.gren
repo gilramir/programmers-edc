@@ -932,7 +932,7 @@ stackLines model =
                         rows - row
 
                     label =
-                        Tui.ink Blue (String.padLeft 2 ' ' (String.fromInt level) ++ ": ")
+                        Tui.ink LightCyan (String.padLeft 2 ' ' (String.fromInt level) ++ ": ")
 
                     index =
                         depth - level
@@ -955,7 +955,7 @@ stackLines model =
 
 entryLine : Model -> Array Span
 entryLine model =
-    [ Tui.ink Blue "> ", Tui.plain model.entry ]
+    [ Tui.ink LightCyan "> ", Tui.plain model.entry ]
 
 
 {-| The two modes, labelled.
@@ -968,9 +968,9 @@ not a label.
 -}
 modeLine : Model -> Array Span
 modeLine model =
-    [ Tui.ink Blue "base "
+    [ Tui.ink LightCyan "base "
     , Tui.plain (String.padRight 8 ' ' (baseName model.base))
-    , Tui.ink Blue "width "
+    , Tui.ink LightCyan "width "
     , Tui.plain (widthName model.width)
     ]
 
@@ -982,7 +982,7 @@ nothing else to do, and it is the answer to the question the mode line raises.
 messageLine : Model -> Array Span
 messageLine model =
     if String.isEmpty model.message then
-        [ Tui.ink DarkGray "Tab changes base, w changes width" ]
+        [ Tui.ink Cyan "Tab changes base, w changes width" ]
 
     else
-        [ Tui.ink Red model.message ]
+        [ Tui.ink LightRed model.message ]

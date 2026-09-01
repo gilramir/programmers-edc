@@ -696,6 +696,21 @@ type alias Span =
 Turbo Vision's palettes deal in. The bottom eight are the plain ones and the
 top eight their bright counterparts; `Brown` is bright-shifted into `Yellow`,
 and `LightGray` into `White`, which is why those two names look out of place.
+
+**Pick these against a blue ground.** A [`Window`](#Window) on the desktop is
+Turbo Vision's blue window -- white on blue for the frame, yellow on blue for
+the text inside it -- and a modal [`dialog`](#dialog) is the grey one. A `Hue`
+names an absolute colour with nothing in between, so it is the model and only
+the model that can put dark blue on blue, and nothing will report it. The four
+that read well on a blue window are `LightCyan` and `Cyan` for something
+quieter than the text, `LightRed` for something wrong, and `LightGreen` for
+something marked; `Blue`, `Black` and `DarkGray` are for the grey ground of a
+dialog and vanish on a window.
+
+The same applies in reverse to `Yellow`: it is what a window's ordinary text
+already is, so a highlight painted in it is not a highlight. Use
+[`on`](#on) with `LightGray` for a selection -- blue on light grey is what
+Turbo Vision's own selected text is -- rather than a background of your own.
 -}
 type Hue
     = Black

@@ -1215,11 +1215,11 @@ title model =
 header : Array Span
 header =
     [ Tui.plain (String.repeat hexStart " ")
-    , Tui.ink Blue (String.join " " (Array.map columnLabel (Array.range 0 7)))
+    , Tui.ink LightCyan (String.join " " (Array.map columnLabel (Array.range 0 7)))
     , Tui.plain "  "
-    , Tui.ink Blue (String.join " " (Array.map columnLabel (Array.range 8 15)))
+    , Tui.ink LightCyan (String.join " " (Array.map columnLabel (Array.range 8 15)))
     , Tui.plain "  "
-    , Tui.ink Blue (String.join "" (Array.map Ascii.hexDigit (Array.range 0 15)))
+    , Tui.ink LightCyan (String.join "" (Array.map Ascii.hexDigit (Array.range 0 15)))
     ]
 
 
@@ -1260,7 +1260,7 @@ row model file index =
         [ Tui.plain "" ]
 
     else
-        [ Tui.ink Blue (offsetText base), Tui.plain "  " ]
+        [ Tui.ink LightCyan (offsetText base), Tui.plain "  " ]
             ++ hexCells model file base
             ++ [ Tui.plain "  " ]
             ++ asciiCells model file base
@@ -1302,16 +1302,16 @@ asciiCells model file base =
                 when byteAt model offset is
                     Just code ->
                         if offset == model.cursor then
-                            Tui.on Blue (Tui.ink White (Ascii.glyph code))
+                            Tui.on LightGray (Tui.ink Blue (Ascii.glyph code))
 
                         else if code >= 32 && code < 127 then
                             Tui.plain (Ascii.glyph code)
 
                         else
-                            Tui.ink DarkGray (Ascii.glyph code)
+                            Tui.ink Cyan (Ascii.glyph code)
 
                     Nothing ->
-                        Tui.ink DarkGray " "
+                        Tui.ink Cyan " "
         )
         (Array.range 0 (bytesPerRow - 1))
 
@@ -1343,7 +1343,7 @@ ones that do and for the tests.
 paint : Model -> Int -> String -> Span
 paint model offset text =
     if offset == model.cursor then
-        Tui.on Blue (Tui.ink White text)
+        Tui.on LightGray (Tui.ink Blue text)
 
     else
         Tui.plain text
@@ -1416,7 +1416,7 @@ user asks for succeeds.
 status : Model -> Array Span
 status model =
     if model.message /= "" then
-        [ Tui.ink Red model.message ]
+        [ Tui.ink LightRed model.message ]
 
     else
         when model.file is

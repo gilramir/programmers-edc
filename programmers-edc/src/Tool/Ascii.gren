@@ -217,7 +217,7 @@ grid model =
 
 header : Array Span
 header =
-    [ Tui.ink Blue
+    [ Tui.ink LightCyan
         (String.repeat labelWidth " "
             ++ String.join " " (Array.map Ascii.hexDigit (Array.range 0 (columns - 1)))
         )
@@ -232,7 +232,7 @@ half over the next character.
 row : Model -> Int -> Array Span
 row model r =
     Array.pushFirst
-        (Tui.ink Blue (Ascii.hexDigit r ++ "_ "))
+        (Tui.ink LightCyan (Ascii.hexDigit r ++ "_ "))
         (Array.intersperse (Tui.plain " ")
             (Array.map (\c -> cell model (r * columns + c)) (Array.range 0 (columns - 1)))
         )
@@ -252,10 +252,10 @@ tests, which can read a cursor position but not a highlight's meaning.
 cell : Model -> Int -> Span
 cell model code =
     if code == model.code then
-        Tui.on Blue (Tui.ink White (Ascii.glyph code))
+        Tui.on LightGray (Tui.ink Blue (Ascii.glyph code))
 
     else if Ascii.isControl code then
-        Tui.ink DarkGray (Ascii.glyph code)
+        Tui.ink Cyan (Ascii.glyph code)
 
     else
         Tui.plain (Ascii.glyph code)

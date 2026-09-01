@@ -728,15 +728,24 @@ public:
 
     // JsWindow derives from TDialog so that a window and a dialog are one
     // class -- but TDialog's constructor takes the window-ness back out:
-    // growMode = 0, flags = wfMove | wfClose, and ofTileable never set by
-    // anything in Turbo Vision except TEditWindow. A window on the desktop
-    // should zoom, resize, grow with the terminal and take part in Tile and
-    // Cascade, so a non-modal one puts all four back.
+    // growMode = 0, flags = wfMove | wfClose, ofTileable never set by anything
+    // in Turbo Vision except TEditWindow, and -- the one that went unnoticed
+    // for eighteen examples -- palette = dpGrayDialog, written over the
+    // wpBlueWindow TWindow's own constructor had just set.
+    //
+    // That last one is why every window in every program built on this was
+    // drawn in the *dialog* palette: white on light grey, the colours of the
+    // Find box in tvedit's screenshot rather than of the editor behind it. A
+    // window on the desktop should zoom, resize, grow with the terminal, take
+    // part in Tile and Cascade, and be blue, so a non-modal one puts all five
+    // back. Modal dialogs never come through here and stay grey, which is the
+    // distinction Turbo Vision has always drawn between the two.
     void beWindow()
     {
         flags = wfMove | wfGrow | wfClose | wfZoom;
         growMode = gfGrowAll | gfGrowRel;
         options |= ofTileable;
+        palette = wpBlueWindow;
         zoomRect = getBounds();
         builtSize = size;
         lastReported = getBounds();

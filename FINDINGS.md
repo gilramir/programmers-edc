@@ -2884,3 +2884,61 @@ The check for it is in `drive_ascii.py`, and it asserts on the colour the
 entry is drawn in rather than on any text, because greying is the entire
 visible difference -- the same reason the chart's own colour checks read
 attributes.
+
+## The window palette, which was grey because nobody set it
+
+Reviewing predc's colours turned up a bug that had been on screen since the
+first window this package ever drew, and had been read as a design decision
+because it was uniform.
+
+`JsWindow` derives from `TDialog` so that a window and a dialog are one class,
+and `beWindow()` puts back what `TDialog`'s constructor takes out: `wfGrow`,
+`wfZoom`, `gfGrowAll | gfGrowRel`, `ofTileable`. Its comment lists exactly those
+four. There is a fifth. `TWindow`'s constructor sets `palette = wpBlueWindow`
+and `TDialog`'s overwrites it with `dpGrayDialog` (`tdialog.cpp:31`), so every
+window on the desktop was drawn in the *dialog* palette: white on light grey.
+
+That is the colour of the Find box in tvedit's screenshot at the top of
+tvision's README rather than of the editor behind it, and it is why nothing
+built on this ever looked like Turbo Vision. One line in `beWindow()` fixes it,
+and the split it restores is the one Turbo Vision has always drawn: windows on
+the desktop are blue, modal dialogs are grey. Dialogs never go through
+`beWindow()`, so they were right all along.
+
+### What it cost, which is the interesting half
+
+`Hue` names an absolute colour with nothing between it and the terminal --
+`examples/palette` argues at length for why -- so **every span in the repo had
+been chosen against a background that was grey by accident.** Changing the
+ground silently invalidated all of them, and the failure mode is invisible
+rather than loud: a colour that no longer contrasts still draws.
+
+Three kinds of breakage, and the suite found two of them:
+
+  - **Dark on dark.** predc's hex viewer painted its column header and offset
+    column in `ink Blue`, which was right on light grey and is blue-on-blue on
+    a window. Measured at `fg=34 bg=44`: perfectly invisible, and *no test
+    failed*, because nothing asserted on those cells.
+  - **A highlight the same colour as the text.** `examples/calendar` marked
+    today in `ink Yellow` and `examples/puzzle` drew its checkerboard in it --
+    and yellow is exactly what a blue window's ordinary text is. Both drivers
+    caught it, because both assert that some cell differs from the body colour.
+  - **A background that matches the ground.** Both of predc's canvases marked
+    their selection with `on Blue`, a blue block on a blue window. `drive_ascii`
+    and `drive_hex` caught these.
+
+The repaint settles a vocabulary, and it is worth having in one place because
+the next canvas will need it: `LightCyan` for a ruler or a label, `Cyan` for a
+placeholder, `LightRed` for something wrong, `LightGreen` for something marked,
+and `on LightGray (ink Blue)` for a selection -- which is not an invention but
+Turbo Vision's own selected-text colour, app palette entry 15 of a blue window.
+`Tui.Hue`'s doc comment now says all of this, including the part that reads
+backwards: `Yellow` is not a highlight on a window, it is the default.
+
+`drive_ascii.py`'s comment on this has now been rewritten twice and is worth
+reading as a pair. The first version pinned "dark blue labels, dark grey dots"
+because an earlier attempt had put bright yellow on light grey at about 1.5:1.
+Those are the two colours that disappear on blue. The check is the same check
+either way -- *the model is the only thing that can get this wrong, so fail
+here rather than in someone's eyes* -- which is the argument for asserting on
+colour at all in a terminal test.

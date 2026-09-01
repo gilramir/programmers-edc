@@ -392,7 +392,12 @@ weeks showing today =
                 Tui.plain "   "
 
             else if isToday day then
-                Tui.ink Yellow (String.padLeft 2 ' ' (String.fromInt day) ++ " ")
+                -- Light green on blue, which is what Turbo Vision's own
+                -- calendar marks today in: it is app palette entry 10, the
+                -- one a blue window also uses for the icons on its frame.
+                -- Yellow would be invisible -- that is the colour a blue
+                -- window's ordinary text already is.
+                Tui.ink LightGreen (String.padLeft 2 ' ' (String.fromInt day) ++ " ")
 
             else
                 Tui.plain (String.padLeft 2 ' ' (String.fromInt day) ++ " ")
