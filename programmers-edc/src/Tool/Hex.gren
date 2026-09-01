@@ -58,8 +58,24 @@ different: without the wrapper the canvas stays sixteen rows in a taller
 window; without the event it is a taller canvas with sixteen rows of dump and
 blank space under them.
 
-Highlighting -- the reason to build a viewer instead of running `xxd` -- is not
-here yet, and neither is pasted input. This is the navigation.
+**Highlighting is vim's visual mode, and that is not a decoration.** `v` marks
+from the cursor, `V` marks whole rows, every arrow and every click moves the
+far end, and one of `1`-`6` paints what is marked. Nothing else in the program
+needed a keyboard gesture with a *state* in it, and the alternatives were both
+worse: `Shift`-arrows extend without a mode but say nothing about what a mouse
+click means while they are held, and `Ctrl-Shift-V` -- the shape that would
+have mimicked vim's third mode -- is the paste binding of every terminal
+emulator on this machine and never arrives. `v` and `V` are plain letters,
+which no terminal intercepts and no modifier report is needed for, and the
+canvas has focus so nothing else wants them.
+
+The mouse extends the mark for free, and that is worth saying because it is not
+a feature that was written: a click already goes through
+[`moveTo`](#moveTo), the mark's far end *is* the cursor, so a click while
+marking moves it. What is not free is dragging -- the binding forwards
+`evMouseDown` and nothing else, so there is no press-move-release to hear.
+
+Pasted input is still not here.
 
 -}
 
@@ -228,8 +244,42 @@ type alias Model =
     , rows : Int
     , browsing : Maybe { path : Path, entries : Array Entry }
     , recent : Array String
+    -- What the user has painted, oldest first, and the range being dragged
+    -- out. Both are offsets into *this* file, so opening another one drops
+    -- them; closing the window drops the whole model, which is the rule every
+    -- tool here follows.
+    , highlights : Array Highlight
+    , marking : Maybe Marking
     , message : String
     }
+
+
+{-| A range of the file the user has painted, and which of the six inks they
+painted it with. Half open, like every range in this file.
+
+They are kept in the order they were made and the *last* one wins wherever two
+overlap, which is the whole of the overlap policy. The alternative -- splitting
+the older range around the newer as it is painted -- needs an answer to what
+happens when the newer one is taken off again, and there is no answer to that
+a person would predict. Paint over something and then take the paint off is
+one they would.
+-}
+type alias Highlight =
+    { start : Int, end : Int, ink : Int }
+
+
+{-| The mark being dragged out: where it started, and whether it counts in
+bytes or in rows. The other end is not stored, because the other end is the
+*cursor* -- so every arrow key, every page, every click and every jump to an
+offset extends the mark without any of them knowing that it does.
+-}
+type alias Marking =
+    { anchor : Int, grain : Grain }
+
+
+type Grain
+    = ByByte
+    | ByRow
 
 
 type alias File =
@@ -275,6 +325,8 @@ init permission =
     , rows = openRows
     , browsing = Nothing
     , recent = []
+    , highlights = []
+    , marking = Nothing
     , message = ""
     }
 
@@ -360,6 +412,22 @@ update ports event model =
                 Just _ ->
                     { model = model, command = Tui.dialog ports (gotoDialog model) }
 
+        Tui.Command "hex.mark" ->
+            mark ByByte model
+
+        Tui.Command "hex.markRows" ->
+            mark ByRow model
+
+        Tui.Command "hex.unpaint" ->
+            unpaint model
+
+        Tui.Command "hex.clear" ->
+            if Array.isEmpty model.highlights then
+                still { model | message = "Nothing is highlighted." }
+
+            else
+                still { model | highlights = [], marking = Nothing, message = "" }
+
         Tui.Command "hex.top" ->
             moveTo 0 model
 
@@ -377,6 +445,21 @@ update ports event model =
 
             else if closed.id == gotoDialogId then
                 answerGoto closed model
+
+            else
+                still model
+
+        -- The six colours are one menu entry each and one key each, so they
+        -- are one command each with the ink's number on the end rather than
+        -- six branches saying the same thing.
+        Tui.Command cmd ->
+            if String.startsWith inkCommand cmd then
+                when inkOf (String.dropFirst (String.count inkCommand) cmd) is
+                    Just index ->
+                        paintWith index model
+
+                    Nothing ->
+                        still model
 
             else
                 still model
@@ -416,6 +499,9 @@ receive ports msg model =
                             , cursor = 0
                             , chunk = { start = 0, bytes = [] }
                             , wanted = Nothing
+                            -- An offset means nothing in a different file.
+                            , highlights = []
+                            , marking = Nothing
                             , browsing = Nothing
                             , recent = remember (Path.toPosixString it.path) model.recent
                             , message =
@@ -448,7 +534,7 @@ receive ports msg model =
             still { model | message = reason }
 
 
--- MOVING
+-- KEYS
 
 
 pressKey : String -> Model -> Step
@@ -489,8 +575,202 @@ pressKey key model =
                 "Ctrl-End" ->
                     moveTo (file.size - 1) model
 
-                _ ->
-                    still model
+                -- vim's two visual modes, and vim's answer to pressing the
+                -- same one twice.
+                "v" ->
+                    mark ByByte model
+
+                "V" ->
+                    mark ByRow model
+
+                "Esc" ->
+                    when model.marking is
+                        Just _ ->
+                            still { model | marking = Nothing, message = "" }
+
+                        Nothing ->
+                            still model
+
+                "d" ->
+                    unpaint model
+
+                other ->
+                    when inkOf other is
+                        Just index ->
+                            paintWith index model
+
+                        Nothing ->
+                            still model
+
+
+-- HIGHLIGHTING
+
+
+{-| The prefix the six menu entries share. One command each rather than one
+command with an argument, because a `MenuItem`'s `cmd` is a string and this is
+what a string with a number on the end is for.
+
+The number on the end is the one on the *key cap* -- `hex.ink3` is what `3`
+does -- so that both ends of this go through [`inkOf`](#inkOf) and there is
+only one place that knows the six are numbered from one and indexed from zero.
+The first version of this put the index on the end instead, and the menu
+painted every range one colour to the left of the one it named.
+-}
+inkCommand : String
+inkCommand =
+    "hex.ink"
+
+
+{-| `"3"` is the third ink, which is index two. Anything else -- a letter, a
+seventh colour -- is not an ink at all, which is what makes this safe to run
+over every key the canvas is sent.
+-}
+inkOf : String -> Maybe Int
+inkOf text =
+    when String.toInt text is
+        Just number ->
+            if number >= 1 && number <= Array.length Theme.highlightNames then
+                Just (number - 1)
+
+            else
+                Nothing
+
+        Nothing ->
+            Nothing
+
+
+{-| Start a mark, change its grain, or -- if it is already this grain -- stop
+it. The same key that starts it stops it, which is the only way out of a mode
+somebody finds without being told about it; `v` then `V` keeps the anchor and
+widens to rows, which is what vim does with the same two keys.
+-}
+mark : Grain -> Model -> Step
+mark grain model =
+    when model.file is
+        Nothing ->
+            still { model | message = "Nothing is open." }
+
+        Just _ ->
+            when model.marking is
+                Just marking ->
+                    if marking.grain == grain then
+                        still { model | marking = Nothing, message = "" }
+
+                    else
+                        still { model | marking = Just { marking | grain = grain } }
+
+                Nothing ->
+                    still
+                        { model
+                            | marking = Just { anchor = model.cursor, grain = grain }
+                            , message = ""
+                        }
+
+
+{-| What is marked right now: the anchor and the cursor, in whichever order the
+user put them, snapped out to whole rows if the mark is a row mark.
+
+Clamped to the end of the file, because the count in the status line is a
+number the user will read and `V` on the last row of a file would otherwise
+claim sixteen bytes that are not there.
+-}
+markedRange : Model -> Maybe Range
+markedRange model =
+    when model.marking is
+        Nothing ->
+            Nothing
+
+        Just marking ->
+            let
+                low =
+                    min marking.anchor model.cursor
+
+                high =
+                    max marking.anchor model.cursor
+
+                raw =
+                    when marking.grain is
+                        ByByte ->
+                            { start = low, end = high + 1 }
+
+                        ByRow ->
+                            { start = rowStart low, end = rowStart high + bytesPerRow }
+
+                size =
+                    when model.file is
+                        Just file ->
+                            file.size
+
+                        Nothing ->
+                            0
+            in
+            Just { start = raw.start, end = min size raw.end }
+
+
+paintWith : Int -> Model -> Step
+paintWith index model =
+    when markedRange model is
+        Nothing ->
+            still { model | message = "Nothing is marked -- press v, move, then a number." }
+
+        Just range ->
+            still
+                { model
+                    | highlights =
+                        model.highlights
+                            ++ [ { start = range.start, end = range.end, ink = index } ]
+                    , marking = Nothing
+                    , message = ""
+                }
+
+
+unpaint : Model -> Step
+unpaint model =
+    when topmostAt model model.cursor is
+        Nothing ->
+            still { model | message = "No highlight under the cursor." }
+
+        Just index ->
+            still { model | highlights = Array.remove index model.highlights, message = "" }
+
+
+{-| Which highlight the byte at this offset belongs to, by *index* -- the last
+one that covers it, since the last one painted is the one on top. The index
+rather than the highlight itself, because both callers want something else:
+one wants its ink and the other wants to take it out of the array.
+-}
+topmostAt : Model -> Int -> Maybe Int
+topmostAt model offset =
+    Array.indexedFoldl
+        (\index highlight found ->
+            if offset >= highlight.start && offset < highlight.end then
+                Just index
+
+            else
+                found
+        )
+        Nothing
+        model.highlights
+
+
+inkAt : Model -> Int -> Maybe Int
+inkAt model offset =
+    topmostAt model offset
+        |> Maybe.andThen (\index -> Array.get index model.highlights)
+        |> Maybe.map (\highlight -> highlight.ink)
+
+
+within : Maybe Range -> Int -> Bool
+within range offset =
+    when range is
+        Just it ->
+            offset >= it.start && offset < it.end
+
+        Nothing ->
+            False
+
+
+-- MOVING AROUND
 
 
 {-| A click on the hex column and a click on the printable one pick the same
@@ -1089,8 +1369,58 @@ menu =
             , Separator
             , Item { title = "~T~op of file", cmd = "hex.top", key = "", shortcut = "Ctrl-Home" }
             , Item { title = "~E~nd of file", cmd = "hex.end", key = "", shortcut = "Ctrl-End" }
+            , Separator
+            , SubMenu
+                { title = "~H~ighlight"
+                , key = ""
+                , items = highlightMenu
+                }
             ]
         }
+
+
+{-| Every entry here names a key and binds none, and that is the same rule the
+calculator's keypad follows from the other side. A `key` on a menu item is an
+Alt- accelerator, and the canvas has focus and eats plain letters, so binding
+`v` here would either do nothing or take the letter away from the thing it is
+for. The `shortcut` column is text: it says what to press, and pressing it goes
+to the canvas, where [`pressKey`](#pressKey) is what actually answers.
+
+So the menu is how somebody *finds* the mode, and the keys are how somebody
+uses it. Neither is a second implementation of the other -- both ends run the
+same four functions.
+-}
+highlightMenu : Array MenuItem
+highlightMenu =
+    [ Item { title = "~M~ark from here", cmd = "hex.mark", key = "", shortcut = "v" }
+    , Item { title = "Mark whole ~r~ows", cmd = "hex.markRows", key = "", shortcut = "V" }
+    , Separator
+    ]
+        ++ Array.indexedMap inkItem Theme.highlightNames
+        ++ [ Separator
+           , Item { title = "R~e~move under cursor", cmd = "hex.unpaint", key = "", shortcut = "d" }
+           , Item { title = "~C~lear all", cmd = "hex.clear", key = "", shortcut = "" }
+           ]
+
+
+inkItem : Int -> String -> MenuItem
+inkItem index name =
+    Item
+        { title = "~" ++ String.fromInt (index + 1) ++ "~  " ++ name
+        , cmd = inkCommand ++ String.fromInt (index + 1)
+        , key = ""
+        , shortcut = String.fromInt (index + 1)
+        }
+
+
+inkName : Int -> String
+inkName index =
+    when Array.get index Theme.highlightNames is
+        Just name ->
+            name
+
+        Nothing ->
+            String.fromInt (index + 1)
 
 
 -- VIEW
@@ -1290,14 +1620,20 @@ asciiCells inks model file base =
             else
                 when byteAt model offset is
                     Just code ->
-                        if offset == model.cursor then
-                            Tui.on inks.selected.bg (Tui.ink inks.selected.fg (Ascii.glyph code))
+                        when face inks model offset is
+                            -- A byte wearing something wears it whether or not
+                            -- it is printable: `dim` is what a byte nobody has
+                            -- said anything about looks like, and a
+                            -- highlighted one has been.
+                            Just pair ->
+                                Tui.on pair.bg (Tui.ink pair.fg (Ascii.glyph code))
 
-                        else if code >= 32 && code < 127 then
-                            Tui.plain (Ascii.glyph code)
+                            Nothing ->
+                                if code >= 32 && code < 127 then
+                                    Tui.plain (Ascii.glyph code)
 
-                        else
-                            Tui.ink inks.dim (Ascii.glyph code)
+                                else
+                                    Tui.ink inks.dim (Ascii.glyph code)
 
                     Nothing ->
                         Tui.ink inks.dim " "
@@ -1331,11 +1667,41 @@ ones that do and for the tests.
 -}
 paint : Inks -> Model -> Int -> String -> Span
 paint inks model offset text =
+    when face inks model offset is
+        Just pair ->
+            Tui.on pair.bg (Tui.ink pair.fg text)
+
+        Nothing ->
+            Tui.plain text
+
+
+{-| What a byte is wearing, and the order the three of them win in. All three
+can be on the screen at once -- a mark being dragged across an old highlight,
+with the cursor somewhere inside it -- and the order is forced by what each one
+is *for*:
+
+The cursor is on top because it is the answer to "where am I", and a mode that
+hid it would be a mode you could get lost in. The mark is next because it is
+the thing being decided; the highlights are what has already been decided, and
+a decision in progress is allowed to cover one that is finished. Underneath,
+nothing: plain text, so that most of a dump is the colour of the window and the
+paint means something.
+
+Both columns read this, which is the point of it being a function rather than
+two similar `if`s -- the hex pair and its printable character being the same
+colour is the only thing that says they are the same byte.
+-}
+face : Inks -> Model -> Int -> Maybe { fg : Hue, bg : Hue }
+face inks model offset =
     if offset == model.cursor then
-        Tui.on inks.selected.bg (Tui.ink inks.selected.fg text)
+        Just inks.selected
+
+    else if within (markedRange model) offset then
+        Just inks.marking
 
     else
-        Tui.plain text
+        inkAt model offset
+            |> Maybe.andThen (\index -> Array.get index inks.highlights)
 
 
 offsetText : Int -> String
@@ -1408,14 +1774,86 @@ status inks model =
         [ Tui.ink inks.alert model.message ]
 
     else
-        when model.file is
-            Nothing ->
-                [ Tui.plain "" ]
-
-            Just _ ->
-                when byteAt model model.cursor is
-                    Just code ->
-                        [ Tui.plain (Ascii.naming code) ]
+        when model.marking is
+            -- A mode with no sign of itself on the screen is a program that
+            -- has stopped answering, so the line the byte's name lives on says
+            -- what is marked and how to get out of it instead. It is also the
+            -- second half of the lesson the calculator taught: the hint is
+            -- here for as long as the mode is, rather than shown once and
+            -- wiped by the next keystroke.
+            Just marking ->
+                when markedRange model is
+                    Just range ->
+                        markLine inks marking range
 
                     Nothing ->
                         [ Tui.plain "" ]
+
+            Nothing ->
+                when model.file is
+                    Nothing ->
+                        [ Tui.plain "" ]
+
+                    Just _ ->
+                        when byteAt model model.cursor is
+                            Just code ->
+                                [ Tui.plain (Ascii.naming code) ] ++ inkNote inks model
+
+                            Nothing ->
+                                [ Tui.plain "" ]
+
+
+markLine : Inks -> Marking -> Range -> Array Span
+markLine inks marking range =
+    [ Tui.on inks.marking.bg
+        (Tui.ink inks.marking.fg
+            (when marking.grain is
+                ByByte ->
+                    " MARK "
+
+                ByRow ->
+                    " MARK ROWS "
+            )
+        )
+    , Tui.plain
+        ("  "
+            ++ offsetText range.start
+            ++ "-"
+            ++ offsetText (max range.start (range.end - 1))
+            ++ "  "
+            ++ String.fromInt (range.end - range.start)
+            ++ (if range.end - range.start == 1 then
+                    " byte"
+
+                else
+                    " bytes"
+               )
+        )
+    , Tui.ink inks.dim
+        ("   1-"
+            ++ String.fromInt (Array.length Theme.highlightNames)
+            ++ " paint   Esc cancel"
+        )
+    ]
+
+
+{-| The swatch is the colour itself rather than its name in the theme's words,
+because the name is what the menu says and the colour is what the screen says,
+and the byte under the cursor is the one place both are available at once.
+-}
+inkNote : Inks -> Model -> Array Span
+inkNote inks model =
+    when inkAt model model.cursor is
+        Nothing ->
+            []
+
+        Just index ->
+            [ Tui.plain "  "
+            , when Array.get index inks.highlights is
+                Just pair ->
+                    Tui.on pair.bg (Tui.ink pair.fg (" " ++ inkName index ++ " "))
+
+                Nothing ->
+                    Tui.plain ""
+            , Tui.ink inks.dim "  d removes it"
+            ]

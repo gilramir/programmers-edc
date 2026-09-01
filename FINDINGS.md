@@ -3266,3 +3266,81 @@ the screen shows.**
 
 `Tool/Hex.gren`'s workaround is gone, and with it the last known bug on the
 list before publishing.
+
+## The mode a terminal will let you have: `v`, and the keystroke that never arrives
+
+predc's hex viewer needed a gesture with a state in it -- mark a range, move,
+paint it -- which is the first thing in this program that is not one keystroke
+answered by one change. The obvious shapes were `Shift`-arrows and vim's
+`Ctrl-v`, and the question asked of the binding was whether it could tell
+`Ctrl-v` from `Ctrl-V` at all.
+
+It can, and that turned out to be the less useful half of the answer. A
+throwaway canvas that echoes `keyName(event)` for whatever is typed at it,
+driven through the pty harness with the escape sequences written by hand:
+
+| typed                       | bytes            | reaches the model as |
+| --------------------------- | ---------------- | -------------------- |
+| `v`                         | `v`              | `"v"`                |
+| `V`                         | `V`              | `"V"`                |
+| Ctrl-v                      | `0x16`           | `"Ctrl-V"`           |
+| Ctrl-v, modifyOtherKeys     | `\e[27;5;118~`   | `"Ctrl-V"`           |
+| Ctrl-Shift-v, modifyOtherKeys | `\e[27;6;118~` | `"Ctrl-Shift-V"`     |
+| Ctrl-Shift-v, kitty         | `\e[118;6u`      | `"Ctrl-Shift-V"`     |
+| Shift-Right                 | `\e[1;2C`        | `"Shift-Right"`      |
+| Ctrl-Shift-Right            | `\e[1;6C`        | `"Ctrl-Shift-Right"` |
+
+Two things in that table are worth keeping. **The case of the letter is not
+what carries the distinction**: `TKey` uppercases letter keys on purpose, so
+that Ctrl-A and Ctrl-a are one key in a shortcut table, and `keys.h` names the
+modifier set instead. Plain Ctrl-v is `"Ctrl-V"` and `"Ctrl-v"` is a string the
+model will never be handed. And **the binding is faithful about modifiers it is
+given** -- the `Shift-` prefix is there, in every combination, once the
+terminal has said so.
+
+Which is the trap. *Whether a name is right* and *whether that keystroke can be
+typed* are different questions, and only the second one decides a gesture. For
+`Ctrl-Shift-V` the second answer is no, twice over: it needs the terminal to be
+reporting modifiers at all -- TVision asks, with `\e[>4;1m` and the kitty
+query in `termio.cpp`, and a terminal is free to decline -- and, on every
+emulator on this machine, it is the *paste* binding, which means it is consumed
+before any program sees it. The most vim-like shape available was the one
+keystroke on the keyboard least likely to arrive.
+
+So the tool uses vim's other two: `v` marks by byte, `V` marks by row. Plain
+letters need no modifier report, no terminal cooperation and no negotiation
+with a window manager; a focused canvas already eats every key it is sent, and
+nothing else in the tool wanted a letter. **The gesture a terminal program can
+rely on is the one that needs nothing of the terminal.**
+
+### The mouse came with it, because the far end of the mark is the cursor
+
+The mark stores an anchor and a grain, and *not* the other end -- the other end
+is `model.cursor`. Every arrow key, every `PgDn`, every click on the dump and
+every Go To already move the cursor, so every one of them extends the mark
+without a line of code knowing that it does. "The mouse should move the far end
+too" was a feature that needed nothing written and one test to prove.
+
+That is the shape to reach for: **store what the second end is, not where it
+is.** A mark holding two offsets would have needed every movement path in the
+file to remember to update the second one, and the failure mode of forgetting
+is a mark that quietly stops following.
+
+What it does *not* buy is dragging. `JsCanvas::handleEvent` forwards
+`evMouseDown` and nothing else (`views.cc:357`), so there is no
+press-move-release for a model to hear, and `Tui.Event` has no motion variant
+to hear it with. Turbo Vision's own idiom for a drag is `mouseEvent(event,
+evMouseMove | evMouseAuto)` in a loop inside `handleEvent`, which is the nested
+event loop this package refuses everywhere else -- so if this is ever added, it
+should be a plain forward of motion-while-a-button-is-down, not the loop. It is
+a second entry for the sweep that starts with the unbound clipboard.
+
+### And one off-by-one that only the menu could have
+
+The six colours are a key each (`1`-`6`) and a menu entry each, and the menu
+entry's `cmd` first carried the *index* while the key carried the number on the
+cap. Both ends went through the same parser, which subtracted one. Every colour
+picked from the menu came out as the one to its left, and every colour picked
+with a key was right. Two ends of the same command have to agree on what the
+number in it means, and the cheapest way to make them agree is to give them the
+same number: `hex.ink3` is what `3` does.

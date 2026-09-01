@@ -997,6 +997,15 @@ drove that dialog past the fault without seeing it, because a pty test reads a
 screen and a screen does not say where the caret is. `drive_dir.py` now types
 into the field, which is the only kind of assertion that can.
 
+**One gap a consumer has since walked into.** The binding forwards
+`evMouseDown` and no other mouse event, so a model can hear a click and cannot
+hear a drag -- which predc's hex viewer wanted for extending a highlight and
+worked around by making the far end of its mark the cursor, so that a click
+extends it. Adding it means forwarding motion-while-a-button-is-down as its own
+event, *not* Turbo Vision's own idiom of a nested `mouseEvent` loop inside
+`handleEvent`. It goes on the same list as the unbound clipboard
+(`THardwareInfo::setClipboardText`), and FINDINGS has both.
+
 **One known limitation**, written up under gap (7) and in FINDINGS:
 `TMenuView::execute` runs a nested event loop, so the *menu bar* stops the
 program while a pull-down is open. Nothing in this package is built on it —

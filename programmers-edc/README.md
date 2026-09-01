@@ -90,6 +90,25 @@ Two things about it are temporary, and both are temporary for the same reason
     src/Config.gren   the one thing predc remembers between runs
     test/drive_*.py   one pty driver per tool, plus the shell and the themes
 
+## Highlighting a hex dump
+
+`v` marks from the cursor, `V` marks whole rows, and one of `1`-`6` paints what
+is marked; `Esc` drops the mark and `d` takes the paint off the range under the
+cursor. Everything that moves the cursor -- arrows, `PgDn`, `Ctrl-End`, a click
+on either column, **Bytes | Go to offset** -- moves the far end of the mark,
+because the far end *is* the cursor. **Bytes | Highlight** is the same six
+things on a menu, for finding them the first time.
+
+The keys are vim's two visual modes rather than `Shift`-arrows or vim's third
+one, and that is a fact about terminals rather than a preference:
+`Ctrl-Shift-V` is the paste binding of every terminal emulator worth naming and
+never reaches a program at all. FINDINGS has the measurements.
+
+Ranges are offsets into the file that is open, so opening another one drops
+them, and closing the window drops the whole tool the way it drops every other
+one here. Where two overlap the newer one shows; taking it off puts the older
+one back.
+
 ## Colors
 
 Three schemes, on **Tools | Colors**: Borland, Dark and Gren. The choice is

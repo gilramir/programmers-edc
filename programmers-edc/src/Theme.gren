@@ -1,4 +1,4 @@
-module Theme exposing (Inks, Name(..), all, decode, encode, inks, next, palette, title)
+module Theme exposing (Inks, Name(..), all, decode, encode, highlightNames, inks, next, palette, title)
 
 {-| predc's colour schemes, and the two halves every one of them has.
 
@@ -75,9 +75,9 @@ next name =
 -- WHAT THE TOOLS PAINT WITH
 
 
-{-| The four things every canvas in this program needs to say, named for what
-they mean rather than for what colour they are -- which is the entire point,
-since what colour they are is what a theme changes.
+{-| The things every canvas in this program needs to say, named for what they
+mean rather than for what colour they are -- which is the entire point, since
+what colour they are is what a theme changes.
 
   - `ruler` -- a column header, an offset, a label on a value: the scaffolding
     around the data, and quieter than it.
@@ -87,6 +87,19 @@ since what colour they are is what a theme changes.
   - `selected` -- the byte, cell or row the caret is on, painted rather than
     merely pointed at, because whether a terminal shows its cursor at all is
     the terminal's business.
+  - `marking` -- a range the user is dragging out and has not committed to.
+    One colour, and it has to differ from `selected` *and* from all six below,
+    because all three can be on screen at once: the pending range, the cursor
+    inside it, and the highlights it is being dragged across.
+  - `highlights` -- the six a hex dump range can be painted, in the order the
+    number keys pick them and [`highlightNames`](#highlightNames) names them.
+
+The last two are the hex viewer's, and they are here rather than in it for the
+reason the other four are: a colour a *ground* has to be chosen against belongs
+beside the ground. Six is a count, not a limit found by trying: it is how many
+backgrounds a sixteen-colour terminal has that a person can still tell apart
+in a glance at a grid, once the ground, the selection and the marker are spoken
+for.
 
 -}
 type alias Inks =
@@ -94,7 +107,19 @@ type alias Inks =
     , dim : Hue
     , alert : Hue
     , selected : { fg : Hue, bg : Hue }
+    , marking : { fg : Hue, bg : Hue }
+    , highlights : Array { fg : Hue, bg : Hue }
     }
+
+
+{-| What the six are *called*, which is the same in every scheme because the
+name is the meaning and the hue is the theme's answer to it. A menu entry and a
+number key both read this, so a theme that picked a green for slot one would be
+caught by the label rather than by the eye.
+-}
+highlightNames : Array String
+highlightNames =
+    [ "Red", "Green", "Yellow", "Magenta", "Cyan", "Grey" ]
 
 
 inks : Name -> Inks
@@ -108,6 +133,11 @@ inks name =
             , dim = Cyan
             , alert = LightRed
             , selected = { fg = Blue, bg = LightGray }
+            -- A lighter blue than the window, so a range being dragged out
+            -- reads as part of the same surface until it is committed to a
+            -- colour that does not.
+            , marking = { fg = Black, bg = LightBlue }
+            , highlights = darkGrounds
             }
 
         Dark ->
@@ -118,6 +148,11 @@ inks name =
             , dim = Cyan
             , alert = LightRed
             , selected = { fg = Black, bg = LightGray }
+            -- `Blue` is free here in a way it is not on Borland's blue, and it
+            -- is the one dark ground that reads as a marker rather than as one
+            -- more colour in the set.
+            , marking = { fg = White, bg = Blue }
+            , highlights = darkGrounds
             }
 
         Gren ->
@@ -128,7 +163,32 @@ inks name =
             , dim = DarkGray
             , alert = Red
             , selected = { fg = White, bg = Blue }
+            -- Blue is the selection here, so the marker is the other thing a
+            -- light ground has always used for this: a highlighter pen.
+            , marking = { fg = Black, bg = Yellow }
+            , highlights = darkGrounds
             }
+
+
+{-| The same six in all three schemes, which is not a shortcut. Every one of
+them is a *dark* ground with light text on it, and that is the one description
+that holds on all three of this program's grounds at once -- Turbo Vision's
+blue, near-black, and paper. The bright halves of the sixteen are the ones that
+change meaning with the ground: `Yellow` is a highlighter on paper and a glare
+on near-black, and `LightGray` is already the selection twice over.
+
+`Cyan` takes black text rather than white. It is the lightest of the six, and
+the only one where the eye picks the darker of the two.
+-}
+darkGrounds : Array { fg : Hue, bg : Hue }
+darkGrounds =
+    [ { fg = White, bg = Red }
+    , { fg = White, bg = Green }
+    , { fg = White, bg = Brown }
+    , { fg = White, bg = Magenta }
+    , { fg = Black, bg = Cyan }
+    , { fg = White, bg = DarkGray }
+    ]
 
 
 -- WHAT THE PACKAGE PAINTS WITH

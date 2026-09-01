@@ -86,6 +86,18 @@ def menu(app, item, entry):
     app.click(at + 3, entry + 2, settle=0.9)
 
 
+def bytes_menu(app, keys, settle=0.9):
+    """Open the Bytes pull-down and drive it with its own hot keys.
+
+    Clicking down a nested submenu means knowing where the second box lands;
+    typing the letters the entries underline does not, and it checks the
+    letters at the same time."""
+    bar = app.render().split("\n")[0]
+    at = bar.index("Bytes")
+    app.click(at + 1, 1, settle=0.6)
+    app.send(keys, settle=settle)
+
+
 def dump_rows(app):
     """How many rows of the window are dump, counted rather than assumed --
     which is the whole point of the resize checks."""
@@ -342,7 +354,129 @@ def main():
     check("and grows back to sixteen rows", dump_rows(app) == 16, dump_rows(app))
     go_to(app, "0")
 
-    # 13. A file smaller than the window, and one with nothing in it at all.
+    # 13. Highlighting, which is vim's visual mode with sixteen bytes to a
+    #     row: `v` marks, the *cursor* is the far end of the mark, and one of
+    #     `1`-`6` paints what is marked. The colours are Borland's -- the
+    #     marker on 104, red on 41, green on 42 -- because this driver runs
+    #     with an empty HOME and that is the scheme predc opens in.
+    app.send(b"4", settle=0.6)
+    check("a colour with nothing marked says what is missing",
+          "Nothing is marked" in status(app), status(app))
+
+    app.send(b"v", settle=0.6)
+    check("v starts a mark, and the mark is one byte long",
+          status(app).startswith("MARK") and "1 byte " in status(app), status(app))
+    check("and the way out of the mode stays on the screen while the mode is",
+          "Esc cancel" in status(app), status(app))
+
+    app.send(b"\x1b[C" * 3, settle=0.7)
+    check("the arrows move the far end", "4 bytes" in status(app), status(app))
+    display = app.display()
+    check("the marked bytes are painted in both columns",
+          display.bg_at(HEX_AT, FIRST_ROW) == 104
+          and display.bg_at(ASCII_AT, FIRST_ROW) == 104,
+          f"hex={display.bg_at(HEX_AT, FIRST_ROW)} "
+          f"ascii={display.bg_at(ASCII_AT, FIRST_ROW)}")
+    check("and the cursor shows through the mark, so the mode cannot lose it",
+          display.bg_at(HEX_AT + 9, FIRST_ROW) == 47,
+          str(display.bg_at(HEX_AT + 9, FIRST_ROW)))
+
+    app.send(b"1", settle=0.6)
+    display = app.display()
+    check("a number paints the mark and ends the mode",
+          not status(app).startswith("MARK"), status(app))
+    check("the range keeps its colour in both columns",
+          display.bg_at(HEX_AT, FIRST_ROW) == 41
+          and display.bg_at(ASCII_AT, FIRST_ROW) == 41,
+          f"hex={display.bg_at(HEX_AT, FIRST_ROW)} "
+          f"ascii={display.bg_at(ASCII_AT, FIRST_ROW)}")
+    check("and the line under the dump names the colour the byte is wearing",
+          "Red" in status(app), status(app))
+
+    app.send(b"\x1b[C", settle=0.6)
+    check("the byte the cursor moved off is painted too, now nothing covers it",
+          app.display().bg_at(HEX_AT + 9, FIRST_ROW) == 41,
+          str(app.display().bg_at(HEX_AT + 9, FIRST_ROW)))
+    check("and a byte outside the range wears nothing",
+          "Red" not in status(app), status(app))
+
+    #     `V` is the same mark snapped out to whole rows, which is the shape a
+    #     hex dump is actually read in.
+    app.send(b"\x1b[B", settle=0.6)
+    app.send(b"V", settle=0.6)
+    check("V marks the whole row the cursor is on",
+          status(app).startswith("MARK ROWS") and "16 bytes" in status(app), status(app))
+    app.send(b"\x1b[B", settle=0.6)
+    check("and grows a row at a time", "32 bytes" in status(app), status(app))
+    app.send(b"2", settle=0.6)
+    display = app.display()
+    check("both rows are painted end to end",
+          display.bg_at(HEX_AT, FIRST_ROW + 1) == 42
+          and display.bg_at(ASCII_AT + 15, FIRST_ROW + 2) == 42,
+          f"first={display.bg_at(HEX_AT, FIRST_ROW + 1)} "
+          f"last={display.bg_at(ASCII_AT + 15, FIRST_ROW + 2)}")
+    check("and the offset column is not: it is the ruler, not the data",
+          display.bg_at(LEFT, FIRST_ROW + 1) != 42,
+          str(display.bg_at(LEFT, FIRST_ROW + 1)))
+
+    #     The mouse moves the far end as well, and that is not a feature that
+    #     was written: a click moves the cursor, and the cursor *is* the far
+    #     end of the mark.
+    app.send(b"\x1b[1;5H", settle=0.7)
+    check("Ctrl-Home is the top of the file", where(app).startswith("Offset 00000000"),
+          where(app))
+    app.send(b"v", settle=0.6)
+    click_at(app, ASCII_AT + 5, FIRST_ROW)
+    check("a click while marking extends the mark rather than ending it",
+          "6 bytes" in status(app), status(app))
+
+    app.send(b"\x1b", settle=0.6)
+    check("Esc drops the mark", "MARK" not in status(app), status(app))
+    check("and paints nothing",
+          app.display().bg_at(HEX_AT + 15, FIRST_ROW) not in (104, 41, 42),
+          str(app.display().bg_at(HEX_AT + 15, FIRST_ROW)))
+
+    app.send(b"\x1b[H", settle=0.6)
+    check("Home is back inside the first range", "Red" in status(app), status(app))
+    app.send(b"d", settle=0.6)
+    check("d takes the paint off the range under the cursor",
+          "Red" not in status(app), status(app))
+    check("and the bytes go back to plain",
+          app.display().bg_at(HEX_AT + 3, FIRST_ROW) not in (41, 104),
+          str(app.display().bg_at(HEX_AT + 3, FIRST_ROW)))
+    check("while the range it was not asked about is untouched",
+          app.display().bg_at(HEX_AT, FIRST_ROW + 1) == 42,
+          str(app.display().bg_at(HEX_AT, FIRST_ROW + 1)))
+
+    #     An offset means nothing in another file, so loading one drops them.
+    #     Loading the *same* one again is the same thing and easier to assert.
+    open_file(app, os.path.join(work, "sample.bin"))
+    check("opening a file drops every highlight in the old one",
+          app.display().bg_at(HEX_AT, FIRST_ROW + 1) != 42,
+          str(app.display().bg_at(HEX_AT, FIRST_ROW + 1)))
+
+    #     The menu is the other half of it. It names every key and binds none
+    #     of them -- the canvas has focus and eats plain letters, so a `v`
+    #     bound here would take the letter away from the thing it is for --
+    #     and both ends run the same four functions.
+    bytes_menu(app, b"h")
+    screen = app.render()
+    check("the Highlight submenu lists the colours and the keys that pick them",
+          "Green" in screen and "Mark from here" in screen, screen)
+    app.send(b"m", settle=0.7)
+    check("Mark from here starts the same mark v does",
+          status(app).startswith("MARK"), status(app))
+    app.send(b"\x1b[C" * 2, settle=0.6)
+    bytes_menu(app, b"h3", settle=1.0)
+    check("and a colour off the menu paints it",
+          app.display().bg_at(HEX_AT, FIRST_ROW) == 43,
+          str(app.display().bg_at(HEX_AT, FIRST_ROW)))
+    bytes_menu(app, b"hc", settle=1.0)
+    check("Clear all takes every highlight off",
+          app.display().bg_at(HEX_AT, FIRST_ROW) != 43,
+          str(app.display().bg_at(HEX_AT, FIRST_ROW)))
+
+    # 14. A file smaller than the window, and one with nothing in it at all.
     open_file(app, os.path.join(work, "small.bin"))
     check("a small file is one row", rows(app)[0].startswith("00000000  48 65 6C 6C 6F"),
           rows(app)[0])
@@ -361,7 +495,7 @@ def main():
     check("and draws no rows at all", all(row.strip() == "" for row in rows(app)),
           repr(rows(app)[0]))
 
-    # 14. It is a window like any other: closing it forgets it, and the menu
+    # 15. It is a window like any other: closing it forgets it, and the menu
     #     it brought with it goes too.
     app.send(ALT_F3, settle=1.2)
     check("Alt-F3 closed the window", "Hex Dump" not in app.render(), app.render())
