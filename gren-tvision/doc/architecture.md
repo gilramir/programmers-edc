@@ -273,12 +273,14 @@ Out of Gren, as JSON on `tuiOut`:
 | `setEnabled` | `Tui.setEnabled` | greys a command everywhere it appears |
 | `setEditorText` / `readEditor` | the editor | the only pair that carries a document |
 | `searchEditor` | find/replace | answered by `searched` |
+| `copyToClipboard` | `Tui.copyToClipboard` | answered by `copied`, which says whether the system took it |
+| `readClipboard` | `Tui.readClipboard` | a request; answered by `clipboardText`, whenever the clipboard gets round to it |
 | `doubleClickDelay` | `Tui.setDoubleClickDelay` | in PC timer ticks, 1/18.2s |
 | `quit` | `Tui.quit` | restores the terminal and exits |
 
 Back into Gren on `tuiIn`: `command`, `select`, `focus`, `key`, `click`,
-`scroll`, `resized`, `changed`, `edited`, `editorText`, `searched`,
-`dialogClosed`, `windowClosed`. `Tui.Event` is that list, decoded, with
+`scroll`, `resized`, `windowResized`, `changed`, `edited`, `editorText`,
+`searched`, `copied`, `clipboardText`, `dialogClosed`, `windowClosed`. `Tui.Event` is that list, decoded, with
 `Unknown` for anything a future runtime sends that this package does not know.
 
 A `render` is the entire description every time. Working out what changed is

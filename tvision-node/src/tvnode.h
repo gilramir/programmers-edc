@@ -21,6 +21,7 @@
 #define Uses_TDialog
 #define Uses_TEvent
 #define Uses_TEventQueue
+#define Uses_THardwareInfo
 #define Uses_TInputLine
 #define Uses_TFilterValidator
 #define Uses_TValidator

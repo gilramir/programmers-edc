@@ -3356,3 +3356,79 @@ picked from the menu came out as the one to its left, and every colour picked
 with a key was right. Two ends of the same command have to agree on what the
 number in it means, and the cheapest way to make them agree is to give them the
 same number: `hex.ink3` is what `3` does.
+
+## The clipboard, and why it is a request rather than a getter
+
+`THardwareInfo::setClipboardText` and `requestClipboardText`
+(`hardware.h:104`) were the last two functions in the C++ API that nothing in
+this binding reached. They are now `tv.setClipboard(text)` and
+`tv.requestClipboard()`, and on the Gren side
+[`copyToClipboard`](Tui#copyToClipboard) and [`readClipboard`](Tui#readClipboard)
+with a `Copied` and a `ClipboardText` event -- the first thing in this package
+that talks to a program outside it.
+
+**Reading is asynchronous, and that is the whole shape of the API.** On unix
+Turbo Vision gets at the clipboard two ways (`unixcon.cpp:50`): it runs
+`wl-copy`, `xsel`, `xclip` or WSL's `clip.exe` if one of them is there and its
+environment variable is set, and otherwise it asks the *terminal*, with
+`OSC 52`. The first is a subprocess and answers immediately. The second is an
+escape sequence out and an escape sequence back, parsed by the same code that
+parses keystrokes -- so the answer to "what is in the clipboard" can arrive
+several events after the question, and on a terminal that never replies it does
+not arrive at all. A getter would have to block on that. So `readClipboard` is
+a `Cmd` and `ClipboardText` is an `Event`, which is the shape
+[`readEditor`](Tui#readEditor) has for a much weaker reason.
+
+**Writing can half-work, and the model is told.** `setClipboardText` returns
+false when nothing took the text, and both `Copied` and `ClipboardText` carry a
+`Bool` saying whether the system was involved. False is not a failure: the
+binding keeps the last copy in a `std::string` of its own, so copy-and-paste
+inside one program works on a machine with no clipboard at all. What false
+means is that no *other* program will see it, and that is worth a line on a
+status line rather than silence.
+
+### `TClipboard` is twenty lines and the wrong twenty
+
+Turbo Vision has a wrapper for exactly this -- `TClipboard::setText` and
+`requestText` -- and it is not used here. `tclipbrd.cpp` is short enough to
+quote the reason: `requestText` hands whatever it finds to
+`TEventQueue::setPasteText`, which turns the text into *keystrokes* aimed at
+whatever has focus.
+
+That is the right answer for an input line and it already happens without any
+of this: pasting with the terminal's own paste key is a burst of key events,
+which is the `minPasteEventCount` mechanism the calculator found. It is the
+wrong answer for a program that wants the text -- a hex dump viewer cannot be
+typed into. So the accept callback is ours, the local fallback is ours, and
+`TClipboard` is skipped. Note that `requestClipboardText` takes a function
+*reference* rather than a `std::function`, so the callback cannot capture; there
+is one clipboard and one JS callback, so a file-static suffices.
+
+### The reason it is testable is that it is an escape sequence
+
+A clipboard looks like the least testable thing in the library and is one of
+the more testable, because the fallback path is *on the wire*. `drive_clip.py`
+removes `DISPLAY` and `WAYLAND_DISPLAY` from the environment -- without which
+the subprocess path wins and the suite would write to the clipboard of whoever
+ran it -- and then drives both halves through the pty:
+
+  - a copy is `ESC]52;;<base64>BEL` in the byte stream, which the driver
+    decodes and compares against what it typed;
+  - `ESC]60;allowWindowOps BEL` from the driver is a terminal claiming full
+    OSC 52 support (`termio.cpp`, `parseOSC`), and it changes what both halves
+    report without restarting anything;
+  - a paste is then `ESC]52;;?BEL` out, and the driver answers it with a
+    base64'd string of its own, which lands in the field.
+
+No clipboard, no display, no window manager. The one platform note: on macOS
+`pbcopy` has no environment variable guarding it, so the same suite would need
+a different arrangement there.
+
+### And two new variants broke four examples, which is the system working
+
+`Event` is a public union, so adding `Copied` and `ClipboardText` to it stopped
+four programs compiling -- three examples that answer every variant with
+`model` and the demo's event log, which names them all. Every one was a two-line
+fix and every one was found by the compiler in the first build. That is the
+difference between a union and a string: the protocol version exists for the
+runtime, and exhaustiveness is what covers the same skew inside one language.

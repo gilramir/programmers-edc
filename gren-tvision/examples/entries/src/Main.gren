@@ -255,6 +255,12 @@ handleEvent event model =
         EditorText _ ->
             { model = model, command = Cmd.none }
 
+        Copied _ ->
+            { model = model, command = Cmd.none }
+
+        ClipboardText _ ->
+            { model = model, command = Cmd.none }
+
         Unknown _ ->
             { model = model, command = Cmd.none }
 

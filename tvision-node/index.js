@@ -55,6 +55,7 @@ function start(config) {
     onWindowResize: guard(config.onWindowResize),
     onChange: guard(config.onChange),
     onEdit: guard(config.onEdit),
+    onClipboard: guard(config.onClipboard),
   });
 
   const report = (err) => {
@@ -178,6 +179,11 @@ module.exports = {
   overlays: addon.overlays,
 
   screenSize: addon.screenSize,
+
+  // The clipboard, which is a request and an answer rather than a getter:
+  // see the note on requestClipboard() in app.cc.
+  setClipboard: addon.setClipboard,
+  requestClipboard: addon.requestClipboard,
   doubleClickDelay: addon.doubleClickDelay,
   log,
 };

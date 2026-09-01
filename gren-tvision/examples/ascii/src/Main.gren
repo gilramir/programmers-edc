@@ -229,6 +229,12 @@ handleEvent event model =
         EditorText _ ->
             model
 
+        Copied _ ->
+            model
+
+        ClipboardText _ ->
+            model
+
         Unknown _ ->
             model
 

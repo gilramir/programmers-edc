@@ -262,6 +262,20 @@ describe event =
         Searched it ->
             "Searched " ++ it.id ++ " = " ++ String.fromInt it.matches
 
+        Copied it ->
+            "Copied "
+                ++ (if it.toSystem then
+                        "to the system clipboard"
+
+                    else
+                        "here only"
+                   )
+
+        ClipboardText it ->
+            "ClipboardText "
+                ++ String.fromInt (String.count it.text)
+                ++ " chars"
+
         Unknown what ->
             "Unknown " ++ what
 

@@ -99,6 +99,19 @@ Napi::FunctionReference g_onResize;
 Napi::FunctionReference g_onWindowResize;
 Napi::FunctionReference g_onChange;
 Napi::FunctionReference g_onEdit;
+Napi::FunctionReference g_onClipboard;
+
+// What this process last copied, and where the last paste came from.
+//
+// TVision keeps the same fallback in `TClipboard::localText` and we cannot use
+// it: `TClipboard::requestText` hands what it finds to
+// `TEventQueue::setPasteText`, which turns it into *keystrokes* aimed at
+// whatever has focus. That is the right answer for an input line -- and it is
+// already what happens when the user hits their terminal's own paste key -- and
+// the wrong one for a program that wants the text. So the twenty lines of
+// tclipbrd.cpp are reimplemented here around an accept function of our own.
+static std::string g_clipboardLocal;
+static bool g_clipboardFromSystem = false;
 
 // Windows are destroyed wholesale when the application goes away; that is not
 // news anyone needs, and calling into JS from inside the teardown would be a
@@ -1291,7 +1304,8 @@ static void prepare(const Napi::Env &env, const Napi::Value &value)
                           std::make_pair("onResize", &g_onResize),
                           std::make_pair("onWindowResize", &g_onWindowResize),
                           std::make_pair("onChange", &g_onChange),
-                          std::make_pair("onEdit", &g_onEdit)})
+                          std::make_pair("onEdit", &g_onEdit),
+                          std::make_pair("onClipboard", &g_onClipboard)})
         {
         if (!config.Has(binding.first))
             continue;
@@ -1338,6 +1352,9 @@ static void teardown(const Napi::Env &env)
     g_onWindowResize.Reset();
     g_onChange.Reset();
     g_onEdit.Reset();
+    g_onClipboard.Reset();
+    g_clipboardLocal.clear();
+    g_clipboardFromSystem = false;
     g_editNotes.clear();
     g_changeNotes.clear();
     g_lastDeskSize = {0, 0};
@@ -1885,6 +1902,74 @@ static Napi::Value DoubleClickDelay(const Napi::CallbackInfo &info)
     return Napi::Number::New(env, TEventQueue::doubleDelay);
 }
 
+// What the clipboard answered, whenever it answers.
+//
+// `requestClipboardText` takes a function *reference* and not a std::function,
+// so this cannot capture anything and has to be a plain static -- which costs
+// nothing, because there is one clipboard and one callback to hand it to.
+//
+// It can be called from three places and the difference matters to nobody but
+// this comment: straight out of `requestClipboard` when a helper program
+// answered (xclip and friends are read synchronously), out of the input parser
+// a moment later when the *terminal* answered an OSC 52 query, or out of
+// `requestClipboard` again with this process's own last copy when there is no
+// system clipboard at all.
+static void acceptClipboardText(TStringView text)
+{
+    if (g_onClipboard.IsEmpty() || g_hasPendingError)
+        return;
+
+    std::string body = text.data() ? std::string(text.data(), text.size())
+                                   : std::string();
+    Napi::Env env = g_onClipboard.Env();
+    Napi::HandleScope scope(env);
+    callJs(g_onClipboard, {
+                              Napi::String::New(env, body),
+                              Napi::Boolean::New(env, g_clipboardFromSystem),
+                          });
+}
+
+// tv.setClipboard(text) -- true if the *system* clipboard took it.
+//
+// False is not a failure: the text is kept here either way, so a copy and a
+// paste inside one program work on a machine with no clipboard at all. What
+// false means is that no other program will see it, which is a thing worth
+// telling the user and the only reason this returns anything.
+static Napi::Value SetClipboard(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    requireRunning(env, "setClipboard");
+
+    std::string text = info.Length() > 0 && !info[0].IsUndefined()
+                           ? info[0].ToString().Utf8Value()
+                           : std::string();
+    g_clipboardLocal = text;
+    return Napi::Boolean::New(env, THardwareInfo::setClipboardText(text));
+}
+
+// tv.requestClipboard() -- ask for the clipboard's text; the answer arrives at
+// onClipboard, which is why this is a request and not a getter.
+//
+// It has to be. A terminal that owns the clipboard is asked for it with an
+// escape sequence (`OSC 52`), and the reply comes back through the input
+// stream like a keystroke -- so the answer to "what is in the clipboard" can
+// arrive several events after the question. The return value says only whether
+// somebody has been asked; on false the callback has already fired with what
+// this process last copied.
+static Napi::Value RequestClipboard(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    requireRunning(env, "requestClipboard");
+
+    g_clipboardFromSystem = true;
+    if (THardwareInfo::requestClipboardText(acceptClipboardText))
+        return Napi::Boolean::New(env, true);
+
+    g_clipboardFromSystem = false;
+    acceptClipboardText(g_clipboardLocal);
+    return Napi::Boolean::New(env, false);
+}
+
 static Napi::Object Init(Napi::Env env, Napi::Object exports)
 {
     exports.Set("doubleClickDelay", Napi::Function::New(env, DoubleClickDelay));
@@ -1898,6 +1983,8 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports)
     exports.Set("setStatusLine", Napi::Function::New(env, SetStatusLine));
     exports.Set("setTheme", Napi::Function::New(env, SetTheme));
     exports.Set("screenSize", Napi::Function::New(env, ScreenSize));
+    exports.Set("setClipboard", Napi::Function::New(env, SetClipboard));
+    exports.Set("requestClipboard", Napi::Function::New(env, RequestClipboard));
     registerViewApi(env, exports);
     return exports;
 }

@@ -23,6 +23,7 @@ module Tui exposing
     , Window
     , WindowPalette(..)
     , borland
+    , copyToClipboard
     , defineProgram
     , dialog
     , fileDialog
@@ -45,6 +46,7 @@ module Tui exposing
     , plain
     , popupMenu
     , quit
+    , readClipboard
     , readEditor
     , replaceInEditor
     , resizable
@@ -199,6 +201,7 @@ its own is a pull-down, and one without is a command sitting on the bar.
 @docs Event, Value, DialogSpec
 @docs dialog, quit, setEnabled, setDoubleClickDelay, focus
 @docs setEditorText, readEditor, findInEditor, replaceInEditor
+@docs copyToClipboard, readClipboard
 @docs messageBox, MessageButton, okButtons, okCancelButtons, yesNoButtons, yesNoCancelButtons
 @docs fileDialog
 @docs text, number, flag, flags, marks
@@ -275,11 +278,14 @@ instead of an index into a table. Version 17 added [`Theme`](#Theme) on a
 than the model, described in seventeen fields instead of the hundred and
 thirty-five attributes Turbo Vision keeps them in. Version 18 split a
 [`ThemePanel`](#ThemePanel)'s `control` into `button` and `input`, which Turbo
-Vision has always drawn differently and for a good reason.
+Vision has always drawn differently and for a good reason. Version 19 added
+[`copyToClipboard`](#copyToClipboard) and [`readClipboard`](#readClipboard)
+with the [`Copied`](#Event) and [`ClipboardText`](#Event) events -- the first
+thing in this package that talks to a program outside it.
 -}
 protocolVersion : Int
 protocolVersion =
-    18
+    19
 
 
 -- GEOMETRY
@@ -1136,6 +1142,14 @@ type alias StatusItem =
     [`replaceInEditor`](#replaceInEditor). `matches` is how many were acted on:
     `0` or `1` for a find, however many were replaced otherwise. `0` is how a
     program says "not found" in its own words.
+  - `Copied` -- the answer to [`copyToClipboard`](#copyToClipboard).
+    `toSystem` is `False` when the system clipboard refused the text, which is
+    not a failure -- the text is kept, and [`readClipboard`](#readClipboard)
+    will give it back -- but it does mean no *other* program will see it, which
+    is worth saying out loud on a status line.
+  - `ClipboardText` -- the answer to [`readClipboard`](#readClipboard).
+    `fromSystem` is `False` when what came back is this program's own last
+    copy, because there was no system clipboard to ask.
   - `DialogClosed` -- a [`dialog`](#dialog) was dismissed. `cmd` is the button
     that closed it (`"cancel"` if it was cancelled or closed from its frame),
     and `values` holds every field in it -- read them with [`text`](#text),
@@ -1172,6 +1186,8 @@ type Event
     | Edited { id : String, isModified : Bool, line : Int, column : Int }
     | EditorText { id : String, text : String }
     | Searched { id : String, matches : Int }
+    | Copied { toSystem : Bool }
+    | ClipboardText { text : String, fromSystem : Bool }
     | DialogClosed { id : String, cmd : String, values : Decode.Value }
     | WindowClosed String
     | Unknown String
@@ -1839,6 +1855,46 @@ searchFields id spec =
     , { key = "wholeWords", value = Encode.bool spec.wholeWords }
     , { key = "all", value = Encode.bool spec.all }
     ]
+
+
+{-| Put text on the clipboard. The answer arrives as a [`Copied`](#Event)
+event saying whether the *system* clipboard took it.
+
+    Tui.copyToClipboard tui (String.join "\n" selectedRows)
+
+There is a fallback underneath, and it is the reason `Copied` carries a
+`Bool` rather than nothing at all. Turbo Vision reaches the system clipboard
+through `wl-copy`, `xsel`, `xclip` or the terminal itself (`OSC 52`), and on a
+machine where none of those answer, the text is kept in the program instead --
+so a copy and a paste inside one program always work, and `toSystem = False`
+means only that no *other* program will see it.
+
+-}
+copyToClipboard : Ports msg -> String -> Cmd msg
+copyToClipboard ports body =
+    ports.toJs <|
+        Encode.object
+            [ { key = "type", value = Encode.string "copyToClipboard" }
+            , { key = "text", value = Encode.string body }
+            ]
+
+
+{-| Ask for the clipboard's text. It arrives as a
+[`ClipboardText`](#Event) event.
+
+    Tui.readClipboard tui
+
+**A request and not a getter, and that is not a stylistic choice.** A terminal
+that owns the clipboard is asked for it with an escape sequence and answers
+through the input stream, so the reply can arrive several events after the
+question -- the same shape as [`readEditor`](#readEditor), for a much better
+reason. A model should not sit and wait for it: the answer may take a moment,
+and on a terminal that never replies it may not come at all.
+
+-}
+readClipboard : Ports msg -> Cmd msg
+readClipboard ports =
+    ports.toJs (Encode.object [ { key = "type", value = Encode.string "readClipboard" } ])
 
 
 {-| Quit. Any open dialog is cancelled on the way out, and the process exits
@@ -2516,6 +2572,19 @@ eventDecoder =
                             (\id body -> EditorText { id = id, text = body })
                             (Decode.field "id" Decode.string)
                             (Decode.field "text" Decode.string)
+
+                    "copied" ->
+                        Decode.map
+                            (\ok -> Copied { toSystem = ok })
+                            (Decode.field "toSystem" Decode.bool)
+
+                    "clipboardText" ->
+                        Decode.map2
+                            (\body fromSystem ->
+                                ClipboardText { text = body, fromSystem = fromSystem }
+                            )
+                            (Decode.field "text" Decode.string)
+                            (Decode.field "fromSystem" Decode.bool)
 
                     "searched" ->
                         Decode.map2

@@ -997,14 +997,23 @@ drove that dialog past the fault without seeing it, because a pty test reads a
 screen and a screen does not say where the caret is. `drive_dir.py` now types
 into the field, which is the only kind of assertion that can.
 
+**The clipboard is bound now**, in both directions:
+[`copyToClipboard`](../src/Tui.gren) and `readClipboard`, with `Copied` and
+`ClipboardText` events, protocol 19. It was the last unreached pair of
+functions in the C++ API. Reading is a request answered by an event rather than
+a getter, because a terminal that owns the clipboard is asked for it with an
+escape sequence and replies through the input stream -- FINDINGS has the shape
+and the reason `TClipboard` is skipped. `tvision-node/examples/clip.js` and
+`test/drive_clip.py` are the demonstration, and the driver is worth reading for
+how it answers OSC 52 with no clipboard anywhere near it.
+
 **One gap a consumer has since walked into.** The binding forwards
 `evMouseDown` and no other mouse event, so a model can hear a click and cannot
 hear a drag -- which predc's hex viewer wanted for extending a highlight and
 worked around by making the far end of its mark the cursor, so that a click
 extends it. Adding it means forwarding motion-while-a-button-is-down as its own
 event, *not* Turbo Vision's own idiom of a nested `mouseEvent` loop inside
-`handleEvent`. It goes on the same list as the unbound clipboard
-(`THardwareInfo::setClipboardText`), and FINDINGS has both.
+`handleEvent`. FINDINGS has it.
 
 **One known limitation**, written up under gap (7) and in FINDINGS:
 `TMenuView::execute` runs a nested event loop, so the *menu bar* stops the

@@ -14,7 +14,7 @@ const { createDiffer } = require('./diff');
 // Bumped in lockstep with Tui.protocolVersion on the Gren side. A Gren package
 // and an npm package version independently, and they will skew; refusing an
 // unknown version beats rendering nothing and leaving the author to guess.
-const PROTOCOL = 18;
+const PROTOCOL = 19;
 
 /**
  * Drive a compiled Gren program's UI.
@@ -116,6 +116,14 @@ function run(grenModule, options = {}) {
             // the document: see `editorText` below for how one travels.
             onEdit: (id, modified, line, column) =>
               send({ type: 'edited', id, modified: !!modified, line, column }),
+            // The clipboard's answer, which arrives when it arrives: a
+            // terminal that owns the clipboard is asked for it with an escape
+            // sequence and replies through the input stream, so this can be
+            // several events after the request that caused it. `fromSystem` is
+            // false when the answer is this process's own last copy, which is
+            // what a machine with no clipboard falls back to.
+            onClipboard: (text, fromSystem) =>
+              send({ type: 'clipboardText', text, fromSystem: !!fromSystem }),
             onChange: (id, value) => {
               differ.valueChanged(id, value);
               send({ type: 'changed', id, value });
@@ -240,6 +248,20 @@ function run(grenModule, options = {}) {
         }
         break;
       }
+
+      // Copy is synchronous and its answer is not interesting enough to wait
+      // for -- but it is interesting: false means the system clipboard refused
+      // it and no other program will see it, which a model may want to say out
+      // loud. So it goes back as an event, like every other answer here.
+      case 'copyToClipboard':
+        send({ type: 'copied', toSystem: !!tv.setClipboard(message.text) });
+        break;
+
+      // And read is a request whose answer comes back through onClipboard
+      // above, whenever the clipboard gets round to it.
+      case 'readClipboard':
+        tv.requestClipboard();
+        break;
 
       case 'doubleClickDelay':
         tv.doubleClickDelay(message.ticks);
