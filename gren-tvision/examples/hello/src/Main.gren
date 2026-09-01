@@ -114,6 +114,7 @@ view model =
             [ { id = "answer"
               , title = "You said"
               , rect = { x1 = 22, y1 = 8, x2 = 58, y2 = 13 }
+              , resize = Tui.resizable
               , views =
                     [ StaticText
                         { id = "answerText"

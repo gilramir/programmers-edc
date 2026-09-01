@@ -238,6 +238,7 @@ viewerWindow model =
     { id = "viewWin"
     , title = model.name
     , rect = { x1 = 1, y1 = 1, x2 = 77, y2 = 21 }
+    , resize = Tui.resizable
     , views =
         [ Canvas
             { id = "text"

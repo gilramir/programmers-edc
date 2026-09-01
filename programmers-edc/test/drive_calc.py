@@ -234,6 +234,22 @@ def main():
     check("with the keyboard", "> 9" in app.render(), app.render())
     check("and everything it had", top(app) == "6", str(stack(app)))
 
+    # A keypad, a stack and two lines of text, all of them a fixed size, so the
+    # window is `resize = Tui.fixedSize` and its frame says so: no zoom box, no
+    # resize handle, and a Zoom entry that is greyed rather than merely inert.
+    frame = [row for row in app.render().split("\n") if "RPN Calculator" in row][0]
+    check("a fixed-size window has no zoom box on its frame",
+          "[↑]" not in frame and "[↕]" not in frame, frame)
+
+    before = app.render()
+    app.send(b"\x1b[15;5~", settle=0.6)
+    for _ in range(3):
+        app.send(b"\x1b[1;2B", settle=0.3)
+        app.send(b"\x1b[1;2C", settle=0.3)
+    app.send(b"\r", settle=0.9)
+    check("and Ctrl-F5 plus shifted arrows changes nothing",
+          app.render() == before, app.render())
+
     app.send(b"\x1bx", settle=1.0)
     code = app.wait(timeout=6)
     check("Alt-X exits with two tools open", code == 0, f"exit={code}")

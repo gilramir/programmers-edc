@@ -276,6 +276,11 @@ view model =
     { id = windowId
     , title = "ASCII Chart"
     , rect = { x1 = 6, y1 = 2, x2 = 54, y2 = 17 }
+    -- Sixteen rows of eight columns is the chart, and there is no more of it
+    -- to show. A window that could be dragged bigger would be the same chart
+    -- with space around it, so the frame is told not to offer one: no resize
+    -- handle, no zoom box.
+    , resize = Tui.fixedSize
     , views =
         [ Canvas
             { id = canvasId

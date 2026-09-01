@@ -170,6 +170,12 @@ handleEvent event model =
         Resized size ->
             { model = { model | desk = size }, command = Cmd.none }
 
+        -- A window's own size, which this one does not need: every view in
+        -- the list window is wrapped in `Grows`, so Turbo Vision does the
+        -- arithmetic and nothing here has to count rows.
+        WindowResized _ ->
+            { model = model, command = Cmd.none }
+
         -- The user typed in the filter box. Storing it and rendering it back
         -- is the whole point and is also the trap: the runtime records what
         -- the view reported before the model is asked, so the render that
@@ -338,6 +344,7 @@ clockWindow model =
         , x2 = model.desk.cols - 1
         , y2 = 9
         }
+    , resize = Tui.resizable
     , views =
         [ StaticText
             { id = "clockTime"
@@ -378,6 +385,7 @@ listWindow model =
     -- told to follow, in TGroup::changeBounds, whether the window changed size
     -- because the terminal did or because the user dragged its corner -- and
     -- the model is not told about the second one at all.
+    , resize = Tui.resizable
     , views =
         -- A control in an ordinary window, which is the thing this API could
         -- not see until protocol 8. Turbo Vision reports neither a keystroke

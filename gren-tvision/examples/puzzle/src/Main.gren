@@ -382,6 +382,7 @@ puzzleWindow model =
     { id = "puzzleWin"
     , title = "Puzzle"
     , rect = { x1 = 1, y1 = 1, x2 = 21, y2 = 7 }
+    , resize = Tui.resizable
     , views =
         [ Canvas
             { id = "board"

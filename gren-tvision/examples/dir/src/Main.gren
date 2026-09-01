@@ -627,6 +627,7 @@ dirWindow model =
     { id = "dirWin"
     , title = model.status
     , rect = { x1 = 1, y1 = 1, x2 = 78, y2 = 21 }
+    , resize = Tui.resizable
     , views =
         [ Tui.ListBox
             { id = "tree"

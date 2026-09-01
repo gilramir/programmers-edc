@@ -686,6 +686,7 @@ jobWindow model index job =
     { id = "job-" ++ String.fromInt index
     , title = describe job ++ " " ++ job.command
     , rect = frame (Array.length model.jobs) index
+    , resize = Tui.resizable
     , views =
         [ Canvas
             { id = "out-" ++ String.fromInt index

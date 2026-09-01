@@ -870,6 +870,54 @@ The Gren-only example is done: `watch`, written up above. It is the answer to
 three things — a subscription, several children at once, and a handle on
 something still running.
 
+### Gap 11, which the list did not have: how big is *this* window?
+
+Found from outside, by `programmers-edc`'s hex dump viewer, and it is the
+mirror of gap 2. `Grows` (gap 2) makes a view follow its window's edges, and
+`Resized` (gap 1) says how big the *desktop* is -- but nothing said how big one
+window was. For a view that only draws itself that is fine, and it is why the
+gap went unnoticed through fifteen examples: `entries` fills a window with
+`Grows` and never counts anything. A view whose contents are the model's has
+the other problem. A hex dump in a taller window was sixteen rows of dump and
+blank space, because the canvas grew and the lines did not.
+
+Two additions, and they are halves of one idea.
+
+**`WindowResized`** carries a window's whole rectangle, in the same desktop
+coordinates as `Window.rect`. It is found by polling, once per pump, exactly
+as `Resized` is: a window's bounds can change five ways -- the resize handle,
+the zoom box, `Tile`, `Cascade`, and `growMode` following the terminal -- with
+no one call they share, and comparing the rectangle is true whichever route
+was taken. The differ is deliberately told nothing, which is what leaves a
+window where the user dragged it: what the differ compares against is the
+*model's* rectangle, and a model that ignores this event renders the same one
+and writes no `setBounds`.
+
+**`Resize`** on a `Window` says which of its two dimensions the user may
+change at all -- `Tui.resizable`, `Tui.resizeHeight`, `Tui.resizeWidth`,
+`Tui.fixedSize`. It is `sizeLimits`, which is the single call `TFrame::
+dragWindow`, `TWindow::zoom`, `TFrame::draw`, `TView::locate` and
+`TView::calcBounds` all consult, so one override pins a dimension everywhere.
+`examples/ascii` and `examples/forms` now say `fixedSize`, which is what both
+of them always were: a 32x8 chart and two windows tiled to fill 80x25 exactly,
+neither with anywhere to put extra space. The frame stops drawing a resize
+handle and a zoom box for a window that has nothing to do with them.
+
+It also turned up a gap in `TWindow::setState`, which only ever *enables* the
+commands a window supports and leaves disabling them to whichever window was
+selected before. A program whose first window is fixed-size therefore inherits
+an enabled `cmZoom` from `initCommands()` and shows a lit `F5 Zoom` that does
+nothing. `JsWindow` now disables it for a window that cannot zoom -- and not
+`cmResize`, because a fixed-size window can still be moved.
+
+The pair is what let the hex viewer stop apologising for sixteen bytes a row.
+It is no longer "the model cannot know how wide the window is"; it is "sixteen
+is what a hex dump is, and the window says so" -- `resize = Tui.resizeHeight`,
+taller shows more file, wider is not offered. The full argument is in FINDINGS,
+along with the rule this made concrete: a *view's* rectangle is structural, so
+a layout must be written once and grown by `Grows`, never recomputed from the
+new height.
+
 ### What is left, now that the list is empty
 
 **One known bug, found from outside.** `programmers-edc`'s hex dump viewer --

@@ -44,7 +44,7 @@ ROWS = 16
 LEFT = 1
 HEX_AT = LEFT + 10
 ASCII_AT = LEFT + 60
-SCROLL_AT = LEFT + 76
+SCROLL_AT = LEFT + 77   # one column clear of the ASCII, hard against the frame
 WHERE_ROW = 20
 STATUS_ROW = 21
 
@@ -83,6 +83,45 @@ def menu(app, item, entry):
     at = bar.index(item)
     app.click(at + 1, 1, settle=0.6)
     app.click(at + 3, entry + 2, settle=0.9)
+
+
+def dump_rows(app):
+    """How many rows of the window are dump, counted rather than assumed --
+    which is the whole point of the resize checks."""
+    return sum(1 for row in app.render().split("\n")
+               if len(row) > LEFT + 8 and is_offset(row[LEFT:LEFT + 8]))
+
+
+def is_offset(text):
+    return len(text) == 8 and all(c in "0123456789ABCDEF" for c in text)
+
+
+def first_offset(app):
+    for row in app.render().split("\n"):
+        if len(row) > LEFT + 8 and is_offset(row[LEFT:LEFT + 8]):
+            return row[LEFT:LEFT + 8]
+    return ""
+
+
+def find_row(app, text):
+    for i, row in enumerate(app.render().split("\n")):
+        if text in row:
+            return i
+    return -1
+
+
+def frame_width(app):
+    """The window's own width, from the row its title is on."""
+    return len(line_at(app, 1).rstrip("░ "))
+
+
+def resize(app, arrows):
+    """Ctrl-F5 puts the window into Turbo Vision's size/move mode; shifted
+    arrows resize rather than move; Enter commits."""
+    app.send(b"\x1b[15;5~", settle=0.6)
+    for i in range(0, len(arrows), 6):
+        app.send(arrows[i:i + 6], settle=0.4)
+    app.send(b"\r", settle=1.0)
 
 
 def open_file(app, name, settle=1.6):
@@ -259,7 +298,41 @@ def main():
     check("clicking the dump takes the caret back",
           where(app).startswith("Offset 00000010 (16)"), where(app))
 
-    # 12. A file smaller than the window, and one with nothing in it at all.
+    # 12. The window resizes in one direction and not the other.
+    #
+    #     Two halves, and both have to be there. `Grows` on the canvas is what
+    #     makes it taller -- Turbo Vision does that arithmetic in
+    #     `TGroup::changeBounds` -- and the `WindowResized` event is what tells
+    #     the model how many rows it now has. Without the first it is sixteen
+    #     rows of dump in a taller window; without the second it is a taller
+    #     canvas with sixteen rows of dump in it and blank space below.
+    #
+    #     Ctrl-F5 is the Window menu's Resize/move, and shifted arrows are how
+    #     `TView::dragView` resizes rather than moves. Shift-Left is the one
+    #     that matters here: the window already spans the terminal, so widening
+    #     is the desktop's limit rather than the window's, and narrowing is the
+    #     thing `resize = Tui.resizeHeight` has to refuse.
+    go_to(app, "0")
+    width = frame_width(app)
+    resize(app, b"\x1b[1;2A" * 5)
+    check("the dump shrank with the window", dump_rows(app) == 11, dump_rows(app))
+    check("and the lines that describe the byte came with it",
+          find_row(app, "Offset 00000000") == 3 + 11 + 1,
+          find_row(app, "Offset 00000000"))
+
+    app.send(b"\x1b[6~", settle=0.9)
+    check("a page is now eleven rows and not sixteen",
+          first_offset(app) == "000000B0", first_offset(app))
+
+    resize(app, b"\x1b[1;2D" * 3)
+    check("the window refuses to be made narrower", frame_width(app) == width,
+          f"{frame_width(app)} != {width}")
+
+    resize(app, b"\x1b[1;2B" * 5)
+    check("and grows back to sixteen rows", dump_rows(app) == 16, dump_rows(app))
+    go_to(app, "0")
+
+    # 13. A file smaller than the window, and one with nothing in it at all.
     open_file(app, os.path.join(work, "small.bin"))
     check("a small file is one row", rows(app)[0].startswith("00000000  48 65 6C 6C 6F"),
           rows(app)[0])
@@ -278,7 +351,7 @@ def main():
     check("and draws no rows at all", all(row.strip() == "" for row in rows(app)),
           repr(rows(app)[0]))
 
-    # 13. It is a window like any other: closing it forgets it, and the menu
+    # 14. It is a window like any other: closing it forgets it, and the menu
     #     it brought with it goes too.
     app.send(ALT_F3, settle=1.2)
     check("Alt-F3 closed the window", "Hex Dump" not in app.render(), app.render())

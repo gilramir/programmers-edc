@@ -37,9 +37,16 @@ function skeleton(view) {
 // highlight -- and skipped TGroup::changeBounds, which is the only thing that
 // resolves a child view's growMode. A view's own rect is still structural:
 // nothing can move one of those but a rebuild.
+//
+// `resize` is a third thing again: the one window-level field with no call that
+// changes it in place. It is read once, by tv.window(), because it becomes the
+// window's own sizeLimits and those are answered against the size it was built
+// at. So it is compared here -- a model that changes it is asking for a
+// different window, and gets one.
 function sameShape(before, after) {
   if (!before) return false;
   if (before.items.length !== after.items.length) return false;
+  if (JSON.stringify(before.resize) !== JSON.stringify(after.resize)) return false;
   return before.items.every((view, i) => skeleton(view) === skeleton(after.items[i]));
 }
 

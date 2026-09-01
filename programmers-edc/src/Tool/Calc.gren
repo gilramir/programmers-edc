@@ -860,8 +860,13 @@ view model =
     , title = "RPN Calculator"
     -- Down and to the right of the chart's, so that opening both leaves each
     -- window's title bar reachable. Where a window *starts* is the only say
-    -- the model has: after that it is the user's, and Turbo Vision's.
+    -- the model has about its position: after that it is the user's, and
+    -- Turbo Vision's.
     , rect = { x1 = 20, y1 = 3, x2 = 58, y2 = 22 }
+    -- Its size is not the user's, though. A keypad, a stack and two lines of
+    -- text are what this window holds, all of them a fixed size, and a bigger
+    -- window would be the same keypad with a gap beside it.
+    , resize = Tui.fixedSize
     , views =
         [ Canvas
             { id = canvasId

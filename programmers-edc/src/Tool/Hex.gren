@@ -33,10 +33,30 @@ own as well, and therefore a `Tui.Ports` record at that type -- which is one
 extra binding in `Main` and nothing more, because port functions are
 polymorphic.
 
-**Sixteen bytes a row is forced, not preferred.** `Resized` reports the
-*desktop*, never a window, so nothing tells a model that the user widened this
-one -- and a canvas's lines are the model's. A dump that reflowed to its window
-would need a fact the program cannot have.
+**Sixteen bytes a row is a choice, and the window is told to enforce it.**
+It did not start that way. `Resized` reports the *desktop*, never a window, so
+nothing told a model that the user had widened this one -- and a canvas's lines
+are the model's, so a dump that reflowed to its window needed a fact the
+program could not have. This is the tool that made the package grow the fact:
+`Tui.WindowResized` says how big a window is now, and `Tui.Resize` on the
+window says which of its dimensions the user may change at all.
+
+Which turns the width into an argument rather than a limitation, and the
+argument comes out the other way. Sixteen is what a hex dump is: it makes the
+low nibble of the offset the column number, so the byte at `0x4C` is in column
+C of the row starting `40`, and that is the whole reason a dump is laid out in
+a grid. A twenty-three byte row would be a table nobody can read an offset off.
+So the window says `resize = Tui.resizeHeight`, the frame stops offering a
+width the model would refuse to use, and sixteen stays forced -- by the format
+now, rather than by the API.
+
+Height is the opposite: more rows is more file, and the tool wants all it can
+get. The canvas grows by itself, because [`Grows`](Tui#Grow) is what
+`TGroup::changeBounds` is for, and `WindowResized` is what tells the model to
+put more lines in it. Both halves are needed and the failure modes are
+different: without the wrapper the canvas stays sixteen rows in a taller
+window; without the event it is a taller canvas with sixteen rows of dump and
+blank space under them.
 
 Highlighting -- the reason to build a viewer instead of running `xxd` -- is not
 here yet, and neither is pasted input. This is the navigation.
@@ -116,17 +136,38 @@ bytesPerRow =
     16
 
 
-visibleRows : Int
-visibleRows =
+{-| How many dump rows the window shows when it opens. Not a minimum: the
+window is [`Tui.resizeHeight`](Tui#resizeHeight), so the user can drag it
+shorter as well as taller.
+-}
+openRows : Int
+openRows =
     16
+
+
+{-| How many rows of a window of this height are the dump.
+
+Six are spoken for whatever the height is: two frame rows, the column header,
+the blank row under the dump, and the two lines describing the byte under the
+cursor. Written once because it is used twice -- to lay the window out, and to
+turn a [`Tui.WindowResized`](Tui#Event) event into a row count -- and those two
+agreeing is the whole of the arithmetic.
+
+Turbo Vision will not let a window go below six rows, which is one row short of
+having a dump at all, so the floor here is one rather than zero: `page` is a
+divisor and a screenful of nothing is not a number to do arithmetic with.
+-}
+rowsIn : Int -> Int
+rowsIn height =
+    max 1 (height - 6)
 
 
 {-| One screenful: what `PgUp` moves by, and how much has to be in memory for
 the window to draw.
 -}
-page : Int
-page =
-    visibleRows * bytesPerRow
+page : Model -> Int
+page model =
+    model.rows * bytesPerRow
 
 
 {-| How much is read at a time. Sixty-four screenfuls, so scrolling crosses a
@@ -178,6 +219,12 @@ type alias Model =
     -- guard: an answer that is not this range answers a question no longer
     -- being asked.
     , wanted : Maybe Range
+    -- How many dump rows the window is showing. Sixteen until the user drags
+    -- the window taller, and then whatever fits. The canvas grows by itself --
+    -- `Grows` is what does that -- but its *lines* are the model's, so a taller
+    -- canvas the model was not told about would be sixteen rows of dump with
+    -- blank space under them.
+    , rows : Int
     , browsing : Maybe { path : Path, entries : Array Entry }
     , recent : Array String
     , message : String
@@ -224,6 +271,7 @@ init permission =
     , cursor = 0
     , chunk = { start = 0, bytes = [] }
     , wanted = Nothing
+    , rows = openRows
     , browsing = Nothing
     , recent = []
     , message = ""
@@ -251,6 +299,29 @@ update ports event model =
     when event is
         Tui.Resized size ->
             still { model | desktop = size }
+
+        -- The user dragged the window taller or shorter. Only the height can
+        -- change -- `resize = Tui.resizeHeight` in the view below -- so the
+        -- only thing to work out is how many rows of dump now fit, and the
+        -- only thing to do about it is read enough bytes to fill them.
+        --
+        -- The window's *rectangle* is deliberately not stored. What the model
+        -- renders is what the differ compares against, so a rectangle it never
+        -- changes is a `setBounds` never written and a window left exactly
+        -- where the user put it.
+        Tui.WindowResized it ->
+            if it.id == windowId then
+                let
+                    grown =
+                        { model | rows = rowsIn (it.rect.y2 - it.rect.y1) }
+                in
+                -- Through `scrollTo` rather than straight to `load`, because
+                -- a window that just got shorter can leave `top` past the last
+                -- row there is anything to show above.
+                scrollTo grown.top grown
+
+            else
+                still model
 
         Tui.KeyPressed pressed ->
             if pressed.id == canvasId then
@@ -443,7 +514,7 @@ clickAt : Int -> Int -> Model -> Step
 clickAt x y model =
     let
         line =
-            clamp 0 (visibleRows - 1) y
+            clamp 0 (model.rows - 1) y
 
         column =
             if x >= asciiStart then
@@ -485,12 +556,15 @@ pageBy direction model =
         Just file ->
             let
                 top =
-                    clamp 0 (maxTop file) (model.top + direction * page)
+                    clamp 0 (maxTop model file) (model.top + direction * page model)
             in
             load
                 { model
                     | top = top
-                    , cursor = clamp 0 (max 0 (file.size - 1)) (top + Math.modBy page (model.cursor - model.top))
+                    , cursor =
+                        clamp 0
+                            (max 0 (file.size - 1))
+                            (top + Math.modBy (page model) (model.cursor - model.top))
                 }
 
 
@@ -505,20 +579,20 @@ moveTo offset model =
                 cursor =
                     clamp 0 (max 0 (file.size - 1)) offset
             in
-            load { model | cursor = cursor, top = keepInView file cursor model.top }
+            load { model | cursor = cursor, top = keepInView model file cursor model.top }
 
 
 {-| The smallest scroll that puts the cursor back on screen, which is what
 every editor does and the only behaviour that survives holding an arrow key
 down.
 -}
-keepInView : File -> Int -> Int -> Int
-keepInView file cursor top =
+keepInView : Model -> File -> Int -> Int -> Int
+keepInView model file cursor top =
     if cursor < top then
         rowStart cursor
 
-    else if cursor >= top + page then
-        min (maxTop file) (rowStart cursor - page + bytesPerRow)
+    else if cursor >= top + page model then
+        min (maxTop model file) (rowStart cursor - page model + bytesPerRow)
 
     else
         top
@@ -533,10 +607,10 @@ scrollTo offset model =
         Just file ->
             let
                 top =
-                    clamp 0 (maxTop file) (rowStart offset)
+                    clamp 0 (maxTop model file) (rowStart offset)
 
                 cursor =
-                    clamp top (min (max 0 (file.size - 1)) (top + page - 1)) model.cursor
+                    clamp top (min (max 0 (file.size - 1)) (top + page model - 1)) model.cursor
             in
             load { model | top = top, cursor = cursor }
 
@@ -558,7 +632,7 @@ goTo offset model =
             load
                 { model
                     | cursor = cursor
-                    , top = clamp 0 (maxTop file) (rowStart cursor - 5 * bytesPerRow)
+                    , top = clamp 0 (maxTop model file) (rowStart cursor - 5 * bytesPerRow)
                 }
 
 
@@ -570,9 +644,9 @@ rowStart offset =
 {-| The last `top` there is: the one that puts the final row on the bottom line
 of the window.
 -}
-maxTop : File -> Int
-maxTop file =
-    max 0 (rowStart (max 0 (file.size - 1)) - page + bytesPerRow)
+maxTop : Model -> File -> Int
+maxTop model file =
+    max 0 (rowStart (max 0 (file.size - 1)) - page model + bytesPerRow)
 
 
 {-| `//` truncates its *result* to 32 bits, which is fine for a column and
@@ -599,7 +673,7 @@ load model =
         Just file ->
             let
                 needed =
-                    { start = model.top, end = min file.size (model.top + page) }
+                    { start = model.top, end = min file.size (model.top + page model) }
             in
             if covers model.chunk needed then
                 still model
@@ -1039,8 +1113,26 @@ view model =
     { id = windowId
     , title = title model
     -- The widest window in the program, and it has to be: a dump row is
-    -- seventy-six columns and cannot be narrower.
-    , rect = { x1 = 0, y1 = 0, x2 = 79, y2 = 22 }
+    -- seventy-six columns and cannot be narrower. Every rectangle below is
+    -- written for *this* height and never recomputed, even after the user has
+    -- dragged the window taller. Two reasons, and they are both about what a
+    -- rectangle in a render means:
+    --
+    -- A view's rectangle is structural -- change one and the window is torn
+    -- down and built again, losing the caret and the z-order -- so a layout
+    -- that recomputed itself on every resize would rebuild the window on every
+    -- resize. The `Grows` wrappers do the same arithmetic in `TGroup::
+    -- changeBounds` instead, where it costs nothing.
+    --
+    -- And the *window's* rectangle is what the differ compares the next render
+    -- against. Leaving it alone is what leaves the window the size the user
+    -- dragged it to; rendering the height back would be a `setBounds` writing
+    -- the size that is already there.
+    , rect = { x1 = 0, y1 = 0, x2 = 79, y2 = 2 + openRows + 4 }
+    -- Taller shows more of the file. Wider shows the same rows with space
+    -- beside them, because sixteen bytes to a row is the format and not a
+    -- layout choice -- so the frame does not offer it.
+    , resize = Tui.resizeHeight
     , views =
         [ Canvas
             { id = "hex.header"
@@ -1049,39 +1141,58 @@ view model =
             , cursor = Nothing
             , takesFocus = False
             }
-        , Canvas
-            { id = canvasId
-            , rect = { x1 = 1, y1 = 2, x2 = 1 + lineWidth, y2 = 2 + visibleRows }
-            , lines = dump model
-            , cursor = cursorAt model
-            , takesFocus = True
+        , Grows
+            { grow = Tui.stretchHeight
+            , view =
+                Canvas
+                    { id = canvasId
+                    , rect = { x1 = 1, y1 = 2, x2 = 1 + lineWidth, y2 = 2 + openRows }
+                    , lines = dump model
+                    , cursor = cursorAt model
+                    , takesFocus = True
+                    }
             }
-        , ScrollBar
-            { id = scrollId
-            , rect = { x1 = 1 + lineWidth, y1 = 2, x2 = 2 + lineWidth, y2 = 2 + visibleRows }
-            , value = divideBy bytesPerRow model.top
-            , min = 0
-            , max =
-                when model.file is
-                    Just file ->
-                        divideBy bytesPerRow (maxTop file)
+        , Grows
+            { grow = Tui.stretchHeight
+            , view =
+                ScrollBar
+                    { id = scrollId
+                    -- Against the frame, with column 77 left empty: a scroll
+                    -- bar touching the last column of the ASCII rendering
+                    -- reads as a seventeenth character.
+                    , rect = { x1 = 2 + lineWidth, y1 = 2, x2 = 3 + lineWidth, y2 = 2 + openRows }
+                    , value = divideBy bytesPerRow model.top
+                    , min = 0
+                    , max =
+                        when model.file is
+                            Just file ->
+                                divideBy bytesPerRow (maxTop model file)
 
-                    Nothing ->
-                        0
-            , pageStep = visibleRows
-            , arrowStep = 1
+                            Nothing ->
+                                0
+                    , pageStep = model.rows
+                    , arrowStep = 1
+                    }
             }
-        , StaticText
-            { id = "hex.where"
-            , rect = { x1 = 1, y1 = 19, x2 = 1 + lineWidth, y2 = 20 }
-            , text = whereItIs model
+        , Grows
+            { grow = Tui.pinBottom
+            , view =
+                StaticText
+                    { id = "hex.where"
+                    , rect = { x1 = 1, y1 = 3 + openRows, x2 = 1 + lineWidth, y2 = 4 + openRows }
+                    , text = whereItIs model
+                    }
             }
-        , Canvas
-            { id = "hex.status"
-            , rect = { x1 = 1, y1 = 20, x2 = 1 + lineWidth, y2 = 21 }
-            , lines = [ status model ]
-            , cursor = Nothing
-            , takesFocus = False
+        , Grows
+            { grow = Tui.pinBottom
+            , view =
+                Canvas
+                    { id = "hex.status"
+                    , rect = { x1 = 1, y1 = 4 + openRows, x2 = 1 + lineWidth, y2 = 5 + openRows }
+                    , lines = [ status model ]
+                    , cursor = Nothing
+                    , takesFocus = False
+                    }
             }
         ]
     }
@@ -1133,10 +1244,10 @@ dump model =
                     else
                         [ Tui.plain "" ]
                 )
-                (Array.range 0 (visibleRows - 1))
+                (Array.range 0 (model.rows - 1))
 
         Just file ->
-            Array.map (row model file) (Array.range 0 (visibleRows - 1))
+            Array.map (row model file) (Array.range 0 (model.rows - 1))
 
 
 row : Model -> File -> Int -> Array Span
@@ -1266,7 +1377,7 @@ cursorAt model =
                 line =
                     divideBy bytesPerRow (model.cursor - model.top)
             in
-            if line >= 0 && line < visibleRows then
+            if line >= 0 && line < model.rows then
                 Just
                     { x = hexColumn (Math.modBy bytesPerRow model.cursor)
                     , y = line

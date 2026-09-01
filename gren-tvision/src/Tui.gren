@@ -10,6 +10,7 @@ module Tui exposing
     , Program
     , ProgramConfiguration
     , Rect
+    , Resize
     , Span
     , StatusItem
     , Ui
@@ -21,6 +22,7 @@ module Tui exposing
     , fileDialog
     , findInEditor
     , fixed
+    , fixedSize
     , flag
     , flags
     , focus
@@ -39,6 +41,9 @@ module Tui exposing
     , quit
     , readEditor
     , replaceInEditor
+    , resizable
+    , resizeHeight
+    , resizeWidth
     , setDoubleClickDelay
     , setEditorText
     , setEnabled
@@ -179,6 +184,7 @@ its own is a pull-down, and one without is a command sitting on the bar.
 @docs Ports
 @docs Program, ProgramConfiguration, defineProgram
 @docs Ui, Window, View, Rect
+@docs Resize, resizable, resizeHeight, resizeWidth, fixedSize
 @docs Grow, fixed, stretch, stretchWidth, stretchHeight, pinRight, pinBottom
 @docs Span, Hue, line, plain, ink, on
 @docs MenuItem, StatusItem, PopupItem, popupMenu
@@ -247,10 +253,16 @@ added the [`Editor`](#View) view with [`setEditorText`](#setEditorText),
 [`EditorText`](#Event) events -- the first view whose contents do not travel
 with the render. Version 14 added [`findInEditor`](#findInEditor),
 [`replaceInEditor`](#replaceInEditor) and the [`Searched`](#Event) event.
+Version 15 added [`Resize`](#Resize) on a [`Window`](#Window) and the
+[`WindowResized`](#Event) event, which are the two halves of the same thing:
+one says which of a window's dimensions the user may change, and the other is
+how the model finds out that they did. Until then a window's size was a fact
+only Turbo Vision had, and a view that filled one could grow with it -- see
+[`Grows`](#Grow) -- but the model could not know by how much.
 -}
 protocolVersion : Int
 protocolVersion =
-    14
+    15
 
 
 -- GEOMETRY
@@ -393,18 +405,91 @@ type alias Ui =
 {-| A window on the desktop.
 
 `id` must be stable across renders -- it is how the runtime recognises this as
-the same window. `title` can change freely; it is patched in place.
+the same window. `title` and `rect` can change freely: both are patched in
+place, the second through `TView::locate`, which is also what resolves the
+[`Grows`](#Grow) of everything inside.
 
-Changing a window's `rect`, or the id, type or rectangle of anything inside it,
-is a structural change: the window is closed and rebuilt, losing focus and
-z-order. Changing only the *content* of its views is not.
+Changing [`resize`](#Resize), or the id, type or rectangle of anything inside
+the window, is a structural change: the window is closed and rebuilt, losing
+focus and z-order. Changing only the *content* of its views is not.
+
+A window's `rect` is the model's opinion of where the window should be, not a
+report of where it is. The user can move and resize one, and the runtime does
+not write the model's rectangle back over that -- it compares against what the
+model last rendered, so a rectangle that has not changed is a window left
+alone. [`WindowResized`](#Event) is how a model that wants to know finds out.
 -}
 type alias Window =
     { id : String
     , title : String
     , rect : Rect
+    , resize : Resize
     , views : Array View
     }
+
+
+{-| Which of a window's two dimensions the user is allowed to change.
+
+Not [`Grow`](#Grow), which is the other end of the same story: `Grow` is about
+a view inside a window following the window's edges, and this is about which of
+those edges can move at all.
+
+It exists because a window is often only free in one direction. A hex dump is
+seventy-six columns and will never be anything else; a taller one shows more
+of the file, and a wider one shows the same rows with space beside them. Saying
+so is better than allowing a resize that has nothing to do -- the frame stops
+offering what it cannot deliver, and the model stops having to cope with a
+width it never wanted.
+
+    { id = "hex"
+    , title = "Hex Dump"
+    , rect = { x1 = 0, y1 = 0, x2 = 79, y2 = 22 }
+    , resize = Tui.resizeHeight
+    , views = [ ... ]
+    }
+
+It is Turbo Vision's `sizeLimits`, which is the one call every route to a new
+size passes through: the frame's resize handle, the zoom box, `Tile` and
+`Cascade`, and the window being carried along when the terminal changes size.
+A pinned dimension is pinned at the size the window was **built** at, because
+that is the number the model wrote.
+
+Changing this on a window that is already open rebuilds it. Nothing else about
+a window is like that -- the title and the rectangle are both patched in place
+-- and it is because `sizeLimits` is asked once, at construction, for a fact
+the model is not expected to change its mind about.
+-}
+type alias Resize =
+    { width : Bool, height : Bool }
+
+
+{-| Free in both directions: what every window was before this existed, and
+what most windows want.
+-}
+resizable : Resize
+resizable =
+    { width = True, height = True }
+
+
+{-| Taller and shorter, never wider or narrower. -}
+resizeHeight : Resize
+resizeHeight =
+    { width = False, height = True }
+
+
+{-| Wider and narrower, never taller or shorter. -}
+resizeWidth : Resize
+resizeWidth =
+    { width = True, height = False }
+
+
+{-| Neither. The frame loses its resize handle and its zoom box as well: both
+are corners to grab, and offering one that cannot move anything is worse than
+not offering it.
+-}
+fixedSize : Resize
+fixedSize =
+    { width = False, height = False }
 
 
 {-| The controls.
@@ -784,6 +869,21 @@ type alias StatusItem =
     that closed it (`"cancel"` if it was cancelled or closed from its frame),
     and `values` holds every field in it -- read them with [`text`](#text),
     [`number`](#number) and [`flag`](#flag).
+  - `WindowResized` -- the user moved, resized, zoomed or tiled a window, and
+    `rect` is where it is now, in the same desktop coordinates as
+    [`Window`](#Window)'s own. A window that fills itself with a
+    [`Grows`](#Grow) view already resizes correctly without this; what needs it
+    is a model that has to *count* -- how many rows of a file a dump can show,
+    and therefore how far a page down goes.
+
+    Not sent for a size the model itself set, on the same principle as
+    `Changed`: only a change the model did not already know about is news.
+    A model that ignores this keeps working, and the window keeps the size the
+    user gave it, because what the differ compares against is the model's own
+    rectangle and that has not changed. A model that stores `rect` and renders
+    it back is the exact case this is for, and writes nothing either --
+    [`Resize`](#Resize) is how it says which dimensions it is willing to be
+    told about in the first place.
   - `WindowClosed` -- the user closed a window from its frame. **Handle this**:
     if the model still lists the window, the next render reopens it.
   - `Unknown` -- an event this version of the package does not understand.
@@ -796,6 +896,7 @@ type Event
     | Clicked { id : String, x : Int, y : Int, isDouble : Bool, isRight : Bool }
     | Scrolled { id : String, value : Int }
     | Resized { cols : Int, rows : Int }
+    | WindowResized { id : String, rect : Rect }
     | Changed { id : String, value : Value }
     | Edited { id : String, isModified : Bool, line : Int, column : Int }
     | EditorText { id : String, text : String }
@@ -1703,6 +1804,13 @@ encodeWindow window =
         [ { key = "id", value = Encode.string window.id }
         , { key = "title", value = Encode.string window.title }
         , { key = "rect", value = encodeRect window.rect }
+        , { key = "resize"
+          , value =
+                Encode.object
+                    [ { key = "width", value = Encode.bool window.resize.width }
+                    , { key = "height", value = Encode.bool window.resize.height }
+                    ]
+          }
         , { key = "items", value = Encode.array encodeView window.views }
         ]
 
@@ -2077,6 +2185,12 @@ eventDecoder =
                             (Decode.field "cols" Decode.int)
                             (Decode.field "rows" Decode.int)
 
+                    "windowResized" ->
+                        Decode.map2
+                            (\id rect -> WindowResized { id = id, rect = rect })
+                            (Decode.field "id" Decode.string)
+                            (Decode.field "rect" rectDecoder)
+
                     "changed" ->
                         Decode.map2
                             (\id value -> Changed { id = id, value = value })
@@ -2095,6 +2209,23 @@ eventDecoder =
 
                     other ->
                         Decode.succeed (Unknown other)
+            )
+
+
+{-| `[x1, y1, x2, y2]`, the order [`encodeRect`](#Rect) writes and the binding
+takes -- so a rectangle makes the round trip without either side reordering it.
+-}
+rectDecoder : Decode.Decoder Rect
+rectDecoder =
+    Decode.array Decode.int
+        |> Decode.andThen
+            (\numbers ->
+                when numbers is
+                    [ x1, y1, x2, y2 ] ->
+                        Decode.succeed { x1 = x1, y1 = y1, x2 = x2, y2 = y2 }
+
+                    _ ->
+                        Decode.fail "a rect is four numbers"
             )
 
 

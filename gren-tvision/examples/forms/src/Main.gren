@@ -257,6 +257,11 @@ handleEvent event model =
         Resized _ ->
             { model = model, command = Cmd.none }
 
+        -- Nor is the window's: the form inside it is fixed-size, so the
+        -- window says `resize = Tui.fixedSize` and this never arrives.
+        WindowResized _ ->
+            { model = model, command = Cmd.none }
+
         -- Every editable control here is inside the form *dialog*, and its
         -- values are read from the answer when Save is pressed. So these
         -- arrive -- a dialog's fields report like any other -- and there is
@@ -469,6 +474,10 @@ listWindow model =
     { id = "list"
     , title = "Phone Numbers (" ++ String.fromInt (Array.length model.records) ++ ")"
     , rect = { x1 = 1, y1 = 0, x2 = 45, y2 = 15 }
+    -- Two windows laid out side by side to fill an 80x25 terminal exactly.
+    -- Either one resized would overlap the other, and neither has a `Grows`
+    -- to make the space useful, so neither is resizable.
+    , resize = Tui.fixedSize
     , views =
         [ ListBox
             { id = "keys"
@@ -518,6 +527,7 @@ detailWindow model =
     { id = "detail"
     , title = "Record"
     , rect = { x1 = 46, y1 = 0, x2 = 79, y2 = 17 }
+    , resize = Tui.fixedSize
     , views =
         [ field 1 "Name" record.name
         , field 3 "Company" record.company

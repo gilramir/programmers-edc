@@ -1071,6 +1071,18 @@ void applyCursors(const Napi::Env &env, const Napi::Value &value)
         }
 }
 
+// A window's `resize` field: {width, height}, each saying whether the user may
+// change that dimension. Absent means both, which is what every window did
+// before the field existed.
+static void applyResize(const Napi::Object &spec, JsWindow *win)
+{
+    Napi::Value v = spec.Get("resize");
+    if (!v.IsObject())
+        return;
+    Napi::Object r = v.As<Napi::Object>();
+    win->setResize(getBool(r, "width", true), getBool(r, "height", true));
+}
+
 void applyInitialFocus(const Napi::Object &spec, TView *firstSelectable)
 {
     std::string wanted = getString(spec, "focus");
@@ -1154,6 +1166,7 @@ static Napi::Value Window(const Napi::CallbackInfo &info)
     JsWindow *win = new JsWindow(getRect(env, spec, "window"),
                                  getString(spec, "title").c_str(), id);
     win->beWindow();
+    applyResize(spec, win);
     g_views.addWindow(id, win);
 
     TView *firstSelectable = nullptr;
@@ -1441,6 +1454,10 @@ static Napi::Value SetBounds(const Napi::CallbackInfo &info)
                  a.Get(2u).ToNumber().Int32Value(),
                  a.Get(3u).ToNumber().Int32Value());
     win->locate(bounds);
+    // The model asked for this, so the resize poll must not report it back as
+    // news -- the same rule the Changed event follows for a value the model
+    // set itself.
+    win->lastReported = win->getBounds();
     return Napi::Boolean::New(env, true);
 }
 

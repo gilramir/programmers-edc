@@ -396,6 +396,7 @@ calculatorWindow model =
     , rect = { x1 = 5, y1 = 3, x2 = 29, y2 = 18 }
     -- The display comes first so that it, and not a button, is what the
     -- window focuses when it opens.
+    , resize = Tui.resizable
     , views =
         Array.pushFirst
             (Canvas

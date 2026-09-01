@@ -2744,3 +2744,143 @@ A builder that dies leaves the application in a state where the *only* symptom
 is that the screen stopped changing. That is worth a look on its own: an
 exception raised while building a window or a dialog should end up somewhere a
 person can see it, and today it does not.
+
+## Closing the last one the hex viewer found: how big is *this* window?
+
+The hex viewer's first write-up said sixteen bytes a row was "forced, not
+preferred", and the reason was the honest one: `Resized` reports the desktop,
+never a window, so nothing told a model that the user had dragged one wider.
+The same sentence, read the other way round, says the tool cannot grow
+*taller* either — a canvas fills its window by itself, because `Grows` has
+done that since gap 2, but the canvas's **lines** are the model's, and a model
+that does not know how many rows there are cannot produce them. A hex dump in
+a taller window was sixteen rows and blank space.
+
+Two things closed it, and they are two halves of one idea rather than two
+features.
+
+### `WindowResized`, and the poll that finds it
+
+A window's bounds can change five ways: the frame's resize handle, its zoom
+box, `Tile`, `Cascade`, and `growMode` carrying it along when the terminal
+changes size. There is no one call they share that a callback could hang off —
+`TView::locate`, `TView::calcBounds` and `TWindow::zoom` all end at
+`changeBounds` by different routes, and `TGroup::changeBounds` is called for
+reasons that are not resizes as well.
+
+`flushResize` had already answered this question one level up. It does not
+hook `SIGWINCH`, `WINDOW_BUFFER_SIZE_EVENT` or `setScreenMode`; it compares
+the desktop's bounds against the ones it last saw, once per pump, because
+whichever route was taken the desktop is a different size afterwards.
+`flushWindowResize` is the same trick over the window registry: four integer
+comparisons per open window per pump, and there are never many.
+
+Two details are the interesting part.
+
+**It reports the whole rectangle, not the size.** A window that was dragged
+has moved without resizing, and a model that stores the rectangle and renders
+it back — which is the intended shape, and the same shape `Changed` has for an
+input line — needs the position too or it will move the window back sideways
+the first time it re-renders.
+
+**It is not reported for a size the model itself set.** `SetBounds` seeds the
+remembered rectangle after calling `locate`, on the same principle `Changed`
+already followed: only a change the model did not already know about is news.
+
+And one non-detail that took the longest to get right: **the differ is told
+nothing**. The first version recorded the new rectangle into the spec the
+differ compares against, by analogy with `valueChanged` — and that is exactly
+backwards. What the differ holds is the *model's* rectangle. A model that
+ignores `WindowResized` renders the same rectangle it always did, it compares
+equal, no `setBounds` is written, and the window stays where the user dragged
+it. Recording the real one would have made every existing example snap its
+windows back on the next render. A model that *does* store the rectangle
+compares unequal exactly once and writes a `setBounds` to where the window
+already is, which `TView::locate` drops on the floor (`if( bounds != r )`).
+Both work, nothing regresses, and the code that makes it so is the code that
+is not there.
+
+### `Resize`, and why `sizeLimits` is the whole of it
+
+The other half is the width, and the argument comes out the opposite way from
+the one the original write-up assumed. Sixteen bytes a row is not a limitation
+to be lifted once the model can know better — it is what a hex dump *is*. The
+low nibble of the offset is the column number, so `0x4C` is in column C of the
+row starting `40`, and a twenty-three byte row is a grid nobody can read an
+offset off. The right answer is not to reflow; it is to stop offering.
+
+`Window` gained `resize : Resize`, a record of two booleans, with
+`Tui.resizable`, `Tui.resizeHeight`, `Tui.resizeWidth` and `Tui.fixedSize`
+naming the four. It is Turbo Vision's `sizeLimits`, and `sizeLimits` turns out
+to be the one call every route to a new size passes through:
+`TFrame::dragWindow` for the handle, `TWindow::zoom` for the zoom box,
+`TFrame::draw` for whether the zoom box is even drawn as a zoom, `TView::locate`
+for `setBounds`, and `TView::calcBounds` — via `fitToLimits` — for `growMode`.
+Pinning a dimension in one override pins it on all five, with nothing else to
+remember and no state to keep in step. `JsWindow` also drops `wfGrow` and
+`wfZoom` when *neither* dimension can move, because a resize handle that
+cannot resize is a corner the user grabs for nothing.
+
+A pinned dimension is pinned at the size the window was **built** at rather
+than at whatever it currently is. The model wrote that number; a window that
+quietly kept a width it had drifted to would be a window whose size nothing
+owns.
+
+### What it looks like in the tool, and the rule it turns on
+
+`Tool/Hex.gren` now says `resize = Tui.resizeHeight`, wraps its canvas and
+scroll bar in `Grows stretchHeight` and its two description lines in
+`Grows pinBottom`, and keeps one field: how many dump rows the window is
+showing.
+
+Every rectangle in that window is still written for the height the window
+*opens* at and is never recomputed. That is the rule this made concrete, and
+it is worth stating plainly because the obvious alternative looks tidier and
+is wrong: **a view's rectangle is structural.** Change one and the differ
+tears the window down and builds it again, losing the caret and the z-order.
+So a layout that recomputed itself from the new height would rebuild the whole
+window on every drag — while `Grows` does the identical arithmetic inside
+`TGroup::changeBounds`, where it costs a repaint and nothing else. The model
+computes only what `Grows` cannot: the number of lines to put in the canvas,
+which is `height - 6` because two frame rows, the header, the blank row and
+the two description lines are spoken for whatever the height is.
+
+The one cost is that a window rebuilt for some *other* structural reason comes
+back at the model's declared size. For this tool nothing is structural — the
+dump's lines, the scroll bar's bounds and the two description lines are all
+patched — so it never happens. A window that both resizes and changes shape
+would want to store the rectangle and render it back, which is what
+`WindowResized` carrying the whole rectangle is for.
+
+`drive_hex.py` drives it the way a person would: `Ctrl-F5` is the Window menu's
+Resize/move, shifted arrows resize rather than move in `TView::dragView`, and
+`Enter` commits. Five Shift-Ups leave eleven rows of dump with the description
+lines directly under them and `PgDn` moving eleven rows; three Shift-Lefts
+leave the width exactly where it was.
+
+### And a menu entry that has to look as dead as it is
+
+`fixedSize` turned up a gap in `TWindow::setState` on its first real use.
+predc's ASCII chart and RPN calculator are both fixed-size windows -- sixteen
+rows of eight columns, and a keypad, neither with anywhere to put extra space
+-- and with the zoom box gone from the frame, the Window menu's Zoom entry and
+the status line's `F5 Zoom` were still lit, and did nothing.
+
+`TWindow::setState` only ever *enables* the commands a window supports when it
+is selected. Nothing disables the ones it does not: it relies on the previously
+selected window having disabled its own set on the way out. That works for two
+windows taking turns and does not work for the first one, because
+`initCommands()` starts with almost everything enabled, so a program whose
+first window is fixed-size inherits a `cmZoom` that nobody ever turned off.
+
+Upstream has the same gap for any window without `wfZoom` -- a `TDialog` on the
+desktop, for one -- and it has stayed invisible because nothing in Turbo Vision
+makes `wfZoom` a thing an author sets. `Resize` does, so `JsWindow::setState`
+now disables `cmZoom` for a window that cannot zoom. `cmResize` is deliberately
+left alone: a fixed-size window can still be *moved*, and `cmResize` is the
+move as well as the grow.
+
+The check for it is in `drive_ascii.py`, and it asserts on the colour the
+entry is drawn in rather than on any text, because greying is the entire
+visible difference -- the same reason the chart's own colour checks read
+attributes.

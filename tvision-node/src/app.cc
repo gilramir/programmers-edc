@@ -96,6 +96,7 @@ Napi::FunctionReference g_onKey;
 Napi::FunctionReference g_onClick;
 Napi::FunctionReference g_onClose;
 Napi::FunctionReference g_onResize;
+Napi::FunctionReference g_onWindowResize;
 Napi::FunctionReference g_onChange;
 Napi::FunctionReference g_onEdit;
 
@@ -681,6 +682,48 @@ static void flushResize()
                         Napi::Number::New(env, size.y)});
 }
 
+// The same trick as flushResize, one level down.
+//
+// A window's bounds can change by five different routes -- the frame's resize
+// handle, its zoom box, Tile, Cascade, and growMode carrying it along when the
+// terminal changes size -- and there is no single call they share that JS could
+// be hung off. What they do share is the window afterwards having different
+// bounds than it had before, so this compares, once per pump, per window. It is
+// four integer comparisons for each open window and there are never many.
+//
+// It reports the whole rectangle rather than only the size, because a window
+// that was dragged has moved without resizing and the differ still has to know:
+// the rect it last applied is what the next render is compared against, and a
+// stale one would move the window back under the user.
+static void flushWindowResize()
+{
+    if (g_onWindowResize.IsEmpty() || g_hasPendingError || g_shuttingDown)
+        return;
+
+    std::vector<std::pair<std::string, TRect>> moved;
+    for (const auto &entry : g_views.openWindows())
+        {
+        JsWindow *win = entry.second;
+        TRect now = win->getBounds();
+        if (now == win->lastReported)
+            continue;
+        win->lastReported = now;
+        moved.emplace_back(entry.first, now);
+        }
+    if (moved.empty())
+        return;
+
+    Napi::Env env = g_onWindowResize.Env();
+    Napi::HandleScope scope(env);
+    for (const auto &it : moved)
+        callJs(g_onWindowResize,
+               {Napi::String::New(env, it.first),
+                Napi::Number::New(env, it.second.a.x),
+                Napi::Number::New(env, it.second.a.y),
+                Napi::Number::New(env, it.second.b.x),
+                Napi::Number::New(env, it.second.b.y)});
+}
+
 void noteWindowClosed(const std::string &id)
 {
     if (g_onClose.IsEmpty() || g_shuttingDown)
@@ -1053,6 +1096,7 @@ static void prepare(const Napi::Env &env, const Napi::Value &value)
                           std::make_pair("onClick", &g_onClick),
                           std::make_pair("onClose", &g_onClose),
                           std::make_pair("onResize", &g_onResize),
+                          std::make_pair("onWindowResize", &g_onWindowResize),
                           std::make_pair("onChange", &g_onChange),
                           std::make_pair("onEdit", &g_onEdit)})
         {
@@ -1098,6 +1142,7 @@ static void teardown(const Napi::Env &env)
     g_onClick.Reset();
     g_onClose.Reset();
     g_onResize.Reset();
+    g_onWindowResize.Reset();
     g_onChange.Reset();
     g_onEdit.Reset();
     g_editNotes.clear();
@@ -1204,6 +1249,7 @@ static Napi::Value Step(const Napi::CallbackInfo &info)
         flushScrolled();
         flushClosedWindows();
         flushResize();
+        flushWindowResize();
 
         // The outer half of TGroup::execute(): a command the target considers
         // valid ends it. For the application that means quitting; for a modal
@@ -1244,6 +1290,7 @@ static Napi::Value Step(const Napi::CallbackInfo &info)
     // breaks out on evNothing before reaching the safe point above, and the
     // size the application started at is the one every layout needs first.
     flushResize();
+    flushWindowResize();
 
     if (finished || g_hasPendingError)
         {

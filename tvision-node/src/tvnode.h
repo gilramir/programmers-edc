@@ -666,6 +666,66 @@ public:
 
     virtual void handleEvent(TEvent &event) override;
 
+    // The other half of a window that cannot be zoomed: saying so.
+    //
+    // TWindow::setState *enables* the commands a window supports when it is
+    // selected and relies on the previously selected one having disabled its
+    // own on the way out -- so a window with no zoom box inherits whatever the
+    // last one left enabled, and a program whose first window is fixed-size
+    // starts with cmZoom enabled because nothing ever turned it off. The
+    // symptom is a lit F5 on the status line that does nothing, which is worse
+    // than a greyed one. Upstream has the same gap for any window without
+    // wfZoom; here it is reachable from the API, so it is worth closing.
+    //
+    // cmResize is deliberately not in this. A fixed-size window can still be
+    // moved, and cmResize is the move as well as the grow.
+    virtual void setState(ushort aState, Boolean enable) override
+    {
+        TDialog::setState(aState, enable);
+        if (enable != False && (aState & sfSelected) != 0 &&
+            (flags & wfZoom) == 0)
+            {
+            TCommandSet cannot;
+            cannot += cmZoom;
+            disableCommands(cannot);
+            }
+    }
+
+    // Which of the two dimensions the user is allowed to change.
+    //
+    // Turbo Vision asks a view for its own limits rather than keeping a rule
+    // anywhere central, and every route that could change a window's size goes
+    // through this one call: TFrame::dragWindow for the resize handle,
+    // TWindow::zoom for the zoom box -- and TFrame::draw, which is why the box
+    // stops offering a zoom it cannot do -- TView::locate for setBounds, and
+    // TView::calcBounds for growMode following the terminal. Pinning a
+    // dimension here pins it on all five, with nothing else to remember.
+    //
+    // A pinned dimension is pinned at the size the window was *built* at and
+    // not at whatever it drifted to, because the model wrote that number.
+    virtual void sizeLimits(TPoint &min, TPoint &max) override
+    {
+        TDialog::sizeLimits(min, max);
+        if (!canResizeWidth)
+            {
+            min.x = builtSize.x;
+            max.x = builtSize.x;
+            }
+        if (!canResizeHeight)
+            {
+            min.y = builtSize.y;
+            max.y = builtSize.y;
+            }
+    }
+
+    bool canResizeWidth = true;
+    bool canResizeHeight = true;
+    TPoint builtSize = {0, 0};
+
+    // What the resize poll last saw. Seeded when the window is built, so that
+    // building one is not itself reported as a resize.
+    TRect lastReported = TRect(0, 0, 0, 0);
+
     // JsWindow derives from TDialog so that a window and a dialog are one
     // class -- but TDialog's constructor takes the window-ness back out:
     // growMode = 0, flags = wfMove | wfClose, and ofTileable never set by
@@ -678,6 +738,22 @@ public:
         growMode = gfGrowAll | gfGrowRel;
         options |= ofTileable;
         zoomRect = getBounds();
+        builtSize = size;
+        lastReported = getBounds();
+    }
+
+    // A window the model says cannot be resized in either direction has no
+    // resize handle and no zoom box, because both would be corners the user
+    // can grab and nothing would move. One dimension pinned keeps them: a
+    // window that only grows downwards is still worth dragging and still worth
+    // zooming, and sizeLimits is what makes the zoom full-height rather than
+    // full-screen.
+    void setResize(bool width, bool height)
+    {
+        canResizeWidth = width;
+        canResizeHeight = height;
+        if (!width && !height)
+            flags &= ~(wfGrow | wfZoom);
     }
 
     std::string windowId;
@@ -741,6 +817,13 @@ public:
     {
         auto it = byWindow.find(windowId);
         return it == byWindow.end() ? nullptr : &it->second;
+    }
+
+    // The resize poll walks every open window once per pump, which is what
+    // lets a size change be noticed whichever of the five routes changed it.
+    const std::unordered_map<std::string, JsWindow *> &openWindows() const
+    {
+        return windows;
     }
 
     bool has(const std::string &id) const

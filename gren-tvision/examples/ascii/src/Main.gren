@@ -209,6 +209,12 @@ handleEvent event model =
         Resized _ ->
             model
 
+        -- Nor is its own window's, which it fixes: `resize = Tui.fixedSize`
+        -- means this never arrives, and a chart that reflowed is a different
+        -- program.
+        WindowResized _ ->
+            model
+
         -- Nothing here has a value the user can move: a canvas reports keys
         -- and clicks, not a value.
         Changed _ ->
@@ -264,6 +270,11 @@ chartWindow model =
     { id = "chartWin"
     , title = "ASCII Chart"
     , rect = { x1 = 8, y1 = 3, x2 = 8 + columns + 4, y2 = 3 + rows + 5 }
+    -- Thirty-two columns of eight rows is the chart, and a chart that could be
+    -- dragged wider would be the same chart with space beside it. Saying so
+    -- takes the resize handle and the zoom box off the frame, so the window
+    -- stops offering something that cannot happen.
+    , resize = Tui.fixedSize
     , views =
         [ Canvas
             { id = "chart"

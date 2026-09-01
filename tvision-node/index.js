@@ -52,6 +52,7 @@ function start(config) {
     onClick: guard(config.onClick),
     onClose: guard(config.onClose),
     onResize: guard(config.onResize),
+    onWindowResize: guard(config.onWindowResize),
     onChange: guard(config.onChange),
     onEdit: guard(config.onEdit),
   });

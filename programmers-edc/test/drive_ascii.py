@@ -45,6 +45,37 @@ def cell(code):
     return (ORIGIN[0] + (code % 16) * 2, ORIGIN[1] + code // 16)
 
 
+def resize(app, arrows):
+    """Ctrl-F5 is the Window menu's Resize/move; shifted arrows resize rather
+    than move in `TView::dragView`; Enter commits."""
+    app.send(b"\x1b[15;5~", settle=0.6)
+    for i in range(0, len(arrows), 6):
+        app.send(arrows[i:i + 6], settle=0.3)
+    app.send(b"\r", settle=0.9)
+
+
+def zoom_attr(app):
+    """The colour the Window menu draws its Zoom entry in. Turbo Vision greys
+    an item whose command is disabled, and dropping `wfZoom` is what disables
+    it -- so this is how "the frame has no zoom box" is visible on the menu."""
+    bar = app.render().split("\n")[0]
+    app.click(bar.index("Window") + 1, 1, settle=0.7)
+    screen = app.display()
+    for r, row in enumerate(screen.grid):
+        text = "".join(row)
+        if "Zoom" in text:
+            attr = screen.attrs[r][text.index("Zoom")]
+            app.send(b"\x1b", settle=0.4)
+            return attr
+    app.send(b"\x1b", settle=0.4)
+    return None
+
+
+def zoom_is_greyed(app):
+    attr = zoom_attr(app)
+    return attr is not None and attr[0] == 90
+
+
 def numbers(screen):
     """The four bases off the first detail line, as a dict."""
     m = re.search(r"Dec\s+(\d+)\s+Hex\s+(\S+)\s+Oct\s+(\S+)\s+Bin\s+(\d{4} \d{4})",
@@ -208,6 +239,25 @@ def main():
           numbers(app.render())["dec"] == 0, str(numbers(app.render())))
     check("so the cursor is back on the first cell", app.cursor() == cell(0),
           f"{app.cursor()} != {cell(0)}")
+
+    # The window is `resize = Tui.fixedSize`: sixteen rows of eight columns is
+    # the whole chart, and a bigger window would be the same chart with a gap
+    # round it. Three things follow, and the third is the one that is easy to
+    # forget -- a command nothing can act on has to *look* like one.
+    frame = [row for row in app.render().split("\n") if "ASCII Chart" in row][0]
+    check("a fixed-size window has no zoom box on its frame",
+          "[↑]" not in frame and "[↕]" not in frame, frame)
+    check("and no resize handle at the foot of it",
+          not any("└─" in row for row in app.render().split("\n")),
+          app.render())
+
+    before = app.render()
+    resize(app, b"\x1b[1;2B" * 3 + b"\x1b[1;2C" * 3)
+    check("and Ctrl-F5 plus shifted arrows changes nothing",
+          app.render() == before, app.render())
+
+    check("Window | Zoom is greyed out while it is the active window",
+          zoom_is_greyed(app), str(zoom_attr(app)))
 
     app.send(b"\x1bx", settle=1.0)
     code = app.wait(timeout=6)

@@ -166,6 +166,7 @@ view model =
         [ { id = "status"
           , title = "Multiple menu bars"
           , rect = { x1 = 8, y1 = 4, x2 = 62, y2 = 13 }
+          , resize = Tui.resizable
           , views =
                 [ StaticText
                     { id = "which"

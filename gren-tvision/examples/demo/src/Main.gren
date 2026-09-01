@@ -216,6 +216,14 @@ describe event =
         Resized it ->
             "Resized " ++ String.fromInt it.cols ++ "x" ++ String.fromInt it.rows
 
+        WindowResized it ->
+            "WindowResized "
+                ++ it.id
+                ++ " = "
+                ++ String.fromInt (it.rect.x2 - it.rect.x1)
+                ++ "x"
+                ++ String.fromInt (it.rect.y2 - it.rect.y1)
+
         Changed it ->
             "Changed "
                 ++ it.id
@@ -505,6 +513,7 @@ noteWindow model it =
     { id = windowId it
     , title = "Note " ++ String.fromInt it.id
     , rect = { x1 = 1 + offset, y1 = 1 + offset, x2 = 31 + offset, y2 = 10 + offset }
+    , resize = Tui.resizable
     , views =
         [ Canvas
             { id = windowId it ++ "Body"
@@ -527,6 +536,7 @@ eventWindow model =
         else
             "Event Viewer"
     , rect = { x1 = 40, y1 = 1, x2 = 79, y2 = 20 }
+    , resize = Tui.resizable
     , views =
         [ Canvas
             { id = "eventLog"

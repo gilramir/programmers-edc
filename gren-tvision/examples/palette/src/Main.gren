@@ -193,6 +193,7 @@ paletteWindow =
     { id = "paletteWin"
     , title = "Colours, said out loud"
     , rect = { x1 = 4, y1 = 1, x2 = 46, y2 = 12 }
+    , resize = Tui.resizable
     , views =
         [ Canvas
             { id = "colours"
@@ -236,6 +237,7 @@ plainWindow =
     { id = "plainWin"
     , title = "Saying nothing"
     , rect = { x1 = 4, y1 = 13, x2 = 46, y2 = 18 }
+    , resize = Tui.resizable
     , views =
         [ Canvas
             { id = "plain"
