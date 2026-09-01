@@ -282,6 +282,19 @@ def main():
         app.send(b"\x1b", settle=0.5)
         app.send(b"\x1b", settle=0.8)
 
+        # And the caret opens in the Name field, which is the first view in
+        # `Tui.fileDialog`'s array that can hold one. It has not always been:
+        # the array was built with `Array.append`, which makes its first
+        # argument the *postfix*, so the buttons were listed first, the dialog
+        # opened on OK and the field was two Tabs away. This is the check that
+        # was missing -- everything above drives the dialog with arrow keys and
+        # a mouse, and none of it can tell where the caret is.
+        app.send(b"\x1bc", settle=1.5)
+        app.send(b"zz", settle=0.6)
+        check("the caret opens in the Name field, so typing reaches it",
+              "zz" in app.render().split("\n")[5], app.render().split("\n")[5])
+        app.send(b"\x1b", settle=0.8)
+
         app.send(b"\x1bx", settle=1.0)
         code = app.wait(timeout=6)
         check("exit code 0", code == 0, f"exit={code}")

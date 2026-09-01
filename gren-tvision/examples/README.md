@@ -982,19 +982,20 @@ FINDINGS.
 
 ### What is left, now that the list is empty
 
-**One known bug, found from outside.** `programmers-edc`'s hex dump viewer --
-written as an ordinary consumer of this package -- opened `Tui.fileDialog` and
-typed a path into it, which is what the `Name` field is for, and nothing
-happened. A modal dialog with a list in it opens with the caret on the list;
-the field is two Tabs away. `applyInitialFocus` exists to prevent exactly this
-and works for windows. A dialog of a field and two buttons is fine, so it is
-something a `ListBox` or its scroll bar does; sending the same `Tui.focus` one
-message later fixes it, so the call is being undone rather than refused. The
-whole reproduction is in FINDINGS, the workaround is one line in
-`Tool/Hex.gren`, and `programmers-edc/test/drive_hex.py` pins it. **This should
-be fixed before anything is published** -- `examples/dir` has had it since the
-day the dialog was written and never noticed, because its test drives the
-dialog with the arrow keys.
+**The one known bug is fixed, and it was ours.** `programmers-edc`'s hex dump
+viewer -- written as an ordinary consumer of this package -- opened
+`Tui.fileDialog`, typed a path into the `Name` field, and nothing happened. It
+looked like a binding bug for a week: a modal dialog with a list in it opened
+with the caret elsewhere and the field two Tabs away, `applyInitialFocus` works
+for windows, and every distinguishing feature of the failing case pointed at
+`TListViewer`. The cause was `Tui.fileDialog` building its `views` array with
+`Array.append`, whose *first* argument is the postfix -- so it listed the
+buttons first, and that array is both the initial focus and the tab order. One
+word, `prepend`, fixes both. The story is in FINDINGS under "The dialog that
+opened on the wrong view"; what is worth carrying away is that nine checks
+drove that dialog past the fault without seeing it, because a pty test reads a
+screen and a screen does not say where the caret is. `drive_dir.py` now types
+into the field, which is the only kind of assertion that can.
 
 **One known limitation**, written up under gap (7) and in FINDINGS:
 `TMenuView::execute` runs a nested event loop, so the *menu bar* stops the

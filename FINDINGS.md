@@ -2683,51 +2683,28 @@ always fill with `Cmd.none` buys nothing but noise.
 
 ### A modal dialog opens with the caret in the wrong place
 
-This one is a bug, it is in the binding, and every program that uses
-`Tui.fileDialog` has it.
+**This was not a bug in the binding, and the section that said it was is
+replaced by the one at the end of this file** -- "The dialog that opened on the
+wrong view, and the `append` that put it there". What follows is the symptom as
+it was seen from predc, which is worth keeping because it is exactly what a
+consumer meets.
 
-`applyInitialFocus` (`views.cc`) exists precisely to undo Turbo Vision's
-"whatever was inserted last has the caret" — `insert()` prepends, so in a list
-written top to bottom the Cancel button wins, and a declarative API should not
-inherit an artifact of insertion order. It is called on both paths: for a
-window (`views.cc`, after `deskTop->insert`) and for a modal dialog
-(`app.cc`, after `beginModal`).
+`Tui.fileDialog` opens with the caret somewhere other than the `Name` field:
+the field is two Tabs away, and typing a path -- the thing the field is for --
+does nothing at all. `examples/dir` has had this since the day the dialog was
+written and never noticed, because its test drives the dialog with the arrow
+keys and never types.
 
-For a window it works. The calculator's canvas has the caret the moment it
-opens, which is why typing digits at it does anything.
+What was verified at the time, all of it still true and none of it the cause:
+a dialog of a field, a label and two buttons is fine (predc's Go To Offset
+dialog, and `examples/entries`' Add dialog); it is not a render arriving behind
+the dialog and stealing the caret, because it reproduces with an `update` that
+changes no part of the model; and the same focus sent one message later --
+`Cmd.batch [ Tui.dialog ports spec, Tui.focus ports "fileName" ]` -- sticks,
+which is what made it look like a call being *undone* rather than a call being
+made to the wrong view. `Tool.Hex` carried that one-line workaround until the
+cause was found.
 
-For a modal dialog with a list in it, it does not. `Tui.fileDialog` opens with
-the caret on the *file list*: the `Name` field is two Tabs away, and typing a
-path — the thing the field is for — does nothing at all. `examples/dir` has
-had this since the day the dialog was written and never noticed, because its
-test drives the list with the arrow keys and never types.
-
-What is verified, and it narrows the fault usefully:
-
-  - A dialog of a field, a label and two buttons is **fine**. predc's Go To
-    Offset dialog takes what is typed at it the moment it opens, and
-    `examples/entries` has been typing into its Add dialog for months.
-  - A dialog with a `ListBox` and a `History` in it is **not**. Both the
-    programs that have one are affected.
-  - It is not a render arriving behind the dialog and stealing the caret: it
-    reproduces with an `update` that changes no part of the model.
-  - **The same focus, sent one message later, sticks.** `Cmd.batch
-    [ Tui.dialog ports spec, Tui.focus ports "fileName" ]` puts the caret in
-    the field and leaves it there. So the call is being undone rather than
-    refused, by something between `beginModal` and the dialog reaching the
-    screen.
-
-The root cause is not found yet. The suspect is `TView::setState(sfVisible,
-True)`, which calls `owner->resetCurrent()` for any selectable view being
-shown, and a list box brings a scroll bar of its own into the group — but that
-happens inside `buildItems`, which runs *before* `applyInitialFocus`, so the
-order does not obviously explain it.
-
-`Tool.Hex` carries the one-line workaround with a comment saying why, and
-`drive_hex.py` asserts that the field takes what is typed at it, which is a
-check that stays true and stays useful after the binding is fixed. **It should
-be fixed before anything is published**: a file dialog that ignores the
-keyboard is the first thing a new user of this package will meet.
 
 ### And one documented rule whose failure mode is silence
 
@@ -3214,3 +3191,78 @@ checks in two suites started failing against a program that was working
 perfectly. Every predc driver now runs with `HOME` set to a fresh temporary
 directory. A suite whose result depends on which colour scheme the person
 running it happens to like is not a suite.
+
+## The dialog that opened on the wrong view, and the `append` that put it there
+
+The one known bug on the list -- `Tui.fileDialog` opening with the caret
+anywhere but its `Name` field -- was in `Tui.fileDialog`, in the one line
+nobody reads:
+
+```gren
+    , views =
+        Array.append
+            [ InputLine { id = "fileName", … }, History …, Label …, ListBox …, StaticText … ]
+            placed          -- the buttons
+```
+
+**`Array.append fst second` makes `fst` the postfix.** It is not `++` with the
+arguments in the order they are written; it is the pipeline reading, `xs |>
+Array.append suffix`, and `Array.prepend` is the one that means `++`. Gren
+documents this with an example that says so in three symbols -- `append [1,2,3]
+[4,5,6] == [4,5,6,1,2,3]` -- and the line above still reads, to anyone who
+knows Elm, as "the fields and then the buttons". What it built was the buttons
+and then the fields.
+
+That array is two things at once, and this is why one typo produced two
+symptoms:
+
+  - **The caret opens on the first view in it that can hold one**
+    (`buildItems` returns `firstSelectable`, `applyInitialFocus` focuses it),
+    so the dialog opened on the OK button.
+  - **Tab walks it in the same order.** `kbTab` is `focusNext(False)`
+    (`twindow.cpp:147`), which is `prev()` through a chain that `insert()`
+    builds by prepending -- so a Tab goes to the view declared *after* this one,
+    and the order of the array is the tab order. From OK that was Cancel, then
+    `fileName`. Which is where "the Name field is two Tabs away" came from: not
+    an odd tab order plus a focus bug, but one wrong order seen twice.
+
+Everything that made this look like a bug in the binding was true and none of
+it was relevant. A dialog of a field and two buttons really is fine -- those
+specs list the field first because they are written as one literal array, with
+no `append` to get backwards. A `Tui.focus` sent one message later really does
+stick -- naming a view by id has nothing to do with array order. And a
+`ListBox` really is present in both affected dialogs -- because
+`Tui.fileDialog` is the only helper in the package that builds its view array
+out of two pieces, and it is the only one with a list. Every distinguishing
+feature of the failing case pointed at `TListViewer`, and the actual difference
+was the `Array.append`.
+
+**What found it was printing the thing that was assumed.** Four rounds of
+reading `tgroup.cpp`, `tview.cpp` and `tlstview.cpp` produced a plausible
+mechanism (a list viewer shows its scroll bar when it goes active, and
+`TView::setState(sfVisible)` calls `owner->resetCurrent()`) that was wrong,
+because the scroll bar is not `ofSelectable` and the call never happens. Twenty
+lines of `fprintf` in `buildItems` -- id, type and options for every item as it
+is inserted -- answered it in one run:
+
+```
+  item[0] type=button       id=hex.file-ok      options=0035 sel=1
+  item[1] type=button       id=hex.file-cancel  options=0035 sel=1
+  item[2] type=inputLine    id=fileName         options=0005 sel=1
+```
+
+The order of a list is the kind of fact that reading cannot check, because
+reading is where the wrong order came from.
+
+**And the test could not see it either, which is the part worth fixing.**
+`drive_dir.py` drove that dialog with arrow keys, `Alt-O` and the mouse through
+nine checks and a history drop-down, and every one of them passed with the
+caret on the wrong view -- a pty test reads a screen, and a screen does not say
+where the caret is. Typing one word does say, because it lands somewhere. So
+`drive_dir.py` ends by opening the chooser and typing `zz` into it, and that
+check fails against the old array. The rule generalises past this dialog:
+**for anything about focus, the assertion is what a keystroke does, not what
+the screen shows.**
+
+`Tool/Hex.gren`'s workaround is gone, and with it the last known bug on the
+list before publishing.

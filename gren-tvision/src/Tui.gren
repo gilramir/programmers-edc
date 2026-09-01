@@ -743,6 +743,13 @@ fixedSize =
 
 {-| The controls.
 
+**The order of the array they are in is two things**, and both are easy to
+change by accident. The caret opens on the first view in it that can hold one,
+and `Tab` walks the array from there, so this array is the tab order. Build it
+as one literal where you can; a `views` assembled out of pieces is where the
+order goes wrong, and it went wrong here -- `Tui.fileDialog` listed its buttons
+first for a week, because `Array.append fst second` makes `fst` the *postfix*.
+
   - `StaticText` -- a run of text. Longer than its rectangle is silently
     truncated, so budget the columns.
   - `Button` -- sends `cmd` as a [`Command`](#Event) event when pressed, or
@@ -1515,7 +1522,13 @@ fileDialog spec =
     , title = spec.title
     , rect = { x1 = left, y1 = top, x2 = left + width, y2 = top + height }
     , views =
-        Array.append
+        -- `prepend` and not `append`: `Array.append fst second` makes `fst` the
+        -- *postfix*, which is the pipeline reading and the opposite of `++`.
+        -- Written with `append` this listed the buttons first, and the order
+        -- of this array is two things at once -- the caret opens on the first
+        -- view in it that can hold one, and Tab walks it from there -- so the
+        -- dialog opened on OK and the Name field was two Tabs away.
+        Array.prepend
             [ InputLine
                 -- Three columns short of where it would otherwise end,
                 -- because the history drop-down goes in them.

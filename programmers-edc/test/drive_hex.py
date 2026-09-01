@@ -13,12 +13,13 @@ The fixture is forty kilobytes of `i % 256`, which makes every assertion
 arithmetic: the byte at offset *n* is `n % 256`, and the row at a multiple of
 256 is the whole table over again.
 
-One check here is about the *package* rather than this tool. A modal dialog is
-supposed to open with the caret on the first view in it that can hold one, and
-does not -- `Tui.fileDialog` opens with its list focused, so typing a path does
-nothing. `Tool.Hex` sends a `Tui.focus` of its own right after the dialog, and
-"the Name field takes what is typed at it" is what says the workaround is still
-needed. When the binding is fixed the line can go and this check stays green.
+One check here is about the *package* rather than this tool. A dialog opens
+with the caret on the first view in its `views` array that can hold one, and
+`Tui.fileDialog` used to list its buttons first by accident, so it opened on OK
+and typing a path did nothing. That is fixed in the package; "the Name field
+takes what is typed at it" is the check that says so, and it is worth keeping
+here because an order in an array is exactly the kind of thing a later edit
+reshuffles without meaning to.
 """
 
 import os

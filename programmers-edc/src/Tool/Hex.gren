@@ -396,20 +396,7 @@ receive ports msg model =
                     { path = listed.path, entries = entriesOf listed }
             in
             { model = { model | browsing = Just browsing }
-            , command =
-                Cmd.batch
-                    [ Tui.dialog ports (fileDialog model browsing)
-                    -- Which should not be necessary, and is. A dialog is
-                    -- supposed to open with the caret on the first view in it
-                    -- that can hold one -- `applyInitialFocus`, views.cc --
-                    -- and for a *modal* it does not happen: the file dialog
-                    -- opens with its list focused and the Name field takes two
-                    -- Tabs to reach, so typing a path does nothing. The same
-                    -- focus, sent one message later, sticks. `examples/dir`
-                    -- has the same defect and never noticed, because it drives
-                    -- its dialog with the arrow keys.
-                    , Tui.focus ports "fileName"
-                    ]
+            , command = Tui.dialog ports (fileDialog model browsing)
             }
 
         -- Which of the two a name is, is a question about the file system and
