@@ -8,7 +8,7 @@ and then.
 RPN (reverse polish notation) calculator
 integers can be given in decimal, hex, or binary.
 integer results can be shown in decimal, hex, or binary
-handles floating point (base 10)
+handles exact decimals (base 10)
 
 ## Hex dump viewer
 
