@@ -3567,3 +3567,88 @@ take a moment or never arrive, asking puts `Asking for the clipboard...` on the
 message line: the one state this program can be in that it cannot draw. The
 answer clears it, and a terminal that never replies leaves the right thing on
 the screen.
+
+## The calculator's other half, and the `Float` it had no business using
+
+predc's RPN calculator opens by saying its integers are exact. The stack holds
+`BigInt`, a width is a question put to a value rather than a property the value
+carries, and nothing is truncated without a word on the screen saying so. Its
+other half divided two doubles.
+
+`18446744073709551615 2 /` is `9223372036854775807.5`. What the calculator
+answered was `9223372036854775808`: the dividend rounded up to the nearest
+double *before* the division, and the trailing half gone with it. `0.1 0.2 +`
+was `0.30000000000000004`. Both were there from the day the tool was written,
+in the one program whose whole claim is that a `uint64` is exact, and neither
+is visible until somebody types the number that shows it.
+
+`gilramir/gren-bigint` became `gilramir/gren-bignum` -- the same `BigInt`
+module plus a `BigDecimal` -- and the swap itself was two lines, because the
+module kept its name and every signature predc uses. The interesting part was
+what the second module then made possible:
+
+```gren
+type alias Decimal =
+    { amount : BigDecimal, rounded : Bool }
+
+type Value
+    = Whole BigInt
+    | Real Decimal
+```
+
+`add`, `subBy` and `mul` on a `BigDecimal` widen rather than round, so they
+cannot lose anything. Mixing the two halves is exact too, and that is the
+second bug fixed by the same change: promoting a `Whole` used to go through
+`BigInt.toFloat`, and `BigDecimal.fromBigInt` is a change of representation
+rather than a conversion. The only operation left that can lose a digit is a
+division that does not terminate.
+
+### The mark is carried, not computed
+
+`ovf` is worked out at display time from the value and the width, because both
+are still there to look at. Approximation is not like that: `0.999...` gives no
+sign of having been three thirds, and by the time it is drawn the fact is gone.
+So `rounded` rides along on the value, is set by the one operation that can set
+it, and is ORed by everything downstream -- a sum is no more exact than what
+went into it. `1 3 / 3 *` is `~0.99999999999999999999` and says so.
+
+That is also why `Real` holds a record rather than a bare `BigDecimal`. The
+alternative was a second constructor for approximate decimals, which would have
+made every site that matches `Real` match twice to ask a question only two of
+them care about.
+
+### Twenty significant digits, not twenty places
+
+`divByTo` takes decimal *places*, and a fixed number of them is wrong in a way
+that only a programmer's calculator walks into. One over the largest `uint64`
+begins nineteen zeroes after the point, so twenty places of it is a single
+digit of answer and nineteen digits of nothing -- and dividing 1 by a `u64` is
+not an exotic thing to do here. The fix is four lines: the magnitude of a
+`BigDecimal` is the digit count of its `unscaled` less its `scale`, a
+quotient's magnitude is within one of the difference of the operands', and one
+either way does not matter for a number that is only going to be read.
+
+    placesFor dividend divisor =
+        max significant (significant - (magnitude dividend - magnitude divisor))
+
+The `max` is the other half of it. A huge quotient must not be rounded to
+twenty significant digits: those integer digits are all real, and cutting them
+would be exactly the lie this change was made to stop.
+
+### And the marker had to go on the left
+
+It was `"  approx"` after the digits, matching `ovf`, and the pty driver
+printed what that actually looks like:
+
+    0.0033333333333333333333  appr
+
+Twenty significant digits of a small quotient is most of a thirty-five-column
+canvas, so a marker on the right is the first thing to fall off the end of the
+line -- and a number too long to show is precisely the case the marker exists
+for. A leading `~` is one column, is where the eye already is, and cannot be
+cut off by the thing it is warning about. `~0.000000000000000000054210108` is
+clipped and still honest.
+
+`ovf` can stay on the right because the value it marks is bounded: sixty-four
+bits of anything is a known width, and the marker is a comment on a number that
+fits. `~` is not a comment. It is part of how the number is written.

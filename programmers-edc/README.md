@@ -90,6 +90,28 @@ Two things about it are temporary, and both are temporary for the same reason
     src/Config.gren   the one thing predc remembers between runs
     test/drive_*.py   one pty driver per tool, plus the shell and the themes
 
+## The calculator's numbers
+
+Both halves are exact. The stack holds `BigInt` for whole numbers and
+`BigDecimal` for the rest, both from `gilramir/gren-bignum`, so
+`18446744073709551615 2 /` is `9223372036854775807.5` rather than the nearest
+double, and `0.1 0.2 +` is `0.3`.
+
+Division promotes rather than truncating -- `10 2 /` is `5` and stays an
+integer, `7 2 /` is `3.5` -- and `%` is there for the truncating answer. The
+one answer that cannot be exact is a division that does not terminate, and it
+is written with a leading `~`: `1 3 /` is `~0.33333333333333333333`. The mark
+is carried by everything computed from it, so `1 3 / 3 *` is
+`~0.99999999999999999999` rather than a `1` that would be a lie.
+
+It is twenty *significant* digits and not twenty decimal places, which is the
+difference between an answer and a row of zeroes when the quotient is smaller
+than `1e-19` -- one over the largest `uint64`, say.
+
+A width is a lens rather than a cast: the stack keeps the exact number, and
+`u64` or `i64` decides how it is shown and whether it is marked `ovf` for not
+fitting. Nothing here is quietly cut down to size.
+
 ## Highlighting a hex dump
 
 `v` marks from the cursor, `V` marks whole rows, and one of `1`-`6` paints what

@@ -6,7 +6,11 @@ Three things are being tested and only the first is the calculator.
 **The arithmetic is exact.** 2^64 - 1 is computed and printed in full. A Gren
 `Int` cannot hold that number and cannot even divide one that size -- see
 gren-lang/compiler#383 -- which is why the stack holds `BigInt` values from
-`gilramir/gren-bigint`.
+`gilramir/gren-bignum`. The decimals are that package's `BigDecimal` for the
+same reason and it is the same test: halving 2^64 - 1 keeps the trailing `.5`
+that a double had no bits left to hold, and `0.1 0.2 +` is `0.3`. The one
+answer that cannot be exact is a division that does not terminate, and it is
+the only thing here written with a leading `~`.
 
 **A keypad and a keyboard share one window.** The display is a canvas with
 focus, so every digit typed reaches the model rather than hunting for a button;
@@ -174,6 +178,27 @@ def main():
     app.send(b"z1\r0\r/", settle=1.0)
     check("dividing by zero says so", "divide by zero" in message(app), message(app))
     check("and leaves the stack alone", stack(app).get(1) == "0", str(stack(app)))
+
+    # The other half of the promotion, which is where a calculator that claims
+    # to be exact usually stops being one. Every check in this block gave a
+    # different answer when that half was a `Float`.
+    app.send(b"z18446744073709551615\r2\r/", settle=1.2)
+    check("halving 2^64 - 1 keeps the digit a double had no room for",
+          top(app) == "9223372036854775807.5", str(stack(app)))
+    app.send(b"z0.1\r0.2\r+", settle=1.2)
+    check("and 0.1 0.2 + is 0.3", top(app) == "0.3", str(stack(app)))
+    app.send(b"z1\r3\r/", settle=1.2)
+    check("a division that does not terminate is marked with a ~",
+          top(app) == "~0.33333333333333333333", str(stack(app)))
+    app.send(b"3\r*", settle=1.2)
+    check("and the mark is carried by everything computed from it",
+          top(app) == "~0.99999999999999999999", str(stack(app)))
+    # Twenty *significant* digits rather than twenty decimal places. One over
+    # the largest uint64 begins nineteen zeroes after the point, and a fixed
+    # twenty places of it would be a single digit of answer.
+    app.send(b"z1\r18446744073709551615\r/", settle=1.2)
+    check("a quotient smaller than 1e-19 still has digits in it",
+          top(app).startswith("~0." + "0" * 19 + "542"), str(stack(app)))
 
     # Bitwise, on numbers wider than a machine word. In hex, `10` is sixteen --
     # which is the whole point of the base being a mode, and was worth one

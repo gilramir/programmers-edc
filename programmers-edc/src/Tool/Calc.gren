@@ -26,14 +26,22 @@ width is a *view* rather than a type -- the stack holds exact integers, and
 overflowed. Nothing is silently truncated; if a value does not fit the width
 you are looking through, it says so.
 
-**Division promotes rather than truncating.** `10 2 /` is `5` and stays an
-integer; `7 2 /` is `3.5`, because a calculator that answered `3` would be
-wrong in the way that costs an afternoon. `%` is there for the truncating
-answer, and works on integers only.
+**Division promotes rather than truncating, and what it promotes to is
+exact.** `10 2 /` is `5` and stays an integer; `7 2 /` is `3.5`, because a
+calculator that answered `3` would be wrong in the way that costs an
+afternoon. The other half of that is `BigDecimal` rather than `Float`:
+`0.1 0.2 +` is `0.3` and not `0.30000000000000004`, and dividing two
+sixty-four-bit integers keeps every digit of the answer instead of the
+fifty-three bits a double would have had left. The one division that cannot
+be exact is the one that does not terminate, and that answer is written with
+a leading `~` for the same reason a value that does not fit its width is
+marked `ovf`. `%` is there for the truncating answer, and works on integers
+only.
 
 -}
 
 import Array exposing (Array)
+import BigDecimal exposing (BigDecimal)
 import BigInt exposing (BigInt)
 import Char
 import Math
@@ -75,9 +83,30 @@ type Base
     | Bin
 
 
+{-| A decimal, and whether it is the whole of the answer.
+
+`rounded` is set by the only operation that can lose a digit -- a division
+that does not terminate -- and anything computed from such a value carries it
+onwards, because a sum is no more exact than what went into it. It is the
+`ovf` of the decimal side: a fact about what is being shown that the number
+itself cannot carry.
+
+`show` writes it as a leading `~` rather than a word after the digits, and
+the reason is the display. Twenty significant digits of a small quotient is
+already most of a thirty-five-column line, so a marker on the right is the
+first thing to fall off the end of it -- and the marker falling off a number
+too long to show is precisely the case it exists for.
+
+-}
+type alias Decimal =
+    { amount : BigDecimal
+    , rounded : Bool
+    }
+
+
 type Value
     = Whole BigInt
-    | Real Float
+    | Real Decimal
 
 
 {-| The stack's last element is its top, which is the end everything happens
@@ -524,7 +553,9 @@ unary operation model =
 
 
 {-| Read what was typed, in the base it was typed in. The separators come out
-first: `BigInt` ignores them too, but a `Float` would not.
+first: both readers take an underscore *between two digits*, and `accepts`
+lets one be typed anywhere, including at the end of a number still being
+typed.
 -}
 parse : Base -> String -> Maybe Value
 parse base text =
@@ -533,7 +564,8 @@ parse base text =
             String.replace "_" "" text
     in
     if base == Dec && String.contains "." cleaned then
-        Maybe.map Real (String.toFloat cleaned)
+        BigDecimal.fromString cleaned
+            |> Maybe.map (\amount -> Real { amount = amount, rounded = False })
 
     else
         Maybe.map Whole (BigInt.fromStringWithBase (radix base) cleaned)
@@ -541,33 +573,47 @@ parse base text =
 
 add : Value -> Value -> Result String Value
 add a b =
-    Ok (arithmetic BigInt.add (+) a b)
+    Ok (arithmetic BigInt.add BigDecimal.add a b)
 
 
 subtract : Value -> Value -> Result String Value
 subtract a b =
-    Ok (arithmetic (\x y -> x |> BigInt.subBy y) (-) a b)
+    Ok (arithmetic (\x y -> x |> BigInt.subBy y) (\x y -> x |> BigDecimal.subBy y) a b)
 
 
 multiply : Value -> Value -> Result String Value
 multiply a b =
-    Ok (arithmetic BigInt.mul (*) a b)
+    Ok (arithmetic BigInt.mul BigDecimal.mul a b)
 
 
-arithmetic : (BigInt -> BigInt -> BigInt) -> (Float -> Float -> Float) -> Value -> Value -> Value
-arithmetic whole real a b =
+{-| Two integers stay an integer; anything else is done in decimal, where
+`add`, `subBy` and `mul` widen rather than round and so cannot lose anything
+that was not lost before they were called. Which is why the only thing to
+work out about the answer is whether an operand was already short of digits.
+-}
+arithmetic : (BigInt -> BigInt -> BigInt) -> (BigDecimal -> BigDecimal -> BigDecimal) -> Value -> Value -> Value
+arithmetic whole decimal a b =
     when { left = a, right = b } is
         { left = Whole x, right = Whole y } ->
             Whole (whole x y)
 
         _ ->
-            Real (real (toFloat a) (toFloat b))
+            Real
+                { amount = decimal (toDecimal a) (toDecimal b)
+                , rounded = isRounded a || isRounded b
+                }
 
 
-{-| Exact when it divides, a `Float` when it does not. A programmer's
+{-| An integer when it divides, a decimal when it does not. A programmer's
 calculator answering `3` to `7 2 /` would be wrong in the expensive way; one
 that answered `3.5` to `10 2 /` would have thrown away the fact that the
 answer is an integer. `%` is the truncating one.
+
+The decimal half is where this used to quietly stop being a calculator you
+could trust. It divided two `Float`s, so `18446744073709551615 3 /` answered
+with the nearest double -- a run of zeroes where the last five digits belong
+-- in the one program whose whole claim is that a `uint64` is exact.
+
 -}
 divide : Value -> Value -> Result String Value
 divide a b =
@@ -579,17 +625,81 @@ divide a b =
                         Ok (Whole answer.quotient)
 
                     else
-                        Ok (Real (BigInt.toFloat x / BigInt.toFloat y))
+                        inDecimal a b
 
                 Nothing ->
                     Err "divide by zero"
 
         _ ->
-            if toFloat b == 0 then
-                Err "divide by zero"
+            inDecimal a b
 
-            else
-                Ok (Real (toFloat a / toFloat b))
+
+{-| Divide in decimal: exactly when the quotient terminates, and to enough
+places to be worth reading when it does not.
+
+`divBy` answers `Nothing` for a zero divisor and for a quotient that runs
+forever, and does not say which. The divisor is asked first so that the
+`Nothing` left over can only mean the second.
+
+-}
+inDecimal : Value -> Value -> Result String Value
+inDecimal a b =
+    let
+        x =
+            toDecimal a
+
+        y =
+            toDecimal b
+    in
+    if BigDecimal.isZero y then
+        Err "divide by zero"
+
+    else
+        when x |> BigDecimal.divBy y is
+            Just answer ->
+                Ok (Real { amount = answer, rounded = isRounded a || isRounded b })
+
+            Nothing ->
+                when x |> BigDecimal.divByTo (placesFor x y) BigDecimal.HalfEven y is
+                    Just answer ->
+                        Ok (Real { amount = answer, rounded = True })
+
+                    Nothing ->
+                        Err "divide by zero"
+
+
+{-| How far a non-terminating quotient is worked out.
+
+Twenty *significant* digits rather than twenty decimal places, because the
+difference between those two is exactly the case a programmer's calculator
+walks into: `1` divided by the largest `uint64` begins nineteen zeroes after
+the point, and twenty places of it would be one digit of answer and nineteen
+of nothing. A quotient's magnitude is within one of the difference of the two
+magnitudes, and one digit either way does not matter when the number is only
+going to be read.
+
+-}
+placesFor : BigDecimal -> BigDecimal -> Int
+placesFor dividend divisor =
+    max significant (significant - (magnitude dividend - magnitude divisor))
+
+
+significant : Int
+significant =
+    20
+
+
+{-| Where the leading digit sits: `10 ^ (magnitude v - 1) <= abs v < 10 ^ magnitude v`
+for a non-zero `v`. Zero has no leading digit and answers `0`.
+-}
+magnitude : BigDecimal -> Int
+magnitude value =
+    if BigDecimal.isZero value then
+        0
+
+    else
+        String.count (BigInt.toString (BigInt.abs (BigDecimal.unscaled value)))
+            - BigDecimal.scale value
 
 
 remainder : Value -> Value -> Result String Value
@@ -656,18 +766,33 @@ negate value =
         Whole x ->
             Ok (Whole (BigInt.negate x))
 
-        Real x ->
-            Ok (Real (Basics.negate x))
+        Real it ->
+            Ok (Real { it | amount = BigDecimal.negate it.amount })
 
 
-toFloat : Value -> Float
-toFloat value =
+{-| An integer becomes a decimal exactly. `fromBigInt` is a change of
+representation and not a conversion, which is what `BigInt.toFloat` was, and
+why mixing an integer into a decimal sum used to cost every digit past the
+fifty-third.
+-}
+toDecimal : Value -> BigDecimal
+toDecimal value =
     when value is
         Whole x ->
-            BigInt.toFloat x
+            BigDecimal.fromBigInt x
 
-        Real x ->
-            x
+        Real it ->
+            it.amount
+
+
+isRounded : Value -> Bool
+isRounded value =
+    when value is
+        Whole _ ->
+            False
+
+        Real it ->
+            it.rounded
 
 
 -- SHOWING
@@ -685,8 +810,14 @@ wrapped one as though it were the answer.
 show : Model -> Value -> String
 show model value =
     when value is
-        Real x ->
-            String.fromFloat x
+        Real it ->
+            (if it.rounded then
+                "~"
+
+             else
+                ""
+            )
+                ++ BigDecimal.toString it.amount
 
         Whole x ->
             when model.width is
