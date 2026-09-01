@@ -3432,3 +3432,66 @@ four programs compiling -- three examples that answer every variant with
 fix and every one was found by the compiler in the first build. That is the
 difference between a union and a string: the protocol version exists for the
 runtime, and exhaustiveness is what covers the same skew inside one language.
+
+## `y`, and the first thing that could not be copied
+
+predc's hex viewer yanks: `y` takes what is marked, **Bytes | Copy as a dump**
+takes the same range as the rows on the screen, and both go out through
+[`copyToClipboard`](Tui#copyToClipboard). It is the first Gren program to call
+the clipboard, and it found three things.
+
+**With nothing marked, `y` takes the highlight under the cursor.** That rule is
+one line and it is what makes a highlight worth more than its colour: mark a
+range once, paint it, and it stays a range -- something to come back to
+tomorrow and copy without marking it again. Painting stopped being decoration
+the moment reading it back was possible.
+
+**Two shapes, because neither is recoverable from the other.** `AsHex` is
+`00 01 02 03` and goes into a debugger or a test fixture; `AsDump` is what the
+window shows, offsets and printable column included, and goes into a bug
+report. Nothing on the receiving end of a clipboard can turn one into the
+other. The dump form snaps to whole rows however the range was made -- a first
+line indented by an amount nothing explains is not a dump -- and writes full
+stops where the screen writes middle dots, because what is on the other end of
+a clipboard may be ASCII only.
+
+**And the streaming design finally cost something.** The viewer never holds the
+file: it holds the size and one 16 KB chunk around the cursor, which is what
+lets it open a four gigabyte core dump instantly. A mark can be dragged across
+more of the file than that -- `V` then `Ctrl-End` marks all forty kilobytes of
+the test fixture -- and those bytes are genuinely not in the program. It
+refuses, and says by how much:
+
+    That is 40960 bytes and only 16384 are in memory at a time.
+
+Refusing beats the alternative, which is copying the part it happens to be
+holding. **A dump missing its middle looks exactly like a dump**, and it would
+be found by whoever pasted it into a bug report rather than by whoever copied
+it. Reading the range first and copying when it arrives is a state machine
+worth building the day somebody wants it; a wrong answer is not worth shipping
+in the meantime.
+
+### The clipboard's wire is what makes a consumer's test possible too
+
+`drive_hex.py` now removes `DISPLAY` and `WAYLAND_DISPLAY` like `drive_clip.py`
+does, and gets the same thing back: what predc copied is base64 inside an
+`OSC 52` in the pty's byte stream, so the driver decodes it and compares it
+against the bytes the window was showing. It also sends
+`ESC]60;allowWindowOps` halfway through, which turns the message from "this
+program only" into a plain "Copied 4 bytes as hex" without restarting
+anything. That is the whole of the Gren clipboard API exercised end to end, and
+it is what the previous commit could not do.
+
+### A pty test that counts menu lines breaks when the menu grows
+
+Two entries added to predc's `Bytes` menu moved *Top of file* and *End of file*
+down by three lines, and four checks failed -- none of them about copying, all
+of them about paging past the first chunk. `menu(app, "Bytes", 5)` had been
+clicking the fifth line of the pull-down.
+
+Every entry is reached by the letter it underlines now (`bytes_menu(app,
+b"e")`), which is shorter, is the only way into a *nested* submenu without
+knowing where the second box lands, and checks the hot keys while it is there.
+The general form: **in a pty test, name the thing rather than its position.**
+The same rule already applies to rows and columns, where it is obvious; a menu
+is the case where the position looks stable and is not.

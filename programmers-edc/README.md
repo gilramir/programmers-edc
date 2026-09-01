@@ -111,6 +111,20 @@ them, and closing the window drops the whole tool the way it drops every other
 one here. Where two overlap the newer one shows; taking it off puts the older
 one back.
 
+## Copying
+
+`y` copies what is marked as hex -- `00 01 02 03` -- and **Bytes | Copy as a
+dump** copies the same range as the rows on the screen, offsets and printable
+column included. With nothing marked, both take the highlight the cursor is
+sitting in, which is the other reason to paint one.
+
+Two things it will tell you rather than guess about. The system clipboard is
+`wl-copy`, `xsel`, `xclip` or the terminal itself, and when none of them will
+take the text predc keeps it anyway and says so -- copy and paste between two
+of predc's own tools still work. And the viewer holds 16 KB of the file at a
+time, so a mark dragged across more of it than that is refused with the number,
+rather than copied with a hole in it.
+
 ## Colors
 
 Three schemes, on **Tools | Colors**: Borland, Dark and Gren. The choice is

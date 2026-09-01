@@ -22,7 +22,9 @@ here because an order in an array is exactly the kind of thing a later edit
 reshuffles without meaning to.
 """
 
+import base64
 import os
+import re
 import sys
 import tempfile
 
@@ -77,24 +79,27 @@ def click_at(app, col, row):
     app.click(col + 1, row + 1, settle=0.8)
 
 
-def menu(app, item, entry):
-    """Open a pull-down by clicking its name, then click the `entry`-th line in
-    it (1-based). Row 0 is the menu bar and row 1 is the box's own border."""
+def menu(app, item):
+    """Open a pull-down by clicking its name on the bar."""
     bar = app.render().split("\n")[0]
-    at = bar.index(item)
-    app.click(at + 1, 1, settle=0.6)
-    app.click(at + 3, entry + 2, settle=0.9)
+    app.click(bar.index(item) + 1, 1, settle=0.6)
+
+
+def copied(app, mark):
+    """What the last OSC 52 written since `mark` carried."""
+    found = re.findall(rb"\x1b\]52;;([A-Za-z0-9+/=]*)\x07", app.buf[mark:])
+    return base64.b64decode(found[-1]).decode() if found else ""
 
 
 def bytes_menu(app, keys, settle=0.9):
-    """Open the Bytes pull-down and drive it with its own hot keys.
+    """Open the Bytes pull-down and drive it with the letters it underlines.
 
-    Clicking down a nested submenu means knowing where the second box lands;
-    typing the letters the entries underline does not, and it checks the
-    letters at the same time."""
-    bar = app.render().split("\n")[0]
-    at = bar.index("Bytes")
-    app.click(at + 1, 1, settle=0.6)
+    Which is the only way to reach a *nested* submenu without knowing where the
+    second box lands -- and it is why nothing here counts menu lines any more.
+    Two entries added to this menu moved Top and End down by three, and the
+    four checks that broke were about neither.
+    """
+    menu(app, "Bytes")
     app.send(keys, settle=settle)
 
 
@@ -139,13 +144,13 @@ def resize(app, arrows):
 
 def open_file(app, name, settle=1.6):
     """File | Open, type a name, press Enter -- OK is the default button."""
-    menu(app, "Bytes", 1)
+    bytes_menu(app, b"o", settle=1.0)
     app.send(name.encode(), settle=0.8)
     app.send(b"\r", settle=settle)
 
 
 def go_to(app, text, settle=1.4):
-    menu(app, "Bytes", 2)
+    bytes_menu(app, b"g", settle=1.0)
     app.send(text.encode(), settle=0.8)
     app.send(b"\r", settle=settle)
 
@@ -170,6 +175,13 @@ def main():
     env = dict(os.environ, TERM="xterm-256color",
                HOME=tempfile.mkdtemp(prefix="predc-home-"))
     env.pop("XDG_CONFIG_HOME", None)
+    # And no display, which is not tidiness either. Turbo Vision reaches the
+    # system clipboard through `wl-copy`, `xsel` or `xclip` before it falls
+    # back to asking the terminal, and with a display set this suite would
+    # write to the clipboard of whoever ran it. Without one the copy is an
+    # `OSC 52` on the wire, which is the half a pty can read.
+    env.pop("DISPLAY", None)
+    env.pop("WAYLAND_DISPLAY", None)
     app = Pty(node_argv(LAUNCHER), env, cwd=work)
     app.pump(2.5)
 
@@ -185,7 +197,7 @@ def main():
           "Nothing open" in screen, screen)
 
     # 2. The file dialog. Typing into it is the package check described above.
-    menu(app, "Bytes", 1)
+    bytes_menu(app, b"o", settle=1.0)
     check("Open file... opened the dialog", "Open file" in app.render(), app.render())
     check("and it listed the directory the program was run in",
           "sample.bin" in app.render(), app.render())
@@ -255,7 +267,7 @@ def main():
     # 7. Past the first chunk, which is the whole point. 16 KB is read at a
     #    time and the end of the file is at 40 KB, so nothing here has been in
     #    memory before.
-    menu(app, "Bytes", 5)
+    bytes_menu(app, b"e")
     check("End of file goes to the last byte",
           where(app).startswith("Offset 00009FFF (40959)"), where(app))
     check("and the bytes there are read, not guessed",
@@ -263,7 +275,7 @@ def main():
           rows(app)[ROWS - 1])
     check("the last row is the bottom row: nothing is scrolled past the end",
           offsets(app)[ROWS - 1] == "00009FF0", str(offsets(app)[-2:]))
-    menu(app, "Bytes", 4)
+    bytes_menu(app, b"t")
     check("Top of file comes back to zero",
           where(app).startswith("Offset 00000000 (0)") and offsets(app)[0] == "00000000",
           where(app))
@@ -486,7 +498,66 @@ def main():
           app.display().bg_at(HEX_AT, FIRST_ROW) != 43,
           str(app.display().bg_at(HEX_AT, FIRST_ROW)))
 
-    # 14. A file smaller than the window, and one with nothing in it at all.
+    # 14. Yanking, which is the first thing in predc that speaks to another
+    #     program at all. With no display in the environment the clipboard is
+    #     the terminal's, and the terminal is this driver -- so what predc
+    #     copied is on the wire, base64'd into an `OSC 52`, and can be read
+    #     back and compared with the bytes it was looking at.
+    app.send(b"\x1b[1;5H", settle=0.6)              # Ctrl-Home
+    app.send(b"v", settle=0.5)
+    app.send(b"\x1b[C" * 3, settle=0.7)
+    mark = len(app.buf)
+    app.send(b"y", settle=0.9)
+    check("y copies the marked bytes as hex", copied(app, mark) == "00 01 02 03",
+          repr(copied(app, mark)))
+    check("and the line under the dump says what it did",
+          "Copied 4 bytes as hex" in status(app), status(app))
+    check("and admits that nothing else can see it, because nothing took it",
+          "this program only" in status(app), status(app))
+    check("and the mark is spent, the way vim spends one",
+          "MARK" not in status(app), status(app))
+
+    #     With nothing marked it takes the highlight under the cursor, which
+    #     is what makes a highlight worth more than its colour: mark it once,
+    #     and it is a range to come back to.
+    app.send(b"\x1b[1;5H", settle=0.6)              # Ctrl-Home
+    app.send(b"v", settle=0.5)
+    app.send(b"\x1b[C", settle=0.5)
+    app.send(b"1", settle=0.7)
+    mark = len(app.buf)
+    app.send(b"y", settle=0.9)
+    check("with nothing marked, y takes the highlight the cursor is in",
+          copied(app, mark) == "00 01", repr(copied(app, mark)))
+
+    #     A dump is rows, so copying one takes whole rows however the range
+    #     was made -- and the printable column is full stops, because what is
+    #     on the other end of a clipboard may be ASCII only.
+    mark = len(app.buf)
+    bytes_menu(app, b"d", settle=1.0)
+    check("Copy as a dump takes the whole row the highlight is on",
+          copied(app, mark) ==
+          "00000000  00 01 02 03 04 05 06 07  08 09 0A 0B 0C 0D 0E 0F  " + "." * 16,
+          repr(copied(app, mark)))
+
+    #     A terminal that says it can do OSC 52 properly changes the sentence,
+    #     because now something else did take it. `ESC]60;allowWindowOps` is
+    #     what TVision reads as that claim.
+    app.send(b"\x1b]60;allowWindowOps\x07", settle=0.6)
+    app.send(b"y", settle=0.9)
+    check("and with a terminal that takes it, the caveat goes away",
+          "Copied" in status(app) and "this program only" not in status(app),
+          status(app))
+
+    #     And the one thing a viewer that never holds its file cannot do.
+    app.send(b"V", settle=0.6)
+    app.send(b"\x1b[1;5F", settle=1.2)              # Ctrl-End
+    app.send(b"y", settle=0.9)
+    check("a mark bigger than the chunk is refused, and says by how much",
+          "40960 bytes" in status(app) and "16384" in status(app), status(app))
+    app.send(b"\x1b", settle=0.5)
+    bytes_menu(app, b"hc", settle=1.0)
+
+    # 15. A file smaller than the window, and one with nothing in it at all.
     open_file(app, os.path.join(work, "small.bin"))
     check("a small file is one row", rows(app)[0].startswith("00000000  48 65 6C 6C 6F"),
           rows(app)[0])
@@ -505,7 +576,7 @@ def main():
     check("and draws no rows at all", all(row.strip() == "" for row in rows(app)),
           repr(rows(app)[0]))
 
-    # 15. It is a window like any other: closing it forgets it, and the menu
+    # 16. It is a window like any other: closing it forgets it, and the menu
     #     it brought with it goes too.
     app.send(ALT_F3, settle=1.2)
     check("Alt-F3 closed the window", "Hex Dump" not in app.render(), app.render())

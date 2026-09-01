@@ -250,6 +250,11 @@ type alias Model =
     -- tool here follows.
     , highlights : Array Highlight
     , marking : Maybe Marking
+    -- What the last yank sent, worded for the message line. The answer to a
+    -- copy is an event and not a return value, so the sentence has to wait
+    -- somewhere for it: `Copied` says whether the system clipboard took the
+    -- text and nothing about what the text *was*.
+    , yanked : Maybe String
     , message : String
     }
 
@@ -280,6 +285,19 @@ type alias Marking =
 type Grain
     = ByByte
     | ByRow
+
+
+{-| The two things a range of a file is worth pasting somewhere as.
+
+`AsHex` is the bytes and nothing else -- `48 65 6C 6C 6F` -- which is what goes
+into a debugger, a test fixture or an argument to something. `AsDump` is what is
+on the screen, offsets and printable column included, which is what goes into a
+bug report. Neither is recoverable from the other by whatever receives it, which
+is why there are two.
+-}
+type Shape
+    = AsHex
+    | AsDump
 
 
 type alias File =
@@ -327,6 +345,7 @@ init permission =
     , recent = []
     , highlights = []
     , marking = Nothing
+    , yanked = Nothing
     , message = ""
     }
 
@@ -378,7 +397,7 @@ update ports event model =
 
         Tui.KeyPressed pressed ->
             if pressed.id == canvasId then
-                pressKey pressed.key model
+                pressKey ports pressed.key model
 
             else
                 still model
@@ -411,6 +430,34 @@ update ports event model =
 
                 Just _ ->
                     { model = model, command = Tui.dialog ports (gotoDialog model) }
+
+        -- Every open tool is handed every event, so the guard is not
+        -- politeness: `yanked` is what says this tool is the one that asked.
+        Tui.Copied it ->
+            when model.yanked is
+                Just what ->
+                    still
+                        { model
+                            | yanked = Nothing
+                            , message =
+                                "Copied "
+                                    ++ what
+                                    ++ (if it.toSystem then
+                                            "."
+
+                                        else
+                                            " -- this program only, nothing else took it."
+                                       )
+                        }
+
+                Nothing ->
+                    still model
+
+        Tui.Command "hex.copyHex" ->
+            yank ports AsHex model
+
+        Tui.Command "hex.copyDump" ->
+            yank ports AsDump model
 
         Tui.Command "hex.mark" ->
             mark ByByte model
@@ -502,6 +549,7 @@ receive ports msg model =
                             -- An offset means nothing in a different file.
                             , highlights = []
                             , marking = Nothing
+                            , yanked = Nothing
                             , browsing = Nothing
                             , recent = remember (Path.toPosixString it.path) model.recent
                             , message =
@@ -537,8 +585,8 @@ receive ports msg model =
 -- KEYS
 
 
-pressKey : String -> Model -> Step
-pressKey key model =
+pressKey : Tui.Ports Msg -> String -> Model -> Step
+pressKey ports key model =
     when model.file is
         Nothing ->
             still model
@@ -593,6 +641,9 @@ pressKey key model =
 
                 "d" ->
                     unpaint model
+
+                "y" ->
+                    yank ports AsHex model
 
                 other ->
                     when inkOf other is
@@ -768,6 +819,198 @@ within range offset =
 
         Nothing ->
             False
+
+
+-- COPYING
+
+
+{-| vim's key, and vim's meaning: take what is marked. What is different is
+what it takes when *nothing* is marked -- the highlight under the cursor, if
+there is one -- and that is what makes a highlight worth more than its colour.
+Mark it once, paint it, and it is a range you can come back to and copy a day
+later without marking it again.
+
+The mark is dropped afterwards, as vim drops the selection, and the paint is
+not: `y` is a read.
+-}
+yank : Tui.Ports Msg -> Shape -> Model -> Step
+yank ports shape model =
+    when yankRange model is
+        Nothing ->
+            still
+                { model | message = "Nothing is marked, and the cursor is not in a highlight." }
+
+        Just wanted ->
+            let
+                range =
+                    shaped shape model wanted
+            in
+            when bytesIn model range is
+                -- The file was never held, only a window of it, so a mark
+                -- dragged across more of the file than the chunk covers is a
+                -- range this program genuinely does not have. Saying so is
+                -- better than copying the part it happens to be holding: a
+                -- dump missing its middle looks exactly like a dump.
+                Nothing ->
+                    still
+                        { model
+                            | message =
+                                "That is "
+                                    ++ String.fromInt (range.end - range.start)
+                                    ++ " bytes and only "
+                                    ++ String.fromInt chunkSize
+                                    ++ " are in memory at a time."
+                        }
+
+                Just codes ->
+                    { model =
+                        { model
+                            | marking = Nothing
+                            , yanked = Just (describeYank shape range)
+                            , message = ""
+                        }
+                    , command = Tui.copyToClipboard ports (render shape range codes)
+                    }
+
+
+{-| What a yank would take: the mark, or failing that the highlight the cursor
+is sitting in.
+-}
+yankRange : Model -> Maybe Range
+yankRange model =
+    when markedRange model is
+        Just range ->
+            Just range
+
+        Nothing ->
+            topmostAt model model.cursor
+                |> Maybe.andThen (\index -> Array.get index model.highlights)
+                |> Maybe.map (\highlight -> { start = highlight.start, end = highlight.end })
+
+
+{-| A dump is rows, so copying one takes whole rows however the range was made
+-- otherwise the first line of what lands in the bug report is indented by an
+amount nothing explains.
+-}
+shaped : Shape -> Model -> Range -> Range
+shaped shape model range =
+    when shape is
+        AsHex ->
+            range
+
+        AsDump ->
+            let
+                size =
+                    when model.file is
+                        Just file ->
+                            file.size
+
+                        Nothing ->
+                            range.end
+            in
+            { start = rowStart range.start
+            , end = min size (rowStart (max range.start (range.end - 1)) + bytesPerRow)
+            }
+
+
+{-| Every byte of the range, or nothing at all if any of them is not held.
+
+Two passes and no `pushLast`: a Gren array is copied when it grows, so folding
+sixteen thousand bytes into one an element at a time is quadratic and this is
+the one place in the program with sixteen thousand of anything.
+-}
+bytesIn : Model -> Range -> Maybe (Array Int)
+bytesIn model range =
+    let
+        offsets =
+            Array.range range.start (range.end - 1)
+
+        codes =
+            Array.mapAndKeepJust (byteAt model) offsets
+    in
+    if Array.length codes == Array.length offsets && Array.length codes > 0 then
+        Just codes
+
+    else
+        Nothing
+
+
+render : Shape -> Range -> Array Int -> String
+render shape range codes =
+    when shape is
+        AsHex ->
+            String.join " " (Array.map hexPair codes)
+
+        AsDump ->
+            String.join "\n"
+                (Array.indexedMap
+                    (\index line -> dumpLine (range.start + index * bytesPerRow) line)
+                    (rowsOf codes)
+                )
+
+
+hexPair : Int -> String
+hexPair code =
+    String.padLeft 2 '0' (Ascii.radix 16 code)
+
+
+rowsOf : Array Int -> Array (Array Int)
+rowsOf codes =
+    Array.map
+        (\index -> Array.slice (index * bytesPerRow) ((index + 1) * bytesPerRow) codes)
+        (Array.range 0 (divideBy bytesPerRow (Array.length codes - 1)))
+
+
+{-| One line of what the window shows, in text.
+
+Not quite what the window shows: the printable column uses a full stop where
+the screen uses a middle dot. The screen can afford a character that says
+"nothing here" more clearly than a full stop; a clipboard cannot, because what
+is on the other end of it may be ASCII only, and every hex dump ever printed
+has used a full stop for this.
+-}
+dumpLine : Int -> Array Int -> String
+dumpLine base codes =
+    offsetText base
+        ++ "  "
+        -- The screen's own hex field, so a short last row still leaves the
+        -- printable column where every other row put it.
+        ++ String.padRight (asciiStart - hexStart - 2)
+            ' '
+            (String.join " " (Array.map hexPair (Array.takeFirst 8 codes))
+                ++ "  "
+                ++ String.join " " (Array.map hexPair (Array.dropFirst 8 codes))
+            )
+        ++ "  "
+        ++ String.join ""
+            (Array.map
+                (\code ->
+                    if code >= 32 && code < 127 then
+                        Ascii.glyph code
+
+                    else
+                        "."
+                )
+                codes
+            )
+
+
+describeYank : Shape -> Range -> String
+describeYank shape range =
+    String.fromInt (range.end - range.start)
+        ++ (if range.end - range.start == 1 then
+                " byte"
+
+            else
+                " bytes"
+           )
+        ++ (when shape is
+                AsHex ->
+                    " as hex"
+
+                AsDump ->
+                    " as a dump"
+           )
 
 
 -- MOVING AROUND
@@ -1366,6 +1609,12 @@ menu =
         , items =
             [ Item { title = "~O~pen file...", cmd = "hex.open", key = "", shortcut = "" }
             , Item { title = "~G~o to offset...", cmd = "hex.goto", key = "", shortcut = "" }
+            , Separator
+            -- What is marked, or the highlight under the cursor. Both entries
+            -- name `y` as far as the eye is concerned, and neither binds it:
+            -- the canvas has focus and the key goes there.
+            , Item { title = "Cop~y~ bytes", cmd = "hex.copyHex", key = "", shortcut = "y" }
+            , Item { title = "Copy as a ~d~ump", cmd = "hex.copyDump", key = "", shortcut = "" }
             , Separator
             , Item { title = "~T~op of file", cmd = "hex.top", key = "", shortcut = "Ctrl-Home" }
             , Item { title = "~E~nd of file", cmd = "hex.end", key = "", shortcut = "Ctrl-End" }
