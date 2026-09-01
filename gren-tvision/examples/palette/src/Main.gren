@@ -180,8 +180,10 @@ midnightPanel ground =
     , accent = Tui.Rgb 0xE8A33D
     , selected = { fg = Tui.Rgb 0x14141A, bg = Tui.Rgb 0x8AA9C8 }
     , disabled = Tui.Rgb 0x6A6A78
-    , control = { fg = Tui.Rgb 0xE8E8F0, bg = Tui.Rgb 0x3A3A48 }
-    , controlAccent = Tui.Rgb 0xE8A33D
+    , button = { fg = Tui.Rgb 0xE8E8F0, bg = Tui.Rgb 0x3A3A48 }
+    , buttonAccent = Tui.Rgb 0xE8A33D
+    , input = { fg = Tui.Rgb 0xE8E8F0, bg = Tui.Rgb 0x141A24 }
+    , inputAccent = Tui.Rgb 0xE8A33D
     , scrollBar = { fg = Tui.Rgb 0x5A5A6A, bg = Tui.Rgb 0x24242E }
     }
 

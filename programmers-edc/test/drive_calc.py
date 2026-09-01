@@ -28,6 +28,7 @@ once would fail without that fix, which is most of them.
 import os
 import re
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -100,7 +101,16 @@ def message(app):
 
 def main():
     check = Checks()
-    env = dict(os.environ, TERM="xterm-256color")
+    # A temporary HOME, so that this driver reads no config file but the one
+    # it did not write. predc remembers its colour scheme in
+    # `$HOME/.config/predc/`, and a suite that inherited the real one would
+    # pass or fail depending on which theme the person running it happens to
+    # like -- which is exactly what happened once, when a scratch script left a
+    # `"gren"` behind and four colour checks in two suites started failing
+    # against a program that was working perfectly.
+    env = dict(os.environ, TERM="xterm-256color",
+               HOME=tempfile.mkdtemp(prefix="predc-home-"))
+    env.pop("XDG_CONFIG_HOME", None)
     app = Pty(node_argv(LAUNCHER), env, cwd=ROOT)
 
     app.pump(2.5)

@@ -3013,13 +3013,26 @@ is the expansion, one commented line per slot. That file is the only place the
 thirty-two dialog entries are written down in order, which matters because
 getting one wrong miscolours exactly one kind of control and nothing reports it.
 
-**The proof that the expansion is right is that nothing changed.** `Tui.borland`
-is Turbo Vision's own scheme re-derived through the seventeen fields, and all
-529 checks passed against it unaltered -- including `drive_palette`'s, which
-assert exact SGR attributes for six specific palette entries, and
-`drive_ascii`'s, which pin foreground and background on particular cells. A
-table-driven rewrite that reproduces every colour the old table produced is a
-table-driven rewrite that is correct.
+**`Tui.borland` is Turbo Vision's look rebuilt, not its table reproduced**, and
+the first version of this write-up said otherwise. It claimed the expansion was
+proved right because all 529 checks passed against it unaltered. They did, and
+that proves much less than it sounds: the suite asserts on a few dozen cells,
+and a hundred and thirty-five slots do not fit in a few dozen cells.
+
+Comparing the generated palette against `cpAppColor` byte for byte -- which is
+twenty lines of Python and should have been the first thing done -- says **82 of
+135 slots differ**. Most of the difference is in blocks nothing reaches: the
+help viewer, the two slots per set that no view's palette string indexes, and
+the cyan dialog set, which a program gets only by asking for a `CyanWindow`.
+The rest is the model deliberately treating a surface as one surface: stock
+Turbo Vision puts a list box on cyan *inside* a grey dialog and a check box
+cluster on cyan too, and the seventeen-field model puts both on the panel's own
+ground. The stock blue dialog set is the largest divergence and the most
+deliberate -- it is a blue-framed grey dialog rather than a blue surface, and a
+window drawn in it would not look like the editor it is supposed to look like.
+
+That is a fair thing for a described scheme to be. It was not a fair thing to
+call byte-identical.
 
 ### Three things that were not obvious
 
@@ -3141,3 +3154,63 @@ existing `== 34` meaning what it meant and lets a check say
 not the nearest of sixteen". The driver sets `COLORTERM=truecolor` for the same
 reason, and `HOME` to a fresh temporary directory so that the first-run case is
 actually a first run.
+
+## The slot map was wrong, and only a light theme could show it
+
+Reviewing predc's Gren scheme turned up four things, three of them cosmetic and
+one of them a bug in the binding that had been invisible in every theme.
+
+**The dialog slot map was two off for the list viewer.** `writeDialogSet`'s
+thirty-two entries were taken from the Turbo Vision Programming Guide's list,
+which is *nearly* right and puts the list viewer at slots 28-31. The authority
+is not the book: it is each view's own palette string, and `cpListViewer` is
+`"\x1A\x1A\x1B\x1C\x1D"`, which is slots 26-29. So a file dialog's rows were
+drawn in the scroll bar's colours -- blue on cyan under Borland, and a
+1.85:1 grey-on-grey under Gren, which is where it was finally noticed.
+
+Nothing reported it, and nothing could have: no check in the suite asserts on a
+list row's colour, so both the wrong map and the "all 529 checks passed"
+argument for it sailed through. `writeDialogSet` now cites the ten palette
+strings it is derived from, one per line, with their file and line numbers --
+`cpCluster`'s fifth colour being `0x1F` and therefore thirteen slots away from
+its other three is exactly the sort of thing a list written from memory gets
+wrong.
+
+**Buttons and input lines had to become two fields.** They were one, `control`,
+and Turbo Vision has always drawn them differently: in the stock scheme a grey
+dialog's buttons are black on green and its fields are white on blue. One
+colour for both makes every text field look like something to press -- and it
+was also what forced predc's first Gren theme into a corner, because an orange
+button meant an orange text box, so the dialogs had to keep a quiet grey and
+could not have the orange at all. Split into `button`/`buttonAccent` and
+`input`/`inputAccent`, both problems go away at once: the Gren theme's buttons
+are the logo orange everywhere, its fields are recessed, and predc's dark theme
+can put its fields *below* the window's ground rather than on it.
+
+**Two smaller ones**, both places where a value was structurally in the wrong
+family rather than merely an odd colour: a grey dialog's scroll bar was blue on
+cyan when the stock scheme has it cyan on blue, and slot 8 -- the label of the
+field that currently has the focus -- was mapped to `selected`, which put a
+coloured block behind the word "Name" in every dialog. It is emphasis, not a
+selection, so it is the brightened text now.
+
+### A light theme is a better test than a dark one
+
+Every one of these had been on screen since the palette work landed, in every
+theme, and the light one is what made three of the four visible. A dark scheme
+that goes wrong is illegible and gets fixed; a light one that goes wrong is
+*nearly* legible and stays that way. `Theme.gren`'s doc comment now records the
+contrast ratio of every colour in it against the ground it lands on, and the
+numbers are the argument: white on the logo orange is 2.8:1 and reads as a
+slightly odd choice rather than as a bug, which is precisely why the focused
+Name field and the selected row of a file list were wrong for as long as they
+were.
+
+### And the suite was not isolated from the user's own config
+
+`drive_ascii` and `drive_hex` assert on colours and read `$HOME`, so once a
+scratch script left a `{"theme": "gren"}` in the real `~/.config/predc/`, four
+checks in two suites started failing against a program that was working
+perfectly. Every predc driver now runs with `HOME` set to a fresh temporary
+directory. A suite whose result depends on which colour scheme the person
+running it happens to like is not a suite.

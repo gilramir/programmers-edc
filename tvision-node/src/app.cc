@@ -305,8 +305,15 @@ struct ThemePanel {
     TColorAttr accent;         // hot keys
     TColorAttr selected;       // the focused row, the selected text
     TColorAttr disabled;
-    TColorAttr control;        // buttons and input lines at rest
-    TColorAttr controlAccent;  // a button's hot key
+    // Buttons and input lines are separate because Turbo Vision colours them
+    // separately and is right to: a button is raised and an input line is
+    // recessed, and in the stock scheme a grey dialog's buttons are black on
+    // green while its fields are white on blue. One `control` for both made
+    // every text field look like a button.
+    TColorAttr button;
+    TColorAttr buttonAccent;
+    TColorAttr input;
+    TColorAttr inputAccent;
     TColorAttr scrollBar;
 };
 
@@ -317,6 +324,7 @@ struct ThemeSpec {
     TColorAttr barAccent;
     TColorAttr barDisabled;
     TColorAttr barSelected;
+    TColorAttr barSelectedDisabled;
     TColorAttr barSelectedAccent;
     ThemePanel window;
     ThemePanel alternate;
@@ -339,9 +347,29 @@ static void writeWindowSet(TColorAttr *at, const ThemePanel &p)
 }
 
 // A dialog set: thirty-two entries, and the only place the list of them is
-// written down. The order is Turbo Vision's and comes from the Programming
-// Guide; getting one wrong colours exactly one kind of control and nothing
-// says so, which is why they are named here one per line.
+// written down.
+//
+// **Derived from the views rather than from the book.** The first version of
+// this took the order from the Turbo Vision Programming Guide and had the list
+// viewer two slots late, so a file dialog's rows came out in the scroll bar's
+// colours -- which nothing reported, because no test asserted on a list row.
+// The authority is each view's own palette string, and every line below is one
+// of them:
+//
+//      cpScrollBar     "\x04\x05\x05"                  tscrlbar.cpp:37
+//      cpStaticText    "\x06"                          tstatict.cpp:30
+//      cpLabel         "\x07\x08\x09\x09"              tlabel.cpp:28
+//      cpButton        "\x0A\x0B\x0C\x0D\x0E\x0E\x0E\x0F"  tbutton.cpp:41
+//      cpCluster       "\x10\x11\x12\x12\x1f"          tcluster.cpp:39
+//      cpInputLine     "\x13\x13\x14\x15"              tinputli.cpp:84
+//      cpHistory       "\x16\x17"                      thistory.cpp:37
+//      cpHistoryWindow "\x13\x13\x15\x18\x17\x13\x14"  thistwin.cpp:26
+//      cpListViewer    "\x1A\x1A\x1B\x1C\x1D"          tlstview.cpp:30
+//      cpInfoPane      "\x1E"                          stddlg.cpp:67
+//
+// Note that cpCluster's fifth colour is 0x1F, so a disabled check box is slot
+// 31 rather than anywhere near the other three -- which is exactly the kind of
+// thing a list written from memory gets wrong.
 static void writeDialogSet(TColorAttr *at, const ThemePanel &p)
 {
     at[0] = p.frame;           // 1  frame, passive
@@ -351,31 +379,36 @@ static void writeDialogSet(TColorAttr *at, const ThemePanel &p)
     at[4] = p.scrollBar;       // 5  scroll bar controls
     at[5] = p.text;            // 6  static text
     at[6] = p.text;            // 7  label, normal
-    at[7] = p.selected;        // 8  label, selected
+    // 8 is the label of the field that has the focus, and it is *emphasis*
+    // rather than a selection: the stock scheme brightens the text and leaves
+    // it on the panel's ground. Mapping it to `selected` put a coloured block
+    // behind the word "Name" in every dialog, which is the sort of thing that
+    // looks intentional until it is pointed at.
+    at[7] = p.frameActive;     // 8  label, highlighted
     at[8] = p.accent;          // 9  label, shortcut
-    at[9] = p.control;         // 10 button, normal
-    at[10] = p.control;        // 11 button, default
+    at[9] = p.button;          // 10 button, normal
+    at[10] = p.button;         // 11 button, default
     at[11] = p.selected;       // 12 button, selected
     at[12] = p.disabled;       // 13 button, disabled
-    at[13] = p.controlAccent;  // 14 button, shortcut
+    at[13] = p.buttonAccent;   // 14 button, shortcut
     at[14] = p.frame;          // 15 button, shadow
     at[15] = p.text;           // 16 cluster, normal
     at[16] = p.selected;       // 17 cluster, selected
     at[17] = p.accent;         // 18 cluster, shortcut
-    at[18] = p.control;        // 19 input line, normal
+    at[18] = p.input;          // 19 input line, normal (and history window)
     at[19] = p.selected;       // 20 input line, selected
-    at[20] = p.controlAccent;  // 21 input line, arrow
-    at[21] = p.control;        // 22 history, normal
-    at[22] = p.selected;       // 23 history, selected
-    at[23] = p.controlAccent;  // 24 history, arrow
-    at[24] = p.frame;          // 25 history window, side
-    at[25] = p.scrollBar;      // 26 history window, scroll bar page
-    at[26] = p.scrollBar;      // 27 history window, scroll bar controls
-    at[27] = p.text;           // 28 list viewer, normal
-    at[28] = p.accent;         // 29 list viewer, focused
-    at[29] = p.selected;       // 30 list viewer, selected
-    at[30] = p.disabled;       // 31 list viewer, divider
-    at[31] = p.text;           // 32 info pane
+    at[20] = p.inputAccent;    // 21 input line, arrows
+    at[21] = p.inputAccent;    // 22 history, arrow
+    at[22] = p.input;          // 23 history, sides
+    at[23] = p.scrollBar;      // 24 history window, scroll bar
+    at[24] = p.scrollBar;      // 25 -- reached by nothing in the library
+    at[25] = p.text;           // 26 list viewer, normal
+    at[26] = p.selected;       // 27 list viewer, focused
+    at[27] = p.accent;         // 28 list viewer, selected
+    at[28] = p.disabled;       // 29 list viewer, divider
+    at[29] = p.text;           // 30 info pane
+    at[30] = p.disabled;       // 31 cluster, disabled
+    at[31] = p.text;           // 32 -- reached by nothing in the library
 }
 
 // The whole thing, in the order above.
@@ -386,7 +419,10 @@ static void buildAppPalette(TColorAttr *at, const ThemeSpec &t)
     at[2] = t.barDisabled;
     at[3] = t.barAccent;
     at[4] = t.barSelected;
-    at[5] = t.barDisabled;
+    // Disabled *and* highlighted, so the ink is the disabled one and the
+    // ground is the selected one -- which is what the stock scheme does and
+    // what putting barDisabled here straight did not.
+    at[5] = t.barSelectedDisabled;
     at[6] = t.barSelectedAccent;
     writeWindowSet(at + 7, t.window);
     writeWindowSet(at + 15, t.alternate);
@@ -1757,13 +1793,15 @@ static ThemePanel readPanel(const Napi::Env &env, const Napi::Object &theme,
     p.frame = readPair(env, o, "frame");
     p.frameActive = readInk(env, o, "frameActive", p.frame);
     p.selected = readPair(env, o, "selected");
-    p.control = readPair(env, o, "control");
+    p.button = readPair(env, o, "button");
+    p.input = readPair(env, o, "input");
     p.scrollBar = readPair(env, o, "scrollBar");
-    // The three that are a foreground on a ground already named: an accent is
-    // a hot key in the body text, a control accent is one on a button, and
-    // disabled is text that is still text.
+    // The four that are a foreground on a ground already named: an accent is a
+    // hot key in the body text, the other two are hot keys on a button and on
+    // an input line, and disabled is text that is still text.
     p.accent = readInk(env, o, "accent", p.text);
-    p.controlAccent = readInk(env, o, "controlAccent", p.control);
+    p.buttonAccent = readInk(env, o, "buttonAccent", p.button);
+    p.inputAccent = readInk(env, o, "inputAccent", p.input);
     p.disabled = readInk(env, o, "disabled", p.text);
     return p;
 }
@@ -1798,6 +1836,7 @@ static Napi::Value SetTheme(const Napi::CallbackInfo &info)
         t.barDisabled = readInk(env, o, "barDisabled", t.bar);
         t.barSelectedAccent = readInk(env, o, "barSelectedAccent",
                                       t.barSelected);
+        t.barSelectedDisabled = readInk(env, o, "barDisabled", t.barSelected);
         t.window = readPanel(env, o, "window");
         t.alternate = readPanel(env, o, "alternate");
         t.dialog = readPanel(env, o, "dialog");

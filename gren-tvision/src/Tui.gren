@@ -273,11 +273,13 @@ Turbo Vision's palette machinery that survives being asked to name a colour
 instead of an index into a table. Version 17 added [`Theme`](#Theme) on a
 [`Ui`](#Ui), which is the rest of it: every colour this package draws rather
 than the model, described in seventeen fields instead of the hundred and
-thirty-five attributes Turbo Vision keeps them in.
+thirty-five attributes Turbo Vision keeps them in. Version 18 split a
+[`ThemePanel`](#ThemePanel)'s `control` into `button` and `input`, which Turbo
+Vision has always drawn differently and for a good reason.
 -}
 protocolVersion : Int
 protocolVersion =
-    17
+    18
 
 
 -- GEOMETRY
@@ -477,10 +479,16 @@ ground already named rather than repeating it.
   - `accent` -- the letter a `~tilde~` marks.
   - `selected` -- the focused row of a list, selected text, a pressed button.
   - `disabled` -- a button that cannot be pressed, a list's divider.
-  - `control` -- a button or an input line at rest.
-  - `controlAccent` -- a hot key on one of those, and the arrow on a history
-    drop-down.
+  - `button` -- a button at rest, and `buttonAccent` its hot key.
+  - `input` -- an input line at rest, and `inputAccent` its arrows and the one
+    on a history drop-down beside it.
   - `scrollBar` -- the page and the arrows both.
+
+Buttons and input lines are two fields and not one because Turbo Vision draws
+them differently and is right to: a button is raised and a field is recessed,
+and in the stock scheme a grey dialog's buttons are black on green while its
+fields are white on blue. One colour for both makes every text field look like
+something to press.
 
 Turbo Vision has thirty-two slots per dialog and this fills them from nine.
 The expansion is one line per slot in `buildAppPalette` (`app.cc`), which is
@@ -493,8 +501,10 @@ type alias ThemePanel =
     , accent : Tint
     , selected : Pair
     , disabled : Tint
-    , control : Pair
-    , controlAccent : Tint
+    , button : Pair
+    , buttonAccent : Tint
+    , input : Pair
+    , inputAccent : Tint
     , scrollBar : Pair
     }
 
@@ -546,7 +556,7 @@ borland =
     , barAccent = Ansi Red
     , barDisabled = Ansi DarkGray
     , barSelected = { fg = Ansi Black, bg = Ansi Green }
-    , barSelectedAccent = Ansi LightRed
+    , barSelectedAccent = Ansi Red
     , window = bluePanel
     , alternate = cyanPanel
     , dialog = grayPanel
@@ -561,9 +571,11 @@ bluePanel =
     , accent = Ansi LightGreen
     , selected = { fg = Ansi Blue, bg = Ansi LightGray }
     , disabled = Ansi DarkGray
-    , control = { fg = Ansi Black, bg = Ansi Green }
-    , controlAccent = Ansi LightRed
-    , scrollBar = { fg = Ansi Blue, bg = Ansi Cyan }
+    , button = { fg = Ansi Black, bg = Ansi Green }
+    , buttonAccent = Ansi Yellow
+    , input = { fg = Ansi White, bg = Ansi Blue }
+    , inputAccent = Ansi LightGreen
+    , scrollBar = { fg = Ansi Blue, bg = Ansi LightGray }
     }
 
 
@@ -575,8 +587,10 @@ cyanPanel =
     , accent = Ansi LightGreen
     , selected = { fg = Ansi Cyan, bg = Ansi LightGray }
     , disabled = Ansi DarkGray
-    , control = { fg = Ansi Black, bg = Ansi Green }
-    , controlAccent = Ansi LightRed
+    , button = { fg = Ansi Black, bg = Ansi Green }
+    , buttonAccent = Ansi Yellow
+    , input = { fg = Ansi White, bg = Ansi Blue }
+    , inputAccent = Ansi LightGreen
     , scrollBar = { fg = Ansi Cyan, bg = Ansi Blue }
     }
 
@@ -589,9 +603,11 @@ grayPanel =
     , accent = Ansi Red
     , selected = { fg = Ansi White, bg = Ansi Green }
     , disabled = Ansi DarkGray
-    , control = { fg = Ansi Black, bg = Ansi Green }
-    , controlAccent = Ansi LightRed
-    , scrollBar = { fg = Ansi Blue, bg = Ansi Cyan }
+    , button = { fg = Ansi Black, bg = Ansi Green }
+    , buttonAccent = Ansi Yellow
+    , input = { fg = Ansi White, bg = Ansi Blue }
+    , inputAccent = Ansi LightGreen
+    , scrollBar = { fg = Ansi Cyan, bg = Ansi Blue }
     }
 
 
@@ -2083,8 +2099,10 @@ encodeThemePanel panel =
         , { key = "accent", value = encodeTint panel.accent }
         , { key = "selected", value = encodePair panel.selected }
         , { key = "disabled", value = encodeTint panel.disabled }
-        , { key = "control", value = encodePair panel.control }
-        , { key = "controlAccent", value = encodeTint panel.controlAccent }
+        , { key = "button", value = encodePair panel.button }
+        , { key = "buttonAccent", value = encodeTint panel.buttonAccent }
+        , { key = "input", value = encodePair panel.input }
+        , { key = "inputAccent", value = encodeTint panel.inputAccent }
         , { key = "scrollBar", value = encodePair panel.scrollBar }
         ]
 

@@ -90,9 +90,9 @@ Two things about it are temporary, and both are temporary for the same reason
     src/Config.gren   the one thing predc remembers between runs
     test/drive_*.py   one pty driver per tool, plus the shell and the themes
 
-## Colours
+## Colors
 
-Three schemes, on **Tools | Colours**: Borland, Dark and Gren. The choice is
+Three schemes, on **Tools | Colors**: Borland, Dark and Gren. The choice is
 written to `$XDG_CONFIG_HOME/predc/config.json` (or `~/.config/predc/`) the
 moment it is made, and read back before the first frame of the next run.
 

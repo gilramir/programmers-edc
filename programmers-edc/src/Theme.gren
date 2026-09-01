@@ -188,8 +188,13 @@ darkPanel ground =
     , accent = orange
     , selected = { fg = Tui.Rgb 0x121218, bg = Tui.Rgb 0x8AA9C8 }
     , disabled = Tui.Rgb 0x62626E
-    , control = { fg = Tui.Rgb 0xE8E8F0, bg = Tui.Rgb 0x3A3A48 }
-    , controlAccent = orange
+    , button = { fg = Tui.Rgb 0xF4F4FA, bg = Tui.Rgb 0x3F3F50 }
+    , buttonAccent = orange
+    -- Recessed rather than raised: a field sits *below* the window's ground
+    -- and a button sits above it, which is the whole of why Turbo Vision keeps
+    -- two colours here and this theme keeps two grounds.
+    , input = { fg = Tui.Rgb 0xE8E8F0, bg = Tui.Rgb 0x14141A }
+    , inputAccent = orange
     , scrollBar = { fg = Tui.Rgb 0x4A4A58, bg = Tui.Rgb 0x24242E }
     }
 
@@ -200,6 +205,36 @@ Borland's.
 
 It is also the one that proves `Inks` had to exist. Every hue the other two
 paint with is a bright one, and every bright hue is invisible here.
+
+**Every colour below was checked as a contrast ratio against the ground it
+lands on**, and that is not fussiness -- it is the only way to get a light
+scheme right, because on a light ground the mistakes are quiet. A dark scheme
+that goes wrong is illegible and you fix it; a light one that goes wrong is
+*nearly* legible, and it stays that way. The first version of this had white
+text on the orange at 2.8:1 in two places that mattered -- the focused Name
+field of the file dialog, and the selected row of its list -- and it read as a
+slightly odd colour rather than as a bug.
+
+So the orange appears in three places and each one is a different orange,
+chosen for what it sits on:
+
+  - `frameActive`, the border and title of the window in front, is
+    [`deepOrange`](#gren) at 5.3:1 on paper. The border is decoration and could
+    be brighter; the title is text and cannot.
+  - the accents -- hot keys, in the body text and on the menu bar -- are
+    `0xB85C00` at 4.3:1.
+  - the buttons are the *bright* [`orange`](#orange) with near-black on it, at
+    6.3:1 -- the keypad, and the OK and Cancel of every dialog. This is the one
+    place the logo colour appears at full strength, and it can now be used in a
+    dialog as well as in a window because `button` and `input` are separate
+    fields: before they were one, an orange button meant an orange text field,
+    which is why the Name box of the file dialog was the thing that looked
+    wrong.
+
+And the selection is not orange at all, in either direction. White on slate is
+12.3:1 and reads at a glance, which is what a selection is for. Neither is the
+input line: paper with a hairline of warm grey under it, at 10.5:1, which is a
+text field that looks like a text field.
 -}
 gren : Tui.Theme
 gren =
@@ -207,24 +242,48 @@ gren =
     , bar = { fg = Tui.Rgb 0x2A2622, bg = Tui.Rgb 0xF4F1EA }
     , barAccent = Tui.Rgb 0xB85C00
     , barDisabled = Tui.Rgb 0x9A948A
-    , barSelected = { fg = Tui.Rgb 0xFFFFFF, bg = orange }
-    , barSelectedAccent = Tui.Rgb 0x3A1A00
+    , barSelected = grenSelected
+    , barSelectedAccent = Tui.Rgb 0xFFC46B
     , window = grenPanel (Tui.Rgb 0xFAF8F3)
     , alternate = grenPanel (Tui.Rgb 0xF0EEE6)
     , dialog = grenPanel (Tui.Rgb 0xF4F1EA)
     }
 
 
+{-| Deep enough that a window title drawn in it reads on paper -- 5.3:1, where
+the logo orange is 2.6:1 and looks like a mistake somebody made on purpose.
+-}
+deepOrange : Tui.Tint
+deepOrange =
+    Tui.Rgb 0xA35200
+
+
+{-| White on slate, and deliberately not on the orange: 12.3:1 against the
+2.8:1 that white on orange gives. This is the focused input line, the selected
+row of a list and the highlighted entry on the menu bar, which is to say every
+place a person is looking for something.
+-}
+grenSelected : Tui.Pair
+grenSelected =
+    { fg = Tui.Rgb 0xFFFFFF, bg = Tui.Rgb 0x3A342E }
+
+
 grenPanel : Tui.Tint -> Tui.ThemePanel
 grenPanel ground =
     { frame = { fg = Tui.Rgb 0x8A857C, bg = ground }
-    , frameActive = Tui.Rgb 0x2A2622
+    , frameActive = deepOrange
     , text = { fg = Tui.Rgb 0x2A2622, bg = ground }
     , accent = Tui.Rgb 0xB85C00
-    , selected = { fg = Tui.Rgb 0xFFFFFF, bg = orange }
+    , selected = grenSelected
     , disabled = Tui.Rgb 0x9A948A
-    , control = { fg = Tui.Rgb 0x2A2622, bg = Tui.Rgb 0xDCD7CC }
-    , controlAccent = Tui.Rgb 0xB85C00
+    -- Near-black on the logo orange, at 6.3:1. White on it is 2.8:1 and looks
+    -- like a mistake somebody made on purpose, which is what the first pass
+    -- did. The hot key is a dark red-brown: readable on the orange and
+    -- unmistakably not the letter beside it.
+    , button = { fg = Tui.Rgb 0x2A1400, bg = orange }
+    , buttonAccent = Tui.Rgb 0x5C0A00
+    , input = { fg = Tui.Rgb 0x2A2622, bg = Tui.Rgb 0xDCD7CC }
+    , inputAccent = Tui.Rgb 0xB85C00
     , scrollBar = { fg = Tui.Rgb 0xB0AAA0, bg = Tui.Rgb 0xEAE6DD }
     }
 

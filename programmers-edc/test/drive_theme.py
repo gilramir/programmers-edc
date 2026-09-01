@@ -66,7 +66,7 @@ def click_entry(app, text, settle=0.9):
 
 def choose(app, theme):
     open_menu(app, "Tools")
-    click_entry(app, "Colours", settle=0.7)
+    click_entry(app, "Colors", settle=0.7)
     return click_entry(app, theme, settle=1.3)
 
 
@@ -118,7 +118,7 @@ def main():
     # 2. The menu says which one is in use. Turbo Vision has no checkable menu
     #    item, so it is a character in the title.
     open_menu(app, "Tools")
-    click_entry(app, "Colours", settle=0.7)
+    click_entry(app, "Colors", settle=0.7)
     box = app.render()
     check("the menu ticks the theme in use",
           any("√" in line and "Borland" in line for line in box.split("\n")),
@@ -133,7 +133,7 @@ def main():
     #    the whole reason the theme is Rgb rather than Ansi: Black and DarkGray
     #    is the only dark pair the sixteen offer and it is at once too far
     #    apart to read as one surface and too close to be a border.
-    check("Tools | Colours | Dark is reachable", choose(app, "Dark"))
+    check("Tools | Colors | Dark is reachable", choose(app, "Dark"))
     dark = surfaces(app)
     for what in ("desktop", "bar", "frame"):
         check(f"Dark repaints the {what}, which no ink can reach",
@@ -152,7 +152,7 @@ def main():
 
     # 5. Gren is the light one, and the reason Inks is a record per theme
     #    rather than one set shared by all three.
-    check("Tools | Colours | Gren is reachable", choose(app, "Gren"))
+    check("Tools | Colors | Gren is reachable", choose(app, "Gren"))
     app.send(b"\x1ba", settle=1.0)
     gren = surfaces(app)
     gren_ruler = app.display().fg_at(*RULER)

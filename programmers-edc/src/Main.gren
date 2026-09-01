@@ -381,7 +381,7 @@ menuBar model =
             , Tool.Hex.menuItem
             , Tui.Separator
             , SubMenu
-                { title = "~C~olours"
+                { title = "~C~olors"
                 , key = ""
                 , items = Array.map (themeItem model.theme) Theme.all
                 }

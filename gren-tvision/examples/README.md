@@ -955,9 +955,14 @@ application palette -- everything the package draws rather than the model -- in
 seventeen fields rather than the hundred and thirty-five attributes Turbo
 Vision keeps them in, which works because the 135 are not 135 decisions: one
 desktop, one bar, and three coloured surfaces written into two blocks apiece.
-`Tui.borland` is Turbo Vision's own scheme re-derived through those fields, and
-the evidence that the expansion is right is that every colour assertion in the
-suite passed against it unchanged.
+`Tui.borland` is Turbo Vision's *look* rebuilt from those fields rather than
+its table reproduced: compared byte for byte against `cpAppColor`, 82 of the
+135 slots differ, almost all of them in blocks nothing reaches or in places
+where the model deliberately treats a surface as one surface. The first version
+of this paragraph claimed the expansion was proved correct because every colour
+assertion in the suite passed against it, which proves much less -- the suite
+asserts on a few dozen cells, and one genuinely wrong slot (the list viewer,
+two off) survived exactly that argument.
 
 The example's second theme is deliberately `Rgb` throughout where Borland's is
 `Ansi`, because that is a real choice: `Ansi` inherits whatever sixteen colours
