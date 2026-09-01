@@ -110,6 +110,33 @@ def main():
           "Saying nothing (blue)" in app.render(),
           [r for r in app.render().split("\n") if "Saying nothing" in r])
 
+    # Alt-T changes the application palette -- the other hundred and
+    # thirty-four colours, everything the package draws rather than the model.
+    # Three things have to move that Alt-W cannot touch: the desktop, the menu
+    # bar and the status line. And the lines that name their own colours must
+    # not, for the third time on this screen: a theme does not reach a span.
+    before_desk = (app.display().fg_at(70, 20), app.display().bg_at(70, 20))
+    before_bar = (app.display().fg_at(2, 0), app.display().bg_at(2, 0))
+    named = (app.display().fg_at(*FIRST), app.display().bg_at(*FIRST))
+
+    app.send(b"\x1bt", settle=1.2)
+    d = app.display()
+    check("Alt-T repaints the desktop",
+          (d.fg_at(70, 20), d.bg_at(70, 20)) != before_desk,
+          f"{(d.fg_at(70, 20), d.bg_at(70, 20))} == {before_desk}")
+    check("and the menu bar, which no window palette reaches",
+          (d.fg_at(2, 0), d.bg_at(2, 0)) != before_bar,
+          f"{(d.fg_at(2, 0), d.bg_at(2, 0))} == {before_bar}")
+    check("and a span that names its own colour is untouched",
+          (d.fg_at(*FIRST), d.bg_at(*FIRST)) == named,
+          f"{(d.fg_at(*FIRST), d.bg_at(*FIRST))} != {named}")
+
+    app.send(b"\x1bt", settle=1.2)
+    d = app.display()
+    check("and Alt-T again brings Turbo Vision's own scheme back",
+          (d.fg_at(70, 20), d.bg_at(70, 20)) == before_desk,
+          f"{(d.fg_at(70, 20), d.bg_at(70, 20))} != {before_desk}")
+
     # The original's About box, `\003` centring markers and all.
     app.send(b"\x1ba", settle=1.2)
     about = app.render()

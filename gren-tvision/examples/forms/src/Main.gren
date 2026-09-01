@@ -449,6 +449,7 @@ view model =
     -- keystroke before anything else, dialogs included, so anything bound
     -- here is spent for the whole program. The menu entries above name the
     -- same keys as hints and leave the binding to these.
+    , theme = Tui.borland
     , statusLine =
         [ { text = "~F2~ New", key = "F2", cmd = "new" }
         , { text = "~F3~ Edit", key = "F3", cmd = "edit" }

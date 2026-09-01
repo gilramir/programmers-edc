@@ -267,6 +267,153 @@ static std::vector<StatusItemDef> parseStatusLine(const Napi::Env &env,
 /*  The application                                                   */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/*  The application palette                                           */
+/* ------------------------------------------------------------------ */
+
+// Turbo Vision's application palette is one hundred and thirty-five colour
+// attributes, and every colour on the screen that this package draws rather
+// than the model comes out of it. The layout is fixed and is the reason a
+// theme can be described in seventeen fields instead of a hundred and
+// thirty-five:
+//
+//      1        the desktop
+//      2-7      the menu bar and the status line
+//      8-15     the blue window set
+//      16-23    the cyan window set
+//      24-31    the gray window set
+//      32-63    the gray dialog set
+//      64-95    the blue dialog set
+//      96-127   the cyan dialog set
+//      128-135  the help viewer
+//
+// The window sets are eight entries and the dialog sets are thirty-two, and
+// the first eight of a dialog set mean the same things as a window set --
+// frame, scroll bar, text -- which is what lets one Panel describe both. A
+// JsWindow is a TDialog, so what it actually reads is a *dialog* set; the
+// window sets are filled in from the same Panel so that anything reaching them
+// (a TWindow this package did not build) is at least consistent.
+struct ThemePair {
+    TColorAttr attr = {};
+};
+
+// One coloured surface: a window, the alternate window, or a dialog.
+struct ThemePanel {
+    TColorAttr frame;          // an inactive frame, and the surface's ground
+    TColorAttr frameActive;
+    TColorAttr text;           // body text and static text
+    TColorAttr accent;         // hot keys
+    TColorAttr selected;       // the focused row, the selected text
+    TColorAttr disabled;
+    TColorAttr control;        // buttons and input lines at rest
+    TColorAttr controlAccent;  // a button's hot key
+    TColorAttr scrollBar;
+};
+
+struct ThemeSpec {
+    bool set = false;
+    TColorAttr desktop;
+    TColorAttr bar;
+    TColorAttr barAccent;
+    TColorAttr barDisabled;
+    TColorAttr barSelected;
+    TColorAttr barSelectedAccent;
+    ThemePanel window;
+    ThemePanel alternate;
+    ThemePanel dialog;
+};
+
+static ThemeSpec g_theme;
+
+// A window set: eight entries, in Turbo Vision's order.
+static void writeWindowSet(TColorAttr *at, const ThemePanel &p)
+{
+    at[0] = p.frame;         // 1  frame, passive
+    at[1] = p.frameActive;   // 2  frame, active
+    at[2] = p.frameActive;   // 3  frame icons
+    at[3] = p.scrollBar;     // 4  scroll bar page
+    at[4] = p.scrollBar;     // 5  scroll bar controls
+    at[5] = p.text;          // 6  normal text
+    at[6] = p.selected;      // 7  selected text
+    at[7] = p.text;          // 8  reserved
+}
+
+// A dialog set: thirty-two entries, and the only place the list of them is
+// written down. The order is Turbo Vision's and comes from the Programming
+// Guide; getting one wrong colours exactly one kind of control and nothing
+// says so, which is why they are named here one per line.
+static void writeDialogSet(TColorAttr *at, const ThemePanel &p)
+{
+    at[0] = p.frame;           // 1  frame, passive
+    at[1] = p.frameActive;     // 2  frame, active
+    at[2] = p.frameActive;     // 3  frame icons
+    at[3] = p.scrollBar;       // 4  scroll bar page
+    at[4] = p.scrollBar;       // 5  scroll bar controls
+    at[5] = p.text;            // 6  static text
+    at[6] = p.text;            // 7  label, normal
+    at[7] = p.selected;        // 8  label, selected
+    at[8] = p.accent;          // 9  label, shortcut
+    at[9] = p.control;         // 10 button, normal
+    at[10] = p.control;        // 11 button, default
+    at[11] = p.selected;       // 12 button, selected
+    at[12] = p.disabled;       // 13 button, disabled
+    at[13] = p.controlAccent;  // 14 button, shortcut
+    at[14] = p.frame;          // 15 button, shadow
+    at[15] = p.text;           // 16 cluster, normal
+    at[16] = p.selected;       // 17 cluster, selected
+    at[17] = p.accent;         // 18 cluster, shortcut
+    at[18] = p.control;        // 19 input line, normal
+    at[19] = p.selected;       // 20 input line, selected
+    at[20] = p.controlAccent;  // 21 input line, arrow
+    at[21] = p.control;        // 22 history, normal
+    at[22] = p.selected;       // 23 history, selected
+    at[23] = p.controlAccent;  // 24 history, arrow
+    at[24] = p.frame;          // 25 history window, side
+    at[25] = p.scrollBar;      // 26 history window, scroll bar page
+    at[26] = p.scrollBar;      // 27 history window, scroll bar controls
+    at[27] = p.text;           // 28 list viewer, normal
+    at[28] = p.accent;         // 29 list viewer, focused
+    at[29] = p.selected;       // 30 list viewer, selected
+    at[30] = p.disabled;       // 31 list viewer, divider
+    at[31] = p.text;           // 32 info pane
+}
+
+// The whole thing, in the order above.
+static void buildAppPalette(TColorAttr *at, const ThemeSpec &t)
+{
+    at[0] = t.desktop;
+    at[1] = t.bar;
+    at[2] = t.barDisabled;
+    at[3] = t.barAccent;
+    at[4] = t.barSelected;
+    at[5] = t.barDisabled;
+    at[6] = t.barSelectedAccent;
+    writeWindowSet(at + 7, t.window);
+    writeWindowSet(at + 15, t.alternate);
+    writeWindowSet(at + 23, t.dialog);
+    writeDialogSet(at + 31, t.dialog);
+    writeDialogSet(at + 63, t.window);
+    writeDialogSet(at + 95, t.alternate);
+    // The help viewer, which this package does not build -- see the note in
+    // examples/README about THelpFile -- filled from the window panel so that
+    // nothing in the table is left at whatever the stock byte was.
+    writeWindowSet(at + 127, t.window);
+}
+
+// data[0] is the length and the entries are at [1..135], which is why every
+// write below is offset by one (palette.cpp:26).
+static TPalette &stockPalette()
+{
+    static TPalette p(cpAppColor, sizeof(cpAppColor) - 1);
+    return p;
+}
+
+static TPalette &themedPalette()
+{
+    static TPalette p(cpAppColor, sizeof(cpAppColor) - 1);
+    return p;
+}
+
 class JsApp : public TApplication {
 public:
     JsApp() noexcept
@@ -276,6 +423,16 @@ public:
     }
 
     virtual void handleEvent(TEvent &event) override;
+
+    // The model's theme, when it sent one, and Turbo Vision's own otherwise.
+    //
+    // Overwriting a palette in place and forcing a repaint is what tvdemo's
+    // own colour dialog does (tvdemo2.cpp:349), and is the only precedent
+    // there is for changing a scheme while a program is running.
+    virtual TPalette &getPalette() const override
+    {
+        return g_theme.set ? themedPalette() : stockPalette();
+    }
 
     static TMenuBar *initMenuBar(TRect r);
     static TStatusLine *initStatusLine(TRect r);
@@ -1530,6 +1687,137 @@ static Napi::Value SetStatusLine(const Napi::CallbackInfo &info)
     return Napi::Boolean::New(env, true);
 }
 
+/* ------------------------------------------------------------------ */
+/*  tv.setTheme(theme)                                                */
+/* ------------------------------------------------------------------ */
+
+// One colour, either of the sixteen the terminal has always had or a literal
+// 24-bit one. The first follows whatever scheme the user has set on their
+// terminal, which is a feature and not a shortcut: a theme built out of `Ansi`
+// looks like the rest of their machine, and one built out of `Rgb` looks the
+// same everywhere. magiblot's TVision quantises an Rgb colour down when the
+// terminal cannot do better, so neither is a hard requirement.
+static TColor readColor(const Napi::Env &env, const Napi::Value &value,
+                        const char *where)
+{
+    if (value.IsNumber())
+        return TColor(TColorBIOS((uint8_t) value.ToNumber().Int32Value()));
+    if (value.IsArray())
+        {
+        Napi::Array rgb = value.As<Napi::Array>();
+        if (rgb.Length() == 3)
+            return TColor(TColorRGB(
+                (uint8_t) rgb.Get(0u).ToNumber().Int32Value(),
+                (uint8_t) rgb.Get(1u).ToNumber().Int32Value(),
+                (uint8_t) rgb.Get(2u).ToNumber().Int32Value()));
+        }
+    throw Napi::Error::New(env, std::string("tvision: ") + where +
+                                    " must be a colour index or [r, g, b]");
+}
+
+// A foreground and a background, as the two-element array the encoder writes.
+static TColorAttr readPair(const Napi::Env &env, const Napi::Object &owner,
+                           const char *key)
+{
+    Napi::Value value = owner.Get(key);
+    if (!value.IsArray())
+        throw Napi::Error::New(env, std::string("tvision: theme.") + key +
+                                        " must be [foreground, background]");
+    Napi::Array pair = value.As<Napi::Array>();
+    if (pair.Length() != 2)
+        throw Napi::Error::New(env, std::string("tvision: theme.") + key +
+                                        " must be [foreground, background]");
+    TColorAttr attr = {};
+    attr.setForeground(readColor(env, pair.Get(0u), key));
+    attr.setBackground(readColor(env, pair.Get(1u), key));
+    return attr;
+}
+
+// A foreground on the ground `over` already names, which is how a theme says
+// "hot keys are red" without repeating the surface's colour nine times.
+static TColorAttr readInk(const Napi::Env &env, const Napi::Object &owner,
+                          const char *key, TColorAttr over)
+{
+    TColorAttr attr = over;
+    attr.setForeground(readColor(env, owner.Get(key), key));
+    return attr;
+}
+
+static ThemePanel readPanel(const Napi::Env &env, const Napi::Object &theme,
+                            const char *key)
+{
+    Napi::Value value = theme.Get(key);
+    if (!value.IsObject())
+        throw Napi::Error::New(env, std::string("tvision: theme.") + key +
+                                        " must be an object");
+    Napi::Object o = value.As<Napi::Object>();
+
+    ThemePanel p;
+    p.text = readPair(env, o, "text");
+    p.frame = readPair(env, o, "frame");
+    p.frameActive = readInk(env, o, "frameActive", p.frame);
+    p.selected = readPair(env, o, "selected");
+    p.control = readPair(env, o, "control");
+    p.scrollBar = readPair(env, o, "scrollBar");
+    // The three that are a foreground on a ground already named: an accent is
+    // a hot key in the body text, a control accent is one on a button, and
+    // disabled is text that is still text.
+    p.accent = readInk(env, o, "accent", p.text);
+    p.controlAccent = readInk(env, o, "controlAccent", p.control);
+    p.disabled = readInk(env, o, "disabled", p.text);
+    return p;
+}
+
+// tv.setTheme(theme) -- the whole application palette, from the model.
+//
+// Turbo Vision's palette is a hundred and thirty-five attributes and this is
+// seventeen fields, which is the difference between describing a scheme and
+// re-implementing an indirection table. buildAppPalette above is where the
+// expansion is written down, one line per slot.
+static Napi::Value SetTheme(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+
+    if (info[0].IsNull() || info[0].IsUndefined())
+        {
+        g_theme.set = false;
+        }
+    else
+        {
+        if (!info[0].IsObject())
+            throw Napi::TypeError::New(env, "tvision: setTheme(theme) needs an "
+                                            "object");
+        Napi::Object o = info[0].As<Napi::Object>();
+
+        ThemeSpec t;
+        t.set = true;
+        t.desktop = readPair(env, o, "desktop");
+        t.bar = readPair(env, o, "bar");
+        t.barSelected = readPair(env, o, "barSelected");
+        t.barAccent = readInk(env, o, "barAccent", t.bar);
+        t.barDisabled = readInk(env, o, "barDisabled", t.bar);
+        t.barSelectedAccent = readInk(env, o, "barSelectedAccent",
+                                      t.barSelected);
+        t.window = readPanel(env, o, "window");
+        t.alternate = readPanel(env, o, "alternate");
+        t.dialog = readPanel(env, o, "dialog");
+
+        // Only once every field has been read, so that a theme with one bad
+        // colour in it leaves the screen alone rather than half repainted.
+        g_theme = t;
+        buildAppPalette(themedPalette().data + 1, g_theme);
+        }
+
+    // Nothing caches a colour -- every view asks getColor on every draw -- so
+    // the whole of "apply it" is repainting. setScreenMode at the mode it is
+    // already in is what tvdemo's colour dialog does; it re-reads the screen
+    // and redraws from the top, which is the only thing that reaches the menu
+    // bar, the status line and the desktop as well as the windows.
+    if (g_app && g_running)
+        g_app->setScreenMode(TScreen::screenMode);
+    return Napi::Boolean::New(env, true);
+}
+
 // tv.screenSize() -- so JS can lay windows out relative to the terminal.
 static Napi::Value ScreenSize(const Napi::CallbackInfo &info)
 {
@@ -1569,6 +1857,7 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports)
     exports.Set("quit", Napi::Function::New(env, Quit));
     exports.Set("setMenuBar", Napi::Function::New(env, SetMenuBar));
     exports.Set("setStatusLine", Napi::Function::New(env, SetStatusLine));
+    exports.Set("setTheme", Napi::Function::New(env, SetTheme));
     exports.Set("screenSize", Napi::Function::New(env, ScreenSize));
     registerViewApi(env, exports);
     return exports;

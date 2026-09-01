@@ -223,6 +223,7 @@ view model =
             , items = [ Item { title = "E~x~it", cmd = "quit", key = "Alt-X", shortcut = "Alt-X" } ]
             }
         ]
+    , theme = Tui.borland
     , statusLine =
         [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
         , { text = "Arrows, PgUp/PgDn, Home/End scroll", key = "", cmd = "" }

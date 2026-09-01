@@ -14,7 +14,7 @@ const { createDiffer } = require('./diff');
 // Bumped in lockstep with Tui.protocolVersion on the Gren side. A Gren package
 // and an npm package version independently, and they will skew; refusing an
 // unknown version beats rendering nothing and leaving the author to guess.
-const PROTOCOL = 16;
+const PROTOCOL = 17;
 
 /**
  * Drive a compiled Gren program's UI.
@@ -32,6 +32,9 @@ function run(grenModule, options = {}) {
     : () => {};
 
   let started = false;
+  // The theme last handed to the binding, as JSON, so a render that did not
+  // change it does not repaint the screen.
+  let appliedTheme = null;
   let differ = null;
   // See the `focus` case below: a focus can name a view the render it came
   // with has not built yet.
@@ -78,6 +81,10 @@ function run(grenModule, options = {}) {
           // The first render builds the application, menu bar and status line
           // included; later ones can replace them, because Turbo Vision keeps
           // both in members a subclass can swap.
+          // Before start(), so that the very first frame is drawn in the
+          // theme rather than repainted into it a moment later.
+          tv.setTheme(message.theme);
+          appliedTheme = JSON.stringify(message.theme);
           tv.start({
             menuBar: message.menuBar,
             statusLine: message.statusLine,
@@ -121,6 +128,15 @@ function run(grenModule, options = {}) {
           });
           started = true;
         } else {
+          // Compared by value, like everything else here: a model that
+          // re-renders the same theme thirty times a second must not repaint
+          // the screen thirty times, and setTheme's repaint is the whole
+          // screen.
+          const theme = JSON.stringify(message.theme);
+          if (theme !== appliedTheme) {
+            appliedTheme = theme;
+            tv.setTheme(message.theme);
+          }
           differ.chrome(message.menuBar, message.statusLine);
         }
         differ.apply(message.windows);

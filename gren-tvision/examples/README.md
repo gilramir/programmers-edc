@@ -950,7 +950,24 @@ colour; the lower one follows, because its lines name nothing. That is the
 whole trade on one screen and a single keystroke -- say the colour and it is
 yours to keep, say nothing and it is the window's to change.
 
-Two things it taught. The three sets a window can have are the *dialog*
+`Alt-T` then changes what those three sets *are*. `Theme` on a `Ui` is the
+application palette -- everything the package draws rather than the model -- in
+seventeen fields rather than the hundred and thirty-five attributes Turbo
+Vision keeps them in, which works because the 135 are not 135 decisions: one
+desktop, one bar, and three coloured surfaces written into two blocks apiece.
+`Tui.borland` is Turbo Vision's own scheme re-derived through those fields, and
+the evidence that the expansion is right is that every colour assertion in the
+suite passed against it unchanged.
+
+The example's second theme is deliberately `Rgb` throughout where Borland's is
+`Ansi`, because that is a real choice: `Ansi` inherits whatever sixteen colours
+the person running the program has set and matches the rest of their machine,
+`Rgb` pins the colour and looks the same everywhere. A dark scheme is the case
+that needs the second -- `Black` and `DarkGray` is the only dark pair the
+sixteen offer, and it is at once too far apart to read as one surface and too
+close to be a border.
+
+Two more things it taught. The three sets a window can have are the *dialog*
 palettes and not the window ones -- a window here can hold a button, and a
 button asks for entries past the eight a window palette has. And a `TGroup`
 with a buffer draws by blitting it, so recolouring a window and calling

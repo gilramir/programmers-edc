@@ -2983,3 +2983,84 @@ Those are the two colours that disappear on blue. The check is the same check
 either way -- *the model is the only thing that can get this wrong, so fail
 here rather than in someone's eyes* -- which is the argument for asserting on
 colour at all in a terminal test.
+
+## The application palette, described rather than tabulated
+
+`Theme` on a [`Ui`](Tui#Ui) is the rest of the colour work: every colour on the
+screen that the package draws rather than the model, in seventeen fields.
+
+### Why it is seventeen and not a hundred and thirty-five
+
+Turbo Vision's application palette is 135 colour attributes and
+`examples/palette` argues -- correctly -- that the *indirection* into them has
+no Gren equivalent. The table does, and the reason is that the 135 are not 135
+decisions. The layout is fixed and structured:
+
+    1        the desktop
+    2-7      the menu bar and the status line
+    8-15     the blue window set
+    16-23    the cyan window set
+    24-31    the gray window set
+    32-63    the gray dialog set
+    64-95    the blue dialog set
+    96-127   the cyan dialog set
+    128-135  the help viewer
+
+One desktop, one bar, and three coloured surfaces each described the same way
+and written into two blocks apiece. So a `Theme` is a desktop pair, five bar
+colours, and three `ThemePanel`s of nine -- and `buildAppPalette` in `app.cc`
+is the expansion, one commented line per slot. That file is the only place the
+thirty-two dialog entries are written down in order, which matters because
+getting one wrong miscolours exactly one kind of control and nothing reports it.
+
+**The proof that the expansion is right is that nothing changed.** `Tui.borland`
+is Turbo Vision's own scheme re-derived through the seventeen fields, and all
+529 checks passed against it unaltered -- including `drive_palette`'s, which
+assert exact SGR attributes for six specific palette entries, and
+`drive_ascii`'s, which pin foreground and background on particular cells. A
+table-driven rewrite that reproduces every colour the old table produced is a
+table-driven rewrite that is correct.
+
+### Three things that were not obvious
+
+**A Gren union constructor takes at most one parameter**, so `Rgb Int Int Int`
+does not compile. `Rgb 0xF08C00` is better anyway: it is how a colour is
+written everywhere else, and it is what `TColorRGB`'s own constructor takes.
+The split into three bytes happens in the encoder, once, rather than in C++
+against a number that has already been through a double.
+
+**`Ansi` and `Rgb` are a real choice and not a convenience.** A theme built out
+of `Ansi` names one of the sixteen and therefore inherits whatever scheme the
+person running the program has set on their terminal -- it belongs to their
+machine and matches the rest of it. `Rgb` pins the colour and looks the same
+everywhere, including where that is wrong. magiblot's TVision quantises an
+`Rgb` down when the terminal cannot do better, so a 24-bit theme still runs
+over ssh; it just stops being the colour that was picked. A dark theme is the
+case that needs `Rgb`, because `Black` and `DarkGray` is the only dark pair the
+sixteen offer and it is simultaneously too far apart to read as one surface and
+too close to be a border.
+
+**Applying it is a whole-screen repaint, so it has to be diffed.** `setTheme`
+overwrites the palette in place and calls `setScreenMode(TScreen::screenMode)`,
+which is what tvdemo's own colour dialog does (`tvdemo2.cpp:349`) and the only
+precedent there is for changing a scheme while a program runs. A `Ui` is
+rendered whole on every update, so a model that renders the same theme thirty
+times a second would repaint the screen thirty times: `tui.js` compares the
+theme by value and only calls through when it changed, the same rule the
+differ applies to everything else. It is also sent *before* `tv.start()`, so
+the first frame is drawn in the theme rather than repainted into it.
+
+### What a theme still does not reach
+
+A [`Span`](Tui#Span) that names a [`Hue`](Tui#Hue). That is deliberate and it
+is the same trade `examples/palette` has always been about, one level up: a
+span colour is absolute, so a program with themed canvases keeps its own hues
+in its model beside its choice of `Theme` and paints from them. The colour is
+a model decision, made where the decision about what to draw is made.
+
+`examples/palette` now shows all three levels on one screen, which is why the
+demonstration belongs there rather than anywhere more convenient. `Alt-W` moves
+one window between the three sets a theme defines. `Alt-T` changes what those
+three sets are, and takes the desktop and the menu bar with it -- which no
+window palette can reach. And through both of them the window whose spans name
+both halves of their colour does not move at all.

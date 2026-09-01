@@ -5,6 +5,7 @@ module Tui exposing
     , Hue(..)
     , MenuItem(..)
     , MessageButton
+    , Pair
     , PopupItem(..)
     , Ports
     , Program
@@ -13,11 +14,15 @@ module Tui exposing
     , Resize
     , Span
     , StatusItem
+    , Theme
+    , ThemePanel
+    , Tint(..)
     , Ui
     , Value(..)
     , View(..)
     , Window
     , WindowPalette(..)
+    , borland
     , defineProgram
     , dialog
     , fileDialog
@@ -189,6 +194,7 @@ its own is a pull-down, and one without is a command sitting on the bar.
 @docs WindowPalette
 @docs Grow, fixed, stretch, stretchWidth, stretchHeight, pinRight, pinBottom
 @docs Span, Hue, line, plain, ink, on
+@docs Theme, ThemePanel, Pair, Tint, borland
 @docs MenuItem, StatusItem, PopupItem, popupMenu
 @docs Event, Value, DialogSpec
 @docs dialog, quit, setEnabled, setDoubleClickDelay, focus
@@ -203,6 +209,7 @@ import Array exposing (Array)
 import Init
 import Json.Decode as Decode
 import Json.Encode as Encode
+import Math
 import Node
 import Task
 
@@ -263,11 +270,14 @@ only Turbo Vision had, and a view that filled one could grow with it -- see
 [`Grows`](#Grow) -- but the model could not know by how much.
 Version 16 added [`WindowPalette`](#WindowPalette), which is the one piece of
 Turbo Vision's palette machinery that survives being asked to name a colour
-instead of an index into a table.
+instead of an index into a table. Version 17 added [`Theme`](#Theme) on a
+[`Ui`](#Ui), which is the rest of it: every colour this package draws rather
+than the model, described in seventeen fields instead of the hundred and
+thirty-five attributes Turbo Vision keeps them in.
 -}
 protocolVersion : Int
 protocolVersion =
-    16
+    17
 
 
 -- GEOMETRY
@@ -402,8 +412,186 @@ showing things; put anything the user has to reach in a window.
 type alias Ui =
     { menuBar : Array MenuItem
     , statusLine : Array StatusItem
+    , theme : Theme
     , windows : Array Window
     , overlays : Array View
+    }
+
+
+{-| Every colour on the screen that this package draws rather than the model.
+
+Turbo Vision keeps these as one hundred and thirty-five colour attributes and
+resolves a view's colour through three layers of indirection into them.
+[`examples/palette`](https://github.com/gilramir/gren-tvision) argues at length
+that the indirection has no Gren equivalent -- and it does not, but the *table*
+does, because the hundred and thirty-five are not a hundred and thirty-five
+decisions. They are one desktop, one bar, and three coloured surfaces, each
+described the same way, repeated across the window and dialog blocks. That is
+what this is.
+
+    { theme = Tui.borland
+    , menuBar = ...
+    }
+
+[`borland`](#borland) is Turbo Vision's own scheme, and it is the value to
+start from: copy it, change what you want, and the fields you did not think
+about are still the ones a Turbo Vision program has always had.
+
+The three surfaces are the same three a [`WindowPalette`](#WindowPalette) picks
+between, which is the connection worth holding on to: `window` is what
+`BlueWindow` draws in, `alternate` is `CyanWindow`, and `dialog` is
+`GrayWindow` **and** every modal [`dialog`](#dialog).
+
+This is half of what "theme" usually means, and the half that is not here is
+deliberate. A [`Span`](#Span) that names a [`Hue`](#Hue) is an absolute colour
+with nothing in between, so a theme does not reach one. A program with themed
+canvases keeps its own hues in its model beside its choice of `Theme` and
+paints from them -- which is the same principle, one level up: the colour is a
+model decision, made where the decision about what to draw is made.
+-}
+type alias Theme =
+    { desktop : Pair
+    -- The menu bar and the status line, which share their six colours.
+    , bar : Pair
+    , barAccent : Tint
+    , barDisabled : Tint
+    , barSelected : Pair
+    , barSelectedAccent : Tint
+    , window : ThemePanel
+    , alternate : ThemePanel
+    , dialog : ThemePanel
+    }
+
+
+{-| One coloured surface: a window, the alternate window, or a dialog.
+
+Nine fields, of which three are a foreground alone -- an accent is a hot key
+*in* the body text and a disabled entry is still body text, so both sit on a
+ground already named rather than repeating it.
+
+  - `frame` -- an inactive frame, and with it the ground the whole surface
+    sits on.
+  - `frameActive` -- the frame of the window that has the focus, and its
+    close and zoom boxes.
+  - `text` -- body text, static text, a label, a list.
+  - `accent` -- the letter a `~tilde~` marks.
+  - `selected` -- the focused row of a list, selected text, a pressed button.
+  - `disabled` -- a button that cannot be pressed, a list's divider.
+  - `control` -- a button or an input line at rest.
+  - `controlAccent` -- a hot key on one of those, and the arrow on a history
+    drop-down.
+  - `scrollBar` -- the page and the arrows both.
+
+Turbo Vision has thirty-two slots per dialog and this fills them from nine.
+The expansion is one line per slot in `buildAppPalette` (`app.cc`), which is
+the place to look when a control comes out the wrong colour.
+-}
+type alias ThemePanel =
+    { frame : Pair
+    , frameActive : Tint
+    , text : Pair
+    , accent : Tint
+    , selected : Pair
+    , disabled : Tint
+    , control : Pair
+    , controlAccent : Tint
+    , scrollBar : Pair
+    }
+
+
+{-| A foreground and a background. -}
+type alias Pair =
+    { fg : Tint, bg : Tint }
+
+
+{-| One colour in a [`Theme`](#Theme), and the choice between two kinds.
+
+`Ansi` names one of the sixteen a terminal has always had, and what it actually
+looks like is whatever scheme the person running the program has set -- so a
+theme built out of `Ansi` belongs to their machine and matches the rest of it.
+`Rgb` pins the colour exactly and looks the same everywhere; it takes one
+`0xRRGGBB`, which is how a colour is written down everywhere else and is also
+what `TColorRGB` itself takes.
+
+    , accent = Rgb 0xF08C00
+
+Neither is a requirement: Turbo Vision quantises an `Rgb` down to what the
+terminal says it can do, so a 24-bit theme still runs over ssh -- it just
+stops being the colour you picked. Check a theme at sixteen colours if it is
+going anywhere but your own terminal.
+
+Note that this is the *theme's* colour type and [`Hue`](#Hue) is the span's.
+They are separate on purpose: a span colour is resolved against a view's
+palette and has always been one of the sixteen, and giving it 24 bits would
+mean giving `TColorBIOS` up in a place where the whole point is to agree with
+whatever the window is already using.
+-}
+type Tint
+    = Ansi Hue
+    | Rgb Int
+
+
+{-| Turbo Vision's own scheme, byte for byte, and the value to start a theme
+from.
+
+The blue windows and yellow text of every Borland tool from 1990, the light
+grey dialogs with red hot keys, the black-on-cyan menu bar. It is what this
+package drew before a theme could be described at all, so a program that
+writes `theme = Tui.borland` gets exactly what it had.
+-}
+borland : Theme
+borland =
+    { desktop = { fg = Ansi Blue, bg = Ansi LightGray }
+    , bar = { fg = Ansi Black, bg = Ansi LightGray }
+    , barAccent = Ansi Red
+    , barDisabled = Ansi DarkGray
+    , barSelected = { fg = Ansi Black, bg = Ansi Green }
+    , barSelectedAccent = Ansi LightRed
+    , window = bluePanel
+    , alternate = cyanPanel
+    , dialog = grayPanel
+    }
+
+
+bluePanel : ThemePanel
+bluePanel =
+    { frame = { fg = Ansi LightGray, bg = Ansi Blue }
+    , frameActive = Ansi White
+    , text = { fg = Ansi Yellow, bg = Ansi Blue }
+    , accent = Ansi LightGreen
+    , selected = { fg = Ansi Blue, bg = Ansi LightGray }
+    , disabled = Ansi DarkGray
+    , control = { fg = Ansi Black, bg = Ansi Green }
+    , controlAccent = Ansi LightRed
+    , scrollBar = { fg = Ansi Blue, bg = Ansi Cyan }
+    }
+
+
+cyanPanel : ThemePanel
+cyanPanel =
+    { frame = { fg = Ansi Blue, bg = Ansi Cyan }
+    , frameActive = Ansi White
+    , text = { fg = Ansi Yellow, bg = Ansi Cyan }
+    , accent = Ansi LightGreen
+    , selected = { fg = Ansi Cyan, bg = Ansi LightGray }
+    , disabled = Ansi DarkGray
+    , control = { fg = Ansi Black, bg = Ansi Green }
+    , controlAccent = Ansi LightRed
+    , scrollBar = { fg = Ansi Cyan, bg = Ansi Blue }
+    }
+
+
+grayPanel : ThemePanel
+grayPanel =
+    { frame = { fg = Ansi Black, bg = Ansi LightGray }
+    , frameActive = Ansi White
+    , text = { fg = Ansi Black, bg = Ansi LightGray }
+    , accent = Ansi Red
+    , selected = { fg = Ansi White, bg = Ansi Green }
+    , disabled = Ansi DarkGray
+    , control = { fg = Ansi Black, bg = Ansi Green }
+    , controlAccent = Ansi LightRed
+    , scrollBar = { fg = Ansi Blue, bg = Ansi Cyan }
     }
 
 
@@ -1845,6 +2033,7 @@ render ports config model =
             , { key = "protocol", value = Encode.int protocolVersion }
             , { key = "menuBar", value = Encode.array encodeMenuItem ui.menuBar }
             , { key = "statusLine", value = Encode.array encodeStatusItem ui.statusLine }
+            , { key = "theme", value = encodeTheme ui.theme }
             , { key = "windows", value = Encode.array encodeWindow ui.windows }
             , { key = "overlays", value = Encode.array encodeView ui.overlays }
             ]
@@ -1856,6 +2045,63 @@ render ports config model =
 encodeRect : Rect -> Encode.Value
 encodeRect r =
     Encode.array Encode.int [ r.x1, r.y1, r.x2, r.y2 ]
+
+
+{-| A colour is a number when it is one of the sixteen and a three element
+array when it is not, which is the whole of the wire format: the binding tells
+them apart by type rather than by a tag, exactly as `Value`'s decoder does.
+-}
+encodeTint : Tint -> Encode.Value
+encodeTint tint =
+    when tint is
+        Ansi hue ->
+            Encode.int (hueCode hue)
+
+        Rgb value ->
+            -- Split here rather than in the binding: `//` is fine on a colour
+            -- and `Math.modBy` is the only remainder Gren has, so doing it
+            -- once in one place beats doing it in C++ against a number that
+            -- has already been through a double.
+            Encode.array Encode.int
+                [ Math.modBy 256 (value // 65536)
+                , Math.modBy 256 (value // 256)
+                , Math.modBy 256 value
+                ]
+
+
+encodePair : Pair -> Encode.Value
+encodePair pair =
+    Encode.array encodeTint [ pair.fg, pair.bg ]
+
+
+encodeThemePanel : ThemePanel -> Encode.Value
+encodeThemePanel panel =
+    Encode.object
+        [ { key = "frame", value = encodePair panel.frame }
+        , { key = "frameActive", value = encodeTint panel.frameActive }
+        , { key = "text", value = encodePair panel.text }
+        , { key = "accent", value = encodeTint panel.accent }
+        , { key = "selected", value = encodePair panel.selected }
+        , { key = "disabled", value = encodeTint panel.disabled }
+        , { key = "control", value = encodePair panel.control }
+        , { key = "controlAccent", value = encodeTint panel.controlAccent }
+        , { key = "scrollBar", value = encodePair panel.scrollBar }
+        ]
+
+
+encodeTheme : Theme -> Encode.Value
+encodeTheme theme =
+    Encode.object
+        [ { key = "desktop", value = encodePair theme.desktop }
+        , { key = "bar", value = encodePair theme.bar }
+        , { key = "barAccent", value = encodeTint theme.barAccent }
+        , { key = "barDisabled", value = encodeTint theme.barDisabled }
+        , { key = "barSelected", value = encodePair theme.barSelected }
+        , { key = "barSelectedAccent", value = encodeTint theme.barSelectedAccent }
+        , { key = "window", value = encodeThemePanel theme.window }
+        , { key = "alternate", value = encodeThemePanel theme.alternate }
+        , { key = "dialog", value = encodeThemePanel theme.dialog }
+        ]
 
 
 encodeWindow : Window -> Encode.Value

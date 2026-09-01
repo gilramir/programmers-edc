@@ -146,6 +146,7 @@ module.exports = {
   readEditor: addon.readEditor,
   searchEditor: addon.searchEditor,
   setLines: addon.setLines,
+  setTheme: addon.setTheme,
   setTitle: addon.setTitle,
   setWindowPalette: addon.setWindowPalette,
   setCursor: addon.setCursor,

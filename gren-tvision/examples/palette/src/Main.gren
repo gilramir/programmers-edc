@@ -69,6 +69,9 @@ type alias Model =
     -- API where a colour is named rather than looked up -- see the note on
     -- `plainWindow` -- so this example is where it belongs.
     , tone : Tui.WindowPalette
+    -- And the application palette, which is the other hundred and thirty-four
+    -- colours: everything the package draws rather than the model.
+    , dark : Bool
     }
 
 
@@ -79,7 +82,7 @@ type Msg
 init : Node.Environment -> Init.Task { model : Model, command : Cmd Msg }
 init _ =
     Node.startProgram
-        { model = { showing = True, showingPlain = True, tone = Tui.BlueWindow }
+        { model = { showing = True, showingPlain = True, tone = Tui.BlueWindow, dark = False }
         , command = Cmd.none
         }
 
@@ -118,6 +121,9 @@ update msg model =
         FromTui (Command "palette") ->
             { model = { model | showing = True, showingPlain = True }, command = Cmd.none }
 
+        FromTui (Command "theme") ->
+            { model = { model | dark = not model.dark }, command = Cmd.none }
+
         FromTui (Command "tone") ->
             { model = { model | tone = nextTone model.tone }, command = Cmd.none }
 
@@ -129,6 +135,55 @@ update msg model =
 
         FromTui _ ->
             { model = model, command = Cmd.none }
+
+
+{-| A second scheme, so that this example shows both halves of the colour
+story: `Alt-W` moves one window between the three sets a theme defines, and
+`Alt-T` changes what those three sets *are*.
+
+Written out in full rather than as `{ Tui.borland | ... }` because that is what
+authoring a theme looks like, and seventeen fields is the size of the job. Two
+things are worth noticing in it.
+
+**It is `Rgb` throughout.** Borland's is `Ansi`, so it follows whatever the
+person running it has set their terminal's sixteen colours to; this one does
+not, because a dark scheme built out of "whatever this terminal calls black" is
+at the mercy of a terminal whose black is not dark. The cost is that it looks
+the same everywhere including where that is wrong -- Turbo Vision quantises it
+down when the terminal cannot do better, and a 24-bit scheme checked only at
+24 bits is a scheme nobody has checked.
+
+**The window ground is lifted off the desktop rather than equal to it.** That
+is the whole trick of a dark scheme in sixteen colours, and the reason it needs
+`Rgb`: `Black` and `DarkGray` is the only pair the sixteen offer, and it is too
+far apart to read as one surface and too close to be a border.
+-}
+midnight : Tui.Theme
+midnight =
+    { desktop = { fg = Tui.Rgb 0x2A2A33, bg = Tui.Rgb 0x14141A }
+    , bar = { fg = Tui.Rgb 0xC8C8D0, bg = Tui.Rgb 0x24242E }
+    , barAccent = Tui.Rgb 0xE8A33D
+    , barDisabled = Tui.Rgb 0x6A6A78
+    , barSelected = { fg = Tui.Rgb 0x14141A, bg = Tui.Rgb 0xE8A33D }
+    , barSelectedAccent = Tui.Rgb 0x5A2E00
+    , window = midnightPanel (Tui.Rgb 0x1E1E26)
+    , alternate = midnightPanel (Tui.Rgb 0x1A2430)
+    , dialog = midnightPanel (Tui.Rgb 0x26262F)
+    }
+
+
+midnightPanel : Tui.Tint -> Tui.ThemePanel
+midnightPanel ground =
+    { frame = { fg = Tui.Rgb 0x5A5A6A, bg = ground }
+    , frameActive = Tui.Rgb 0xE8E8F0
+    , text = { fg = Tui.Rgb 0xC8C8D0, bg = ground }
+    , accent = Tui.Rgb 0xE8A33D
+    , selected = { fg = Tui.Rgb 0x14141A, bg = Tui.Rgb 0x8AA9C8 }
+    , disabled = Tui.Rgb 0x6A6A78
+    , control = { fg = Tui.Rgb 0xE8E8F0, bg = Tui.Rgb 0x3A3A48 }
+    , controlAccent = Tui.Rgb 0xE8A33D
+    , scrollBar = { fg = Tui.Rgb 0x5A5A6A, bg = Tui.Rgb 0x24242E }
+    }
 
 
 nextTone : Tui.WindowPalette -> Tui.WindowPalette
@@ -196,15 +251,23 @@ view model =
                 [ Item { title = "~A~bout...", cmd = "about", key = "Alt-A", shortcut = "Alt-A" }
                 , Item { title = "~P~alette", cmd = "palette", key = "Alt-P", shortcut = "Alt-P" }
                 , Item { title = "~W~indow colour", cmd = "tone", key = "Alt-W", shortcut = "Alt-W" }
+                , Item { title = "~T~heme", cmd = "theme", key = "Alt-T", shortcut = "Alt-T" }
                 , Tui.Separator
                 , Item { title = "E~x~it", cmd = "quit", key = "Alt-X", shortcut = "Alt-X" }
                 ]
             }
         ]
+    , theme =
+        if model.dark then
+            midnight
+
+        else
+            Tui.borland
     , statusLine =
         [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
         , { text = "~Alt-P~ Palette", key = "Alt-P", cmd = "palette" }
         , { text = "~Alt-W~ Window colour", key = "Alt-W", cmd = "tone" }
+        , { text = "~Alt-T~ Theme", key = "Alt-T", cmd = "theme" }
         , { text = "", key = "F10", cmd = "menu" }
         ]
     , windows =

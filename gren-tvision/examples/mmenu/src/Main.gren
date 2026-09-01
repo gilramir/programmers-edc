@@ -157,6 +157,7 @@ menuBarFor index =
 view : Model -> Tui.Ui
 view model =
     { menuBar = menuBarFor model.current
+    , theme = Tui.borland
     , statusLine =
         [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
         , { text = "~Alt-N~ Next menu", key = "Alt-N", cmd = "cycle" }

@@ -611,6 +611,7 @@ view model =
                 ]
             }
         ]
+    , theme = Tui.borland
     , statusLine =
         [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
         , { text = "~Alt-E~ Expand", key = "Alt-E", cmd = "toggle" }

@@ -431,6 +431,7 @@ view model =
             , items = [ Item { title = "~C~olours...", cmd = "colours", key = "", shortcut = "" } ]
             }
         ]
+    , theme = Tui.borland
     , statusLine =
         [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
         , { text = "~F2~ New", key = "F2", cmd = "new" }
