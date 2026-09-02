@@ -20,8 +20,14 @@ the first render happens before either has answered. The window is simply not
 in the view until they do, which takes one turn of the event loop and is the
 honest thing to show: a calendar with no date on it would be a lie.
 
-The month arrows are faithful to the original, quirk and all: clicking the one
-that points *up* moves to the *next* month, as `calendar.cpp` does.
+The month arrows point the way they read: `▲` goes back and `▼` goes forward,
+the same direction the Up and Down keys move. They used not to -- the original
+had them the other way round, this port reproduced that faithfully, and it was
+reported as [magiblot/tvision#229][229] along with the leap year rule below.
+Upstream fixed both on 2026-09-01, so the faithful thing and the sensible thing
+are now the same thing.
+
+[229]: https://github.com/magiblot/tvision/issues/229
 
 -}
 
@@ -145,9 +151,10 @@ monthName month =
         |> Maybe.withDefault "?"
 
 
-{-| The original's leap year test is `year % 4 == 0`, which is right for every
+{-| The original's leap year test was `year % 4 == 0`, which is right for every
 year it was ever going to be run in and wrong for 1900 and 2100. Since this
-calendar can be pointed at any year, it uses the rule that is actually true.
+calendar can be pointed at any year it has always used the rule that is
+actually true, and since #229 the original does too.
 -}
 daysIn : Int -> Int -> Int
 daysIn year month =
@@ -274,18 +281,18 @@ handleEvent event model =
                 _ ->
                     model
 
-        -- The header's two arrows, at the columns calendar.cpp puts them. The
-        -- one pointing up moves forward; that is what the original does, and
-        -- it is not a typo here either.
+        -- The header's two arrows, at the columns calendar.cpp puts them, and
+        -- pointing the way they move since upstream fixed #229: `▲` back and
+        -- `▼` forward, which is what Up and Down have always done here.
         Clicked spot ->
             if spot.y /= 0 then
                 model
 
             else if spot.x == 15 then
-                shift 1 model
+                shift -1 model
 
             else if spot.x == 18 then
-                shift -1 model
+                shift 1 model
 
             else
                 model

@@ -811,9 +811,24 @@ Two smaller things fell out. The original's leap year rule is `year % 4 == 0`,
 which is right for every year Borland expected to be run in and wrong for 1900
 and 2100; a calendar that can be pointed anywhere has to use the real rule. And
 the header's two arrows are backwards -- clicking the one that points *up*
-moves to the next month. That is faithfully reproduced, because it is what
-`calendar.cpp` does. Both are reported upstream as
+moves to the next month. That was faithfully reproduced, because it is what
+`calendar.cpp` did. Both were reported upstream as
 [magiblot/tvision#229](https://github.com/magiblot/tvision/issues/229).
+
+**Both are fixed upstream** (`e72d695`, 2026-09-01), and the arrows are now the
+sensible way round in `calendar.cpp` too -- so this port turned them round with
+it. The reason to reproduce a quirk was that it was what the original did, and
+the moment that stops being true the reason expires; there is no separate
+decision to make. It is also worth noticing what the port's own code had
+already said about it: the *keyboard* here has always been Up for the previous
+month and Down for the next, exactly as `calendar.cpp`'s always was. The two
+halves of the original disagreed with each other, and copying both faithfully
+copied the disagreement.
+
+That is the argument for porting rather than reading, stated from the other
+end. Two bugs that had been in `calendar.cpp` since Borland shipped it were
+found by writing the same view in a language where today is data and a test can
+walk to 1900, and are now fixed for everybody.
 
 ### Porting the puzzle: the generator has to be in the model, and that is better
 

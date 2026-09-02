@@ -98,13 +98,15 @@ def main():
           str(heading(app.render())))
     check("and today is marked again", len(highlighted(app.display())) > 0)
 
-    # The header's arrows, at the columns calendar.cpp puts them: the one
-    # pointing up moves forward. Faithfully reproduced, quirk included.
-    app.click(ORIGIN[0] + 15 + 1, ORIGIN[1] + 0 + 1, settle=0.8)
-    check("clicking the up arrow moves forward, as the original does",
-          heading(app.render()) == expected, str(heading(app.render())))
+    # The header's arrows, at the columns calendar.cpp puts them, and pointing
+    # the way they move: up is back, down is forward, the same as the keys.
+    # They were the other way round until magiblot/tvision#229 -- which this
+    # port filed -- was fixed upstream, and this suite asserted the quirk.
     app.click(ORIGIN[0] + 18 + 1, ORIGIN[1] + 0 + 1, settle=0.8)
-    check("and the down arrow moves back",
+    check("clicking the down arrow moves forward", 
+          heading(app.render()) == expected, str(heading(app.render())))
+    app.click(ORIGIN[0] + 15 + 1, ORIGIN[1] + 0 + 1, settle=0.8)
+    check("and the up arrow moves back",
           heading(app.render()) == (MONTHS[today.month - 1], today.year),
           str(heading(app.render())))
 

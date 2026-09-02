@@ -123,6 +123,16 @@ becomes data that arrives after the first render -- and `drive_calendar.py` can
 walk a year back and check that today stops being highlighted when you leave
 its month.
 
+**Two bugs in `calendar.cpp` came out of that port and are now fixed
+upstream.** Its leap year rule was `year % 4 == 0`, wrong for 1900 and 2100 --
+which matters only once today is data and a test can walk to either -- and its
+two header arrows were backwards, so clicking the one pointing *up* moved
+forward while the Up *key* moved back. Both were filed as
+[magiblot/tvision#229](https://github.com/magiblot/tvision/issues/229) and
+fixed in `e72d695`; this example, which had reproduced the arrow quirk
+deliberately, turned round with it. The reason to copy a quirk is that it is
+what the original does, and it expires the day that stops being true.
+
 `TPuzzleView`'s constructor calls `srand(time(0))` and shuffles five hundred
 times. In Gren the generator has to live in the model, so the board is a pure
 function of a seed and a depth; `--seed=` and `--scramble=` follow for free,
