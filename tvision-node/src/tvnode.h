@@ -183,8 +183,8 @@ public:
     }
 };
 
-// The scroll bar a list box or an editor makes for itself, which takes the
-// mouse wheel only when the pointer is over the pane it scrolls.
+// A scroll bar that takes the mouse wheel only when the pointer is over the
+// pane it scrolls -- and the base of every scroll bar in the binding.
 //
 // The wheel is not a positional event. `views.h` defines
 // `positionalEvents = evMouse & ~evMouseWheel`, so `TGroup::handleEvent` does
@@ -201,12 +201,18 @@ public:
 // So the bar answers for a region instead of for the window -- its own column
 // and the pane it belongs to. A window with one list is unchanged, because
 // the pointer is over that list.
+//
+// A null `pane` keeps the old rule, and that is not a fallback: it is the
+// right answer for a window whose only scrollable thing is the scroll bar's,
+// and it is what a `scrollBar` with no `for` still gets.
 class PaneScrollBar : public TScrollBar {
 public:
     PaneScrollBar(const TRect &bounds) noexcept : TScrollBar(bounds) {}
 
-    // The view this bar scrolls. Set after construction rather than passed
-    // to it, because `TListViewer` wants the bar to exist first.
+    // The view this bar scrolls, or null for a bar that answers for the whole
+    // window. Set after construction rather than passed to it, because
+    // `TListViewer` wants the bar to exist first -- and because a model-owned
+    // bar names its pane by id, which is resolved by the builder.
     TView *pane = nullptr;
 
     virtual void handleEvent(TEvent &event) override;
@@ -293,10 +299,10 @@ private:
 //
 // Whether the bar is horizontal or vertical is not a field: TScrollBar decides
 // from its own rectangle, one column wide being vertical.
-class JsScrollBar : public TScrollBar {
+class JsScrollBar : public PaneScrollBar {
 public:
     JsScrollBar(const TRect &bounds, std::string id) noexcept
-        : TScrollBar(bounds), viewId(std::move(id))
+        : PaneScrollBar(bounds), viewId(std::move(id))
     {
         // Not selectable by default -- the one a list box owns should not be
         // in the tab order. One the model asked for by id should be.

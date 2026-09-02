@@ -707,6 +707,9 @@ jobWindow model index job =
             , max = bottomOf model.rows job
             , pageStep = model.rows
             , arrowStep = 1
+            -- One canvas to a window, so the wheel can arrive from anywhere
+            -- in it and does not have to say which pane it meant.
+            , for = ""
             }
         ]
     }

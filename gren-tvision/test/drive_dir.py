@@ -201,6 +201,33 @@ def main():
         check("and the next one shows its own",
               files(app) == ["g1.txt", "g2.txt"], str(files(app)))
 
+        # ---- the wheel belongs to the pane under the pointer ----
+        #
+        # Two scrollable panes in one window, which is the case Turbo Vision's
+        # wheel routing gets wrong: `views.h` excludes `evMouseWheel` from
+        # `positionalEvents`, so a turn is offered to every view in z-order
+        # until one takes it and the frontmost scroll bar answers for the whole
+        # window. The file pane's bar is listed last and is therefore in front,
+        # so it used to take every turn and the tree could not be wheeled at
+        # all. `for = "files"` on that bar is what makes it answer only over
+        # the files.
+        #
+        # Neither pane here has enough rows to scroll, and neither needs any:
+        # the tree's highlight *is* the directory being shown, so a wheel turn
+        # that reaches the tree changes the title and the file list, and one
+        # that does not reach it changes nothing. Up rather than down because
+        # the highlight is on the last row -- a turn is three arrow steps, so
+        # it goes from `gamma` to the root and no further.
+        app.wheel(TREE[0] + 1, TREE[1] + 2, down=False, turns=1)
+        check("a wheel turn over the tree moves the tree",
+              files(app) == ["other.txt", "top.txt"], str(files(app)))
+        check("and the title follows it, so it really was the tree",
+              os.path.join(root, "gamma") not in app.render(), app.render())
+
+        app.wheel(FILES[0] + 1, FILES[1] + 2, turns=1)
+        check("and a turn over the files leaves the tree alone",
+              files(app) == ["other.txt", "top.txt"], str(files(app)))
+
         # The one part of tvdir that was never ported, because there was no
         # way to ask for a path. TChDirDialog reads the directory from inside
         # itself; here listing one is a Task, so Alt-C is two steps -- read,

@@ -1989,6 +1989,11 @@ view inks model =
                                 0
                     , pageStep = model.rows
                     , arrowStep = 1
+                    -- The dump is the only thing in this window that scrolls,
+                    -- so the wheel is taken from anywhere in it -- including
+                    -- with the pointer over the dump itself, which is where a
+                    -- hand already is.
+                    , for = ""
                     }
             }
         , Grows

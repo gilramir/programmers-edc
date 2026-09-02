@@ -25,6 +25,12 @@ its own rectangle -- one column wide is vertical, anything else horizontal --
 and inventing an `orientation` field to sit next to a rectangle that already
 says the same thing would only give the two a way to disagree.
 
+**What it scrolls is a field, though**, and it is `for`. Turbo Vision does not
+send a wheel turn to the view under the pointer, so a bar has to be told which
+view it answers for or it answers for the whole window. `""` here, because a
+dialog with one scroll bar in it wants the wheel from anywhere in it; see
+`examples/dir` for the window that does not.
+
 **A click that knows it is the second one.** `TClickTester` reacts to
 `meDoubleClick`, so `Clicked` grew `isDouble`. The first click of a pair still
 arrives on its own a moment earlier, which is exactly the behaviour being
@@ -197,6 +203,9 @@ mouseWindow model =
             , max = 20
             , pageStep = 4
             , arrowStep = 1
+            -- Nothing else in this dialog scrolls, so the wheel is welcome
+            -- from anywhere in it.
+            , for = ""
             }
         , Tui.Label
             { id = "delayLabel"

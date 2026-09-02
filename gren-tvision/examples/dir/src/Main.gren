@@ -655,6 +655,11 @@ dirWindow model =
             , max = max 0 (Array.length model.files - paneHeight)
             , pageStep = paneHeight
             , arrowStep = 1
+            -- The window this bar is in has two scrollable panes, and the
+            -- tree's bar is listed first, so without this the file bar would
+            -- take every wheel turn in the window and the tree could not be
+            -- wheeled at all. The canvas it names is above.
+            , for = "files"
             }
         , Tui.StaticText
             { id = "count"

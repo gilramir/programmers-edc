@@ -4373,21 +4373,34 @@ unchanged, because the pointer is over the pane.
 constructor wants its scroll bar to already exist, so the bar cannot know its
 list at the moment it is built.
 
-### What is deliberately not covered, and where it still bites
+### The bar the model owns cannot be told, so it is asked
 
-A `ScrollBar` the *model* asked for by id is left window-wide. It scrolls
-something the binding cannot see -- in `predc hex` it is a `Canvas` the model
-paints -- so there is no pane to name, and "reaches the bar from anywhere in
-the window" is the documented behaviour that section relied on.
+A `ScrollBar` the *model* put in a window is the other half, and it could not
+be fixed the same way: it scrolls something the binding cannot see. In `predc
+hex` it drives a `Canvas` the model paints, and nothing on the C++ side knows
+the two go together. There is no pane to infer.
 
-The cost is that the same bug is still live one level over, in
-`examples/dir`: a tree `ListBox` on the left and a model-owned `ScrollBar` for
-the file pane on the right, and the file bar is inserted last. Turning the
-wheel over the *tree* scrolls the *files*. The fix would be a `for` field on
-`ScrollBar` naming the view it drives, which is the shape `label` and
-`history` already use -- the target listed before the bar, looked up by id --
-and it is a four-place change rather than a one-line one. Left undone
-deliberately, and written down here so it is not rediscovered.
+So it is named. `for` on `ScrollBar`, resolved by id at build time, which is
+the shape `Label` and `History` already use -- **list the view before the
+bar** -- with one difference: theirs must name a particular kind of view (a
+control, an input line), and this one may name any view at all, because what a
+model-owned bar scrolls is usually a canvas.
+
+`""` is not an omission and not a default that will be tightened later. It is
+the right answer for the majority: a window whose only scrollable thing is
+this bar's wants the wheel from everywhere in it, including with the pointer
+over the content, which is where a hand already is. `mouse`, `watch`,
+`viewer` and `predc hex` all say `""` and all mean it.
+
+`examples/dir` is the one that wanted the field, and it is the case that
+proves the rule is not academic: a tree `ListBox` on the left, a model-owned
+bar for the file pane on the right, the file bar inserted last and therefore
+in front. Turning the wheel over the *tree* scrolled the *files*, and there
+was no pointer position anywhere in that window that could scroll the tree.
+
+Which is what `JsScrollBar` deriving from `PaneScrollBar` rather than from
+`TScrollBar` is for: one implementation of the rule, and the model-owned bar
+opts into it by naming something.
 
 ### Driving a wheel from a test
 
@@ -4404,3 +4417,11 @@ The check that bites hardest is the one on the *area* list, because it reads
 out in text: choosing an area writes its prefix into `Find`, so a wheel that
 reaches the areas at all is a wheel that changes the box. The zone list can
 only be checked by what scrolled; the area list says which pane got the event.
+
+`drive_dir.py` does the same trick with no scrolling at all, and it is the
+better version. Neither of that window's panes has enough rows to move --
+the fixture is four directories and a handful of files -- but the tree's
+highlight *is* the directory being shown, so a wheel turn that reaches the tree
+changes the title and the file list, and one that does not reach it changes
+nothing. A test for which pane got an event does not need a pane long enough to
+scroll; it needs a pane that says out loud when it was touched.

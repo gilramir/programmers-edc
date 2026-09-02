@@ -260,6 +260,10 @@ viewerWindow model =
             , max = lastLine model
             , pageStep = height
             , arrowStep = 1
+            -- One document in the window, so either bar may answer for all of
+            -- it: a horizontal bar ignores a vertical turn without consuming
+            -- it, and it falls through to this one.
+            , for = ""
             }
         , Tui.ScrollBar
             { id = "across"
@@ -269,6 +273,7 @@ viewerWindow model =
             , max = max 0 (model.widest - width)
             , pageStep = width
             , arrowStep = 1
+            , for = ""
             }
         , Tui.StaticText
             { id = "where"

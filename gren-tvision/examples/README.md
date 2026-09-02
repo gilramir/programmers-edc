@@ -20,7 +20,7 @@ Build them all with `../build.sh`, run one with `../run.sh <name>`.
 | `calc` | `tvision/examples/tvdemo` (calc.cpp) | `takesFocus` on a button: a keypad that can be pressed but never holds the caret |
 | `palette` | `tvision/examples/palette` | nothing -- it is the example whose entire subject the port removes, and the write-up says what that costs |
 | `mouse` | `tvision/examples/tvdemo` (mousedlg.cpp) | the scroll bar as a view of its own, `isDouble` on a click, `setDoubleClickDelay`, and `takesFocus` on a canvas |
-| `dir` | `tvision/examples/tvdir` | no widget at all — but it found a real bug in the diff, moved a list box's scroll bar, and is the first example to use the file system; later `Tui.fileDialog`, which finished the port, and the `History` on its field |
+| `dir` | `tvision/examples/tvdir` | no widget at all — but it found a real bug in the diff, moved a list box's scroll bar, and is the first example to use the file system; later `Tui.fileDialog`, which finished the port, the `History` on its field, and `for` on `ScrollBar`, because it is the only window here with two scrollable panes in it |
 | `demo` | `tvision/examples/tvdemo` (the shell) | real windows: zoom, resize, tile and cascade, which every window had silently been unable to do — and later the first `Tui.messageBox`, which is its About box with fifteen lines taken out, `popupMenu`, whose right-click menu is three commands it already had, and `Ui.overlays`, which is where its clock finally belongs |
 | `viewer` | `tvision/examples/tvdemo` (fileview.cpp) | nothing — `TScroller` went the way of `TOutline`; but it is the first horizontal scroll bar doing its own job |
 | `edit` | `tvision/examples/tvedit` | the editor: the first view whose contents do not travel with the render, and the first time the state is not the model's — plus find and replace, where a command needs a string only the program can ask for |
@@ -226,7 +226,13 @@ on the window frame, which is right for a window that is a list and nothing
 else and wrong for two panes side by side. A list box's scroll bar now occupies
 the column immediately to the right of the list, so leave one. That column is
 also the bar's answer to the mouse wheel: it takes a turn over its own list and
-over itself, and nowhere else. See the wheel note under tvdemo.
+over itself, and nowhere else.
+
+**And, long afterwards, it wanted `for` on `ScrollBar`.** Two scrollable panes
+in one window is the shape Turbo Vision's wheel routing gets wrong, and this is
+the only example that has it: the file pane's bar was in front and took every
+turn, so the tree could not be wheeled from anywhere on the screen. `for =
+"files"` on that bar is the whole fix. See the wheel note under tvdemo.
 
 There is no "Please Wait" window, either. The original scans the whole drive in
 a constructor and has to put one up; `FileSystem.listDirectory` is a task, a
@@ -516,14 +522,18 @@ view under the pointer — nor to the focused one. It is offered to every view i
 z-order until one takes it, and a scroll bar is the only thing that ever does,
 so the *frontmost* bar in a window used to answer for the whole window.
 
-Since predc's time zone picker, that is no longer true of a bar a `ListBox` or
-an `Editor` makes for itself: those take a wheel turn only over their own pane,
-which is what makes three lists side by side scroll independently. A `ScrollBar`
-the model owns is still window-wide, because the binding cannot know what it
-scrolls. **So a window with a model-owned `ScrollBar` and a second scrollable
-pane still sends every wheel turn to that bar** — `dir` is one, and its tree
-cannot be wheeled. `FINDINGS.md`, *The wheel that turned the wrong list*, has
-the shape of the fix if it is wanted.
+Since predc's time zone picker, that is no longer true. A bar a `ListBox` or an
+`Editor` makes for itself takes a wheel turn only over its own pane, which is
+what makes three lists side by side scroll independently, and a `ScrollBar` the
+model owns takes one **`for`** field to do the same — the id of the view it
+scrolls, listed before the bar, the rule `Label` already follows. `""` keeps
+the window-wide behaviour, which is the right answer for a window whose only
+scrollable thing is that bar's and is what four of the five say.
+
+`dir` is the fifth and the reason the field exists: a tree list on the left and
+a model-owned bar for the file pane on the right, the file bar listed last and
+therefore in front, so every wheel turn in the window went to the files and no
+pointer position could reach the tree.
 
 ### The coverage gaps, all closed
 

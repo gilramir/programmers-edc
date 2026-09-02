@@ -1013,6 +1013,25 @@ TView *buildItems(const Napi::Env &env, TGroup *win, const Napi::Value &value,
                 throw Napi::Error::New(env, "tvision: a scrollBar needs an id");
             JsScrollBar *bar =
                 new JsScrollBar(getRect(env, it, "scrollBar"), id);
+            // `for` names the view this bar scrolls, and is what makes the
+            // mouse wheel belong to that view rather than to the whole
+            // window. Empty is not an omission: a window whose only
+            // scrollable thing is this bar's wants the wheel from everywhere,
+            // and that is the majority. Like a label's and a history's, the
+            // view has to have been listed already -- and unlike theirs it may
+            // be any kind of view at all, because what a model-owned bar
+            // scrolls is usually a canvas the model paints.
+            std::string scrolls = getString(it, "for");
+            if (!scrolls.empty())
+                {
+                ViewRef *target = g_views.find(scrolls);
+                if (target == nullptr)
+                    throw Napi::Error::New(env,
+                                           "tvision: scrollBar for unknown id '" +
+                                               scrolls + "' (list it before the "
+                                                         "bar)");
+                bar->pane = target->view;
+                }
             // setParams in one go: TScrollBar clamps the value against the
             // range, so setting them separately can leave the thumb somewhere
             // neither side asked for.

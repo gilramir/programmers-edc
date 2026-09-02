@@ -864,13 +864,21 @@ first for a week, because `Array.append fst second` makes `fst` the *postfix*.
     A click on the *arrows* steps by `arrowStep` and a click anywhere else
     takes the thumb straight to the pointer -- this fork of Turbo Vision does
     not page with the mouse, so `pageStep` is reached only from the keyboard
-    (`Ctrl-Left`/`Ctrl-Right`, `PgUp`/`PgDn`). The wheel is three `arrowStep`s
-    and reaches the bar from anywhere in the window, because Turbo Vision does
-    not deliver a wheel turn to the view under the pointer -- so a window with
-    two of these in it, or one of these and a `ListBox`, sends every turn to
-    whichever was listed last. Every one of those is a single click: unlike
-    other focusable views, a scroll bar does not spend the first one taking
-    focus.
+    (`Ctrl-Left`/`Ctrl-Right`, `PgUp`/`PgDn`). Every one of those is a single
+    click: unlike other focusable views, a scroll bar does not spend the first
+    one taking focus.
+
+    The wheel is three `arrowStep`s, and `for` is what decides where it has to
+    be pointing. Turbo Vision does not deliver a wheel turn to the view under
+    the pointer -- it offers it to every view in the window until one takes it
+    -- so a bar with `for = ""` answers from anywhere in the window, which is
+    what a window whose only scrollable thing is this bar's wants. **Name the
+    view it scrolls, and it answers only over that view or over itself**,
+    which is what a window with two scrollable panes in it needs: without it
+    the pane whose bar was listed last takes every turn, wherever the pointer
+    was. **List that view before the bar**, the same rule a `Label` follows,
+    and it may be any kind of view -- what a bar like this scrolls is usually
+    a `Canvas` the model paints.
   - `Canvas` -- paints exactly the lines it is given, and sends
     [`KeyPressed`](#Event) and [`Clicked`](#Event) events while focused. This is
     the escape hatch for anything the stock controls cannot express: Turbo
@@ -971,7 +979,7 @@ type View
     | CheckBoxes { id : String, rect : Rect, items : Array String, checked : Array Bool }
     | MultiCheckBoxes { id : String, rect : Rect, items : Array String, marks : String, states : Array Int }
     | RadioButtons { id : String, rect : Rect, items : Array String, selected : Int }
-    | ScrollBar { id : String, rect : Rect, value : Int, min : Int, max : Int, pageStep : Int, arrowStep : Int }
+    | ScrollBar { id : String, rect : Rect, value : Int, min : Int, max : Int, pageStep : Int, arrowStep : Int, for : String }
     | Label { id : String, rect : Rect, text : String, for : String }
     | Canvas { id : String, rect : Rect, lines : Array (Array Span), cursor : Maybe { x : Int, y : Int }, takesFocus : Bool }
     | Editor { id : String, rect : Rect }
@@ -2525,6 +2533,7 @@ encodeViewFields view =
             , { key = "max", value = Encode.int v.max }
             , { key = "pageStep", value = Encode.int v.pageStep }
             , { key = "arrowStep", value = Encode.int v.arrowStep }
+            , { key = "for", value = Encode.string v.for }
             ]
 
         Label v ->
