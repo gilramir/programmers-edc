@@ -14,7 +14,7 @@ const { createDiffer } = require('./diff');
 // Bumped in lockstep with Tui.protocolVersion on the Gren side. A Gren package
 // and an npm package version independently, and they will skew; refusing an
 // unknown version beats rendering nothing and leaving the author to guess.
-const PROTOCOL = 20;
+const PROTOCOL = 21;
 
 /**
  * Drive a compiled Gren program's UI.
@@ -95,6 +95,13 @@ function run(grenModule, options = {}) {
             onKey: (id, key) => send({ type: 'key', id, key }),
             onClick: (id, x, y, doubled, right) =>
               send({ type: 'click', id, x, y, doubled: !!doubled, right: !!right }),
+            // The pointer moved on a canvas with a button held, or the button
+            // came up and ended the gesture. Only ever the canvas the press
+            // happened in, and collapsed to one position per pass of the pump,
+            // so this arrives at about the rate a model can render at rather
+            // than at the rate a terminal reports cells at.
+            onDrag: (id, x, y, done) =>
+              send({ type: 'drag', id, x, y, done: !!done }),
             onClose: (id) => differ.windowClosed(id),
             // Fires once at startup and again on every resize, so a model
             // that lays out against it never has to assume a size. The

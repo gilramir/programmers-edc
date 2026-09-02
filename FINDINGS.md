@@ -3341,14 +3341,13 @@ is.** A mark holding two offsets would have needed every movement path in the
 file to remember to update the second one, and the failure mode of forgetting
 is a mark that quietly stops following.
 
-What it does *not* buy is dragging. `JsCanvas::handleEvent` forwards
-`evMouseDown` and nothing else (`views.cc:357`), so there is no
-press-move-release for a model to hear, and `Tui.Event` has no motion variant
-to hear it with. Turbo Vision's own idiom for a drag is `mouseEvent(event,
-evMouseMove | evMouseAuto)` in a loop inside `handleEvent`, which is the nested
-event loop this package refuses everywhere else -- so if this is ever added, it
-should be a plain forward of motion-while-a-button-is-down, not the loop. It is
-a second entry for the sweep that starts with the unbound clipboard.
+What it did not buy, at the time, was dragging: `JsCanvas::handleEvent`
+forwarded `evMouseDown` and nothing else, so there was no press-move-release
+for a model to hear and `Tui.Event` had no motion variant to hear it with. That
+is closed -- see "The drag, and the capture Turbo Vision keeps inside a loop"
+at the end of this file -- and the shape above is exactly why it cost one small
+function in `Tool/Hex.gren` when it came: a drag moves the cursor, and the
+cursor is already the far end of the mark.
 
 ### A key that picks a colour has to wear it
 
@@ -4641,3 +4640,133 @@ subscription is alive, and it costs the suite three seconds rather than sixty.
 That is not why the POSIX line counts -- it counts because a POSIX timestamp
 *is* a count of seconds and the rows have no seconds column -- but a design
 that makes a fast test possible is worth noticing when it happens.
+
+## The drag, and the capture Turbo Vision keeps inside a loop
+
+The last thing on the sweep that started with the unbound clipboard.
+`JsCanvas::handleEvent` forwarded `evMouseDown` and nothing else, so a model
+could hear a click and could not hear a drag, and `Tui.Event` had no variant to
+hear one with. predc's hex viewer wanted it for extending a highlight and got
+most of the way there without it — the far end of a mark *is* the cursor, so a
+click extends one — but "press here, pull to there" is a gesture the package
+simply did not have.
+
+It is now `Tui.Dragged { id, x, y, isDone }`, protocol 21. Most of what had to
+be decided to get there is not about mice.
+
+### A drag needs a capture, and a capture is what the nested loop was for
+
+`TGroup::handleEvent` routes a positional event to `firstThat(hasMouse)`
+(`tgroup.cpp:377`) — the view the pointer is over *now*. That is correct for a
+click and useless for a drag: pull a selection one column past the edge of the
+canvas and the motion belongs to the frame, or to the window underneath, or to
+nothing.
+
+Every stock Turbo Vision view that drags gets round this the same way, with
+`TView::mouseEvent(event, evMouseMove | evMouseAuto)` in a `do…while` inside
+`handleEvent` (`tview.cpp:636`) — which pulls events out of the queue itself
+and is therefore a nested event loop, the exact shape this package refuses
+everywhere else and the reason the menu bar's one is a known defect.
+
+So the capture is written out longhand instead: a `JsCanvas *` set by the
+press, consulted by the pump before it routes, cleared by the release. One
+pointer, a couple of dozen lines, and no loop. **The nested loop was never the
+point of `mouseEvent` — the capture was**, and a capture is a variable.
+
+Three things fall out of it that are worth knowing before writing the next one.
+The pointer has to be cleared in `~JsCanvas`, because a window closed mid-drag
+would otherwise leave the pump dereferencing freed memory on the very next
+motion. It has to be cleared when a modal opens, because every event now goes
+to the modal and the release that would have ended the gesture is never coming.
+And the captured view gets `handleEvent` and no `eventError`: that call takes a
+`TGroup *` and a canvas is not one.
+
+### The coordinates are not clamped, and that is the whole of the edge case
+
+A drag pulled above a canvas reports row `-1`, and past the bottom it reports
+`rows`. Clamping in C++ was the obvious thing and is the wrong one: a model that
+wants the cells it owns clamps in one line, and a model that wants to scroll
+needs the number that says *how far past*. Nobody can un-clamp a clamped
+coordinate back into "off the top". So the honest number goes out and
+`examples/ascii` demonstrates the clamp on the Gren side, in the `moveTo` it
+already had for Home and End.
+
+What is deliberately *not* forwarded is `evMouseAuto`, which Turbo Vision fires
+repeatedly while a button is held still (`tevent.cpp:196`). That is the event
+that would buy "hold it off the bottom edge and keep scrolling", and it is a
+separate decision rather than an oversight: its whole job is to report a
+position that has not changed, which is the one thing the collapse below exists
+to throw away. It would need its own variant or its own flag, and nothing has
+asked for it yet.
+
+### A plain click has to stay a plain click
+
+The first design reported the release of every gesture, and every single click
+on a canvas became two events. Clicking is what a canvas is mostly for, so:
+the press arms the capture and sends nothing extra, the first cell the pointer
+*moves* to sends the first `Dragged`, and the release sends one only if there
+was motion to end. A click is exactly the one `Clicked` it has always been, and
+`drive_ascii.py` pins that with a click after a drag.
+
+The same rule inside predc is what lets the mouse draw a mark without taking
+away the click that moves the cursor: the press moves the cursor, the first
+motion turns that position into the mark's anchor, and every motion after it is
+the ordinary `clickAt`. One small function in `Tool/Hex.gren`, and `v`, `1`-`6`,
+the legend, `y` and the dump copy all work on what the mouse drew without
+knowing a mouse was involved.
+
+### One thing the capture cannot rescue: the focusing click
+
+`TView::handleEvent` spends the first mouse-down on a selectable view that does
+not hold the caret on giving it the caret, and clears the event
+(`tview.cpp:551-558`) unless the view carries `ofFirstClick`. A canvas with
+`takesFocus = True` therefore never hears that click -- which has been true
+since canvases existed and nobody had noticed, because a click that only
+focuses looks like the window manager behaviour everyone expects.
+
+It matters more now, because the press is what creates the capture: a drag
+begun with the focusing click is not a drag, it is a focus. `JsScrollBar`
+carries `ofFirstClick` for a related reason and the note beside it says why the
+two together were worse for a *bar* -- a click there has a position-dependent
+meaning and nothing on screen says whether it counted. A canvas is not in that
+position; "put the cursor here" is unambiguous. Whether to give it the flag is
+a decision about every canvas program, not about dragging, so it is written
+down here and in `Canvas`'s doc comment rather than changed in passing.
+
+### Motion is collapsed per pump, like a scroll bar's positions
+
+The pointer crossing six cells is six events and only the sixth means anything,
+which is the argument `noteScrolled` already makes about a thumb drag. So
+`noteDragged` collapses per canvas and `flushDragged` runs once per pass of the
+pump rather than at each event's safe point — the collapse is worth nothing if
+it is drained between the events it is meant to merge.
+
+The release wins any collapse it takes part in, because it arrives last, so a
+whole flick of the wrist can reach the model as a single event with `isDone`
+set. A model that only acts on `isDone` still learns where the drag ended; one
+that draws a selection as it grows acts on all of them.
+
+One ordering hazard came with that and is worth naming because it is generic.
+**A click is dispatched where it happens and a drag is queued, so mixing the
+two mixes their order**: a press arriving in the same pass as the end of the
+previous gesture would overtake it. `dispatchClick` therefore flushes the drag
+notes before it dispatches. Any future event that is queued alongside one that
+is not has the same problem in the same place.
+
+### Driving one from a test
+
+SGR mouse reporting encodes motion as the button code **plus 32**
+(`termio.cpp:531`), and TVision has mode 1002 on from startup, so a driver can
+send one. What classifies it is not the terminal but `TEventQueue`: a `32` sets
+the same button bit a press does, and `getMouseEvent` calls it `evMouseDown`,
+`evMouseMove` or `evMouseUp` by comparing against the buttons that were already
+down (`tevent.cpp:108-190`). A release at a position the pointer had not
+reported yet is split into a move and a *deferred* up, which is what
+`pendingMouseUp` is for.
+
+`harness.py` grew `drag(path)` — press at the first cell, motion through the
+rest, release at the last. The check worth copying is not that the cursor
+follows the pointer; it is the one that drags to screen (1, 1), the top-left
+corner of the desktop and nowhere near the chart. It arrives anyway, and it
+arrives with negative coordinates. Nothing else asserts that the capture is
+real.

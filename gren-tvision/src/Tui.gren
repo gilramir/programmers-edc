@@ -300,7 +300,7 @@ silence this number turns into a sentence.
 -}
 protocolVersion : Int
 protocolVersion =
-    20
+    21
 
 
 -- GEOMETRY
@@ -880,7 +880,8 @@ first for a week, because `Array.append fst second` makes `fst` the *postfix*.
     and it may be any kind of view -- what a bar like this scrolls is usually
     a `Canvas` the model paints.
   - `Canvas` -- paints exactly the lines it is given, and sends
-    [`KeyPressed`](#Event) and [`Clicked`](#Event) events while focused. This is
+    [`KeyPressed`](#Event) events while focused and [`Clicked`](#Event) and
+    [`Dragged`](#Event) events for the mouse. This is
     the escape hatch for anything the stock controls cannot express: Turbo
     Vision's own calendar and ASCII chart are views of this kind. A line is an
     array of coloured [`Span`](#Span)s; [`line`](#line) makes the common one,
@@ -891,7 +892,12 @@ first for a week, because `Array.append fst second` makes `fst` the *postfix*.
     `takesFocus` means the same thing here as on a `Button`, and matters more:
     a focused canvas consumes **every** key it receives, `Tab` included, so a
     canvas that is only there to be looked at or clicked should say `False` or
-    it will trap the caret. Clicks still arrive either way.
+    it will trap the caret. Clicks and drags still arrive either way -- with
+    one exception that belongs to `takesFocus = True`: Turbo Vision spends the
+    first click on a selectable view that does not have the caret on *giving*
+    it the caret (`TView::handleEvent`), so that click, and a drag begun with
+    it, do not reach the model. Every one after it does, until something else
+    takes the focus away.
 
     What it does *not* eat is anything the menu bar or the status line claims
     first. Both are `ofPreProcess` views (`tmenubar.cpp`, `tstatusl.cpp`), so
@@ -1170,6 +1176,28 @@ type alias StatusItem =
     what this event carries.
     `isDouble` marks the second click of a double click; the first arrived on
     its own a moment earlier, so a view that acts on both will act twice.
+  - `Dragged` -- the pointer moved on a canvas with a button held down, or the
+    button came up and ended the gesture (`isDone`). It is always preceded by
+    the [`Clicked`](#Event) that began it, and always on that same canvas: a
+    drag belongs to the view it started in and keeps reporting there however
+    far off it is pulled, which is why `x` and `y` can be negative or past the
+    canvas's own size. They are not clamped on purpose -- a drag above the top
+    row is how a model is asked to scroll, and a clamped number cannot be
+    turned back into that by anybody.
+
+    Which button is held is not repeated here: the press said so, and this is
+    the same gesture.
+
+    A plain click sends none of these, and neither does motion with no button
+    down: a terminal only reports motion while a button is held, and Turbo
+    Vision only asks it to.
+
+    Positions are collapsed to one per pass of the event pump, on the same
+    reasoning as `Scrolled`: the pointer crossing six cells is six reports and
+    only the sixth is worth a render. The `isDone` one wins any collapse it is
+    part of, so a whole flick of the wrist can arrive as a single event -- a
+    model that only acts on `isDone` still sees where the drag ended, and one
+    that draws a selection as it grows should act on every one of them.
   - `Scrolled` -- a [`ScrollBar`](#View) moved, by arrow, click, drag, wheel or
     key. A drag reports only where it ended: the intermediate positions are
     collapsed, because a model that re-rendered on each of them would redraw
@@ -1238,6 +1266,7 @@ type Event
     | Focused { id : String, index : Int, text : String }
     | KeyPressed { id : String, key : String }
     | Clicked { id : String, x : Int, y : Int, isDouble : Bool, isRight : Bool }
+    | Dragged { id : String, x : Int, y : Int, isDone : Bool }
     | Scrolled { id : String, value : Int }
     | Resized { cols : Int, rows : Int }
     | WindowResized { id : String, rect : Rect }
@@ -2747,6 +2776,16 @@ eventDecoder =
                             (Decode.field "y" Decode.int)
                             (Decode.field "doubled" Decode.bool)
                             (Decode.field "right" Decode.bool)
+
+                    "drag" ->
+                        Decode.map4
+                            (\id x y done ->
+                                Dragged { id = id, x = x, y = y, isDone = done }
+                            )
+                            (Decode.field "id" Decode.string)
+                            (Decode.field "x" Decode.int)
+                            (Decode.field "y" Decode.int)
+                            (Decode.field "done" Decode.bool)
 
                     "edited" ->
                         Decode.map4

@@ -165,6 +165,9 @@ handleEvent event model =
         Clicked _ ->
             { model = model, command = Cmd.none }
 
+        Dragged _ ->
+            { model = model, command = Cmd.none }
+
         -- The terminal is a size the model is told, once at startup and again
         -- whenever it changes. Every window here is placed against it.
         Resized size ->

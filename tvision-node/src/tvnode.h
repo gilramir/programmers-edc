@@ -276,6 +276,7 @@ class JsCanvas : public TView {
 public:
     JsCanvas(const TRect &bounds, std::string id, int aColorIndex,
              bool selectable, bool blockCursorShape) noexcept;
+    ~JsCanvas();
 
     virtual void draw() override;
     virtual void handleEvent(TEvent &event) override;
@@ -996,6 +997,20 @@ void noteWindowClosed(const std::string &id);
 // model is the only thing that knows what should be in one.
 void dispatchClick(const std::string &id, int x, int y, bool doubled,
                    bool rightButton);
+
+// The pointer moved with a button held, or the button came up and ended the
+// gesture. Queued rather than dispatched, and collapsed per canvas, for the
+// same reason a scroll bar's positions are: only the latest one means
+// anything, and a model that re-rendered on each cell the pointer crossed
+// would redraw the window a dozen times per gesture.
+void noteDragged(const std::string &id, int x, int y, bool done);
+
+// The view a drag belongs to, or nullptr when no button is down on a canvas.
+// The pump consults this instead of letting `TGroup::handleEvent` route by
+// where the pointer is now -- see the long note in views.cc for why a drag
+// needs a capture and why this one is not Turbo Vision's.
+TView *mouseCaptureView();
+void clearMouseCapture();
 
 /* ------------------------------------------------------------------ */
 /*  Reading JS values                                                 */

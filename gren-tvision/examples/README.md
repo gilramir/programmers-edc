@@ -1040,13 +1040,14 @@ and the reason `TClipboard` is skipped. `tvision-node/examples/clip.js` and
 `test/drive_clip.py` are the demonstration, and the driver is worth reading for
 how it answers OSC 52 with no clipboard anywhere near it.
 
-**One gap a consumer has since walked into.** The binding forwards
-`evMouseDown` and no other mouse event, so a model can hear a click and cannot
-hear a drag -- which predc's hex viewer wanted for extending a highlight and
-worked around by making the far end of its mark the cursor, so that a click
-extends it. Adding it means forwarding motion-while-a-button-is-down as its own
-event, *not* Turbo Vision's own idiom of a nested `mouseEvent` loop inside
-`handleEvent`. FINDINGS has it.
+**One gap a consumer walked into, and it is closed.** The binding forwarded
+`evMouseDown` and no other mouse event, so a model could hear a click and not a
+drag -- which predc's hex viewer wanted for extending a highlight and worked
+around by making the far end of its mark the cursor, so that a click extends
+it. It is `Tui.Dragged` now, protocol 21, and it is a forward of
+motion-while-a-button-is-down rather than Turbo Vision's nested `mouseEvent`
+loop. See "The drag, which is a capture and not a loop" at the end of this
+file, and FINDINGS.
 
 **One known limitation**, written up under gap (7) and in FINDINGS:
 `TMenuView::execute` runs a nested event loop, so the *menu bar* stops the
@@ -1293,3 +1294,76 @@ of. Worth knowing before anyone else swaps one for the other.
 `setTitle` — the same reason a window's rectangle and palette are not
 structural. A mode indicator in a title is therefore free, which is not obvious
 from a package where a view's own rectangle is structural.
+
+## The drag, which is a capture and not a loop
+
+The consumer gap from the section above is closed. `Tui.Event` has
+`Dragged { id, x, y, isDone }`, protocol **21**: the pointer moved on a canvas
+with a button held, or the button came up and ended the gesture. It is always
+preceded by the `Clicked` that began it, and always on that canvas.
+
+**What made it worth doing is not the mouse.** `TGroup::handleEvent` routes a
+positional event to `firstThat(hasMouse)` — the view under the pointer *now* —
+so a selection dragged one column past its own canvas belongs to the frame, or
+to the window underneath, or to nothing. Turbo Vision's stock views get round
+that with `TView::mouseEvent` in a loop inside `handleEvent`, which is a nested
+event loop: the shape this package refuses, and the reason the menu bar's
+pull-downs are a known defect. The capture is written out instead — a pointer
+set by the press, consulted by the pump before it routes, cleared by the
+release, by `~JsCanvas`, and by any modal opening. **The loop was never the
+point of `mouseEvent`; the capture was, and a capture is a variable.**
+
+Four decisions in it are the reusable part.
+
+**A plain click stays one event.** The press arms the capture and sends nothing
+extra; the first cell the pointer *moves* to sends the first `Dragged`; the
+release sends one only if there was motion to end. Reporting every release
+would have made every click on every canvas two events, and clicking is what a
+canvas is mostly for.
+
+**The coordinates are not clamped.** A drag above a canvas reports row `-1` and
+below it reports `rows`. A model that wants only the cells it owns clamps in one
+line; a model that wants to scroll needs to know how far past. Nobody can
+un-clamp a clamped coordinate. `examples/ascii` is the demonstration and needed
+one line, because the `moveTo` that Home and End already went through clamps.
+
+**Motion is collapsed per pass of the pump**, exactly like a scroll bar's
+positions and for the same reason. The release wins any collapse it is part of,
+so a whole gesture can arrive as one event with `isDone` set. The hazard that
+came with it is generic and is worth remembering wherever a queued event meets
+an immediate one: **a click is dispatched where it happens and a drag is
+queued, so a press in the same pass as the end of the previous gesture would
+overtake it.** `dispatchClick` flushes the drag notes first.
+
+**`evMouseAuto` is deliberately not forwarded.** Turbo Vision fires it while a
+button is held *still*, and it is what would buy "hold at the edge and keep
+scrolling". Its whole job is to report a position that has not changed, which
+is the one thing the collapse above throws away, so it needs a variant or a
+flag of its own. Nothing has asked yet; predc's hex viewer stops at the edge
+and says so.
+
+**And one thing the capture cannot rescue**, found on the way and left alone
+on purpose. `TView::handleEvent` spends the first click on a selectable view
+that does not hold the caret on *giving* it the caret and clears the event, so
+a `Canvas` with `takesFocus = True` never hears that click. True since canvases
+existed; it matters more now, because the press is what creates a capture, so a
+drag begun with the focusing click is a focus and not a drag. Whether to give
+`JsCanvas` the `ofFirstClick` that `JsScrollBar` carries is a decision about
+every canvas program rather than about dragging — the note beside `JsScrollBar`
+says why the two flags together were worse for a *bar*, and a canvas is not in
+that position — so it is written down in `Canvas`'s doc comment and in FINDINGS
+instead of changed in passing.
+
+**What it bought the consumer.** predc's hex viewer marks by dragging, in one
+small function, and `v`, `1`-`6`, the colour legend, `y` and the dump copy all
+act on what the mouse drew without knowing a mouse was involved — because the
+far end of a mark is the cursor and a drag moves the cursor. The mark's anchor
+is set on the first motion rather than on the press, which is what leaves a
+plain click free to go on meaning "put the cursor here".
+
+`harness.py` grew `drag(path)`. SGR reports motion as the button code plus 32,
+and `TEventQueue` — not the terminal — is what turns that into
+`evMouseDown`/`evMouseMove`/`evMouseUp` by comparing against the buttons
+already down. The check worth copying from `drive_ascii.py` is the drag to
+screen (1, 1), the corner of the desktop: it arrives at the chart anyway, with
+negative coordinates. Nothing else asserts that the capture is real.

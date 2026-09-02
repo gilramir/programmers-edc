@@ -50,6 +50,7 @@ function start(config) {
     onScroll: guard(config.onScroll),
     onKey: guard(config.onKey),
     onClick: guard(config.onClick),
+    onDrag: guard(config.onDrag),
     onClose: guard(config.onClose),
     onResize: guard(config.onResize),
     onWindowResize: guard(config.onWindowResize),

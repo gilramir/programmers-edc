@@ -156,6 +156,15 @@ on either column, **Bytes | Go to offset** -- moves the far end of the mark,
 because the far end *is* the cursor. **Bytes | Highlight** is the same six
 things on a menu, for finding them the first time.
 
+**Dragging marks too**, and it is the same mark: press on a byte, pull, and
+what the pointer crosses is marked, ready for a colour. A plain click still
+just moves the cursor -- the mark begins on the first cell the pointer *moves*
+to, anchored where the press landed, so nothing was taken away from clicking.
+Dragging off the window is harmless and does not scroll: a terminal reports
+motion while the pointer is moving and not while it is held still, so mark to
+the edge, `PgDn`, and go on marking. The mark is still out and the cursor is
+still its far end.
+
 The keys are vim's two visual modes rather than `Shift`-arrows or vim's third
 one, and that is a fact about terminals rather than a preference:
 `Ctrl-Shift-V` is the paste binding of every terminal emulator worth naming and

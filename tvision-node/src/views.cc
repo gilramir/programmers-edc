@@ -300,11 +300,52 @@ void JsHistory::takeSelection(THistoryWindow *window, ushort result)
         noteChangedText(linkViewId, link->data);
 }
 
+// The mouse capture, which is the one thing a drag needs that Turbo Vision
+// has no other way to give.
+//
+// `TGroup::handleEvent` routes a positional event to `firstThat(hasMouse)` --
+// the view the pointer is *currently* over. Every stock view that drags gets
+// round that by calling `TView::mouseEvent` in a loop, which pulls events out
+// of the queue itself and is therefore a nested event loop: exactly the shape
+// this package refuses. So the capture is written out longhand instead. The
+// press records the canvas here, the pump hands it every motion and the
+// release until the button comes up, and dragging off the edge of the canvas
+// -- or off the window, or onto the menu bar -- keeps reporting to the view
+// the gesture started in, which is what a selection being dragged means.
+//
+// One pointer and not a stack: there is one mouse.
+static JsCanvas *g_dragCanvas = nullptr;
+// The last cell reported, in the canvas's own coordinates. A terminal in mode
+// 1002 reports motion per cell, but a press and the first motion are often the
+// same cell, and a model told "you are still where you already were" would
+// redraw for nothing.
+static TPoint g_dragAt = {0, 0};
+// Whether this gesture has reported any motion at all. A plain click must stay
+// exactly what it is today -- one `Clicked` and nothing else -- so the release
+// is reported only when there was a drag to end.
+static bool g_dragMoved = false;
+
+TView *mouseCaptureView()
+{
+    return g_dragCanvas;
+}
+
+void clearMouseCapture()
+{
+    g_dragCanvas = nullptr;
+    g_dragMoved = false;
+}
+
 JsCanvas::JsCanvas(const TRect &bounds, std::string id, int aColorIndex,
                    bool selectable, bool blockCursorShape) noexcept
     : TView(bounds), viewId(std::move(id)), colorIndex(aColorIndex)
 {
     growMode = 0;
+    // TView asks for evMouseDown and nothing else of the mouse. A drag is
+    // motion and a release, so both have to be asked for -- unconditionally,
+    // because dragging is not a thing only a focusable view can be the subject
+    // of. See the capture below for what a canvas does with them.
+    eventMask |= evMouseMove | evMouseUp;
     if (selectable)
         {
         options |= ofSelectable;
@@ -312,6 +353,14 @@ JsCanvas::JsCanvas(const TRect &bounds, std::string id, int aColorIndex,
         if (blockCursorShape)
             blockCursor();
         }
+}
+
+JsCanvas::~JsCanvas()
+{
+    // A window closed mid-drag would otherwise leave the capture pointing at
+    // freed memory, and the pump dereferences it on the very next motion.
+    if (g_dragCanvas == this)
+        clearMouseCapture();
 }
 
 // A span's colour, resolved against the one the view's palette gives it. A
@@ -371,9 +420,42 @@ void JsCanvas::handleEvent(TEvent &event)
     else if (event.what == evMouseDown)
         {
         TPoint spot = makeLocal(event.mouse.where);
+        g_dragCanvas = this;
+        g_dragAt = spot;
+        g_dragMoved = false;
         dispatchClick(viewId, spot.x, spot.y,
                       (event.mouse.eventFlags & meDoubleClick) != 0,
                       (event.mouse.buttons & mbRightButton) != 0);
+        clearEvent(event);
+        }
+    // The two halves of a drag. Both are guarded on this canvas being the one
+    // that was pressed, and the guard is not paranoia: a terminal in mode 1002
+    // reports motion whenever a button is down anywhere, so a drag begun on the
+    // desktop and pulled across a canvas arrives here as well, and is not this
+    // canvas's gesture to hear.
+    //
+    // The coordinates are `makeLocal` and are deliberately not clamped, so a
+    // drag pulled above a canvas reports a negative row. That is the number a
+    // model wanting to scroll needs, and a model that only wants the cells it
+    // owns can clamp in one line -- whereas a clamped coordinate cannot be
+    // un-clamped back into "past the top" by anybody.
+    else if (event.what == evMouseMove && g_dragCanvas == this)
+        {
+        TPoint spot = makeLocal(event.mouse.where);
+        if (spot.x != g_dragAt.x || spot.y != g_dragAt.y)
+            {
+            g_dragAt = spot;
+            g_dragMoved = true;
+            noteDragged(viewId, spot.x, spot.y, false);
+            }
+        clearEvent(event);
+        }
+    else if (event.what == evMouseUp && g_dragCanvas == this)
+        {
+        TPoint spot = makeLocal(event.mouse.where);
+        if (g_dragMoved)
+            noteDragged(viewId, spot.x, spot.y, true);
+        clearMouseCapture();
         clearEvent(event);
         }
 }

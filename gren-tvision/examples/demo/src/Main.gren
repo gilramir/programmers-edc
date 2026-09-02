@@ -210,6 +210,21 @@ describe event =
                         ""
                    )
 
+        Dragged it ->
+            "Dragged "
+                ++ it.id
+                ++ " ("
+                ++ String.fromInt it.x
+                ++ ", "
+                ++ String.fromInt it.y
+                ++ ")"
+                ++ (if it.isDone then
+                        " done"
+
+                    else
+                        ""
+                   )
+
         Scrolled it ->
             "Scrolled " ++ it.id ++ " = " ++ String.fromInt it.value
 
@@ -306,6 +321,13 @@ handleEvent event model =
 
         Command "about" ->
             { model = model, command = Tui.dialog tui (aboutDialog model) }
+
+        -- Named in the log above and acted on nowhere: nothing in this
+        -- window is a thing to drag. What it is here for is that the log
+        -- shows the shape -- the positions collapsing to one per pass of the
+        -- pump, and the last of them carrying `done`.
+        Dragged _ ->
+            { model = model, command = Cmd.none }
 
         -- A right click on a note asks for a context menu, and asking is all
         -- it does. Every entry on it is one of Turbo Vision's own window

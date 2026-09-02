@@ -94,6 +94,7 @@ Napi::FunctionReference g_onFocus;
 Napi::FunctionReference g_onScroll;
 Napi::FunctionReference g_onKey;
 Napi::FunctionReference g_onClick;
+Napi::FunctionReference g_onDrag;
 Napi::FunctionReference g_onClose;
 Napi::FunctionReference g_onResize;
 Napi::FunctionReference g_onWindowResize;
@@ -134,6 +135,15 @@ struct ScrollNote {
 };
 
 std::vector<ScrollNote> g_scrollNotes;
+
+struct DragNote {
+    std::string id;
+    int x;
+    int y;
+    bool done;
+};
+
+std::vector<DragNote> g_dragNotes;
 
 // node-gyp compiles with -fno-rtti, so there is no dynamic_cast to recover
 // these from TProgram::menuBar / statusLine. We made them; we keep them.
@@ -955,9 +965,59 @@ static void flushClosedWindows()
         callJs(g_onClose, {Napi::String::New(env, id)});
 }
 
+// Collapsed per canvas, like the scroll notes, and for the same reason: the
+// pointer crossing six cells is six events and the model wants the sixth. The
+// release wins any collapse it takes part in, because it arrives last and
+// carries the position the gesture ended at -- so a whole drag read in one
+// pass of the pump becomes exactly one event, with `done` set.
+void noteDragged(const std::string &id, int x, int y, bool done)
+{
+    if (g_onDrag.IsEmpty() || g_shuttingDown)
+        return;
+    for (DragNote &note : g_dragNotes)
+        if (note.id == id)
+            {
+            note.x = x;
+            note.y = y;
+            note.done = done;
+            return;
+            }
+    g_dragNotes.push_back({id, x, y, done});
+}
+
+// Drained once per pump rather than at each event's safe point -- that is what
+// makes the collapse above worth anything, since a burst of motion is read in
+// one pass of the loop.
+static void flushDragged()
+{
+    if (g_dragNotes.empty() || g_onDrag.IsEmpty() || g_hasPendingError)
+        {
+        g_dragNotes.clear();
+        return;
+        }
+
+    std::vector<DragNote> notes;
+    notes.swap(g_dragNotes);
+
+    Napi::Env env = g_onDrag.Env();
+    Napi::HandleScope scope(env);
+    for (const DragNote &note : notes)
+        callJs(g_onDrag, {Napi::String::New(env, note.id),
+                          Napi::Number::New(env, note.x),
+                          Napi::Number::New(env, note.y),
+                          Napi::Boolean::New(env, note.done)});
+}
+
 void dispatchClick(const std::string &id, int x, int y, bool doubled,
                    bool rightButton)
 {
+    // A click is dispatched where it happens and a drag is queued, so a press
+    // arriving in the same pass as the end of the previous gesture would
+    // otherwise overtake it and reach the model in the wrong order. Nothing
+    // else can be waiting here: a press is what begins a capture, and the
+    // notes are one gesture's.
+    flushDragged();
+
     if (g_onClick.IsEmpty() || g_hasPendingError)
         return;
 
@@ -977,6 +1037,12 @@ void dispatchClick(const std::string &id, int x, int y, bool doubled,
 // where it would have called p->execute().
 static void beginModal(ModalSession &s)
 {
+    // Whatever was being dragged, the user is not dragging it any more: every
+    // event now goes to the modal, so the release that would have ended the
+    // gesture is never coming. Dropping the capture here is what keeps a
+    // canvas inside the modal able to start one of its own.
+    clearMouseCapture();
+
     TGroup *host = s.host;
     TView *p = s.view;
 
@@ -1300,6 +1366,7 @@ static void prepare(const Napi::Env &env, const Napi::Value &value)
                           std::make_pair("onScroll", &g_onScroll),
                           std::make_pair("onKey", &g_onKey),
                           std::make_pair("onClick", &g_onClick),
+                          std::make_pair("onDrag", &g_onDrag),
                           std::make_pair("onClose", &g_onClose),
                           std::make_pair("onResize", &g_onResize),
                           std::make_pair("onWindowResize", &g_onWindowResize),
@@ -1347,6 +1414,7 @@ static void teardown(const Napi::Env &env)
     g_onScroll.Reset();
     g_onKey.Reset();
     g_onClick.Reset();
+    g_onDrag.Reset();
     g_onClose.Reset();
     g_onResize.Reset();
     g_onWindowResize.Reset();
@@ -1357,6 +1425,8 @@ static void teardown(const Napi::Env &env)
     g_clipboardFromSystem = false;
     g_editNotes.clear();
     g_changeNotes.clear();
+    g_dragNotes.clear();
+    clearMouseCapture();
     g_lastDeskSize = {0, 0};
     g_config = AppConfig();
 }
@@ -1443,13 +1513,34 @@ static Napi::Value Step(const Napi::CallbackInfo &info)
             break;
 
         ++handled;
-        target->handleEvent(event);
-        // TGroup's, not TView's, and it only ever walks up to the application
-        // to be ignored. A popup menu swallows everything it is given, so
-        // there is nothing left to report and nowhere for it to go.
-        if (event.what != evNothing &&
-            (g_modals.empty() || g_modals.back()->viewIsGroup))
-            ((TGroup *) target)->eventError(event);
+
+        // The mouse capture, which is the whole of dragging. While a button is
+        // held on a canvas, motion and the release go straight to that canvas
+        // rather than through the desktop -- because `TGroup::handleEvent`
+        // routes a positional event to whatever the pointer is over *now*, and
+        // a selection dragged off the edge of its own view would be handed to
+        // the frame, the window underneath, or nothing at all. Turbo Vision's
+        // own views buy the same thing with a nested `mouseEvent` loop; this
+        // buys it with a pointer and no loop. See views.cc.
+        TView *captured = mouseCaptureView();
+        if (captured != nullptr &&
+            (event.what == evMouseMove || event.what == evMouseUp))
+            {
+            // No eventError: the canvas clears every event it is sent here,
+            // and `target` is what that call would have to be about.
+            captured->handleEvent(event);
+            }
+        else
+            {
+            target->handleEvent(event);
+            // TGroup's, not TView's, and it only ever walks up to the
+            // application to be ignored. A popup menu swallows everything it is
+            // given, so there is nothing left to report and nowhere for it to
+            // go.
+            if (event.what != evNothing &&
+                (g_modals.empty() || g_modals.back()->viewIsGroup))
+                ((TGroup *) target)->eventError(event);
+            }
 
         // Safe point: this event is finished, so whatever it destroyed is
         // fully gone and whatever it moved has settled. Both queues are
@@ -1496,6 +1587,7 @@ static Napi::Value Step(const Napi::CallbackInfo &info)
     // next keystroke and arriving after it.
     flushChanged();
     flushEdited();
+    flushDragged();
     // Again outside the loop: the very first pump after tv.start() usually
     // breaks out on evNothing before reaching the safe point above, and the
     // size the application started at is the one every layout needs first.

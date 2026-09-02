@@ -78,6 +78,35 @@ def main():
     check("a click reached the model", decimal(app.render()) == 34,
           f"got {decimal(app.render())}")
 
+    # A drag is a press, motion, and a release. The press lands as a click and
+    # every cell after it as a `Dragged`, so the cursor should end up under
+    # wherever the pointer stopped -- character (5, 3) = 3*32 + 5 = 101.
+    app.drag([(cell(2, 1)[0] + 1, cell(2, 1)[1] + 1),
+              (cell(3, 2)[0] + 1, cell(3, 2)[1] + 1),
+              (cell(5, 3)[0] + 1, cell(5, 3)[1] + 1)], settle=0.8)
+    check("a drag moved the cursor with it", decimal(app.render()) == 101,
+          f"got {decimal(app.render())}")
+    check("and left it where the pointer stopped", app.cursor() == cell(5, 3),
+          f"{app.cursor()} != {cell(5, 3)}")
+
+    # The two halves of the capture, in one gesture. Screen (1, 1) is the
+    # top-left corner of the desktop, nowhere near the chart -- Turbo Vision
+    # would route a positional event there to whatever is under it, and the
+    # canvas would hear nothing. It hears it because the press captured the
+    # mouse, and the coordinates it hears are its own and negative, which is
+    # what `moveTo`'s clamp turns into character 0.
+    app.drag([(cell(4, 4)[0] + 1, cell(4, 4)[1] + 1), (5, 3), (1, 1)],
+             settle=0.8)
+    check("a drag off the canvas still reaches it", decimal(app.render()) == 0,
+          f"got {decimal(app.render())}")
+    check("clamped to the first character", app.cursor() == cell(0, 0),
+          f"{app.cursor()} != {cell(0, 0)}")
+
+    # Back to 34 for the checks below, which were written before the drag was.
+    app.click(cell(2, 1)[0] + 1, cell(2, 1)[1] + 1, settle=0.8)
+    check("a click after a drag is still just a click",
+          decimal(app.render()) == 34, f"got {decimal(app.render())}")
+
     # Closing the window from its frame has to reach the model, or the next
     # render puts it straight back. The close box is at the window's top left.
     app.click(12, 5, settle=1.0)

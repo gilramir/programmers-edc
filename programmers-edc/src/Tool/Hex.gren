@@ -474,9 +474,26 @@ update ports event model =
             else
                 still model
 
-        -- A drag reports only where it ended, so this is one move and not a
-        -- dozen. The cursor comes along with the view rather than being left
-        -- behind: it is what the two lines under the dump describe, and a
+        -- Dragging across the dump marks it, and almost none of that is
+        -- written here. The press moved the cursor and said nothing else; the
+        -- first cell the pointer crosses is what turns that into a mark,
+        -- anchored where the press landed. Everything after it is the ordinary
+        -- `clickAt`, because the far end of a mark *is* the cursor -- the same
+        -- reason `v` and the arrow keys needed no code between them.
+        --
+        -- So the mouse draws the same mark `v` does, `1`-`6` paint what it
+        -- drew, and the legend under the dump appears while it is being drawn
+        -- without this knowing that a legend exists.
+        Tui.Dragged spot ->
+            if spot.id == canvasId then
+                dragTo spot.x spot.y model
+
+            else
+                still model
+
+        -- A drag on the *bar* reports only where it ended, so this is one move
+        -- and not a dozen. The cursor comes along with the view rather than
+        -- being left behind: it is what the two lines under the dump describe, and a
         -- description of a byte nobody can see is worse than none.
         Tui.Scrolled bar ->
             if bar.id == scrollId then
@@ -1268,6 +1285,42 @@ clickAt x y model =
                 0
     in
     moveTo (model.top + line * bytesPerRow + column) model
+
+
+{-| The same byte a click would pick, and a mark anchored where the cursor
+already was if there was not one out already.
+
+`clickAt` clamps, which is what makes a drag pulled off the window harmless:
+[`Tui.Dragged`](Tui#Event) reports the canvas's own coordinates and does not
+clamp them, so the row is `-1` above the dump and `rows` below it, and both end
+up on the nearest row of the window.
+
+What it deliberately does *not* do is scroll. A terminal reports motion when
+the pointer moves and not while it is held still, so "keep scrolling while I
+hold it off the bottom" needs a timer of its own; a drag that scrolled one row
+per twitch would be worse than one that stops at the edge. Mark to the edge,
+`PgDn`, and go on marking -- the mark is still out and the cursor is still its
+far end.
+-}
+dragTo : Int -> Int -> Model -> Step
+dragTo x y model =
+    when model.open is
+        Nothing ->
+            still model
+
+        Just _ ->
+            clickAt x
+                y
+                (when model.marking is
+                    Just _ ->
+                        model
+
+                    Nothing ->
+                        { model
+                            | marking = Just { anchor = model.cursor, grain = ByByte }
+                            , message = ""
+                        }
+                )
 
 
 {-| Undo [`hexColumn`](#hexColumn): three columns to a byte, and one more from

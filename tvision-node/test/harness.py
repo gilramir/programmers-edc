@@ -136,6 +136,28 @@ class Pty:
     def right_click(self, col, row, settle=0.5):
         self.click(col, row, settle=settle, button=2)
 
+    def drag(self, path, settle=0.5, button=0):
+        """Press at the first 1-based (col, row) of `path`, move through the
+        rest, and release at the last one.
+
+        Motion is the button code *plus 32*, which is what mode 1002 reports
+        while a button is held and what `termio.cpp` reads back out. Without
+        the 32 the same sequence is another press, which is a different
+        gesture entirely and lands as a second `Clicked`.
+
+        A cell the pointer is already on is not re-reported by a real
+        terminal, and the binding drops one anyway, so a path may repeat a
+        cell without changing what the program sees. What it must not do is
+        skip the press: a drag whose button was never seen going down belongs
+        to no view, because the capture is what a press creates.
+        """
+        col, row = path[0]
+        self.send(f"\x1b[<{button};{col};{row}M".encode(), settle=0.15)
+        for col, row in path[1:]:
+            self.send(f"\x1b[<{button + 32};{col};{row}M".encode(), settle=0.15)
+        col, row = path[-1]
+        self.send(f"\x1b[<{button};{col};{row}m".encode(), settle=settle)
+
     def wheel(self, col, row, down=True, turns=1, settle=0.5):
         """Turn the mouse wheel at 1-based (col, row).
 

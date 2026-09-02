@@ -79,6 +79,11 @@ def click_at(app, col, row):
     app.click(col + 1, row + 1, settle=0.8)
 
 
+def drag_over(app, path):
+    """`Pty.drag` counts from one and everything else here counts from zero."""
+    app.drag([(col + 1, row + 1) for col, row in path], settle=0.9)
+
+
 def menu(app, item):
     """Open a pull-down by clicking its name on the bar."""
     bar = app.render().split("\n")[0]
@@ -530,6 +535,43 @@ def main():
     check("opening a file drops every highlight in the old one",
           app.display().bg_at(HEX_AT, FIRST_ROW + 1) != 42,
           str(app.display().bg_at(HEX_AT, FIRST_ROW + 1)))
+
+    #     And the mouse can draw the mark as well as move its far end. The
+    #     press is an ordinary click and starts nothing -- clicking to move
+    #     the cursor has to go on working -- so it is the first cell the
+    #     pointer crosses that turns it into a mark, anchored where the press
+    #     landed. Byte 2 of the first row to byte 6 of the second is
+    #     22 - 2 + 1 = 21 bytes.
+    drag_over(app, [(HEX_AT + 6, FIRST_ROW),
+                    (HEX_AT + 12, FIRST_ROW),
+                    (HEX_AT + 18, FIRST_ROW + 1)])
+    check("dragging starts a mark that was never asked for with v",
+          status(app).startswith("MARK") and "21 bytes" in status(app), status(app))
+    check("and the legend comes with it, because the mark is the same mark",
+          "1  2  3  4  5  6" in status(app), status(app))
+
+    app.send(b"3", settle=0.7)
+    display = app.display()
+    # Byte 5 of the second row and not byte 6, which is where the drag stopped
+    # and is therefore wearing the cursor: the cursor shows *through* a colour,
+    # which is checked further up and is the reason a mark cannot be lost.
+    check("a colour paints what the mouse drew, on both rows it crossed",
+          display.bg_at(HEX_AT + 6, FIRST_ROW) == 43
+          and display.bg_at(HEX_AT + 15, FIRST_ROW + 1) == 43,
+          f"start={display.bg_at(HEX_AT + 6, FIRST_ROW)} "
+          f"end={display.bg_at(HEX_AT + 15, FIRST_ROW + 1)}")
+    check("and stops where the press was, not at the start of the row",
+          display.bg_at(HEX_AT, FIRST_ROW) != 43,
+          str(display.bg_at(HEX_AT, FIRST_ROW)))
+
+    #     The drag has to leave a plain click alone, which is the whole reason
+    #     the mark begins on the first motion rather than on the press.
+    click_at(app, HEX_AT + 30, FIRST_ROW + 3)
+    check("a click after all that is still just a click",
+          "MARK" not in status(app), status(app))
+    app.send(b"d", settle=0.6)
+    go_to(app, "0")
+    app.send(b"d", settle=0.6)
 
     #     The menu is the other half of it. It names every key and binds none
     #     of them -- the canvas has focus and eats plain letters, so a `v`

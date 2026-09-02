@@ -186,6 +186,13 @@ handleEvent event model =
         Clicked spot ->
             moveTo spot.x spot.y model
 
+        -- The same cursor, dragged rather than clicked, and the same one line
+        -- to move it. `moveTo` clamps, which is exactly what a drag needs:
+        -- these coordinates are the canvas's own and go negative once the
+        -- pointer is pulled off the top of the chart.
+        Dragged spot ->
+            moveTo spot.x spot.y model
+
         Selected _ ->
             model
 

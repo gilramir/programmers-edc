@@ -236,6 +236,9 @@ handleEvent event model =
         Clicked _ ->
             { model = model, command = Cmd.none }
 
+        Dragged _ ->
+            { model = model, command = Cmd.none }
+
         DialogClosed closed ->
             if closed.cmd == "save" then
                 save (fromValues closed.values) model
