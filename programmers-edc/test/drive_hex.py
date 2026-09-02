@@ -573,6 +573,53 @@ def main():
     go_to(app, "0")
     app.send(b"d", settle=0.6)
 
+    #     The first click on a canvas that is not its window's selected view is
+    #     spent putting the selection back on it, and does not reach the model.
+    #     That is Turbo Vision's `TView::handleEvent` and it is a decision to
+    #     keep it: a window with a scroll bar in it has two things the user can
+    #     be pointing at, and a click that both moved the selection and acted
+    #     would act on a view the user had not been looking at.
+    #
+    #     The bar is what makes this reachable. With one selectable view in the
+    #     window the canvas is always the selected one, so the case never
+    #     arises -- which is why it went unnoticed until a drag needed the
+    #     press.
+    go_to(app, "0")
+    click_at(app, HEX_AT + 6, FIRST_ROW + 2)
+    moved = where(app)
+    check("a click reaches the canvas while it holds the selection",
+          "00000022" in moved, moved)
+
+    click_at(app, SCROLL_AT, FIRST_ROW)
+    parked = where(app)
+    click_at(app, HEX_AT + 12, FIRST_ROW + 5)
+    check("and the first one back from the scroll bar is spent on the selection",
+          where(app) == parked, f"{where(app)} != {parked}")
+    click_at(app, HEX_AT + 12, FIRST_ROW + 5)
+    check("while the second one does what a click does",
+          where(app) != parked, where(app))
+
+    #     Which means a drag begun with that click is a selection and not a
+    #     drag: the press is what creates the capture, and this press never
+    #     happened as far as the model is concerned.
+    click_at(app, SCROLL_AT, FIRST_ROW)
+    before = where(app)
+    drag_over(app, [(HEX_AT + 6, FIRST_ROW + 1),
+                    (HEX_AT + 12, FIRST_ROW + 1),
+                    (HEX_AT + 18, FIRST_ROW + 2)])
+    check("a drag begun with the focusing click marks nothing",
+          "MARK" not in status(app), status(app))
+    check("and moves nothing either",
+          where(app) == before, f"{where(app)} != {before}")
+
+    #     Hand the canvas back before going on, which takes two clicks and not
+    #     one -- as the checks above have just finished proving. The
+    #     sections below type at it and read the top row, so both the selection
+    #     and the offset have to go back where they were found.
+    click_at(app, HEX_AT, FIRST_ROW)
+    click_at(app, HEX_AT, FIRST_ROW)
+    go_to(app, "0")
+
     #     The menu is the other half of it. It names every key and binds none
     #     of them -- the canvas has focus and eats plain letters, so a `v`
     #     bound here would take the letter away from the thing it is for --

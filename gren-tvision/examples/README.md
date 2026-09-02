@@ -1342,17 +1342,24 @@ is the one thing the collapse above throws away, so it needs a variant or a
 flag of its own. Nothing has asked yet; predc's hex viewer stops at the edge
 and says so.
 
-**And one thing the capture cannot rescue**, found on the way and left alone
-on purpose. `TView::handleEvent` spends the first click on a selectable view
-that does not hold the caret on *giving* it the caret and clears the event, so
-a `Canvas` with `takesFocus = True` never hears that click. True since canvases
-existed; it matters more now, because the press is what creates a capture, so a
-drag begun with the focusing click is a focus and not a drag. Whether to give
-`JsCanvas` the `ofFirstClick` that `JsScrollBar` carries is a decision about
-every canvas program rather than about dragging — the note beside `JsScrollBar`
-says why the two flags together were worse for a *bar*, and a canvas is not in
-that position — so it is written down in `Canvas`'s doc comment and in FINDINGS
-instead of changed in passing.
+**And one thing the capture cannot rescue**, found on the way and then decided
+rather than left open. `TView::handleEvent` spends the first click on a
+selectable view that does not hold the selection on *giving* it back, so a
+`Canvas` with `takesFocus = True` does not hear that click — and since the press
+is what creates a capture, a drag begun with it is a selection and not a drag.
+
+The condition is `sfSelected` and not `sfFocused`: *current within its own
+owner*. That is why no example here has ever met it — a window whose only
+selectable view is the canvas has an always-selected canvas. It takes a second
+selectable view in the same window, which is what predc's hex viewer has in its
+scroll bar.
+
+**It stays as it is: the first click brings the view back and does nothing
+else.** `ofFirstClick` would make one click both move the selection and act,
+inside a view the user had not been working in — and a window with a bar in it
+has two things to be pointing at. Two clicks is the cheaper surprise. FINDINGS
+has the measurement and `drive_hex.py` pins it, which is what keeps a decision
+from being undone by an edit that meant well.
 
 **What it bought the consumer.** predc's hex viewer marks by dragging, in one
 small function, and `v`, `1`-`6`, the colour legend, `y` and the dump copy all

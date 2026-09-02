@@ -893,11 +893,16 @@ first for a week, because `Array.append fst second` makes `fst` the *postfix*.
     a focused canvas consumes **every** key it receives, `Tab` included, so a
     canvas that is only there to be looked at or clicked should say `False` or
     it will trap the caret. Clicks and drags still arrive either way -- with
-    one exception that belongs to `takesFocus = True`: Turbo Vision spends the
-    first click on a selectable view that does not have the caret on *giving*
-    it the caret (`TView::handleEvent`), so that click, and a drag begun with
-    it, do not reach the model. Every one after it does, until something else
-    takes the focus away.
+    one exception that belongs to `takesFocus = True`, and it is deliberate:
+    when something else in the same window holds the selection, Turbo Vision
+    spends the first click on *giving* it back (`TView::handleEvent`), so that
+    click, and a drag begun with it, do not reach the model. Every one after it
+    does. A window whose only selectable view is the canvas never sees this,
+    because the canvas is always the selected one; a window with a
+    [`ScrollBar`](#View) beside it does. The alternative -- `ofFirstClick`,
+    which is what a `ScrollBar` carries -- would make one click both move the
+    selection and act, on a view the user had not been working in, and that is
+    the worse of the two.
 
     What it does *not* eat is anything the menu bar or the status line claims
     first. Both are `ofPreProcess` views (`tmenubar.cpp`, `tstatusl.cpp`), so

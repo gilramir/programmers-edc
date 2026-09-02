@@ -4718,20 +4718,40 @@ knowing a mouse was involved.
 ### One thing the capture cannot rescue: the focusing click
 
 `TView::handleEvent` spends the first mouse-down on a selectable view that does
-not hold the caret on giving it the caret, and clears the event
+not hold the selection on giving it the selection, and clears the event
 (`tview.cpp:551-558`) unless the view carries `ofFirstClick`. A canvas with
-`takesFocus = True` therefore never hears that click -- which has been true
-since canvases existed and nobody had noticed, because a click that only
-focuses looks like the window manager behaviour everyone expects.
+`takesFocus = True` therefore does not hear that click.
 
-It matters more now, because the press is what creates the capture: a drag
-begun with the focusing click is not a drag, it is a focus. `JsScrollBar`
-carries `ofFirstClick` for a related reason and the note beside it says why the
-two together were worse for a *bar* -- a click there has a position-dependent
-meaning and nothing on screen says whether it counted. A canvas is not in that
-position; "put the cursor here" is unambiguous. Whether to give it the flag is
-a decision about every canvas program, not about dragging, so it is written
-down here and in `Canvas`'s doc comment rather than changed in passing.
+**The condition is `sfSelected`, not `sfFocused`, and that is what makes it
+rare enough to have gone unnoticed.** `sfSelected` means *current within its own
+owner*, so a window whose only selectable view is the canvas has an
+always-selected canvas and never sees this at all -- which is every example in
+this repo. It takes a second selectable view in the same window to reach it,
+and predc's hex viewer has one: the model-owned `ScrollBar` down its right
+edge. Measured there, with the file open and the cursor at 0:
+
+| what was clicked                     | where the cursor went |
+| ------------------------------------ | --------------------- |
+| the dump, canvas holding the selection | 0 → 34 (it acted)     |
+| the scroll bar                       | the bar is selected now |
+| the dump again                       | 34 (the click was spent) |
+| the dump a second time               | 34 → 84 (it acted)    |
+
+It matters more than it did, because the press is what creates the capture: a
+drag begun with the focusing click is not a drag, it is a selection, and the
+motion after it belongs to nobody.
+
+**Kept as it is, on purpose (Gilbert, 2026-09-02): the first click brings the
+view back and does nothing else.** The alternative is `ofFirstClick`, which is
+what `JsScrollBar` carries -- and the note beside that class says why the two
+flags together were awkward for a *bar*, where a click has a position-dependent
+meaning and nothing on screen says whether it counted. The argument against it
+for a canvas is different and simpler: a window with a scroll bar in it has two
+things the user can be pointing at, and one click that both moved the selection
+and acted would act inside a view the user had not been working in. Two clicks
+is the cheaper surprise. `drive_hex.py` pins all four rows of that table plus
+the drag, because a decision with no test is a decision the next edit undoes
+without telling anybody.
 
 ### Motion is collapsed per pump, like a scroll bar's positions
 
