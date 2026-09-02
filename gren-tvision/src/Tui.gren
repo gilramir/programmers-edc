@@ -1179,10 +1179,12 @@ type alias StatusItem =
     `0` or `1` for a find, however many were replaced otherwise. `0` is how a
     program says "not found" in its own words.
   - `Copied` -- the answer to [`copyToClipboard`](#copyToClipboard).
-    `toSystem` is `False` when the system clipboard refused the text, which is
-    not a failure -- the text is kept, and [`readClipboard`](#readClipboard)
-    will give it back -- but it does mean no *other* program will see it, which
-    is worth saying out loud on a status line.
+    `toSystem` is `False` when nothing *confirmed* taking the text, which is
+    weaker than it sounds and is not a failure: on a unix terminal the `OSC 52`
+    was written anyway and may well have landed. The text is kept either way,
+    and [`readClipboard`](#readClipboard) will give it back. See
+    [`copyToClipboard`](#copyToClipboard) for the whole chain and for what tmux
+    does to it.
   - `ClipboardText` -- the answer to [`readClipboard`](#readClipboard).
     `fromSystem` is `False` when what came back is this program's own last
     copy, because there was no system clipboard to ask.
@@ -1907,16 +1909,35 @@ searchFields id spec =
 
 
 {-| Put text on the clipboard. The answer arrives as a [`Copied`](#Event)
-event saying whether the *system* clipboard took it.
+event saying whether anything *confirmed* taking it.
 
     Tui.copyToClipboard tui (String.join "\n" selectedRows)
 
-There is a fallback underneath, and it is the reason `Copied` carries a
-`Bool` rather than nothing at all. Turbo Vision reaches the system clipboard
-through `wl-copy`, `xsel`, `xclip` or the terminal itself (`OSC 52`), and on a
-machine where none of those answer, the text is kept in the program instead --
-so a copy and a paste inside one program always work, and `toSystem = False`
-means only that no *other* program will see it.
+The chain underneath is worth knowing, because `toSystem = False` is a weaker
+statement than it looks. Turbo Vision tries `wl-copy`, `xsel` and `xclip`
+first, and only when `WAYLAND_DISPLAY` or `DISPLAY` says there is a display to
+talk to -- over ssh there is not, so on a remote machine that half is skipped
+whether or not the programs are installed. What is left is the terminal: an
+`OSC 52` escape sequence, which Turbo Vision **writes every time** and reports
+as successful only if the terminal has proved it also supports *reading* the
+clipboard back (a kitty capability reply, an `OSC 52` answer, or xterm's
+`allowWindowOps`).
+
+So `toSystem = False` means "nothing confirmed taking it", not "nothing took
+it". The sequence went out; whether it landed is between the terminal and
+whatever is between you and it. The one worth naming is tmux, whose default
+`set-clipboard external` swallows an application's `OSC 52` and forwards
+nothing -- `set -g set-clipboard on` is what makes a copy inside tmux reach the
+terminal outside it.
+
+A program that says something on a status line should therefore say the
+terminal did not confirm rather than that the copy failed. The text is kept
+inside the program either way, so a copy and a paste between two of its own
+windows always work, and [`readClipboard`](#readClipboard) gives it back.
+
+`doc/clipboard.md` has the whole of it -- every environment, what each terminal
+calls its permission, and a one-line test that answers "is it me or is it the
+terminal" without a program involved.
 
 -}
 copyToClipboard : Ports msg -> String -> Cmd msg

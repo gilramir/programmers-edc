@@ -3959,3 +3959,91 @@ always meant.
 Protocol 20. An older runtime would pass the new field to a binding that
 ignores what it does not know, and the double click would go on doing nothing
 -- which is the silence the version number exists to turn into a sentence.
+
+## The copy that did reach the clipboard, and the sentence that said it did not
+
+*"Bytes | Copy copies only in-application; I can't paste outside of predc.
+That's useless to me."*
+
+The report was right about the symptom and the message predc printed agreed
+with it:
+
+    Copied 16 bytes as hex -- this program only, nothing else took it.
+
+That sentence was wrong, and it had been wrong since the clipboard was bound.
+The bytes were on the wire the whole time. Under a pty that advertises nothing
+at all -- no `DISPLAY`, no `WAYLAND_DISPLAY`, no `allowWindowOps` -- a yank
+still writes:
+
+    OSC 52 written to the terminal: True
+      payload: b'00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F'
+
+### Why the boolean says less than it seems to
+
+`THardwareInfo::setClipboardText` is two attempts (`unixcon.cpp`):
+
+```cpp
+if (UnixClipboard::setClipboardText(text)) return true;
+if (TermIO::setClipboardText(con, text, inputState)) return true;
+```
+
+The first tries `wl-copy`, `xsel` and `xclip`, and `commandIsAvailable` checks
+**an environment variable before the executable**: no `WAYLAND_DISPLAY` or
+`DISPLAY`, no attempt. Over ssh there is neither, so that half is skipped
+whether or not the programs are installed -- and rightly, since the clipboard
+it would set is the far machine's.
+
+The second writes the `OSC 52`, and this is the part worth reading twice:
+
+```cpp
+con.write(buf, ...);
+// Return false when there is no full OSC 52 support, even though we always
+// make the request. This way, we can still use the internal clipboard.
+return state.hasFullOsc52;
+```
+
+`hasFullOsc52` is set only by evidence that the terminal supports **reading**
+the clipboard back -- a kitty capability reply, an answer to an `OSC 52` query,
+or xterm's `allowWindowOps` in an `OSC 60`. Almost nothing volunteers that. So
+the write happens and the return value is `false`, and every layer above
+faithfully reported "nothing took it" about a copy that may have worked
+perfectly.
+
+### What was actually eating it, measured
+
+The reporter's environment is an ssh session inside tmux 3.4 with
+`XDG_SESSION_TYPE=tty`. tmux's own default is `set-clipboard external`, and the
+manual page's wording for it -- "attempt to set the terminal clipboard but
+ignore attempts by applications to set tmux buffers" -- can be read either way.
+An isolated tmux server (`tmux -L probe`) driven through a pty, with an
+application inside the pane writing exactly the sequence Turbo Vision writes,
+answers it:
+
+    set-clipboard = external   forwarded: no    tmux buffer: none
+    set-clipboard = on         forwarded: yes   tmux buffer: set
+    set-clipboard = off        forwarded: no    tmux buffer: none
+
+`external` swallows it. Only `on` forwards an application's `OSC 52` to the
+terminal outside. That is one line in a `.tmux.conf` and it is the whole fix
+for the person who reported this.
+
+### What changed here
+
+Nothing about the copy: it was already doing the only thing it can do over
+ssh. The three places that repeated the false claim are now accurate --
+`Tui.copyToClipboard`'s doc comment, the `Copied` event's, and predc's message
+line, which now says
+
+    Copied 16 bytes as hex -- the terminal did not confirm it.
+
+and predc's README carries the chain, the tmux measurement and the one-line
+fix. `drive_hex.py` asserts the new sentence, and the check beside it -- the
+one where the driver claims `allowWindowOps` and the caveat disappears -- is
+what keeps the two states apart.
+
+**The general rule, which cost a user an afternoon:** a boolean returned by a
+platform layer is worth exactly what it was measured with. `setClipboardText`
+returns "did the platform confirm", every layer above wrote it down as "did it
+work", and the two are not the same claim. When a program repeats a library's
+boolean in a sentence a person will read, the sentence has to say what the
+boolean actually knows.

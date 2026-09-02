@@ -511,7 +511,13 @@ update ports event model =
                                             "."
 
                                         else
-                                            " -- this program only, nothing else took it."
+                                            -- Not "nothing took it", which is
+                                            -- what this used to say and was
+                                            -- wrong: the `OSC 52` goes out
+                                            -- every time and the terminal
+                                            -- simply never answers for it.
+                                            -- See the README, and `Tui.Copied`.
+                                            " -- the terminal did not confirm it."
                                        )
                         }
 

@@ -1107,3 +1107,20 @@ empty, needed no changes.
 state this at render time? The alternative here was a round trip whose second
 half would have been the first message in this protocol able to dismiss a
 window from the outside.
+
+## The clipboard's boolean says less than it looks like
+
+Reported from the application: "Copy copies only in-application; I can't paste
+outside of predc." The copy was reaching the terminal all along --
+`TermIO::setClipboardText` writes the `OSC 52` every time and returns
+`hasFullOsc52`, which is set only by evidence that the terminal supports
+*reading* the clipboard back. So `Copied.toSystem = False` means "nothing
+confirmed taking it", never "nothing took it", and three doc comments plus one
+status line said the stronger thing.
+
+The other half of the chain is worth knowing when advising anyone: Turbo Vision
+tries `wl-copy`/`xsel`/`xclip` only when `WAYLAND_DISPLAY` or `DISPLAY` is set,
+so over ssh that half never runs -- `OSC 52` is the only route that can work,
+and tmux's default `set-clipboard external` swallows it (measured; `on`
+forwards). `copyToClipboard`'s doc comment now carries all of it, because the
+program that has to explain this to a user is the one built on this package.

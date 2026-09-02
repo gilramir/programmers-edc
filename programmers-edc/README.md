@@ -189,12 +189,49 @@ dump** copies the same range as the rows on the screen, offsets and printable
 column included. With nothing marked, both take the highlight the cursor is
 sitting in, which is the other reason to paint one.
 
-Two things it will tell you rather than guess about. The system clipboard is
-`wl-copy`, `xsel`, `xclip` or the terminal itself, and when none of them will
-take the text predc keeps it anyway and says so -- copy and paste between two
-of predc's own tools still work. And the viewer holds 16 KB of the file at a
-time, so a mark dragged across more of it than that is refused with the number,
-rather than copied with a hole in it.
+The viewer holds 16 KB of the file at a time, so a mark dragged across more of
+it than that is refused with the number rather than copied with a hole in it.
+
+### When the copy does not reach the rest of the machine
+
+`Copied 16 bytes as hex -- the terminal did not confirm it.` means what it
+says, and it is weaker than "the copy failed". There are two routes out of a
+terminal program and predc takes whichever is there:
+
+  - **`wl-copy`, `xsel` or `xclip`**, which Turbo Vision tries only when
+    `WAYLAND_DISPLAY` or `DISPLAY` says there is a display to talk to. **Over
+    ssh there is not**, so on a remote machine this half is skipped whether or
+    not the programs are installed -- and rightly, because the clipboard it
+    would set is the far machine's.
+  - **`OSC 52`**, an escape sequence handed to the terminal, which is
+    *written every time* and reported as successful only if the terminal has
+    proved it also supports reading the clipboard back. Most terminals do not
+    answer that, so the message appears even when the copy worked.
+
+The thing that most often eats it is **tmux**, whose default
+`set-clipboard external` ignores an application's `OSC 52` and forwards
+nothing. Measured on a tmux 3.4 with an `xterm*` terminal outside it:
+
+    set-clipboard = external   forwarded: no    tmux buffer: none
+    set-clipboard = on         forwarded: yes   tmux buffer: set
+    set-clipboard = off        forwarded: no    tmux buffer: none
+
+So one line in `~/.tmux.conf`:
+
+    set -g set-clipboard on
+
+and, on the terminal at the other end, whatever it calls permission to write
+the clipboard (kitty, foot, WezTerm, iTerm2 and Windows Terminal allow it;
+xterm wants `allowWindowOps`; Alacritty has an `osc52` setting). Then the same
+yank lands in the clipboard of the machine you are sitting at, which is the
+whole point of `OSC 52` and the only route that can work over ssh.
+
+Either way predc keeps the text itself, so `y` here and `p` in another of its
+tools always work.
+
+gren-tvision's [`doc/clipboard.md`](../gren-tvision/doc/clipboard.md) is the
+long version: every environment, what each terminal calls its permission, and a
+one-line test that says whether the terminal or tmux is the one eating it.
 
 ## Colors
 

@@ -1,6 +1,6 @@
 # gren-tvision documentation
 
-Turbo Vision terminal UIs, as the Elm architecture. Two documents, and they
+Turbo Vision terminal UIs, as the Elm architecture. Three documents, and they
 answer different questions.
 
   - **[Turbo Vision, from Gren](widgets.md)** -- what you are programming
@@ -16,6 +16,12 @@ answer different questions.
     FFI, and the event loop problem that shaped the rest of the design. Read
     this if you are changing the binding, or if you want to know why the API
     looks the way it does.
+
+  - **[The clipboard, from a terminal program](clipboard.md)** -- why a copy
+    reaches the rest of the machine sometimes and not others, what
+    `Copied.toSystem = False` actually claims, and the one line of `.tmux.conf`
+    that is usually the answer. Read this the first time somebody says the copy
+    only works inside your program.
 
 Alongside these, in the repository:
 

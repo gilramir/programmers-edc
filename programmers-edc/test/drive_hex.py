@@ -566,8 +566,9 @@ def main():
           repr(copied(app, mark)))
     check("and the line under the dump says what it did",
           "Copied 4 bytes as hex" in status(app), status(app))
-    check("and admits that nothing else can see it, because nothing took it",
-          "this program only" in status(app), status(app))
+    check("and says the terminal did not confirm it -- which is the true "
+          "statement, since the OSC 52 above went out regardless",
+          "did not confirm" in status(app), status(app))
     check("and the mark is spent, the way vim spends one",
           "MARK" not in status(app), status(app))
 
@@ -599,7 +600,7 @@ def main():
     app.send(b"\x1b]60;allowWindowOps\x07", settle=0.6)
     app.send(b"y", settle=0.9)
     check("and with a terminal that takes it, the caveat goes away",
-          "Copied" in status(app) and "this program only" not in status(app),
+          "Copied" in status(app) and "did not confirm" not in status(app),
           status(app))
 
     #     And the one thing a viewer that never holds its file cannot do.
