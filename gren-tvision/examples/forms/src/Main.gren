@@ -492,6 +492,7 @@ listWindow model =
             , rect = { x1 = 2, y1 = 2, x2 = 28, y2 = 12 }
             , items = Array.map .name model.records
             , focused = model.focused
+            , chooses = ""
             }
         -- After the list box, not before it: a label names a view that has to
         -- exist already.

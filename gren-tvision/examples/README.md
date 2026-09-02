@@ -1083,3 +1083,27 @@ paged, so `pageStep` is keyboard-only and the bar's resolution is the number of
 cells it is tall -- one cell of a sixteen-row bar is forty-six rows of a
 nine-kilobyte file. Both are now in `Tui.View`'s doc comment, and FINDINGS has
 the measurements.
+
+## The double click in the file dialog
+
+Also reported from the application, also not the binding: double-clicking a
+name in `Tui.fileDialog` did nothing. The event was arriving all along --
+`TListViewer::selectItem` fires and the model gets a `Selected` -- but a modal
+dialog can only be ended by a command, so hearing about the double click and
+being able to act on it are two different things. Turbo Vision's own
+`TFileDialog` turns `cmFileDoubleClicked` into `cmOK` inside the dialog;
+`fileDialog` is a layout built out of an `InputLine`, a `ListBox` and buttons,
+so it never had that.
+
+`ListBox` gained `chooses : String` -- the command a committed entry sends,
+which `fileDialog` fills with the default button's -- and the C++ puts that
+command back on the queue exactly as a button press would. Protocol 20. The
+dialog then closes with the same `DialogClosed` and the same `values`, so
+predc, which already preferred the highlighted row when the Name field was
+empty, needed no changes.
+
+**Fourth use of the declarative field**, after `allowed`, `takesFocus` and
+`isDefault`, and the test for reaching for one is unchanged: could the model
+state this at render time? The alternative here was a round trip whose second
+half would have been the first message in this protocol able to dismiss a
+window from the outside.

@@ -636,6 +636,9 @@ dirWindow model =
             , rect = { x1 = 2, y1 = 1, x2 = 25, y2 = 1 + paneHeight }
             , items = Array.map label (rowsOf model.root)
             , focused = model.focused
+            -- In a window, so a double click is a `Selected` and the model
+            -- decides what it means -- here, expanding a branch.
+            , chooses = ""
             }
         , Canvas
             { id = "files"

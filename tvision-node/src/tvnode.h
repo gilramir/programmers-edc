@@ -197,6 +197,15 @@ public:
     void setItems(std::vector<std::string> newItems);
     const std::vector<std::string> &getItems() const { return items; }
 
+    // The command a committed entry sends, or zero for a list that only
+    // reports. Inside a modal dialog it is what makes a double click on a
+    // file name the same act as pressing OK, which is what TFileDialog does
+    // for itself in tfildlg.cpp -- it turns its own cmFileDoubleClicked
+    // broadcast into a cmOK and puts it back on the queue. A list box the
+    // model built is not a TFileList and has no such broadcast, so the
+    // command is named in the render instead.
+    ushort chooses = 0;
+
 private:
     std::vector<std::string> items;
     std::string viewId;

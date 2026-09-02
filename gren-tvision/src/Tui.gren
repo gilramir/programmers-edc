@@ -291,11 +291,16 @@ thirty-five attributes Turbo Vision keeps them in. Version 18 split a
 Vision has always drawn differently and for a good reason. Version 19 added
 [`copyToClipboard`](#copyToClipboard) and [`readClipboard`](#readClipboard)
 with the [`Copied`](#Event) and [`ClipboardText`](#Event) events -- the first
-thing in this package that talks to a program outside it.
+thing in this package that talks to a program outside it. Version 20 added
+`chooses` on a [`ListBox`](#View): the command a committed entry sends, which
+is what makes a double click in [`fileDialog`](#fileDialog) open the file. An
+older runtime would pass the field to a binding that ignores what it does not
+know, and the double click would go on doing nothing -- which is exactly the
+silence this number turns into a sentence.
 -}
 protocolVersion : Int
 protocolVersion =
-    19
+    20
 
 
 -- GEOMETRY
@@ -811,6 +816,20 @@ first for a week, because `Array.append fst second` makes `fst` the *postfix*.
     click) sends a [`Selected`](#Event) one. `focused` is that highlight seen
     from the other side: it is written to the list only when the model changes
     it, so it steers without fighting the arrow keys.
+
+    `chooses` is a command name, and it says that committing an entry is the
+    same act as pressing the button that carries that command -- which inside
+    a modal dialog is how a double click opens the file. `""` for a list where
+    it is not, which is every list in a window: a `Selected` event is the whole
+    answer there, and the model is free to do what it likes with it. (Set it in
+    a window anyway and the command travels the route a button's does, arriving
+    as an ordinary [`Command`](#Event) event. There is nothing wrong with that;
+    it is just longer than answering the `Selected` you were already sent.) It is a
+    field rather than something the model does when the event arrives because
+    a modal dialog can only be ended by a command, and by the time `Selected`
+    has crossed the port the dialog is still open with nothing able to close
+    it. Turbo Vision's own `TFileDialog` does exactly this translation, in
+    C++, inside the dialog (`cmFileDoubleClicked` becomes `cmOK`).
   - `CheckBoxes` -- a group of boxes, ticked with `Space`. `checked` is one
     flag per item.
   - `MultiCheckBoxes` -- the same cluster with more than two states per box.
@@ -908,7 +927,7 @@ changes size. See [`Grow`](#Grow).
 
     Grows
         { grow = Tui.stretch
-        , view = ListBox { id = "entries", rect = ..., items = ..., focused = 0 }
+        , view = ListBox { id = "entries", rect = ..., items = ..., focused = 0, chooses = "" }
         }
 
 It is opt-in because most views do not want it, and a wrapper rather than a
@@ -935,7 +954,7 @@ type View
     | Button { id : String, rect : Rect, title : String, cmd : String, isDefault : Bool, takesFocus : Bool }
     | InputLine { id : String, rect : Rect, maxLen : Int, value : String, allowed : Maybe String }
     | History { id : String, for : String, items : Array String }
-    | ListBox { id : String, rect : Rect, items : Array String, focused : Int }
+    | ListBox { id : String, rect : Rect, items : Array String, focused : Int, chooses : String }
     | CheckBoxes { id : String, rect : Rect, items : Array String, checked : Array Bool }
     | MultiCheckBoxes { id : String, rect : Rect, items : Array String, marks : String, states : Array Int }
     | RadioButtons { id : String, rect : Rect, items : Array String, selected : Int }
@@ -1588,6 +1607,19 @@ fileDialog spec =
                 , rect = { x1 = 3, y1 = 4, x2 = width - 5, y2 = pathRow }
                 , items = spec.entries
                 , focused = 0
+                -- Double-clicking a name is pressing the first button, which
+                -- is the default one -- `TFileDialog`'s own rule, and the one
+                -- every file dialog since has kept. The answer arrives as the
+                -- same `DialogClosed` the button would have sent, so a caller
+                -- that already reads `fileList` out of `values` needs to know
+                -- nothing about any of this.
+                , chooses =
+                    when Array.first spec.buttons is
+                        Just button ->
+                            button.cmd
+
+                        Nothing ->
+                            ""
                 }
             , StaticText
                 { id = "filePath"
@@ -2422,6 +2454,7 @@ encodeViewFields view =
             , { key = "rect", value = encodeRect v.rect }
             , { key = "items", value = Encode.array Encode.string v.items }
             , { key = "focused", value = Encode.int v.focused }
+            , { key = "chooses", value = Encode.string v.chooses }
             ]
 
         CheckBoxes v ->

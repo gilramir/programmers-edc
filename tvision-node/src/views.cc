@@ -32,6 +32,20 @@ void JsListBox::selectItem(short item)
     TListViewer::selectItem(item);
     if (item >= 0 && (size_t) item < items.size())
         dispatchSelect(viewId, item, items[item]);
+    // Put back rather than dispatched, exactly as TFileDialog does with the
+    // cmOK it makes out of a double click: the command then reaches the
+    // dialog through the ordinary queue, so JsWindow::handleEvent ends the
+    // modal with it and the model is answered by the same `dialogClosed` a
+    // press on the button would have sent. Nothing here knows or cares
+    // whether the list is in a dialog at all.
+    if (chooses != 0)
+        {
+        TEvent event = {};
+        event.what = evCommand;
+        event.message.command = chooses;
+        event.message.infoPtr = nullptr;
+        putEvent(event);
+        }
 }
 
 // The highlight, as opposed to a committed selection. TVision's own examples
@@ -923,6 +937,9 @@ TView *buildItems(const Napi::Env &env, TGroup *win, const Napi::Value &value,
             sb->options |= ofPostProcess;
             win->insert(sb);
             JsListBox *list = new JsListBox(listRect, sb, id);
+            std::string chooses = getString(it, "chooses");
+            if (!chooses.empty())
+                list->chooses = g_commands.intern(chooses);
             if (it.Has("items"))
                 list->setItems(getStringArray(it.Get("items")));
             if (it.Has("focused"))

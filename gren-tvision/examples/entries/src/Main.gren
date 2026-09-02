@@ -445,6 +445,10 @@ listWindow model =
                     , rect = { x1 = 2, y1 = 2, x2 = 43, y2 = 11 }
                     , items = visible model
                     , focused = 0
+                    -- A list in a window, so committing an entry is a
+                    -- `Selected` event and nothing else: there is no dialog
+                    -- here for a command to end.
+                    , chooses = ""
                     }
             }
         -- Both vertical edges follow, so this keeps its one-row height and

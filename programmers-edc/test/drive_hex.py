@@ -162,6 +162,29 @@ def open_file(app, name, settle=1.6):
     app.send(b"\r", settle=settle)
 
 
+def double_click_in_list(app, name, settle=1.8):
+    """Open the dialog and double-click a name in its list.
+
+    The pause between the two presses is real rather than nominal: TVision
+    timestamps a mouse event when it *reads* it, so two reports sitting in the
+    pty buffer together look simultaneous however far apart they were written.
+    0.12s is a human double click and is well inside the default 8-tick
+    (440ms) window; 0.45s is outside it, which is worth knowing because it is
+    what a driver written with a lazy settle accidentally measures.
+    """
+    bytes_menu(app, b"o", settle=1.0)
+    row = col = None
+    for y, line in enumerate(app.render().split("\n")):
+        if name in line:
+            row, col = y + 1, line.index(name) + 1
+            break
+    assert row is not None, f"{name} is not in the dialog's list"
+    app.send(f"\x1b[<0;{col};{row}M".encode(), settle=0.1)
+    app.send(f"\x1b[<0;{col};{row}m".encode(), settle=0.12)
+    app.send(f"\x1b[<0;{col};{row}M".encode(), settle=0.1)
+    app.send(f"\x1b[<0;{col};{row}m".encode(), settle=settle)
+
+
 def go_to(app, text, settle=1.4):
     bytes_menu(app, b"g", settle=1.0)
     app.send(text.encode(), settle=0.8)
@@ -639,7 +662,14 @@ def main():
           "nothing on the clipboard" in status(app), status(app))
 
     # 16. A file smaller than the window, and one with nothing in it at all.
-    open_file(app, os.path.join(work, "small.bin"))
+    #
+    #     Opened with a double click on its name rather than by typing it,
+    #     which is the `chooses` field on the dialog's list box: committing an
+    #     entry sends the command the first button carries, so the dialog ends
+    #     with `ok` and the model reads the row out of `values` exactly as it
+    #     does when OK is pressed. Nothing in predc knows a double click
+    #     happened, and that is the point of doing it that way.
+    double_click_in_list(app, "small.bin")
     check("a small file is one row", rows(app)[0].startswith("00000000  48 65 6C 6C 6F"),
           rows(app)[0])
     check("and the rows past the end of it are blank",

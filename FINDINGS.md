@@ -3873,3 +3873,89 @@ for this job anyway: `PgUp`/`PgDn` page by the model's `pageStep`, and the
 wheel is `3 * arrowStep` and reaches the bar from anywhere in the window --
 including with the pointer over the dump, because a `Canvas` does not consume
 `evMouseWheel` and Turbo Vision passes it up.
+
+## The double click that arrived and had nowhere to go
+
+Asked from the application, and phrased as a question about the library: *"Does
+tvision deliver double-click events? I open Bytes | Open file, select a file,
+and double-click it, and nothing happens; I have to click OK."*
+
+It does deliver them, and the proof is one line of the port trace. One double
+click on a name in the dialog's list, as the very first thing after it opens:
+
+    <- {"type":"focus","id":"fileList","index":1,"text":"alpha.bin"}
+    <- {"type":"select","id":"fileList","index":1,"text":"alpha.bin"}
+
+That is `TListViewer::selectItem`, forwarded by `JsListBox` as a
+[`Selected`](Tui#Event) event. Nothing was missing between the terminal and the
+model. `TListViewer` even sets `options |= ofFirstClick | ofSelectable` in its
+own constructor -- the same pairing the scroll bar had to be taught the day
+before -- so the list acts on the first click and the pair is timed normally
+against the default 8-tick (440ms) window.
+
+### What was missing was a way to act on it
+
+The model hears `Selected` while the dialog is still open, and **a modal dialog
+in this package can only be ended by a command**. There is no
+`Tui.closeDialog`, deliberately: a dialog is a `Cmd` answered by a
+`DialogClosed`, and something that could dismiss one from the outside would be
+a second way for the model to reach into a window it does not own. So the model
+could hear the double click and could do nothing with it.
+
+Turbo Vision has exactly this problem and solves it inside the dialog, in four
+lines of `tfildlg.cpp`:
+
+```cpp
+else if( event.what == evBroadcast && event.message.command == cmFileDoubleClicked )
+    {
+    event.what = evCommand;
+    event.message.command = cmOK;
+    putEvent( event );
+    clearEvent( event );
+    }
+```
+
+`Tui.fileDialog` is not a `TFileDialog` -- it is a layout the package builds
+out of an `InputLine`, a `ListBox` and buttons, because listing a directory is
+a `Task` and belongs to the model -- so it never inherited that wiring.
+
+### `chooses`, and why it is a field rather than an event
+
+    ListBox { id, rect, items, focused, chooses : String }
+
+A command name, meaning *committing an entry is the same act as pressing the
+button that carries this command*. `fileDialog` fills it with the first
+button's command, which is the default one. `""` everywhere else, which is
+every list in a window: there a `Selected` event is the whole answer and the
+model does what it likes with it.
+
+This is the fourth time the API has answered a widget with **a declarative
+field, because the "interaction" is really a rule the model can state up
+front** -- after `allowed` on an `InputLine`, `takesFocus` on a button and
+`isDefault`. The test is always the same: could the model answer this at render
+time? Here it can, and the alternative -- a round trip in which `Selected`
+crosses the port and something crosses back to close the dialog -- would have
+added the first message in this protocol capable of dismissing a window from
+the outside.
+
+The C++ is `putEvent` and not a direct dispatch, again copying `TFileDialog`:
+
+```cpp
+if (chooses != 0) {
+    TEvent event = {};
+    event.what = evCommand;
+    event.message.command = chooses;
+    putEvent(event);
+}
+```
+
+The command goes back through the ordinary queue, so `JsWindow::handleEvent`
+ends the modal with it exactly as it does for a button press, and the model is
+answered by the same `DialogClosed` with the same `values`. **predc needed no
+changes at all**: `answerFile` already preferred the highlighted row when the
+Name field was empty, because that is what pressing OK without typing has
+always meant.
+
+Protocol 20. An older runtime would pass the new field to a binding that
+ignores what it does not know, and the double click would go on doing nothing
+-- which is the silence the version number exists to turn into a sentence.
