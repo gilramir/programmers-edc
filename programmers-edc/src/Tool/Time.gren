@@ -147,6 +147,11 @@ type alias Model =
     -- converter on purpose, and a reply that yanked the caret away from where
     -- they put it would be worse than the bug.
     , restoring : Bool
+    -- Clock mode: the window is a wall clock rather than a converter. The
+    -- instant is the machine's own and follows it, the fields are read-only
+    -- because there is nothing to type into a clock, and `Zones...` still
+    -- works because which zones to watch is the one choice left.
+    , clock : Bool
     }
 
 
@@ -271,6 +276,7 @@ init configured local =
         , message = ""
         , picker = Nothing
         , restoring = False
+        , clock = False
         }
     , command = Task.perform Began Time.now
     }
@@ -293,6 +299,10 @@ type Msg
     = Answered Reply
     | Listed (Array String)
     | Began Time.Posix
+    -- Clock mode's heartbeat, once a second. See `update`: the second is the
+    -- resolution the *minute* has to change at, not the rate anything is
+    -- recomputed at.
+    | Ticked Time.Posix
     | Confused String
 
 
@@ -314,9 +324,26 @@ type alias Reply =
     }
 
 
-subscriptions : Wiring -> Sub Msg
-subscriptions wiring =
-    wiring.intl.fromJs decodeMessage
+{-| The reply port, always, and a heartbeat while the clock is running.
+
+Once a second and not once a minute, because `Time.every` counts from whenever
+it was subscribed and not from the top of the minute: a minute-long interval
+would leave the displayed time up to fifty-nine seconds stale, and a clock that
+says 10:31 while it is 10:32 is simply wrong. The tick is cheap -- `update`
+compares two minute numbers and does nothing on fifty-nine of every sixty, so
+no render, no port traffic and nothing on the screen changes until the minute
+does.
+-}
+subscriptions : Wiring -> Model -> Sub Msg
+subscriptions wiring model =
+    Sub.batch
+        [ wiring.intl.fromJs decodeMessage
+        , if model.clock then
+            Time.every 1000 Ticked
+
+          else
+            Sub.none
+        ]
 
 
 decodeMessage : Decode.Value -> Msg
@@ -493,6 +520,39 @@ receive wiring msg model =
             , command = atInstant wiring.intl posix model.zones
             }
 
+        -- Once a second, and the second is not the same as the minute.
+        --
+        -- The POSIX line is a count of seconds and moves every tick, which
+        -- costs one `setText` on one static text and is the only thing on the
+        -- screen that says out loud that the window is live. The clocks are
+        -- wall clocks and cannot change until the minute does, so the round
+        -- trip that recomputes them goes out on one tick in sixty.
+        --
+        -- The reply carries back the instant it was asked about, so
+        -- `Answered` setting `posix` from it is a no-op here rather than a
+        -- second that stutters: it arrives in milliseconds, while this side
+        -- is still on the second it sent.
+        --
+        -- `Math.truncate` rather than `//` for the same reason `Began` uses
+        -- it, and this one is worse: `//` truncates its result to 32 bits, so
+        -- `posix // 60` is fine forever while `posixToMillis now // 1000`
+        -- goes negative in 2038.
+        Ticked now ->
+            let
+                secs =
+                    Math.truncate (toFloat (Time.posixToMillis now) / 1000)
+            in
+            if not model.clock || secs == model.posix then
+                { model = model, command = Cmd.none }
+
+            else if secs // 60 == model.posix // 60 then
+                { model = { model | posix = secs }, command = Cmd.none }
+
+            else
+                { model = { model | posix = secs }
+                , command = atInstant wiring.intl secs model.zones
+                }
+
         Listed all ->
             { model = { model | picker = Maybe.map (\picker -> { picker | all = all }) model.picker }
             , command = Cmd.none
@@ -593,11 +653,31 @@ update wiring event model =
             else if cmd == "time.picker" then
                 open wiring model
 
+            else if cmd == "time.clock" then
+                if model.clock then
+                    { model = { model | clock = False, message = "" }, command = Cmd.none }
+
+                else
+                    -- Straight to `Began`, which is what `Now` sends: turning
+                    -- the clock on is asking for this instant, and then for
+                    -- every one after it. Doing it any other way would leave
+                    -- the window showing whatever was typed into it until the
+                    -- minute turned over.
+                    { model = { model | clock = True, editing = Nothing, message = "" }
+                    , command = Task.perform Began Time.now
+                    }
+
             else if cmd == "time.add" then
                 { model = model, command = Cmd.none } |> withPicker wiring add
 
             else if cmd == "time.remove" then
                 { model = model, command = Cmd.none } |> withPicker wiring remove
+
+            else if cmd == "time.up" then
+                { model = model, command = Cmd.none } |> withPicker wiring (move -1)
+
+            else if cmd == "time.down" then
+                { model = model, command = Cmd.none } |> withPicker wiring (move 1)
 
             else if cmd == "time.done" then
                 { model = { model | picker = Nothing }, command = Cmd.none }
@@ -762,6 +842,67 @@ add model picker =
                 { model = { model | picker = Just { picker | chosen = Array.pushLast zone picker.chosen } }
                 , command = Cmd.none
                 }
+
+
+{-| Move the highlighted row one place up or down the Displaying list.
+
+The order of that list is the order the converter shows the zones in, and
+until these buttons it was the order they happened to be added in -- with no
+way to change it short of removing three zones so as to put them back in a
+different one.
+
+A swap rather than a remove-and-insert, because the two rows involved are the
+only two that move and a swap says so. `picked` follows the row rather than
+staying on the position, which is the only reading of pressing the button
+twice that is any use: it moves one zone two places, instead of moving two
+different zones one place each.
+
+Off either end is a no-op and not an error. A button that says "you cannot"
+about something the screen has already made obvious is noise, and `Move Up` on
+the first row is a thing a hand does on the way to somewhere else.
+
+**The bounds check is written out and is not `Array.get`'s**, which is the
+second Gren-specific trap this module has hit and is the same shape as the
+first: `Array.get` indexes *from the end* when the index is negative, so
+`Array.get -1` is the last element and never `Nothing`. `Move Up` on the top
+row therefore swapped it with the bottom one, which is neither a move nor a
+no-op, and it read on the screen as the list shuffling itself. `Array.set` is
+the same, so the swap would have written both ends too.
+-}
+move : Int -> Model -> Picker -> Step
+move delta model picker =
+    let
+        to =
+            picker.picked + delta
+    in
+    if to < 0 || to >= Array.length picker.chosen then
+        { model = model, command = Cmd.none }
+
+    else
+        when Array.get picker.picked picker.chosen is
+            Nothing ->
+                { model = model, command = Cmd.none }
+
+            Just zone ->
+                when Array.get to picker.chosen is
+                    Nothing ->
+                        { model = model, command = Cmd.none }
+
+                    Just other ->
+                        { model =
+                            { model
+                                | picker =
+                                    Just
+                                        { picker
+                                            | chosen =
+                                                picker.chosen
+                                                    |> Array.set picker.picked other
+                                                    |> Array.set to zone
+                                            , picked = to
+                                        }
+                            }
+                        , command = Cmd.none
+                        }
 
 
 remove : Model -> Picker -> Step
@@ -1210,7 +1351,12 @@ table desktop model =
             max 0 (Array.length model.rows - 1 - shown)
     in
     { id = windowId
-    , title = "Time converter"
+    , title =
+        if model.clock then
+            "Time converter -- live"
+
+        else
+            "Time converter"
     , rect = { x1 = 1, y1 = 1, x2 = 2 + interior, y2 = 1 + furniture + shown + 2 }
     , resize = Tui.fixedSize
     , palette = Tui.BlueWindow
@@ -1226,7 +1372,7 @@ tableViews fx names interior shown hidden model =
         , text = " YYYY   MM   DD    HH   MM"
         }
     ]
-        ++ (Array.indexedMap (\index row -> clockRow model.editing fx names index (index + 2) row) (Array.takeFirst shown model.rows)
+        ++ (Array.indexedMap (\index row -> clockRow model.editing model.clock fx names index (index + 2) row) (Array.takeFirst shown model.rows)
                 |> Array.flatten
            )
         ++ [ StaticText
@@ -1237,7 +1383,7 @@ tableViews fx names interior shown hidden model =
            ]
         ++ (when Array.last model.rows is
                 Just utc ->
-                    clockRow model.editing fx names (Array.length model.rows - 1) (shown + 3) utc
+                    clockRow model.editing model.clock fx names (Array.length model.rows - 1) (shown + 3) utc
 
                 Nothing ->
                     []
@@ -1247,22 +1393,42 @@ tableViews fx names interior shown hidden model =
                 , rect = { x1 = 2, y1 = shown + 4, x2 = 2 + names, y2 = shown + 5 }
                 , text = "POSIX"
                 }
-           , InputLine
-                { id = posixField
-                , rect = { x1 = fx, y1 = shown + 4, x2 = fx + 24, y2 = shown + 5 }
-                , maxLen = 20
-                , value = held model.editing posixField (String.fromInt model.posix)
-                , allowed = Just "-0123456789"
-                }
+           , if model.clock then
+                -- One column to the right of where the input line sits, and
+                -- that is not a fudge: `TInputLine::draw` writes its text at
+                -- offset 1 inside its own rectangle (tinputli.cpp:144), so a
+                -- static text that starts at the same x1 would sit one column
+                -- left of the digits it replaces and the whole table would
+                -- shift under the heading.
+                StaticText
+                    { id = posixField
+                    , rect = { x1 = fx + 1, y1 = shown + 4, x2 = fx + 23, y2 = shown + 5 }
+                    , text = String.fromInt model.posix
+                    }
+
+             else
+                InputLine
+                    { id = posixField
+                    , rect = { x1 = fx, y1 = shown + 4, x2 = fx + 24, y2 = shown + 5 }
+                    , maxLen = 20
+                    , value = held model.editing posixField (String.fromInt model.posix)
+                    , allowed = Just "-0123456789"
+                    }
            , StaticText
                 { id = "time.message"
                 , rect = { x1 = 2, y1 = shown + 6, x2 = interior, y2 = shown + 8 }
                 , text =
-                    if hidden > 0 && String.isEmpty model.message then
+                    if not (String.isEmpty model.message) then
+                        model.message
+
+                    else if hidden > 0 then
                         String.fromInt hidden ++ " more zones than this terminal is tall enough to show."
 
+                    else if model.clock then
+                        "Live: the clocks follow this machine and cannot be typed in. Zones... still works."
+
                     else
-                        model.message
+                        ""
                 }
            , Button
                 { id = "time.nowbtn"
@@ -1280,11 +1446,34 @@ tableViews fx names interior shown hidden model =
                 , isDefault = False
                 , takesFocus = True
                 }
+           -- One button and two captions rather than a check box, and not for
+           -- want of a check box: a `CheckBoxes` cluster reports what is
+           -- ticked only when a dialog is answered, and this window is not a
+           -- dialog and is never answered. So the state has to be readable
+           -- from the caption, and the caption says what pressing it does.
+           --
+           -- `L` and `S` because both are free. The status line has Alt-X,
+           -- Alt-A, Alt-R, Alt-D and Alt-C, and it is `ofPreProcess`, so it
+           -- wins over any window: `~C~lock` would have opened the converter
+           -- that is already open. The menu bar has F, T, W and H.
+           , Button
+                { id = "time.clockbtn"
+                , rect = { x1 = 28, y1 = shown + 8, x2 = 42, y2 = shown + 10 }
+                , title =
+                    if model.clock then
+                        "~S~top clock"
+
+                    else
+                        "~L~ive clock"
+                , cmd = "time.clock"
+                , isDefault = False
+                , takesFocus = True
+                }
            ]
 
 
-clockRow : Maybe { id : String, text : String } -> Int -> Int -> Int -> Int -> Row -> Array View
-clockRow editing fx names index y row =
+clockRow : Maybe { id : String, text : String } -> Bool -> Int -> Int -> Int -> Int -> Row -> Array View
+clockRow editing live fx names index y row =
     [ StaticText
         { id = "time.name" ++ String.fromInt index
         , rect = { x1 = 2, y1 = y, x2 = 2 + names, y2 = y + 1 }
@@ -1293,13 +1482,38 @@ clockRow editing fx names index y row =
     ]
         ++ Array.map
             (\spec ->
-                InputLine
-                    { id = fieldId index spec.part
-                    , rect = { x1 = fx + spec.at, y1 = y, x2 = fx + spec.at + width spec.part + 2, y2 = y + 1 }
-                    , maxLen = width spec.part
-                    , value = held editing (fieldId index spec.part) (pad (width spec.part) (valueOf spec.part row))
-                    , allowed = Just "0123456789"
-                    }
+                if live then
+                    -- Read-only by being a different widget, which is the
+                    -- honest way to say it in a model that re-renders: there
+                    -- is nothing to type into, rather than a field that
+                    -- swallows what is typed. It also *looks* right, because
+                    -- an input line carries its own background colour and a
+                    -- static text wears the window's.
+                    --
+                    -- `+ 1` on the x, because `TInputLine::draw` writes its
+                    -- text one column inside its own rectangle
+                    -- (tinputli.cpp:144). Same rectangle would mean the whole
+                    -- table sliding a column left of its heading the moment
+                    -- the clock started.
+                    StaticText
+                        { id = fieldId index spec.part
+                        , rect =
+                            { x1 = fx + spec.at + 1
+                            , y1 = y
+                            , x2 = fx + spec.at + 1 + width spec.part
+                            , y2 = y + 1
+                            }
+                        , text = pad (width spec.part) (valueOf spec.part row)
+                        }
+
+                else
+                    InputLine
+                        { id = fieldId index spec.part
+                        , rect = { x1 = fx + spec.at, y1 = y, x2 = fx + spec.at + width spec.part + 2, y2 = y + 1 }
+                        , maxLen = width spec.part
+                        , value = held editing (fieldId index spec.part) (pad (width spec.part) (valueOf spec.part row))
+                        , allowed = Just "0123456789"
+                        }
             )
             -- Two columns of every rectangle belong to the input line rather
             -- than to the text in it, so a four-digit year is six wide and a
@@ -1405,15 +1619,21 @@ chooser desktop picker =
         listTop =
             4
 
+        -- Two rows of buttons rather than one, since Move Up and Move Down
+        -- arrived: six of them do not fit across sixty-four columns however
+        -- they are worded. The second row costs two rows of window and the
+        -- desktop had one to spare, so the lists give up the other one --
+        -- which is what `- 15` is, and it was `- 14` when there was one row
+        -- of buttons.
         listRows =
-            clamp 5 14 (desktop.rows - 14)
+            clamp 5 14 (desktop.rows - 15)
 
         listBottom =
             listTop + listRows
     in
     { id = pickerId
     , title = "Time zones"
-    , rect = { x1 = 6, y1 = 3, x2 = 74, y2 = 3 + listBottom + 5 }
+    , rect = { x1 = 6, y1 = 3, x2 = 74, y2 = 3 + listBottom + 7 }
     , resize = Tui.fixedSize
     , palette = Tui.BlueWindow
     , views =
@@ -1510,21 +1730,44 @@ chooser desktop picker =
             , isDefault = False
             , takesFocus = True
             }
+        -- Which way round the list reads is a choice, and the only one the
+        -- picker could not express: the order is the order zones were added
+        -- in, and before these there was no way to change it short of
+        -- removing three zones to re-add them in a different order.
+        --
+        -- They act on the Displaying highlight, which is the same rule Remove
+        -- follows, and the highlight travels with the row rather than staying
+        -- on the position -- so Move Up pressed twice moves one zone two
+        -- rows, which is the only reading of "again" that is any use.
+        , Button
+            { id = "time.upbtn"
+            , rect = { x1 = 37, y1 = listBottom + 2, x2 = 48, y2 = listBottom + 4 }
+            , title = "Move Up"
+            , cmd = "time.up"
+            , isDefault = False
+            , takesFocus = True
+            }
+        , Button
+            { id = "time.downbtn"
+            , rect = { x1 = 50, y1 = listBottom + 2, x2 = 63, y2 = listBottom + 4 }
+            , title = "Move Down"
+            , cmd = "time.down"
+            , isDefault = False
+            , takesFocus = True
+            }
+        -- The second row, under the two above it. Done and then Cancel, which
+        -- is the order every Turbo Vision dialog puts them in.
         , Button
             { id = "time.donebtn"
-            , rect = { x1 = 37, y1 = listBottom + 2, x2 = 48, y2 = listBottom + 4 }
+            , rect = { x1 = 37, y1 = listBottom + 4, x2 = 48, y2 = listBottom + 6 }
             , title = "Done"
             , cmd = "time.done"
             , isDefault = True
             , takesFocus = True
             }
-        -- Done and then Cancel, which is the order every Turbo Vision dialog
-        -- puts them in, and the reason the row of buttons moved left rather
-        -- than Cancel going on the end: a fourth button did not fit beside
-        -- the third.
         , Button
             { id = "time.cancelbtn"
-            , rect = { x1 = 50, y1 = listBottom + 2, x2 = 63, y2 = listBottom + 4 }
+            , rect = { x1 = 50, y1 = listBottom + 4, x2 = 63, y2 = listBottom + 6 }
             , title = "Cancel"
             , cmd = "time.cancel"
             , isDefault = False

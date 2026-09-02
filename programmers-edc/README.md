@@ -251,7 +251,7 @@ the hour field in Austin.
     │ UTC               2026   09   01    19   32       +00:00     │
     │ POSIX             1788291120                                 │
     │                                                              │
-    │  Now    Zones...                                             │
+    │  Now    Zones...    Live clock                               │
     └──────────────────────────────────────────────────────────────┘
 
 **UTC and POSIX are always there** and are not on the configurable list. The
@@ -264,6 +264,26 @@ No seconds, because nobody typing a time wants to. The instant underneath is a
 whole POSIX timestamp all the same, so pasting `1788291157` shows `14:32` and
 keeps the `:37`, and editing a minute field leaves it where it was. The POSIX
 box is the only place seconds are visible and it is never rounded.
+
+### Live clock
+
+**Live clock** (`Alt-L`) turns the window into a wall clock. The title says
+`Time converter -- live`, every row follows this machine's own time, and the
+fields stop being fields: they are static text while the clock is running, so
+there is nothing to type into rather than a field that swallows what you type.
+**Stop clock** (`Alt-S`) hands the converter back, with whatever instant the
+clock had reached still on the screen and editable again.
+
+`Zones...` still works while it is running, which is the point of it: the list
+you are watching is the one choice a clock still has.
+
+The POSIX line counts every second and the clocks change on the minute, which
+is exactly what each of them is: seconds are what a POSIX timestamp measures,
+and the rows have no seconds column to show. Underneath, the tick is once a
+second and the recomputation is once a minute -- a minute-long timer would
+count from whenever you pressed the button and could leave the window
+fifty-nine seconds stale, and a clock that says 10:31 while it is 10:32 is
+simply wrong.
 
 ### The two mornings a year that are not times
 
@@ -302,7 +322,8 @@ when you press a button is not worth having.
     │  Asia 82      ▒                           ▓                    ▒ │
     │                                                                  │
     │ Space adds or removes; an area types its prefix into Find.       │
-    │    Add >>       << Remove       Done        Cancel               │
+    │    Add >>       << Remove      Move Up     Move Down              │
+    │                                 Done        Cancel               │
     └──────────────────────────────────────────────────────────────────┘
 
 **An area is a saved search and not a second axis.** Choosing `Asia` types
@@ -323,7 +344,14 @@ keyboard's, Enter is Done and Alt-F3 closes the window.
 
 **Add and Remove act on the row the highlight is on**, in the zone list and the
 Displaying list respectively -- wherever you left it, with the arrow keys, a
-click or the wheel.
+click or the wheel. **Move Up** and **Move Down** act on the same highlight in
+the Displaying list, and the highlight travels with the row, so pressing one
+twice moves one zone two places rather than moving two zones one place each.
+
+The order of that list is the order the converter reads in, top to bottom, and
+before those two buttons it was the order the zones happened to be added in --
+changing it meant removing three zones so as to put them back differently.
+`UTC` is not in the list and is always last.
 
 The list is written to `config.json` the moment it changes, and the converter
 behind the window shows the row as soon as you add it, which is the answer to

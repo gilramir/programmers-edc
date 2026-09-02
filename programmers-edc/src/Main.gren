@@ -630,8 +630,8 @@ land on, and the tool that asked for it is gone.
 subscriptions : Model -> Sub Msg
 subscriptions model =
     when model.time is
-        Just _ ->
-            Sub.map FromTime (Tool.Time.subscriptions timeWiring)
+        Just it ->
+            Sub.map FromTime (Tool.Time.subscriptions timeWiring it)
 
         Nothing ->
             Sub.none

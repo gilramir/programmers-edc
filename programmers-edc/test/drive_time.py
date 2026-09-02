@@ -127,6 +127,12 @@ def field_at(app, zone, which):
     return None
 
 
+def posix_value(app):
+    """The number on the POSIX line, which in clock mode is a second hand."""
+    m = re.search(r"POSIX\s+(-?\d+)", app.render())
+    return int(m.group(1)) if m else None
+
+
 def posix_at(app):
     for r, line in enumerate(app.render().split("\n")):
         m = re.search(r"POSIX\s+(-?\d+)", line)
@@ -479,6 +485,41 @@ def main():
           == ["America/Chicago", "Asia/Katmandu", "Asia/Seoul"],
           str(config_of(home)))
 
+    # ---- Move Up and Move Down ----
+    #
+    # The order of the Displaying list is the order the converter shows the
+    # zones in, and it was the order they happened to be added in with no way
+    # to change it. These act on the same highlight the Remove button does.
+    click_in(app, "Displaying", "Asia/Seoul")
+    click_button(app, "Move Up")
+    check("Move Up moves the highlighted row one place",
+          (config_of(home) or {}).get("timezones")
+          == ["America/Chicago", "Asia/Seoul", "Asia/Katmandu"],
+          str(config_of(home)))
+
+    click_button(app, "Move Up")
+    check("and the highlight travels with the row, so twice is two places",
+          (config_of(home) or {}).get("timezones")
+          == ["Asia/Seoul", "America/Chicago", "Asia/Katmandu"],
+          str(config_of(home)))
+
+    # The check that pins a Gren trap rather than a picker one: `Array.get`
+    # indexes from the *end* when the index is negative, so `Array.get -1` is
+    # the last row and never `Nothing`. Move Up on the top row therefore
+    # swapped the first zone with the last one, which is neither a move nor a
+    # no-op. The bounds test in `move` is written out for this reason.
+    click_button(app, "Move Up")
+    check("and off the top is a no-op, not a swap with the bottom",
+          (config_of(home) or {}).get("timezones")
+          == ["Asia/Seoul", "America/Chicago", "Asia/Katmandu"],
+          str(config_of(home)))
+
+    click_button(app, "Move Down")
+    check("and Move Down is the same the other way",
+          (config_of(home) or {}).get("timezones")
+          == ["America/Chicago", "Asia/Seoul", "Asia/Katmandu"],
+          str(config_of(home)))
+
     click_button(app, "Done")
     check("Done closes the picker", "Time zones" not in app.render(), app.render())
 
@@ -543,6 +584,53 @@ def main():
           (config_of(home) or {}).get("timezones") == [], str(config_of(home)))
     check("so the row it added is gone again",
           row(app, "Asia/Seoul") is None, app.render())
+
+    # ---- the live clock ----
+    #
+    # Last, because it throws away the instant everything above was pinned to:
+    # a clock is the machine's own time and nothing else.
+    #
+    # What is checked here is that the mode is live, that it is read-only and
+    # that it stops. What is *not* checked is the minute turning over, and the
+    # reason is arithmetic rather than principle: the tick fires on the second
+    # and recomputes on the minute, so a driver that waited for one would wait
+    # up to sixty seconds and this suite is already the slowest of the
+    # twenty-nine. It was verified by hand instead, and the evidence is in
+    # FINDINGS.md -- the recomputation landed on POSIX 1788351000, which is a
+    # multiple of sixty, so the tick is not merely firing, it is firing on the
+    # boundary.
+    #
+    # The POSIX line is what makes the cheap half checkable at all. It counts
+    # seconds where the clocks count minutes, so three seconds of waiting is
+    # enough to prove the subscription is alive.
+    app.send(b"\x1bl", settle=2.0)
+    check("Alt-L turns the converter into a clock",
+          "Time converter -- live" in app.render(), app.render())
+    started = posix_value(app)
+    app.pump(3.0)
+    check("whose POSIX line counts seconds on its own",
+          posix_value(app) - started >= 2,
+          str((started, posix_value(app))))
+
+    year = row(app, "UTC")[0]
+    where = field_at(app, "UTC", 0)
+    app.click(where[0], where[1], settle=0.5)
+    app.send(b"1999", settle=0.8)
+    check("and whose fields are read-only, being static text and not fields",
+          row(app, "UTC")[0] == year, str(row(app, "UTC")))
+
+    app.send(b"\x1bs", settle=2.0)
+    check("Alt-S gives the converter back",
+          "Time converter -- live" not in app.render() and "Time converter" in app.render(),
+          app.render())
+    stopped = posix_value(app)
+    app.pump(3.0)
+    check("and the clock stops with it", posix_value(app) == stopped,
+          str((stopped, posix_value(app))))
+
+    retype(app, field_at(app, "UTC", 0), "1999", settle=1.2)
+    check("and the fields take typing again", row(app, "UTC")[0] == "1999",
+          str(row(app, "UTC")))
 
     app.send(b"\x1bx", settle=1.0)
     check("Alt-X exits", app.wait(timeout=6) == 0, "")

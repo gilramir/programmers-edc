@@ -4515,3 +4515,114 @@ Cancel going on the end: `Add >>` from column 19 to 4, and Done and Cancel in
 that order, which is the order every Turbo Vision dialog puts them in. None of
 them carries an `Alt` letter, for the reason the others do not -- `~C~ancel`
 would bind Alt-C and the status line has that for the converter itself.
+
+## Reordering the list, and `Array.get -1`
+
+*"How are the times sorted? In order of adding? We need a way to re-order the
+zones, like a move up / move down set of buttons."* Order of adding, yes, with
+`UTC` appended last and never in the list -- and until now the only way to
+change it was to remove three zones so as to put them back differently.
+
+The move itself is a swap of two rows, and `picked` follows the row rather
+than staying on the position, which is the only reading of pressing the button
+twice that is any use: it moves one zone two places instead of moving two
+different zones one place each. `withPicker` carries the rest -- the table
+recomputes, the config file follows, Cancel still undoes the lot.
+
+### The trap: a negative index is not out of bounds
+
+```gren
+    when Array.get to picker.chosen is
+        Nothing -> { model = model, command = Cmd.none }
+        Just other -> ...
+```
+
+Which is the obvious guard and is wrong. gren core:
+
+> Retrieve the element at a given index, or `Nothing` if the index is out of
+> bounds. **A negative index looks up an element in reverse from the end of the
+> array.**
+>
+>     get -1 [ 1, 2, 3 ] == Just 3
+
+So `Move Up` on the top row asked for index `-1`, got the *last* zone, and
+swapped the first with the last. `Array.set` does the same, so both ends were
+written. On the screen it did not read as an off-by-one; it read as the list
+shuffling itself, which is a much worse thing to debug.
+
+The bounds test is now written out -- `if to < 0 || to >= Array.length` -- and
+this is the second Gren-shaped trap in this one module, after `//` truncating
+its *result* to 32 bits. Both have the same character: an API close enough to
+what you expect that the difference does not announce itself, and a symptom
+that looks like an application bug.
+
+## The converter that is sometimes a clock
+
+*"Could we have a toggle button which converts this to a clock, which updates
+every minute? It would disable the editing of the times until Clock mode is
+turned off."*
+
+### Read-only by being a different widget
+
+The fields become `StaticText` while the clock runs, rather than input lines
+that ignore what is typed into them. In a model that re-renders that is barely
+any more code -- one branch in `clockRow` -- and it is the honest version:
+there is nothing to type into, rather than a field that swallows it. It also
+looks right without being styled, because an input line carries its own
+background colour and a static text wears the window's.
+
+One column of arithmetic came with it. `TInputLine::draw` writes its text at
+offset 1 inside its own rectangle (`tinputli.cpp:144`), so a static text at the
+same `x1` sits one column left of the digits it replaces and the whole table
+slides out from under its heading the moment the clock starts. `+ 1` on the x,
+and `width` rather than `width + 2` -- the two spare columns were the input
+line's margins and a static text has none.
+
+### A tick a second, a recomputation a minute
+
+`Time.every` counts from whenever it was subscribed, not from the top of the
+minute, so a sixty-second interval leaves the window up to fifty-nine seconds
+stale and a clock that says 10:31 while it is 10:32 is simply wrong. The tick
+is therefore once a second, and `update` decides what a tick is worth:
+
+  - a different second: set `posix`. The POSIX line moves; nothing else can.
+  - a different *minute*: set `posix` **and** ask the helper for the table.
+
+So the port carries one message a minute and the screen gets one `setText` a
+second. Verified by hand -- the recomputation landed on POSIX `1788351000`,
+which is a multiple of sixty, so the tick is not merely firing, it is firing on
+the boundary.
+
+The reply carries back the instant it was asked about, so `Answered` writing
+`posix` from it is a no-op rather than a second that stutters: it arrives in
+milliseconds, while this side is still on the second that sent it.
+
+### A button with two captions, because a check box cannot report
+
+A toggle wants a check box, and `CheckBoxes` was the wrong widget for a reason
+worth writing down: **a cluster reports what is ticked only when a dialog is
+answered.** The converter is a window and is never answered, so the model would
+never learn that the box had been ticked at all. The state has to be readable
+from a button caption instead, and the caption says what pressing it does --
+`~L~ive clock`, then `~S~top clock`.
+
+`L` and `S` because both are free, and the two letters that read best were not:
+`~C~lock` binds Alt-C, the status line is `ofPreProcess` and already has Alt-C
+for the converter, so the button would have opened the window it is in.
+Alt-D for "Down" is the hex viewer for the same reason. This is the third time
+the status line has picked the letters in this program.
+
+### What the pty driver can and cannot ask
+
+It checks that the mode is live, that it is read-only and that it stops. It
+does not check the minute turning over, and the reason is arithmetic rather
+than principle: the tick recomputes on the minute, so a driver that waited for
+one would wait up to sixty seconds, and `drive_time.py` is already the slowest
+of the twenty-nine suites and sets the wall clock for all of them.
+
+What makes the cheap half checkable at all is the POSIX line counting seconds
+where the clocks count minutes. Three seconds of waiting proves the
+subscription is alive, and it costs the suite three seconds rather than sixty.
+That is not why the POSIX line counts -- it counts because a POSIX timestamp
+*is* a count of seconds and the rows have no seconds column -- but a design
+that makes a fast test possible is worth noticing when it happens.
