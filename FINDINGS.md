@@ -4425,3 +4425,93 @@ highlight *is* the directory being shown, so a wheel turn that reaches the tree
 changes the title and the file list, and one that does not reach it changes
 nothing. A test for which pane got an event does not need a pane long enough to
 scroll; it needs a pane that says out loud when it was touched.
+
+## The button that acted on the first row, whatever the highlight said
+
+Reported straight after the wheel was fixed, and the two are related only in
+that fixing the first made the second easy to hit: *"my cursor is on
+Asia/Seoul, and then I clicked Add, but Asia/Aden was added."* The same with
+Remove, on the other list.
+
+### A list box's highlight lives in C++, and only one event says where it is
+
+`Tui.gren` has said so all along, in the sentence describing the event:
+
+> `Focused` -- the highlight in a list box moved, by arrow key, mouse or a
+> render that replaced the list. **This is how the model learns which entry an
+> "Edit" or "Delete" button should act on**; Turbo Vision's own examples read
+> the list's `focused` member at the moment they need it, which a program that
+> cannot call into C++ has no way to do.
+
+The picker handled `Focused` for exactly one of its three lists -- the area
+list, where it is load-bearing, because choosing an area *is* writing its
+prefix into Find. The zone list and the Displaying list had no branch at all.
+
+So `picker.highlight` and `picker.picked` were only ever written by
+`Tui.Selected`, which carries an index of its own. `Space` and a double click
+were therefore always right, and every check in the suite went through
+`space_on()` and passed. The buttons read the model's copy, and the last thing
+to have written to it was a filter reset -- `highlight = 0`. Add added row
+zero. Click, arrow key or wheel, however far down, made no difference to it at
+all.
+
+Three lines fixed it, and the shape of the bug is worth more than the fix:
+**an event handled for one view of a kind and not for its siblings.** The area
+list needed `Focused` for a visible, interesting reason, which is exactly what
+made it look like an area-list feature rather than the list-box contract it
+is.
+
+### And the test suite was written in the one style that could not see it
+
+`space_on()` clicks a row and presses `Space`, which is how the picker is meant
+to be driven and is what the pty checks had always used. It sends `Selected`,
+and `Selected` carries the index, so the stale copy was never read. A driver
+that used the buttons instead would have caught this on the day the picker was
+written.
+
+The new checks click a row and press the *button*, which is the other half of
+the same act -- and one of them borrows a zone and puts it back, so the state
+the later checks read is unchanged. The rule that falls out: **drive a widget
+by every route the user has, not by the one the model treats as canonical.**
+
+## Cancel, on a window that has already committed everything
+
+Asked for in the same breath: *"this zone window also needs a Cancel button, so
+we can exit it without saving the changes."*
+
+There was nothing to not-save. The picker applies every add and remove to the
+converter as it happens -- `withPicker` sets `model.zones` and asks for the
+recompute -- because that is what makes it a workspace rather than a form: you
+add Seoul, the row appears behind you, and that is the answer to "is that the
+one I meant". `Main` writes the config file whenever what the converter is
+displaying disagrees with what the file says, so the file is already written
+too, by the time a hand reaches the button.
+
+So Cancel could not be "do not commit". It is an undo, and the thing it undoes
+to has to be *remembered when the picker opens*, because by the time it is
+pressed no other copy of the list the user started with exists. One field on
+`Picker`, set once in `open`.
+
+The config file needs no part of this and gets none: restoring `model.zones`
+makes the converter disagree with the file, and the shell writes it for the
+same reason it wrote every other change. A cancel that changed nothing writes
+nothing. That comparison-not-message design in `Main` was written for the
+picker's *four* ways of changing the list; a fifth arrived and cost nothing,
+which is the argument for it made concrete a year late.
+
+**Closing the window is not Cancel.** The close box and `Alt-F3` keep what is
+on the screen. Turbo Vision's own convention is the opposite -- a dialog's
+close box is `cmCancel` -- and it is the wrong convention here: everything in
+that window has been visible on the converter behind it for as long as it has
+been open, and a close box that threw away five zones the user had just watched
+appear is a worse surprise than one that keeps them. The picker is only a
+window rather than a dialog for a redraw reason, but this is a place where it
+should behave like one.
+
+### The layout cost
+
+A fourth button did not fit beside the third, so the row moved left rather than
+Cancel going on the end: `Add >>` from column 19 to 4, and Done and Cancel in
+that order, which is the order every Turbo Vision dialog puts them in. None of
+them carries an `Alt` letter, for the reason the others do not -- `~C~ancel`
+would bind Alt-C and the status line has that for the converter itself.

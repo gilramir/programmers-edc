@@ -302,7 +302,7 @@ when you press a button is not worth having.
     │  Asia 82      ▒                           ▓                    ▒ │
     │                                                                  │
     │ Space adds or removes; an area types its prefix into Find.       │
-    │            Add >>       << Remove       Done                     │
+    │    Add >>       << Remove       Done        Cancel               │
     └──────────────────────────────────────────────────────────────────┘
 
 **An area is a saved search and not a second axis.** Choosing `Asia` types
@@ -321,10 +321,21 @@ does not: `~A~dd` would bind Alt-A and the status line already has that for the
 ASCII chart. So the buttons are the mouse's, `Space` on either list is the
 keyboard's, Enter is Done and Alt-F3 closes the window.
 
-The list is written to `config.json` the moment it changes. Emptying it
-entirely is a choice that sticks: an absent `timezones` key means predc has
-never been told and starts at this machine's zone, and an empty array means you
-removed them all and get UTC and POSIX alone.
+**Add and Remove act on the row the highlight is on**, in the zone list and the
+Displaying list respectively -- wherever you left it, with the arrow keys, a
+click or the wheel.
+
+The list is written to `config.json` the moment it changes, and the converter
+behind the window shows the row as soon as you add it, which is the answer to
+"is that the one I meant". **Cancel** is the price of that: since there is no
+draft to throw away, it is an undo, back to the list the converter was showing
+when the window opened. **Done** and closing the window both keep what is on
+the screen -- a close box that discarded five zones you had just watched appear
+would be the worse surprise of the two.
+
+Emptying the list entirely is a choice that sticks: an absent `timezones` key
+means predc has never been told and starts at this machine's zone, and an empty
+array means you removed them all and get UTC and POSIX alone.
 
 One oddity that belongs to the database rather than to predc: the browsable
 names are the canonical ones, and a few of those are the old spellings. Nepal

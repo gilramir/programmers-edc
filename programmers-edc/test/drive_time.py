@@ -228,6 +228,20 @@ def pane_point(app, head, nth=2):
     return (heading.index(head) + 3, r + 1 + nth)
 
 
+def click_in(app, head, entry, settle=1.0):
+    """Click an entry in one of the picker's three lists, by column.
+
+    Not `line.index(entry)`: a zone that has been chosen is on the screen in
+    two of the three lists at once, and which one was clicked is the question
+    every check below this is asking."""
+    r, heading = picker_heading(app)
+    for i, cell in enumerate(pane(app, head)):
+        if cell == entry:
+            app.click(heading.index(head) + 2, r + 2 + i, settle=settle)
+            return True
+    return False
+
+
 def find_text(app):
     """What is in the Find box, without the count that shares its line."""
     for line in app.render().split("\n"):
@@ -422,6 +436,49 @@ def main():
     check("an area under the pointer answers for itself",
           find_text(app) != before, str((before, find_text(app))))
 
+    # ---- the buttons act on the highlight, and the highlight is C++'s ----
+    #
+    # A list box's highlight lives in Turbo Vision, and `Focused` is the only
+    # way a model that cannot call into it finds out where the highlight went.
+    # `Selected` carries an index of its own, so `Space` and a double click
+    # were always right; the buttons read the model's copy, and nothing wrote
+    # to it between one `Selected` and the next. So Add added whichever row
+    # the last filter reset had left it pointing at -- the first one -- however
+    # far down the list the highlight had since been clicked or wheeled.
+    type_in_find(app, "Asia/", clear=True)
+    zones = pane(app, "Zone")
+    wanted = zones[2]
+    click_in(app, "Zone", wanted)
+    click_button(app, "Add >>")
+    check("Add adds the row the highlight is on, not the first one",
+          (config_of(home) or {}).get("timezones")
+          == ["America/Chicago", "Asia/Seoul", "Asia/Katmandu", wanted],
+          str(config_of(home)) + " wanted " + wanted)
+
+    # And the other list, whose highlight is a second copy of the same bug.
+    click_in(app, "Displaying", "Asia/Seoul")
+    click_button(app, "<< Remove")
+    check("Remove removes the row the highlight is on, not the first one",
+          (config_of(home) or {}).get("timezones")
+          == ["America/Chicago", "Asia/Katmandu", wanted],
+          str(config_of(home)))
+
+    # Seoul back, and the borrowed zone off again, so that the checks after
+    # Done have the three rows they read -- in a different order, which none of
+    # them looks at. `Space` for the add, which is the route that was never
+    # broken, and the button for the remove, which is the route that was.
+    type_in_find(app, "Asia/Seoul", clear=True)
+    # `click_in` and not `space_on`, which searches the whole line: the name is
+    # now in the Find box as well, and the box is the first place it is found.
+    click_in(app, "Zone", "Asia/Seoul")
+    app.send(b" ", settle=1.4)
+    click_in(app, "Displaying", wanted)
+    click_button(app, "<< Remove")
+    check("and the borrowed zone comes off the same way",
+          (config_of(home) or {}).get("timezones")
+          == ["America/Chicago", "Asia/Katmandu", "Asia/Seoul"],
+          str(config_of(home)))
+
     click_button(app, "Done")
     check("Done closes the picker", "Time zones" not in app.render(), app.render())
 
@@ -459,6 +516,33 @@ def main():
           app.render())
     check("UTC stays anyway, because it was never on the list",
           row(app, "UTC") is not None, app.render())
+
+    # ---- Cancel puts back the list the picker opened on ----
+    #
+    # The picker applies every add and remove to the converter as it happens,
+    # which is what makes it a workspace rather than a form. So there is no
+    # draft to throw away and Cancel cannot be "do not commit": it is an undo,
+    # back to what the converter was showing when the picker opened. The
+    # config file follows without being told, because the shell writes it
+    # whenever the two disagree.
+    app.send(b"\x1bz", settle=1.5)
+    type_in_find(app, "Asia/Seoul")
+    click_in(app, "Zone", "Asia/Seoul")
+    app.send(b" ", settle=1.4)
+    # The config file and not the screen, for the same reason the first add was
+    # checked that way: the picker is correctly in front of the converter, so
+    # the row it just added is behind it. The screen is read after Cancel,
+    # when there is nothing in the way.
+    check("a zone added after the list was emptied is written down",
+          (config_of(home) or {}).get("timezones") == ["Asia/Seoul"],
+          str(config_of(home)))
+
+    click_button(app, "Cancel")
+    check("Cancel closes the picker", "Time zones" not in app.render(), app.render())
+    check("and puts back the list it opened on",
+          (config_of(home) or {}).get("timezones") == [], str(config_of(home)))
+    check("so the row it added is gone again",
+          row(app, "Asia/Seoul") is None, app.render())
 
     app.send(b"\x1bx", settle=1.0)
     check("Alt-X exits", app.wait(timeout=6) == 0, "")

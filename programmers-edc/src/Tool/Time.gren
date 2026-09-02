@@ -192,6 +192,12 @@ type alias Picker =
     , chosen : Array String
     , highlight : Int
     , picked : Int
+    -- What the converter was showing when the picker opened, so that Cancel
+    -- has something to put back. It has to be remembered rather than
+    -- recomputed because every add and remove is applied to the table at once
+    -- -- see `withPicker` -- so by the time Cancel is pressed there is no
+    -- other copy of the list the user started with.
+    , opened : Array String
     }
 
 
@@ -596,6 +602,9 @@ update wiring event model =
             else if cmd == "time.done" then
                 { model = { model | picker = Nothing }, command = Cmd.none }
 
+            else if cmd == "time.cancel" then
+                cancel wiring model
+
             else
                 { model = model, command = Cmd.none }
 
@@ -613,7 +622,17 @@ update wiring event model =
         -- a second axis. It arrives on `Focused` rather than `Selected` so
         -- that walking the list with the arrow keys narrows as you go, the way
         -- the filter does when you type into it.
-        Tui.Focused { id, text } ->
+        --
+        -- The other two lists are here for a duller reason and it was a bug
+        -- that they were not: a `ListBox`'s highlight lives in C++, and
+        -- `Focused` is the only way a model that cannot call into it learns
+        -- where the highlight went. `Selected` carries an index too, so
+        -- `Space` and a double click always acted on the right row -- but the
+        -- Add and Remove buttons read `highlight` and `picked`, and nothing
+        -- had written to them since the last `Selected`. Click Seoul, press
+        -- Add, and Aden was added: the row the filter had left the highlight
+        -- on when it was last reset to zero.
+        Tui.Focused { id, index, text } ->
             if id == pickerAreas then
                 { model =
                     { model
@@ -622,6 +641,16 @@ update wiring event model =
                                 (\picker -> { picker | query = queryFor text, highlight = 0 })
                                 model.picker
                     }
+                , command = Cmd.none
+                }
+
+            else if id == pickerZones then
+                { model = { model | picker = Maybe.map (\picker -> { picker | highlight = index }) model.picker }
+                , command = Cmd.none
+                }
+
+            else if id == pickerChosen then
+                { model = { model | picker = Maybe.map (\picker -> { picker | picked = index }) model.picker }
                 , command = Cmd.none
                 }
 
@@ -666,9 +695,55 @@ open wiring model =
             { model = model, command = Tui.focus wiring.tui pickerId }
 
         Nothing ->
-            { model = { model | picker = Just { query = "", all = [], chosen = model.zones, highlight = 0, picked = 0 } }
+            { model =
+                { model
+                    | picker =
+                        Just
+                            { query = ""
+                            , all = []
+                            , chosen = model.zones
+                            , highlight = 0
+                            , picked = 0
+                            , opened = model.zones
+                            }
+                }
             , command = askForZones wiring.intl
             }
+
+
+{-| Cancel: close the picker and put back the list it opened on.
+
+The picker applies every add and remove to the converter as it happens, which
+is what makes it a workspace rather than a form -- you add Seoul and the row
+appears behind you, which is the answer to "is that the one I meant". The cost
+of that is that there is no draft to throw away, so Cancel cannot be "do not
+commit"; it has to be an undo, and the thing it undoes to is remembered when
+the picker opens.
+
+The config file follows without being told. `Main` writes it whenever what the
+converter is displaying disagrees with what the file says, so restoring the
+list restores the file, and a cancel that changed nothing writes nothing.
+
+Closing the window -- the close box, or `Alt-F3` -- is *not* this. It keeps
+what is on the screen, because what is on the screen is what the user has been
+looking at for the whole time the picker was open, and a close box that threw
+away five zones they had just watched appear would be the worse surprise of
+the two.
+-}
+cancel : Wiring -> Model -> Step
+cancel wiring model =
+    when model.picker is
+        Nothing ->
+            { model = model, command = Cmd.none }
+
+        Just picker ->
+            if picker.opened == model.zones then
+                { model = { model | picker = Nothing }, command = Cmd.none }
+
+            else
+                { model = { model | picker = Nothing, zones = picker.opened }
+                , command = atInstant wiring.intl model.posix picker.opened
+                }
 
 
 add : Model -> Picker -> Step
@@ -1421,7 +1496,7 @@ chooser desktop picker =
             }
         , Button
             { id = "time.addbtn"
-            , rect = { x1 = 19, y1 = listBottom + 2, x2 = 32, y2 = listBottom + 4 }
+            , rect = { x1 = 4, y1 = listBottom + 2, x2 = 17, y2 = listBottom + 4 }
             , title = "Add >>"
             , cmd = "time.add"
             , isDefault = False
@@ -1429,7 +1504,7 @@ chooser desktop picker =
             }
         , Button
             { id = "time.rmbtn"
-            , rect = { x1 = 34, y1 = listBottom + 2, x2 = 50, y2 = listBottom + 4 }
+            , rect = { x1 = 19, y1 = listBottom + 2, x2 = 35, y2 = listBottom + 4 }
             , title = "<< Remove"
             , cmd = "time.remove"
             , isDefault = False
@@ -1437,10 +1512,22 @@ chooser desktop picker =
             }
         , Button
             { id = "time.donebtn"
-            , rect = { x1 = 52, y1 = listBottom + 2, x2 = 63, y2 = listBottom + 4 }
+            , rect = { x1 = 37, y1 = listBottom + 2, x2 = 48, y2 = listBottom + 4 }
             , title = "Done"
             , cmd = "time.done"
             , isDefault = True
+            , takesFocus = True
+            }
+        -- Done and then Cancel, which is the order every Turbo Vision dialog
+        -- puts them in, and the reason the row of buttons moved left rather
+        -- than Cancel going on the end: a fourth button did not fit beside
+        -- the third.
+        , Button
+            { id = "time.cancelbtn"
+            , rect = { x1 = 50, y1 = listBottom + 2, x2 = 63, y2 = listBottom + 4 }
+            , title = "Cancel"
+            , cmd = "time.cancel"
+            , isDefault = False
             , takesFocus = True
             }
         ]
