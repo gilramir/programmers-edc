@@ -6,9 +6,9 @@ the shell costs on its own. Everything it checks is the part of the program
 that will still be true when four tools are open on top of it.
 
 It runs `bin/predc.js` and not gren-tvision's `gren-tui` bin, deliberately: the
-launcher is part of what an application is, and it is where the host port will
-be wired when the time tool needs Intl. If the launcher stops resolving the
-runtime, this is what says so.
+launcher is part of what an application is, and it is where the time
+converter's `Intl` port pair is subscribed. If the launcher stops resolving the
+runtime -- or stops attaching that second pair -- this is what says so.
 """
 
 import os
@@ -64,7 +64,15 @@ def main():
     check("the menu bar came from the view",
           all(x in rows[0] for x in ("File", "Window", "Help")), rows[0])
     check("the status line is the bottom row",
-          all(x in rows[24] for x in ("Exit", "Zoom", "Next", "Close")), rows[24])
+          all(x in rows[24] for x in ("Exit", "ASCII", "Time", "Close")), rows[24])
+    # A status line is truncated at the terminal's width without a word about
+    # it, so a bar that has grown one entry too long is a bar that quietly
+    # stops mentioning how to close a window. Zoom and Next came off for the
+    # fourth tool; this is what stops the fifth from pushing Close off too.
+    check("and it fits in eighty columns", len(rows[24].rstrip()) < 80,
+          f"{len(rows[24].rstrip())} columns: {rows[24]}")
+    check("Zoom and Next are the two that came off", 
+          "Zoom" not in rows[24] and "Next" not in rows[24], rows[24])
     check("the desktop is empty until a tool is opened",
           not any("─" in row or "═" in row for row in rows[1:24]),
           "\n".join(rows[1:6]))
@@ -93,6 +101,16 @@ def main():
           edges is not None and abs(edges[0] - (69 - edges[1])) <= 1,
           f"frame at {edges} of 70 columns")
     app.send(b"\r", settle=0.9)
+
+    # A key that came off the bar still works, because the Window menu carries
+    # the same shortcut and `TMenuBar` is `ofPreProcess` exactly as
+    # `TStatusLine` is. Worth a check rather than a comment: it is the whole
+    # reason dropping two entries was safe.
+    app.send(b"\x1ba", settle=1.2)
+    check("a tool opens", "ASCII" in app.render() and "0_" in app.render(), app.render())
+    app.send(b"\x1b\x1b[13~", settle=1.2)
+    check("and Alt-F3 still closes it, off the status line and onto the menu's",
+          "0_" not in app.render(), app.render())
 
     app.send(b"\x1bx", settle=1.0)
     code = app.wait(timeout=6)

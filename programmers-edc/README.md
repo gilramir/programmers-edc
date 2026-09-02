@@ -86,6 +86,7 @@ Two things about it are temporary, and both are temporary for the same reason
     predc                 the desktop, with nothing open
     predc ascii           ... with the ASCII chart open
     predc calc            ... with the RPN calculator open
+    predc time            ... with the time zone converter open, at this moment
     predc hex [FILE]      ... with the hex viewer open, on FILE if you name one
     predc --help          what the commands are
     predc --version
@@ -114,6 +115,8 @@ takes it. FINDINGS.md has the story.
     bin/predc.js      the launcher: resolves main.js against itself, not the cwd
     src/Main.gren     the shell -- menu bar, status line, About, which tools are open
     src/Cli.gren      the command line, as a value: one command per tool
+    bin/timezones.js  the IANA database, behind a port pair -- the one thing
+                      predc needs that Gren has no answer for
     src/Tool/         one module per tool, each handing back a Tui.Window
     src/Ascii.gren    what ASCII says about a byte, shared by two of the tools
     src/Theme.gren    the three colour schemes, and the inks the tools paint with
@@ -232,6 +235,114 @@ tools always work.
 gren-tvision's [`doc/clipboard.md`](../gren-tvision/doc/clipboard.md) is the
 long version: every environment, what each terminal calls its permission, and a
 one-line test that says whether the terminal or tmux is the one eating it.
+
+## Converting a time
+
+The window is one instant read several ways. Every white box is editable and
+they are all the same number seen differently, so typing into any of them moves
+every other one: a POSIX timestamp out of a log file, a wall clock in Seoul, or
+the hour field in Austin.
+
+    ┌─[■]─ Time converter ─────────────────────────────────────────┐
+    │                   YYYY   MM   DD    HH   MM                  │
+    │ America/Chicago   2026   09   01    14   32   CDT -05:00     │
+    │ Asia/Seoul        2026   09   02    04   32       +09:00     │
+    │ ──────────────────────────────────────────────────────────── │
+    │ UTC               2026   09   01    19   32       +00:00     │
+    │ POSIX             1788291120                                 │
+    │                                                              │
+    │  Now    Zones...                                             │
+    └──────────────────────────────────────────────────────────────┘
+
+**UTC and POSIX are always there** and are not on the configurable list. The
+rule across the middle is what separates the zones you chose from the two you
+get whether or not you asked. Everything above it is yours, and
+**Tools | Time converter** opens on the zone this machine is in until you say
+otherwise -- which predc finds out from `Time.getZoneName`, not from a table.
+
+No seconds, because nobody typing a time wants to. The instant underneath is a
+whole POSIX timestamp all the same, so pasting `1788291157` shows `14:32` and
+keeps the `:37`, and editing a minute field leaves it where it was. The POSIX
+box is the only place seconds are visible and it is never rounded.
+
+### The two mornings a year that are not times
+
+02:30 does not happen in Chicago on the second Sunday in March, and 01:30
+happens twice on the first Sunday in November. A converter that has no opinion
+about those is quietly wrong two days a year, so predc has one and says it out
+loud:
+
+    2026-03-08 02:30 does not exist in America/Chicago -- read as
+    2026-03-08 03:30.
+
+An ambiguous time takes the first of the two -- the one the clock read before
+it went back -- and a time that never happened is pushed **forward**, because
+forward is the direction the clock moved and an answer earlier than what you
+typed is the surprising one. The digits you typed stay in the field you typed
+them in; it is every other row that moves.
+
+The same sentence catches the 31st of April, and that is deliberate rather than
+lucky: the day field will take 1 to 31 in every month, because how long April
+is happens to be a question the IANA database already answers and predc has no
+business having a second opinion about.
+
+### Choosing which zones
+
+**Zones...** opens a second window -- not a dialog, because a dialog in
+gren-tvision cannot be redrawn while it is open and a filter that only applies
+when you press a button is not worth having.
+
+    ┌─[■]─ Time zones ─────────────────────────────────────────────────┐
+    │ Find  Asia/seo                          1 of 418                 │
+    │                                                                  │
+    │ Area             Zone                       Displaying           │
+    │  All 418      ▲   Asia/Seoul              ▲  America/Chicago   ▲ │
+    │  Africa 52    ▒                           ▓  Asia/Seoul        ▒ │
+    │  America 144  ▒                           ▓                    ▒ │
+    │  Asia 82      ▒                           ▓                    ▒ │
+    │                                                                  │
+    │ Space adds or removes; an area types its prefix into Find.       │
+    │            Add >>       << Remove       Done                     │
+    └──────────────────────────────────────────────────────────────────┘
+
+**An area is a saved search and not a second axis.** Choosing `Asia` types
+`Asia/` into Find; typing `seo` after it leaves `Asia/seo`. There is one piece
+of state and it is on the screen, so the box always says exactly why you are
+not looking at the zone you wanted -- which beats a rule about whether the area
+or the filter wins, because that rule would be invisible.
+
+The counts are on the area rows because the two levels help very unevenly:
+`America` is 144 names and `Arctic` is one. `All` is a row rather than a mode,
+which is also what makes opening the window show all 418 -- Turbo Vision
+highlights a list's first entry whether or not you asked it to.
+
+The buttons carry no `Alt` letters, for the same reason the calculator's keypad
+does not: `~A~dd` would bind Alt-A and the status line already has that for the
+ASCII chart. So the buttons are the mouse's, `Space` on either list is the
+keyboard's, Enter is Done and Alt-F3 closes the window.
+
+The list is written to `config.json` the moment it changes. Emptying it
+entirely is a choice that sticks: an absent `timezones` key means predc has
+never been told and starts at this machine's zone, and an empty array means you
+removed them all and get UTC and POSIX alone.
+
+One oddity that belongs to the database rather than to predc: the browsable
+names are the canonical ones, and a few of those are the old spellings. Nepal
+is `Asia/Katmandu` in the list, though `Asia/Kathmandu` works perfectly if you
+put it in the config file by hand.
+
+### Where the arithmetic is
+
+Not in Gren. There is no leap-year rule, no month length and no daylight-saving
+logic anywhere in `src/`, because a time zone is not an offset and the only
+thing on the machine that knows the difference is the IANA database compiled
+into node's `Intl`. `bin/timezones.js` is that half, reached over a second port
+pair that `bin/predc.js` subscribes to -- which is exactly what the launcher
+existed for.
+
+Every reply carries the whole window rather than one row. One request per
+keystroke instead of one per zone, and no moment where the table is half
+updated because three answers arrived and two have not.
 
 ## Colors
 

@@ -4062,3 +4062,245 @@ returns "did the platform confirm", every layer above wrote it down as "did it
 work", and the two are not the same claim. When a program repeats a library's
 boolean in a sentence a person will read, the sentence has to say what the
 boolean actually knows.
+
+## The time converter, and the arithmetic Gren was never going to do
+
+predc's last v1 tool converts one instant between several time zones. Almost
+none of it is in Gren, and that was the first decision rather than a
+concession.
+
+### A time zone is not an offset, and there is no Gren that knows it
+
+The tempting shape is a table: `America/Chicago` is -06:00, `Asia/Seoul` is
++09:00, done. It is wrong for Chicago half the year, wrong for all of Chicago
+in 1974, and wrong about Nepal in either direction -- `Asia/Katmandu` was
++05:30 until 1986 and is +05:45 now. The rules live in the IANA database, which
+ships inside every JavaScript runtime as `Intl` and has no Gren equivalent.
+
+Gren core's `Time` is explicit about the half it cannot do. `Time.here`'s own
+doc comment says it will never answer `America/New_York` and will hand back
+`Etc/GMT-5` or `Etc/GMT-4` depending on the season, "due to limitations in
+JavaScript". So `here` is useless for this.
+
+`Time.getZoneName` is not, and this was the one pleasant surprise: it reads
+`Intl.DateTimeFormat().resolvedOptions().timeZone` and answers
+`Name "America/Chicago"`. **The machine's own zone costs no port at all**, and
+that is what predc starts in when its config file has never been written.
+`Offset minutes` is the other branch, for a runtime with no `Intl`, which is
+not node.
+
+Everything else goes over a second port pair, subscribed in `bin/predc.js` --
+which is what the launcher's comment had been anticipating since the shell was
+written. `run()` in `gren-tvision-runtime` returns the app precisely so that a
+program with ports of its own can have them.
+
+### One reply carries the whole window
+
+The obvious protocol is a request per zone. It is wrong twice: N round trips
+per keystroke, and a model holding a half-updated table while the answers
+straggle in. So there are two requests and they answer with the same thing:
+
+    {type:"atInstant", posix, zones}          -> {type:"rows", posix, rows, ...}
+    {type:"fromParts", zone, y,mo,d,h,mi,s,
+                       zones}                 -> {type:"rows", posix, rows, ...}
+
+`rows` is every zone plus UTC, at one instant, with each one's offset in
+**minutes** -- Kathmandu and Chatham are at :45, and a converter that cannot
+say so is wrong about two countries.
+
+The reply also echoes what was asked for. Several requests can be in flight and
+a reply that describes itself needs no bookkeeping on the Gren side to match up
+with the request that caused it.
+
+### Getting a wall clock back to an instant
+
+`Intl` will format an instant in a zone. It will not parse one, and it has no
+API that hands back a zone's offset as a number. Both are done by subtracting
+two clocks:
+
+```js
+function offsetMinutes(zone, ms) {
+  return Math.round((utcMs(wallAt(zone, ms)) - ms) / 60000);
+}
+```
+
+and the reverse is a two-pass guess -- assume the zone is at UTC, look up what
+it really was near that guess, subtract; that can land on the wrong side of a
+daylight-saving change, so look the offset up again at the corrected instant
+and subtract that too.
+
+Two candidates come out of that, and **twice a year the wall clock is not a
+function**, so which one you take has to be decided rather than fallen into:
+
+  - Both candidates read back as the time asked for: the clock went backwards
+    and the instant is ambiguous. Take the earlier -- the first time the clock
+    read it, which is what `fold = 0` means everywhere else that has had to
+    name this.
+  - Neither reads back: the clock jumped forwards and this time does not
+    exist. Take the **later**.
+
+The first version took whichever the second pass produced, and that quietly
+resolved a missing `02:30` in Chicago to `01:30` -- an hour *earlier* than what
+was typed, which is the more surprising of the two wrong answers. Pushing
+forward matches the direction the clock moved and matches what `date`, Python
+and Java do.
+
+Either way the answer is read back and compared, and a mismatch is reported:
+
+    2026-03-08 02:30 does not exist in America/Chicago -- read as
+    2026-03-08 03:30.
+
+The same check catches the 31st of April for free, which is why the day field
+still accepts 1 to 31 in every month. How long April is happens to be a
+question the one place that knows about calendars already answers.
+
+### Three rules that fall out of recomputing on every keystroke
+
+**The field being typed in is never written back to.** The model holds the id
+of the last field touched and the text put in it; that field renders from
+there and every other renders from the last reply. Without it, normalising a
+typed `5` into `05` moves the caret under the user's fingers on the next
+keystroke. It is one `Maybe` and it is load-bearing.
+
+**An incomplete row asks nothing.** `allowed` keeps letters out entirely, and
+empty-or-out-of-range is a sentence on the message line with no request sent,
+so the other rows keep showing the last instant that made sense.
+
+**A message line has to be two rows.** The sentence above is seventy-eight
+characters and the window is sixty. Clipped at one row it read
+"...America/Chicago -- read as", which keeps the complaint and loses the
+answer.
+
+### A number too big for a calendar used to close the program
+
+Leaning on a digit key in the POSIX box killed predc. `Date` holds ±8.64e15
+milliseconds; past that every `Intl` call throws a `RangeError`, and a throw
+inside a port subscription takes the process down with the terminal still in
+its alternate screen. It is checked before the call now, and the subscription
+has a `try` around it as well, because the worst thing a converter can do is
+disagree with you about a date by vanishing.
+
+**The general rule:** a port subscription is an uncaught-exception boundary
+with a terminal on the other side of it. Anything reachable from user input
+belongs inside a `try`.
+
+### The formatter that renamed a parameter, and whose bug it was
+
+`fromParts ports posix wanted asked` came back from `gren-format` as
+`fromParts ports posix (wanted as ked)`, which does not compile. It looks like
+a formatter bug and is not: it is
+[compiler-common#31](https://github.com/gren-lang/compiler-common/issues/31),
+where the shared parser lexes the `as` pattern-alias keyword without checking
+for a word boundary, so any parameter whose name *begins* with `as` is split in
+two. `gren-format` inherits it along with the parser.
+
+**The lesson is about where to look rather than about the bug.**
+`gren-format-lib`'s own documentation has a *Known limitations and Bugs*
+section listing every open upstream issue that affects its output, and #31 is
+in it. Reading that first would have cost a minute; deriving it from a minimal
+repro cost rather more, and produced a report of something already reported.
+When a formatter appears to be wrong, that list is the first stop.
+
+### `maxLen` was one short
+
+`2026` came out as `202`. `TInputLine`'s constructor takes a *limit* and stores
+`maxLen = limit - 1`, and `views.cc` passed the model's `maxLen` through as the
+limit -- so every field held one character fewer than it asked for. Invisible
+for fifteen examples, because the only `maxLen` in the package is
+`fileDialog`'s 255. Fixed at the construction site; no protocol change, since
+the wire field's meaning merely became correct. The rectangle needs one more
+column than that again, for the caret.
+
+### The picker is a window because a dialog cannot be redrawn
+
+The zone picker filters 418 names as you type. `Tui.dialog` builds its views
+once and reads them back as it is destroyed, so a live filter inside a modal is
+not expressible; `Tool.Hex` reopens its dialog to change directory, which is
+right for a directory and hopeless for a keystroke. So the picker is an
+ordinary window, which loses nothing -- a modal is for a question and this is a
+workspace.
+
+**One piece of state, not two.** An area list *and* a filter would need a rule
+about which wins, and that rule would be invisible. So choosing an area types
+its prefix into the same Find box: `Asia` gives `Asia/`, typing `seo` gives
+`Asia/seo`. The box on the screen is then always the whole reason you are or
+are not seeing something. `All` is the first row rather than a mode, which also
+answers an unavoidable event -- Turbo Vision highlights a list's first entry
+when the window opens, and with the areas alone at the top that silently
+filtered the picker to Africa before anybody touched it.
+
+The counts are on the rows because the two levels help very unevenly:
+`America` is 144 names, `Arctic` is one.
+
+### The window that kept coming to the front
+
+Adding a zone buried the picker under the converter. `Tui.focus` was being sent
+with the request, and the runtime *does* re-apply a pending focus after the
+render it came with -- but the render that rebuilds the converter is the next
+one. Adding a zone does not make the table taller until the reply arrives with
+a row in it, and a window whose view list changed is rebuilt rather than
+patched, and a rebuilt window arrives on top.
+
+So the focus is asked for **on the reply**, behind a flag, rather than on the
+click -- and a flag rather than "always refocus the picker", because the user
+may have clicked down to the converter deliberately and a reply that yanked the
+caret back would be worse than the bug.
+
+The port trace found this. The screen said only "wrong window in front", which
+is consistent with about four different causes.
+
+### Alt-T, and the hotkey that cost the Tools menu
+
+The converter is on `Alt-C`. `Alt-T` is the obvious letter and it is the menu
+bar's, for `~T~ools` -- and the status line wins, measured: putting the
+converter on `Alt-T` opened the converter and silently cost the Tools menu its
+hotkey. A shortcut for one tool is not worth the gateway to all of them.
+
+The picker's three buttons carry no hotkey at all, which is the same rule the
+calculator's keypad follows: `~A~dd` binds Alt-A, the status line has Alt-A for
+the ASCII chart and is `ofPreProcess`, so pressing Add opened the ASCII chart.
+Buttons serve the mouse; `Space` on a `ListBox` serves the keyboard.
+
+### Two port pairs, and the type that cannot tell them apart
+
+`Tui.Ports msg` and the converter's own `Ports msg` are the *same record of two
+functions*. Handing one where the other belongs compiles silently and posts
+Turbo Vision's traffic to the time zone helper. Nothing can catch that -- Gren's
+records are structural -- so the two live in one record with field names,
+`{ intl, tui }`, and the field name is the entire defence.
+
+### `Maybe (Array String)` in the config, and why not an array
+
+`Nothing` means predc has never been told and starts at this machine's zone;
+`Just []` means the user removed them all and gets UTC and POSIX alone.
+Collapsed into a bare array, emptying the list would put the local zone back on
+the next run with no way left to say what the user plainly said. `Nothing`
+writes no key at all rather than a `null`, so a config file predc has never
+asked about zones is indistinguishable from one the previous version wrote.
+
+Adding the field also forced every field in that decoder to become
+independently optional. A required-field decoder would have thrown away a
+`config.json` written yesterday -- theme and all -- for not mentioning time
+zones.
+
+### The name in the list is not always the name that works
+
+`Intl.supportedValuesOf('timeZone')` returns canonical names, and a few of
+those are the old spellings: the list says `Asia/Katmandu` and never
+`Asia/Kathmandu`, though `Intl` accepts both. So a zone written into the config
+file by hand can be one the picker cannot find, and it still works, because the
+JavaScript side asks `Intl` whether a name is real rather than checking it
+against the browsable list. Cost half an hour of believing the filter was
+broken.
+
+### What the tests are split by
+
+`drive_time.py` drives the window: what a keystroke does, which row moves, that
+the caret stays. `timezones.checks.js` -- run by `drive_timezones.py`, since
+`tools/run_tests.py` discovers `test/drive*.py` and there is no list -- asks
+the database questions a pty is the wrong instrument for: Nepal in 1970, the
+two Chicago mornings, year 70 meaning 70, a name node has never heard of.
+
+`TZ` is set for the whole pty run, which is what turns "the machine's own zone"
+from a fact about whoever is running the suite into something a check can
+assert. node honours it and `getZoneName` reports it.

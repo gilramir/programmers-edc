@@ -1134,3 +1134,68 @@ so over ssh that half never runs -- `OSC 52` is the only route that can work,
 and tmux's default `set-clipboard external` swallows it (measured; `on`
 forwards). `copyToClipboard`'s doc comment now carries all of it, because the
 program that has to explain this to a user is the one built on this package.
+
+## `maxLen` was one short, and a four-digit year proved it
+
+predc's time converter wanted a field four characters wide. It got three:
+`2026` came out as `202`, and the same off-by-one shortened every field on the
+window by one.
+
+`TInputLine`'s constructor takes a **limit** and stores `maxLen = limit - 1`
+(`tinputli.cpp`), with a buffer of `maxLen + 1` bytes. `views.cc` passed the
+model's `maxLen` straight through as that limit, so the field held one fewer
+character than the model asked for. Nothing had caught it because the only
+`maxLen` in the package is `fileDialog`'s 255, where a filename losing its
+254th character is invisible, and because the field still *looks* right until
+the value is exactly as long as the field.
+
+The fix is `maxLen + 1` at the one construction site, so the name on the Gren
+side means what it says: how many characters the user may type.
+`setInputText`'s write at `[maxLen]` is still the last byte of the buffer, so
+the alloc-size reasoning in the comment above it is unchanged, and ASAN agrees.
+
+No protocol bump -- the wire field kept its name and its meaning became
+correct. **The general shape is worth remembering:** a C++ constructor whose
+parameter is named for a limit rather than for a length is an off-by-one
+waiting for the first caller who cares about the exact width. This one waited
+through fifteen examples and three tools.
+
+## A dialog cannot be redrawn while it is open
+
+The zone picker wanted a filter box that narrows a list of 418 as you type.
+That is not expressible: `Tui.dialog` is a `Cmd`, `tv.dialog()` builds the
+views once and returns a promise, and the differ has no path into an open
+modal. The established alternative is `Tool.Hex`'s -- close it and reopen it
+one directory down -- which resets the caret and is fine for a directory and
+useless for a keystroke.
+
+predc's picker is therefore an **ordinary window** of the tool's, with Done
+where Cancel would have been. Nothing was lost: a modal is for a question and
+this is a workspace, it blocks nothing, and the converter behind it keeps
+working. But the gap is real and this is where it is written down.
+
+If it is ever closed, the shape to reach for is the one `Tui.Ui` already has
+for everything else -- a `modal : Maybe DialogSpec` field rendered every
+update, patched by the differ like a window -- rather than a second message
+that pushes new views into a live dialog. Modality without nesting is already
+the invariant; this would be modality without *staleness*, which is the same
+argument one layer up.
+
+## A rebuilt window comes to the front, one update later than you think
+
+The picker kept being buried by the converter behind it. `Tui.focus` was being
+sent with the request that changed the zone list, and the runtime does
+re-apply a pending focus after the render it came with -- but the render that
+*rebuilds* the converter is not that one. It is the next one: adding a zone
+does not make the table taller until the reply comes back with a row in it, an
+update later, and a window whose view list changed is rebuilt rather than
+patched, and a rebuilt window arrives on top.
+
+So a tool with two windows has to ask for the focus **when the thing that
+changes the layout lands**, not when the user's click happens. predc carries a
+one-field flag for it and the port trace is what found it -- the screen alone
+said only "wrong window in front".
+
+This is not a defect to fix in the package, but it is a fact about it that
+nothing wrote down: `Tui.focus` is a request about the render it accompanies,
+and a render caused by a `Cmd`'s eventual answer is a different render.

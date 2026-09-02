@@ -11,13 +11,16 @@
 // than the working directory -- a tool you carry every day gets run from
 // wherever you happen to be standing.
 //
-// It is also where the host port will be wired when the time tool needs
-// Intl: `run()` hands back the Gren app, so ports beyond the two the runtime
-// insists on are the launcher's to subscribe to.
+// It is also where the time converter's host port is wired. `run()` hands back
+// the Gren app, so ports beyond the two the runtime insists on are the
+// launcher's to subscribe to -- and the IANA time zone database is exactly the
+// kind of thing that has to be, because it lives in node's `Intl` and there is
+// no Gren of it. See `bin/timezones.js`.
 
 const path = require('path');
 
 const run = require('gren-tvision');
+const timezones = require('./timezones');
 
 const compiled = path.join(__dirname, '..', 'main.js');
 
@@ -30,4 +33,4 @@ try {
   process.exit(2);
 }
 
-run(main);
+timezones.attach(run(main));

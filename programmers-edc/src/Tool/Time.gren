@@ -1,0 +1,1447 @@
+module Tool.Time exposing
+    ( Model
+    , Msg
+    , Ports
+    , Step
+    , Wiring
+    , command
+    , init
+    , menuItem
+    , pickerId
+    , receive
+    , subscriptions
+    , update
+    , windowId
+    , windows
+    , zones
+    )
+
+{-| The time converter: one instant, several wall clocks, all of them
+editable.
+
+The tool exists because a POSIX timestamp in a log file means nothing until it
+means a time somewhere, and "somewhere" is usually three places at once -- the
+machine that wrote it, the office that filed the ticket, and the colleague you
+are about to ask about it. So the window is a table of the same instant read
+several ways, and typing into any row moves the instant and every other row
+with it.
+
+**Gren does no calendar arithmetic here, none at all.** No leap years, no month
+lengths, no daylight saving, no tz database. A time zone is not an offset --
+`America/Chicago` was -06:00 in February and is -05:00 today, and was neither
+in 1974 -- and the only thing on this machine that knows the difference is the
+IANA database compiled into JavaScript's `Intl`. So the arithmetic lives in
+`bin/timezones.js` behind a port pair, and this module formats numbers and
+decides what to ask.
+
+Three rules fall out of recomputing on every keystroke, and each of them is
+load-bearing:
+
+**The row being typed in is never written back to.** [`editing`](#Model) holds
+the id of the field the user last touched and the text they put in it, and that
+one field renders from `editing` while every other renders from the last
+answer. Without it, normalising a typed `5` into `05` would move the caret
+under the user's fingers on the very next keystroke.
+
+**An incomplete row asks nothing.** Every field takes digits only -- that is
+`allowed`, and it means a letter never arrives rather than arriving and being
+rejected -- and a field that is empty or out of range leaves the other rows
+showing the last instant that made sense, with the reason on the message line.
+Half a date is not a time and should not briefly look like one.
+
+**A time that does not exist is said out loud.** 02:30 on the second Sunday in
+March does not happen in Chicago, and neither does the 31st of April anywhere.
+Both come back with `adjusted` set, both keep the digits the user typed in the
+field they typed them in, and both put what the instant actually became on the
+message line. Silently snapping is the hex viewer's sniffing problem wearing a
+different hat: a tool that quietly shows you something other than what you
+asked for is the one thing a converter must never be.
+
+-}
+
+import Array exposing (Array)
+import Json.Decode as Decode
+import Json.Encode as Encode
+import Math
+import Task
+import Time
+import Tui exposing (MenuItem(..), Value(..), View(..))
+
+
+-- NAMES
+
+
+command : String
+command =
+    "tool.time"
+
+
+windowId : String
+windowId =
+    "time"
+
+
+{-| The zone picker is a second window of this tool's rather than a modal
+dialog, and that is forced rather than chosen.
+
+`Tui.dialog` builds a dialog's views once and reads them back only as it is
+destroyed -- `tv.dialog()` in the runtime is a promise, and the differ has no
+path into an open modal. So a dialog whose list narrows as you type is not
+expressible in the package today, and a filter that only applies when you
+press a button is not worth having.
+
+Nothing is lost by it. A modal is for a question, and this is a workspace: it
+blocks nothing, the converter behind it keeps working, and closing it from its
+frame is the same "never mind" that `Cancel` would have been.
+-}
+pickerId : String
+pickerId =
+    "time.zones"
+
+
+{-| `Alt-C`, and not the `Alt-T` the name asks for, because the menu bar's own
+`~T~ools` already has that letter -- and the status line wins, so putting the
+converter on `Alt-T` silently cost the Tools menu its hotkey. A shortcut for
+one tool is not worth the gateway to all of them. `C` is for the converter,
+and it is the letter underlined in the menu entry.
+-}
+menuItem : MenuItem
+menuItem =
+    Item { title = "Time ~c~onverter", cmd = command, key = "Alt-C", shortcut = "Alt-C" }
+
+
+-- MODEL
+
+
+type alias Model =
+    { -- The one number everything on the screen is a view of. Seconds, not
+      -- milliseconds, because that is what a POSIX timestamp is and this is
+      -- the box people paste one into.
+      posix : Int
+    -- The zones the user configured, in the order they want to read them.
+    -- `UTC` is not in here: it is always shown and never configurable, so it
+    -- is appended on the way out and arrives back as the last row.
+    , zones : Array String
+    -- The last answer from `Intl`: one row per zone, plus UTC. Empty until
+    -- the first reply lands, which is why `windows` copes with having none.
+    , rows : Array Row
+    -- The field the user is typing in and the text they have put in it. See
+    -- the module comment: this is what stops a recomputation from writing over
+    -- the caret.
+    , editing : Maybe { id : String, text : String }
+    , message : String
+    , picker : Maybe Picker
+    -- Set when the picker changed the list, cleared when the answer arrives.
+    --
+    -- It exists because of an ordering that took a port trace to see. Adding a
+    -- zone does not make the table taller *then*; it makes it taller when the
+    -- reply comes back with a row in it, one update later. That render rebuilds
+    -- the converter -- a window whose view list changed is rebuilt rather than
+    -- patched -- and a rebuilt window arrives in front of the picker that
+    -- chose the zone. `Tui.focus` sent with the request is spent by then: the
+    -- runtime re-applies a pending focus after the render it came with, and
+    -- this is the render after that one.
+    --
+    -- So the focus is asked for on the *reply*, and a flag rather than "always
+    -- refocus the picker" because the user may have clicked down to the
+    -- converter on purpose, and a reply that yanked the caret away from where
+    -- they put it would be worse than the bug.
+    , restoring : Bool
+    }
+
+
+type alias Row =
+    { zone : String
+    , y : Int
+    , mo : Int
+    , d : Int
+    , h : Int
+    , mi : Int
+    , s : Int
+    -- Minutes ahead of UTC. Minutes and not hours because Kathmandu is +05:45
+    -- and Chatham is +12:45, and a converter that cannot say so is wrong about
+    -- two countries.
+    , offset : Int
+    -- `CDT`, or empty. CLDR only carries real abbreviations for North American
+    -- zones in `en-US`; everywhere else `Intl` hands back `GMT+9`, which is
+    -- the offset column spelled differently and worth no width at all. The
+    -- JavaScript half suppresses those, so empty here means "there is no name
+    -- for this, read the offset".
+    , abbrev : String
+    }
+
+
+type alias Picker =
+    { -- The one piece of state the three panes are a function of. Clicking an
+      -- area writes `Asia/` into it; typing narrows further. Two mechanisms
+      -- that fought each other -- an area *and* a filter, with a rule about
+      -- which won -- would be a rule nobody could see; this way the box on the
+      -- screen always says exactly why you are not looking at Kolkata.
+      query : String
+    -- The 418, once JavaScript has been asked for them. Empty while the
+    -- request is in flight, which is a frame or two on the first open and
+    -- never again.
+    --
+    -- These are the *canonical* names, and a few of them are the old
+    -- spellings: the list says `Asia/Katmandu`, never `Asia/Kathmandu`,
+    -- though `Intl` accepts both. So a zone typed into the config file by
+    -- hand can be one this list cannot find, and it still works -- the
+    -- JavaScript side asks `Intl` whether a name is real rather than
+    -- checking it against this.
+    , all : Array String
+    , chosen : Array String
+    , highlight : Int
+    , picked : Int
+    }
+
+
+type alias Step =
+    { model : Model, command : Cmd Msg }
+
+
+{-| The port pair, at this tool's message type.
+
+Structurally `Tui.Ports`, and deliberately not called that: these are predc's
+own ports to `bin/timezones.js` and have nothing to do with Turbo Vision. The
+alias is here so that `Main`, which is the only `port module` and therefore the
+only place a port may be declared, has a name to hand one over by.
+-}
+type alias Ports msg =
+    { toJs : Encode.Value -> Cmd msg
+    , fromJs : (Decode.Value -> msg) -> Sub msg
+    }
+
+
+{-| Both port pairs, because this tool is the first thing here that needs two.
+
+`intl` is predc's own, to `bin/timezones.js`. `tui` is Turbo Vision's, and it
+is here for exactly one command: `Tui.focus`. Adding a zone makes the
+converter one row taller, a window whose view list changed is rebuilt rather
+than patched, and a rebuilt window arrives at the front -- so choosing a zone
+buried the picker that chose it. Saying which window keeps the focus is the
+answer, and only the Turbo Vision pair can say it.
+
+They are kept in one record rather than passed as two arguments because they
+are **structurally identical types**. `Tui.Ports msg` and `Ports msg` are the
+same record of two functions, so handing one where the other belongs compiles
+silently and posts Turbo Vision's traffic to the time zone helper. A field
+name is the only thing that tells them apart, so there is a field name.
+-}
+type alias Wiring =
+    { intl : Ports Msg
+    , tui : Tui.Ports Msg
+    }
+
+
+{-| `configured` is what the config file said, and the `Maybe` is the whole
+point of it: `Nothing` means predc has never been told, and starts at the
+machine's own zone; `Just []` means the user emptied the list on purpose and
+gets UTC and POSIX alone. Collapsing the two would put the local zone back
+every time somebody removed the last row, with no way left to say what they
+plainly said.
+
+`local` is `Nothing` only when `Time.getZoneName` could not name a zone -- an
+`Offset` rather than a `Name`, which needs a JavaScript with no `Intl` at all
+and does not happen on node. UTC carries the window in that case.
+-}
+init : Maybe (Array String) -> Maybe String -> Step
+init configured local =
+    { model =
+        { posix = 0
+        , zones =
+            when configured is
+                Just it ->
+                    it
+
+                Nothing ->
+                    when local is
+                        Just zone ->
+                            [ zone ]
+
+                        Nothing ->
+                            []
+        , rows = []
+        , editing = Nothing
+        , message = ""
+        , picker = Nothing
+        , restoring = False
+        }
+    , command = Task.perform Began Time.now
+    }
+
+
+zones : Model -> Array String
+zones model =
+    model.zones
+
+
+-- THE PORT
+
+
+type Msg
+    -- One reply type for all three requests, because every one of them
+    -- answers with the whole window rather than with a row. A per-zone
+    -- request would be the obvious shape and is wrong twice: N round trips
+    -- per keystroke, and a model holding a half-updated table while the
+    -- answers straggle in.
+    = Answered Reply
+    | Listed (Array String)
+    | Began Time.Posix
+    | Confused String
+
+
+type alias Reply =
+    { posix : Int
+    , rows : Array Row
+    , adjusted : Bool
+    , unknown : Array String
+    -- Empty when the answer is an answer. `"range"` is a date further from
+    -- 1970 than a `Date` can hold, which a person can reach by leaning on a
+    -- digit key; anything else is a JavaScript exception the far side caught
+    -- rather than died of.
+    , problem : String
+    -- What was asked for, echoed back, and present only for a `fromParts`.
+    -- It is here rather than remembered on this side because several requests
+    -- can be in flight at once and a reply that describes itself needs no
+    -- bookkeeping to match up.
+    , asked : Maybe { zone : String, y : Int, mo : Int, d : Int, h : Int, mi : Int }
+    }
+
+
+subscriptions : Wiring -> Sub Msg
+subscriptions wiring =
+    wiring.intl.fromJs decodeMessage
+
+
+decodeMessage : Decode.Value -> Msg
+decodeMessage value =
+    when Decode.decodeValue incoming value is
+        Ok msg ->
+            msg
+
+        Err error ->
+            Confused (Decode.errorToString error)
+
+
+incoming : Decode.Decoder Msg
+incoming =
+    Decode.field "type" Decode.string
+        |> Decode.andThen
+            (\kind ->
+                when kind is
+                    "rows" ->
+                        Decode.map Answered replyDecoder
+
+                    "zones" ->
+                        Decode.map Listed (Decode.field "zones" (Decode.array Decode.string))
+
+                    _ ->
+                        Decode.succeed (Confused kind)
+            )
+
+
+replyDecoder : Decode.Decoder Reply
+replyDecoder =
+    Decode.map5
+        (\posix rows adjusted rest request ->
+            { posix = posix
+            , rows = rows
+            , adjusted = adjusted
+            , unknown = rest.unknown
+            , problem = rest.problem
+            , asked = request
+            }
+        )
+        (Decode.field "posix" Decode.int)
+        (Decode.field "rows" (Decode.array rowDecoder))
+        (Decode.field "adjusted" Decode.bool)
+        (Decode.map2 (\unknown problem -> { unknown = unknown, problem = problem })
+            (Decode.field "unknown" (Decode.array Decode.string))
+            (Decode.field "problem" Decode.string)
+        )
+        (Decode.maybe (Decode.field "asked" askedDecoder))
+
+
+rowDecoder : Decode.Decoder Row
+rowDecoder =
+    Decode.map4
+        (\zone date clock extra ->
+            { zone = zone
+            , y = date.y
+            , mo = date.mo
+            , d = date.d
+            , h = clock.h
+            , mi = clock.mi
+            , s = clock.s
+            , offset = extra.offset
+            , abbrev = extra.abbrev
+            }
+        )
+        (Decode.field "zone" Decode.string)
+        (Decode.map3 (\y mo d -> { y = y, mo = mo, d = d })
+            (Decode.field "y" Decode.int)
+            (Decode.field "mo" Decode.int)
+            (Decode.field "d" Decode.int)
+        )
+        (Decode.map3 (\h mi s -> { h = h, mi = mi, s = s })
+            (Decode.field "h" Decode.int)
+            (Decode.field "mi" Decode.int)
+            (Decode.field "s" Decode.int)
+        )
+        (Decode.map2 (\offset abbrev -> { offset = offset, abbrev = abbrev })
+            (Decode.field "offset" Decode.int)
+            (Decode.field "abbrev" Decode.string)
+        )
+
+
+askedDecoder : Decode.Decoder { zone : String, y : Int, mo : Int, d : Int, h : Int, mi : Int }
+askedDecoder =
+    Decode.map3
+        (\zone date clock ->
+            { zone = zone, y = date.y, mo = date.mo, d = date.d, h = clock.h, mi = clock.mi }
+        )
+        (Decode.field "zone" Decode.string)
+        (Decode.map3 (\y mo d -> { y = y, mo = mo, d = d })
+            (Decode.field "y" Decode.int)
+            (Decode.field "mo" Decode.int)
+            (Decode.field "d" Decode.int)
+        )
+        (Decode.map2 (\h mi -> { h = h, mi = mi })
+            (Decode.field "h" Decode.int)
+            (Decode.field "mi" Decode.int)
+        )
+
+
+{-| `UTC` goes on the end of every request rather than being a case in the
+JavaScript, because it is a zone like any other as far as `Intl` is concerned
+and unlike any other as far as predc is concerned. It is not in
+`Intl.supportedValuesOf` -- there are no single-segment names among the 418 --
+so it can never collide with something the user chose.
+-}
+atInstant : Ports msg -> Int -> Array String -> Cmd msg
+atInstant ports posix wanted =
+    ports.toJs <|
+        Encode.object
+            [ { key = "type", value = Encode.string "atInstant" }
+            , { key = "posix", value = Encode.int posix }
+            , { key = "zones", value = Encode.array Encode.string (wanted ++ [ "UTC" ]) }
+            ]
+
+
+{-| The parameter is `request` rather than the `asked` it wants to be called,
+and that is a workaround for a known upstream parser bug rather than a
+preference:
+[compiler-common#31](https://github.com/gren-lang/compiler-common/issues/31),
+where a parameter whose name begins with `as` is lexed as the pattern-alias
+keyword and split. `fromParts ports posix wanted asked` came back from the
+formatter rewritten in place as `fromParts ports posix (wanted as ked)`.
+
+The reply field it fills is still `asked`: a record field is not a parameter
+and is not affected.
+-}
+fromParts : Ports msg -> Int -> Array String -> { zone : String, y : Int, mo : Int, d : Int, h : Int, mi : Int, s : Int } -> Cmd msg
+fromParts ports posix wanted request =
+    ports.toJs <|
+        Encode.object
+            [ { key = "type", value = Encode.string "fromParts" }
+            , { key = "posix", value = Encode.int posix }
+            , { key = "zone", value = Encode.string request.zone }
+            , { key = "y", value = Encode.int request.y }
+            , { key = "mo", value = Encode.int request.mo }
+            , { key = "d", value = Encode.int request.d }
+            , { key = "h", value = Encode.int request.h }
+            , { key = "mi", value = Encode.int request.mi }
+            , { key = "s", value = Encode.int request.s }
+            , { key = "zones", value = Encode.array Encode.string (wanted ++ [ "UTC" ]) }
+            ]
+
+
+askForZones : Ports msg -> Cmd msg
+askForZones ports =
+    ports.toJs (Encode.object [ { key = "type", value = Encode.string "zoneList" } ])
+
+
+-- UPDATE
+
+
+receive : Wiring -> Msg -> Model -> Step
+receive wiring msg model =
+    when msg is
+        Began now ->
+            let
+                -- `Time.now` is milliseconds and a POSIX timestamp is
+                -- seconds. Truncating rather than rounding, because the
+                -- second a clock is in is the second that has started.
+                --
+                -- `Math.truncate` and not `//`, which would be a 2038 bug in
+                -- of all things a time converter: Gren's `//` compiles to
+                -- `(a / b) | 0` and so truncates its *result* to 32 bits, and
+                -- this quotient passes 2^31 on the 19th of January 2038 and
+                -- comes back negative. The operands are irrelevant -- it is
+                -- the quotient that has to fit -- so a division that has
+                -- worked for years is the shape this bug likes.
+                posix =
+                    Math.truncate (toFloat (Time.posixToMillis now) / 1000)
+            in
+            { model = { model | posix = posix, editing = Nothing, message = "" }
+            , command = atInstant wiring.intl posix model.zones
+            }
+
+        Listed all ->
+            { model = { model | picker = Maybe.map (\picker -> { picker | all = all }) model.picker }
+            , command = Cmd.none
+            }
+
+        Answered reply ->
+            { model =
+                { model
+                    | restoring = False
+                    , posix = reply.posix
+                    -- A reply with no rows is a reply that failed, and the
+                    -- table keeps what it was showing rather than emptying
+                    -- itself: the message line says what went wrong, and the
+                    -- last instant that made sense is still the most useful
+                    -- thing on the screen.
+                    , rows =
+                        if Array.isEmpty reply.rows then
+                            model.rows
+
+                        else
+                            reply.rows
+                    , message = explain reply
+                }
+            , command =
+                if model.restoring then
+                    Tui.focus wiring.tui pickerId
+
+                else
+                    Cmd.none
+            }
+
+        Confused what ->
+            { model = { model | message = "The time zone helper said something predc did not understand: " ++ what }
+            , command = Cmd.none
+            }
+
+
+{-| What the message line says about an answer.
+
+`adjusted` covers two different-looking mistakes that are the same mistake --
+a wall clock that names no instant. The second Sunday in March has no 02:30 in
+Chicago, and April has no 31st anywhere, and in both cases the honest thing is
+to name what it became rather than to show it without comment.
+-}
+explain : Reply -> String
+explain reply =
+    if reply.problem == "range" then
+        "That is further from 1970 than a calendar goes."
+
+    else if not (String.isEmpty reply.problem) then
+        "The time zone helper could not answer: " ++ reply.problem
+
+    else if not (Array.isEmpty reply.unknown) then
+        "This copy of node has never heard of "
+            ++ String.join ", " reply.unknown
+            ++ " -- its time zone database may be older than the one that wrote your config."
+
+    else if not reply.adjusted then
+        ""
+
+    else
+        when reply.asked is
+            Nothing ->
+                ""
+
+            Just asked ->
+                when Array.findFirst (\row -> row.zone == asked.zone) reply.rows is
+                    Nothing ->
+                        ""
+
+                    Just found ->
+                        stamp asked
+                            ++ " does not exist in "
+                            ++ asked.zone
+                            ++ " -- read as "
+                            ++ stamp
+                                { y = found.value.y
+                                , mo = found.value.mo
+                                , d = found.value.d
+                                , h = found.value.h
+                                , mi = found.value.mi
+                                }
+                            ++ "."
+
+
+stamp : { r | y : Int, mo : Int, d : Int, h : Int, mi : Int } -> String
+stamp p =
+    pad 4 p.y ++ "-" ++ pad 2 p.mo ++ "-" ++ pad 2 p.d ++ " " ++ pad 2 p.h ++ ":" ++ pad 2 p.mi
+
+
+update : Wiring -> Tui.Event -> Model -> Step
+update wiring event model =
+    when event is
+        Tui.Command cmd ->
+            if cmd == "time.now" then
+                { model = model, command = Task.perform Began Time.now }
+
+            else if cmd == "time.picker" then
+                open wiring model
+
+            else if cmd == "time.add" then
+                { model = model, command = Cmd.none } |> withPicker wiring add
+
+            else if cmd == "time.remove" then
+                { model = model, command = Cmd.none } |> withPicker wiring remove
+
+            else if cmd == "time.done" then
+                { model = { model | picker = Nothing }, command = Cmd.none }
+
+            else
+                { model = model, command = Cmd.none }
+
+        Tui.Changed { id, value = Text text } ->
+            if id == pickerFind then
+                { model = { model | picker = Maybe.map (\picker -> { picker | query = text, highlight = 0 }) model.picker }
+                , command = Cmd.none
+                }
+
+            else
+                typed wiring id text model
+
+        -- Moving the highlight in the area list *writes the filter*, which is
+        -- the whole of the two-level browse: an area is a saved query and not
+        -- a second axis. It arrives on `Focused` rather than `Selected` so
+        -- that walking the list with the arrow keys narrows as you go, the way
+        -- the filter does when you type into it.
+        Tui.Focused { id, text } ->
+            if id == pickerAreas then
+                { model =
+                    { model
+                        | picker =
+                            Maybe.map
+                                (\picker -> { picker | query = queryFor text, highlight = 0 })
+                                model.picker
+                    }
+                , command = Cmd.none
+                }
+
+            else
+                { model = model, command = Cmd.none }
+
+        Tui.Selected { id, index } ->
+            if id == pickerZones then
+                { model = { model | picker = Maybe.map (\p -> { p | highlight = index }) model.picker }
+                , command = Cmd.none
+                }
+                    |> withPicker wiring add
+
+            else if id == pickerChosen then
+                { model = { model | picker = Maybe.map (\p -> { p | picked = index }) model.picker }
+                , command = Cmd.none
+                }
+                    |> withPicker wiring remove
+
+            else
+                { model = model, command = Cmd.none }
+
+        Tui.WindowClosed id ->
+            if id == pickerId then
+                { model = { model | picker = Nothing }, command = Cmd.none }
+
+            else
+                { model = model, command = Cmd.none }
+
+        _ ->
+            { model = model, command = Cmd.none }
+
+
+{-| Opening the picker asks JavaScript for the 418 names, and only the first
+time: they cannot change while the process is running, and re-asking would
+throw away the query the user is in the middle of typing.
+-}
+open : Wiring -> Model -> Step
+open wiring model =
+    when model.picker is
+        Just _ ->
+            { model = model, command = Tui.focus wiring.tui pickerId }
+
+        Nothing ->
+            { model = { model | picker = Just { query = "", all = [], chosen = model.zones, highlight = 0, picked = 0 } }
+            , command = askForZones wiring.intl
+            }
+
+
+add : Model -> Picker -> Step
+add model picker =
+    when Array.get picker.highlight (matching picker) is
+        Nothing ->
+            { model = model, command = Cmd.none }
+
+        Just zone ->
+            if Array.member zone picker.chosen then
+                { model = { model | message = zone ++ " is already on the list." }
+                , command = Cmd.none
+                }
+
+            else
+                { model = { model | picker = Just { picker | chosen = Array.pushLast zone picker.chosen } }
+                , command = Cmd.none
+                }
+
+
+remove : Model -> Picker -> Step
+remove model picker =
+    let
+        left =
+            Array.keepIf (\entry -> Just entry /= Array.get picker.picked picker.chosen) picker.chosen
+    in
+    { model =
+        { model
+            | picker =
+                Just
+                    { picker
+                        | chosen = left
+                        , picked = min picker.picked (max 0 (Array.length left - 1))
+                    }
+        }
+    , command = Cmd.none
+    }
+
+
+{-| Every picker action ends the same way: the chosen list becomes the tool's
+zones and the table is recomputed at the instant already on screen. Doing it
+here rather than on `Done` is what makes the picker a workspace -- you add
+Seoul and the row appears behind you, which is the answer to "is that the one
+I meant".
+-}
+withPicker : Wiring -> (Model -> Picker -> Step) -> Step -> Step
+withPicker wiring act step =
+    when step.model.picker is
+        Nothing ->
+            step
+
+        Just picker ->
+            let
+                acted =
+                    act step.model picker
+            in
+            when acted.model.picker is
+                Just after ->
+                    if after.chosen == step.model.zones then
+                        acted
+
+                    else
+                        { model = { acted.model | zones = after.chosen, restoring = True }
+                        , command = atInstant wiring.intl acted.model.posix after.chosen
+                        }
+
+                Nothing ->
+                    acted
+
+
+{-| A field of a row was typed in.
+
+Everything about this is arranged so that a half-typed date never becomes a
+half-plausible instant. The field keeps the digits it was given -- `editing`
+is what renders it, so nothing writes over the caret -- and the request only
+goes out if what is now in the field is a number in range. Out of range is a
+sentence on the message line and no request at all, which leaves the other
+rows showing the last instant that made sense.
+-}
+typed : Wiring -> String -> String -> Model -> Step
+typed wiring id text model =
+    let
+        typing =
+            { model | editing = Just { id = id, text = text } }
+    in
+    if id == posixField then
+        when String.toInt (String.trim text) is
+            Just posix ->
+                { model = { typing | message = "" }
+                , command = atInstant wiring.intl posix model.zones
+                }
+
+            Nothing ->
+                { model =
+                    { typing
+                        | message =
+                            if String.isEmpty (String.trim text) then
+                                ""
+
+                            else
+                                "A POSIX timestamp is a whole number of seconds."
+                    }
+                , command = Cmd.none
+                }
+
+    else
+        when { at = fieldOf id, row = Maybe.andThen (\f -> Array.get f.row model.rows) (fieldOf id) } is
+            { at = Just field, row = Just row } ->
+                when String.toInt (String.trim text) is
+                    Nothing ->
+                        { model =
+                            { typing
+                                | message =
+                                    if String.isEmpty (String.trim text) then
+                                        ""
+
+                                    else
+                                        label field.part ++ " wants digits."
+                            }
+                        , command = Cmd.none
+                        }
+
+                    Just number ->
+                        let
+                            limits =
+                                range field.part
+                        in
+                        if number < limits.low || number > limits.high then
+                            { model =
+                                { typing
+                                    | message =
+                                        label field.part
+                                            ++ " is "
+                                            ++ String.fromInt limits.low
+                                            ++ " to "
+                                            ++ String.fromInt limits.high
+                                            ++ "."
+                                }
+                            , command = Cmd.none
+                            }
+
+                        else
+                            { model = { typing | message = "" }
+                            , command = fromParts wiring.intl model.posix model.zones (replace field.part number row)
+                            }
+
+            _ ->
+                { model = model, command = Cmd.none }
+
+
+replace : Part -> Int -> Row -> { zone : String, y : Int, mo : Int, d : Int, h : Int, mi : Int, s : Int }
+replace part number row =
+    let
+        base =
+            { zone = row.zone, y = row.y, mo = row.mo, d = row.d, h = row.h, mi = row.mi, s = row.s }
+    in
+    when part is
+        Year ->
+            { base | y = number }
+
+        Month ->
+            { base | mo = number }
+
+        Day ->
+            { base | d = number }
+
+        Hour ->
+            { base | h = number }
+
+        Minute ->
+            { base | mi = number }
+
+
+-- FIELDS
+
+
+type Part
+    = Year
+    | Month
+    | Day
+    | Hour
+    | Minute
+
+
+parts : Array Part
+parts =
+    [ Year, Month, Day, Hour, Minute ]
+
+
+label : Part -> String
+label part =
+    when part is
+        Year ->
+            "The year"
+
+        Month ->
+            "The month"
+
+        Day ->
+            "The day"
+
+        Hour ->
+            "The hour"
+
+        Minute ->
+            "The minute"
+
+
+{-| What each field will take, and note what is *not* here: the day is 1 to 31
+in every month, because "the 31st of April" is not a typing mistake to be
+prevented -- it is a date that does not exist, and it comes back from `Intl`
+with `adjusted` set and the 1st of May on the message line. The one place that
+knows how long April is should be the one place that is asked.
+-}
+range : Part -> { low : Int, high : Int }
+range part =
+    when part is
+        Year ->
+            { low = 0, high = 9999 }
+
+        Month ->
+            { low = 1, high = 12 }
+
+        Day ->
+            { low = 1, high = 31 }
+
+        Hour ->
+            { low = 0, high = 23 }
+
+        Minute ->
+            { low = 0, high = 59 }
+
+
+suffix : Part -> String
+suffix part =
+    when part is
+        Year ->
+            "y"
+
+        Month ->
+            "mo"
+
+        Day ->
+            "d"
+
+        Hour ->
+            "h"
+
+        Minute ->
+            "mi"
+
+
+width : Part -> Int
+width part =
+    when part is
+        Year ->
+            4
+
+        _ ->
+            2
+
+
+fieldId : Int -> Part -> String
+fieldId row part =
+    "time.r" ++ String.fromInt row ++ "." ++ suffix part
+
+
+{-| The other direction: `time.r3.mo` back into a row number and a part. A
+string rather than a structure on the wire because a view id *is* a string,
+and every id in this program is built to be taken apart again.
+-}
+fieldOf : String -> Maybe { row : Int, part : Part }
+fieldOf id =
+    when String.split "." id is
+        [ "time", rowPart, partPart ] ->
+            Maybe.andThen
+                (\row ->
+                    Array.findFirst (\part -> suffix part == partPart) parts
+                        |> Maybe.map (\found -> { row = row, part = found.value })
+                )
+                (String.toInt (String.dropFirst 1 rowPart))
+
+        _ ->
+            Nothing
+
+
+posixField : String
+posixField =
+    "time.posix"
+
+
+pickerFind : String
+pickerFind =
+    "time.find"
+
+
+pickerAreas : String
+pickerAreas =
+    "time.areas"
+
+
+pickerZones : String
+pickerZones =
+    "time.list"
+
+
+pickerChosen : String
+pickerChosen =
+    "time.chosen"
+
+
+-- THE ZONE LIST
+
+
+{-| The first segment of a name, which is the level the picker browses by.
+Every one of the 418 has one -- there are no single-segment names -- and the
+eighteen with three segments are all inside `America`, so the second pane shows
+`America/Argentina/Ushuaia` in full rather than pretending the middle is a
+city.
+-}
+area : String -> String
+area zone =
+    when Array.first (String.split "/" zone) is
+        Just first ->
+            first
+
+        Nothing ->
+            zone
+
+
+{-| What choosing an area puts in the Find box.
+
+The row says `Asia 82`, because the counts are the reason two levels help
+unevenly -- `America` is 144 names and `Arctic` is one -- so the name is the
+first word of it, and no area in the database has a space in its name.
+
+`All` is a row rather than a special case, and it is first for a reason that
+cost a screen to find: Turbo Vision highlights a list's first entry when the
+window opens, and that sends a `Focused` event nobody asked for. With the
+areas alone at the top, opening the picker silently filtered it to Africa. A
+first row meaning "no filter" turns that unavoidable event into the right
+answer.
+-}
+queryFor : String -> String
+queryFor item =
+    when Array.first (String.split " " item) is
+        Just "All" ->
+            ""
+
+        Just name ->
+            name ++ "/"
+
+        Nothing ->
+            ""
+
+
+areas : Array String -> Array { name : String, count : Int }
+areas all =
+    Array.foldl
+        (\zone found ->
+            let
+                name =
+                    area zone
+            in
+            when Array.findFirst (\entry -> entry.name == name) found is
+                Just at ->
+                    Array.set at.index { name = name, count = at.value.count + 1 } found
+
+                Nothing ->
+                    Array.pushLast { name = name, count = 1 } found
+        )
+        []
+        all
+
+
+matching : Picker -> Array String
+matching picker =
+    let
+        needle =
+            String.toLower (String.trim picker.query)
+    in
+    if String.isEmpty needle then
+        picker.all
+
+    else
+        Array.keepIf (\zone -> String.contains needle (String.toLower zone)) picker.all
+
+
+-- VIEW
+
+
+{-| Two windows, and the second only when the picker is open.
+
+`desktop` is here because a table of N zones is N rows tall and a terminal is
+not: with more zones than fit, the window stops at the bottom of the desktop
+and says how many it could not show. `Resized` is the only thing that reports
+the desktop and the shell is the only thing told, so the number has to be
+handed down rather than asked for.
+
+No `Theme.Inks`, unlike every other tool here, and that is not an oversight:
+inks are what a `Canvas` paints its `Span`s with, and this window is made of
+stock controls. A `StaticText` takes no `Hue` and an `InputLine` takes no
+`Hue`, so a table of input fields has no surface the model is allowed to
+colour. It follows the window's palette, which is the right answer anyway.
+-}
+windows : { cols : Int, rows : Int } -> Model -> Array Tui.Window
+windows desktop model =
+    [ table desktop model ]
+        ++ (when model.picker is
+                Just picker ->
+                    [ chooser desktop picker ]
+
+                Nothing ->
+                    []
+           )
+
+
+{-| How wide the name column is: as wide as the longest name on it, within
+reason. `America/Argentina/Rio_Gallegos` is thirty characters and would push
+the window past eighty columns on its own, so the column is capped and the
+name is cut -- a name is recognisable from its first twenty-four characters,
+and the alternative is a window that does not fit the terminal it is in.
+-}
+nameWidth : Model -> Int
+nameWidth model =
+    Array.foldl (\row so -> max so (String.count row.zone)) 5 model.rows
+        |> clamp 8 24
+
+
+table : { cols : Int, rows : Int } -> Model -> Tui.Window
+table desktop model =
+    let
+        names =
+            nameWidth model
+
+        -- Where the first field starts; everything to its right is measured
+        -- from it.
+        fx =
+            2 + names + 2
+
+        interior =
+            fx + 44
+
+        -- The header, a rule, UTC, POSIX, a blank, two lines of message and
+        -- the buttons: everything that is there whether or not a zone is.
+        --
+        -- Two lines and not one because the longest thing the message line
+        -- says is the most important -- "02:30 does not exist in
+        -- America/Chicago -- read as 03:30" is eighty characters with the
+        -- dates on it, and clipping it at sixty loses the answer and keeps
+        -- the complaint.
+        furniture =
+            9
+
+        room =
+            max 1 (desktop.rows - furniture - 3)
+
+        -- `rows` carries UTC as its last entry, and UTC has a line of its own
+        -- below the rule, so what the table proper shows is one fewer.
+        shown =
+            min (max 0 (Array.length model.rows - 1)) room
+
+        hidden =
+            max 0 (Array.length model.rows - 1 - shown)
+    in
+    { id = windowId
+    , title = "Time converter"
+    , rect = { x1 = 1, y1 = 1, x2 = 2 + interior, y2 = 1 + furniture + shown + 2 }
+    , resize = Tui.fixedSize
+    , palette = Tui.BlueWindow
+    , views = tableViews fx names interior shown hidden model
+    }
+
+
+tableViews : Int -> Int -> Int -> Int -> Int -> Model -> Array View
+tableViews fx names interior shown hidden model =
+    [ StaticText
+        { id = "time.head"
+        , rect = { x1 = fx, y1 = 1, x2 = fx + 28, y2 = 2 }
+        , text = " YYYY   MM   DD    HH   MM"
+        }
+    ]
+        ++ (Array.indexedMap (\index row -> clockRow model.editing fx names index (index + 2) row) (Array.takeFirst shown model.rows)
+                |> Array.flatten
+           )
+        ++ [ StaticText
+                { id = "time.rule"
+                , rect = { x1 = 2, y1 = shown + 2, x2 = interior, y2 = shown + 3 }
+                , text = String.repeat (interior - 2) "─"
+                }
+           ]
+        ++ (when Array.last model.rows is
+                Just utc ->
+                    clockRow model.editing fx names (Array.length model.rows - 1) (shown + 3) utc
+
+                Nothing ->
+                    []
+           )
+        ++ [ StaticText
+                { id = "time.posix.label"
+                , rect = { x1 = 2, y1 = shown + 4, x2 = 2 + names, y2 = shown + 5 }
+                , text = "POSIX"
+                }
+           , InputLine
+                { id = posixField
+                , rect = { x1 = fx, y1 = shown + 4, x2 = fx + 24, y2 = shown + 5 }
+                , maxLen = 20
+                , value = held model.editing posixField (String.fromInt model.posix)
+                , allowed = Just "-0123456789"
+                }
+           , StaticText
+                { id = "time.message"
+                , rect = { x1 = 2, y1 = shown + 6, x2 = interior, y2 = shown + 8 }
+                , text =
+                    if hidden > 0 && String.isEmpty model.message then
+                        String.fromInt hidden ++ " more zones than this terminal is tall enough to show."
+
+                    else
+                        model.message
+                }
+           , Button
+                { id = "time.nowbtn"
+                , rect = { x1 = 2, y1 = shown + 8, x2 = 11, y2 = shown + 10 }
+                , title = "~N~ow"
+                , cmd = "time.now"
+                , isDefault = False
+                , takesFocus = True
+                }
+           , Button
+                { id = "time.zonesbtn"
+                , rect = { x1 = 13, y1 = shown + 8, x2 = 26, y2 = shown + 10 }
+                , title = "~Z~ones..."
+                , cmd = "time.picker"
+                , isDefault = False
+                , takesFocus = True
+                }
+           ]
+
+
+clockRow : Maybe { id : String, text : String } -> Int -> Int -> Int -> Int -> Row -> Array View
+clockRow editing fx names index y row =
+    [ StaticText
+        { id = "time.name" ++ String.fromInt index
+        , rect = { x1 = 2, y1 = y, x2 = 2 + names, y2 = y + 1 }
+        , text = String.takeFirst names row.zone
+        }
+    ]
+        ++ Array.map
+            (\spec ->
+                InputLine
+                    { id = fieldId index spec.part
+                    , rect = { x1 = fx + spec.at, y1 = y, x2 = fx + spec.at + width spec.part + 2, y2 = y + 1 }
+                    , maxLen = width spec.part
+                    , value = held editing (fieldId index spec.part) (pad (width spec.part) (valueOf spec.part row))
+                    , allowed = Just "0123456789"
+                    }
+            )
+            -- Two columns of every rectangle belong to the input line rather
+            -- than to the text in it, so a four-digit year is six wide and a
+            -- two-digit month is four. The gap between the date and the clock
+            -- is one column wider than the gaps inside either, which is the
+            -- whole of what makes the row readable at a glance.
+            [ { part = Year, at = 0 }
+            , { part = Month, at = 7 }
+            , { part = Day, at = 12 }
+            , { part = Hour, at = 18 }
+            , { part = Minute, at = 23 }
+            ]
+        ++ [ StaticText
+                { id = "time.off" ++ String.fromInt index
+                , rect = { x1 = fx + 29, y1 = y, x2 = fx + 43, y2 = y + 1 }
+                , text =
+                    (if String.isEmpty row.abbrev then
+                        "   "
+
+                     else
+                        String.padLeft 3 ' ' row.abbrev
+                    )
+                        ++ " "
+                        ++ offsetText row.offset
+                }
+           ]
+
+
+valueOf : Part -> Row -> Int
+valueOf part row =
+    when part is
+        Year ->
+            row.y
+
+        Month ->
+            row.mo
+
+        Day ->
+            row.d
+
+        Hour ->
+            row.h
+
+        Minute ->
+            row.mi
+
+
+{-| `+09:00`, `-05:00`, `+05:45`. Built from the minutes rather than asked for,
+because `Intl` will format a zone's name and its time but has no API that hands
+its offset back as a number -- the JavaScript half works it out by subtracting
+two clocks, and once it is a number this is arithmetic.
+-}
+offsetText : Int -> String
+offsetText minutes =
+    let
+        sign =
+            if minutes < 0 then
+                "-"
+
+            else
+                "+"
+
+        size =
+            Math.abs minutes
+    in
+    sign ++ pad 2 (size // 60) ++ ":" ++ pad 2 (Math.modBy 60 size)
+
+
+pad : Int -> Int -> String
+pad places number =
+    String.padLeft places '0' (String.fromInt number)
+
+
+{-| The rule that keeps the caret still: a field that the user is in the middle
+of typing renders the text they typed, and every other field renders the
+computed answer. Turbo Vision writes an `InputLine`'s `value` whenever the
+model changes it, so without this the `5` somebody just typed into a month
+would become `05` with the caret behind it, on the next keystroke, every time.
+-}
+held : Maybe { id : String, text : String } -> String -> String -> String
+held editing id computed =
+    when editing is
+        Just it ->
+            if it.id == id then
+                it.text
+
+            else
+                computed
+
+        Nothing ->
+            computed
+
+
+-- THE PICKER
+
+
+chooser : { cols : Int, rows : Int } -> Picker -> Tui.Window
+chooser desktop picker =
+    let
+        found =
+            matching picker
+
+        listTop =
+            4
+
+        listRows =
+            clamp 5 14 (desktop.rows - 14)
+
+        listBottom =
+            listTop + listRows
+    in
+    { id = pickerId
+    , title = "Time zones"
+    , rect = { x1 = 6, y1 = 3, x2 = 74, y2 = 3 + listBottom + 5 }
+    , resize = Tui.fixedSize
+    , palette = Tui.BlueWindow
+    , views =
+        [ StaticText
+            { id = "time.findlabel"
+            , rect = { x1 = 2, y1 = 1, x2 = 8, y2 = 2 }
+            , text = "Find"
+            }
+        , InputLine
+            { id = pickerFind
+            , rect = { x1 = 7, y1 = 1, x2 = 40, y2 = 2 }
+            , maxLen = 32
+            , value = picker.query
+            , allowed = Nothing
+            }
+        , StaticText
+            { id = "time.count"
+            , rect = { x1 = 42, y1 = 1, x2 = 66, y2 = 2 }
+            , text =
+                if Array.isEmpty picker.all then
+                    "asking node..."
+
+                else
+                    String.fromInt (Array.length found) ++ " of " ++ String.fromInt (Array.length picker.all)
+            }
+        , StaticText
+            { id = "time.areahead"
+            , rect = { x1 = 2, y1 = 3, x2 = 16, y2 = 4 }
+            , text = "Area"
+            }
+        , StaticText
+            { id = "time.zonehead"
+            , rect = { x1 = 19, y1 = 3, x2 = 45, y2 = 4 }
+            , text = "Zone"
+            }
+        , StaticText
+            { id = "time.chosenhead"
+            , rect = { x1 = 46, y1 = 3, x2 = 66, y2 = 4 }
+            , text = "Displaying"
+            }
+        -- One column is left free to the right of each list: a ListBox here
+        -- puts its scroll bar in the column immediately beside it rather than
+        -- on the window frame, which is right for a window with three panes.
+        , ListBox
+            { id = pickerAreas
+            , rect = { x1 = 2, y1 = listTop, x2 = 16, y2 = listBottom }
+            , items =
+                Array.map
+                    (\it -> it.name ++ " " ++ String.fromInt it.count)
+                    ([ { name = "All", count = Array.length picker.all } ] ++ areas picker.all)
+            , focused = 0
+            , chooses = ""
+            }
+        , ListBox
+            { id = pickerZones
+            , rect = { x1 = 19, y1 = listTop, x2 = 44, y2 = listBottom }
+            , items = found
+            , focused = picker.highlight
+            , chooses = ""
+            }
+        , ListBox
+            { id = pickerChosen
+            , rect = { x1 = 46, y1 = listTop, x2 = 65, y2 = listBottom }
+            , items = picker.chosen
+            , focused = picker.picked
+            , chooses = ""
+            }
+        -- No caption hotkeys on the three buttons, which is the same rule the
+        -- calculator's keypad follows and for the same reason: `~A~dd` would
+        -- bind Alt-A, the status line is `ofPreProcess` and already has
+        -- Alt-A for the ASCII chart, and the chart would open instead. So the
+        -- buttons serve the mouse and the keyboard has its own way in --
+        -- `Space` on either list commits the entry under the highlight, Enter
+        -- presses Done because it is the default, and Alt-F3 closes the
+        -- window. Neither advertises the other.
+        , StaticText
+            { id = "time.pickhint"
+            , rect = { x1 = 2, y1 = listBottom + 1, x2 = 66, y2 = listBottom + 2 }
+            , text = "Space adds or removes; an area types its prefix into Find."
+            }
+        , Button
+            { id = "time.addbtn"
+            , rect = { x1 = 19, y1 = listBottom + 2, x2 = 32, y2 = listBottom + 4 }
+            , title = "Add >>"
+            , cmd = "time.add"
+            , isDefault = False
+            , takesFocus = True
+            }
+        , Button
+            { id = "time.rmbtn"
+            , rect = { x1 = 34, y1 = listBottom + 2, x2 = 50, y2 = listBottom + 4 }
+            , title = "<< Remove"
+            , cmd = "time.remove"
+            , isDefault = False
+            , takesFocus = True
+            }
+        , Button
+            { id = "time.donebtn"
+            , rect = { x1 = 52, y1 = listBottom + 2, x2 = 63, y2 = listBottom + 4 }
+            , title = "Done"
+            , cmd = "time.done"
+            , isDefault = True
+            , takesFocus = True
+            }
+        ]
+    }

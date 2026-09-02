@@ -863,9 +863,17 @@ TView *buildItems(const Napi::Env &env, TGroup *win, const Napi::Value &value,
             }
         else if (type == "inputLine")
             {
+            // `maxLen + 1`, and the plus one is not a fudge. TInputLine's
+            // constructor takes a *limit* and stores `maxLen = limit - 1`
+            // (tinputli.cpp), so a field declared four characters wide held
+            // three: predc's time converter asked for a four-digit year and
+            // got `202`. The name on the Gren side says how many characters
+            // the user may type, so this is where the two are reconciled.
+            // `setInputText` below writes at `[maxLen]` into a buffer of
+            // `maxLen + 1` bytes, which is still the last valid byte.
             int maxLen = getInt(it, "maxLen", 128);
             TInputLine *input =
-                new JsInputLine(getRect(env, it, "inputLine"), maxLen, id);
+                new JsInputLine(getRect(env, it, "inputLine"), maxLen + 1, id);
             // Structural, like maxLen: a field's filter is part of its shape,
             // so changing one rebuilds the window rather than being patched.
             std::string allowed = getString(it, "allowed");

@@ -39,9 +39,11 @@ import Stream.Log
 import Task
 import Terminal
 import Theme
+import Time
 import Tool.Ascii
 import Tool.Calc
 import Tool.Hex
+import Tool.Time
 import Tui exposing (Event(..), MenuItem(..), View(..))
 
 
@@ -73,6 +75,32 @@ hexPorts =
     { toJs = tuiOut, fromJs = tuiIn }
 
 
+{-| predc's *other* port pair, and the only one that is not Turbo Vision's.
+
+`bin/predc.js` subscribes to it, because `run()` in gren-tvision-runtime hands
+the app back precisely so that a program with ports of its own can: the runtime
+claims `tuiOut` and `tuiIn` and nothing else. What is on the far end is
+`bin/timezones.js` and the IANA time zone database compiled into node, which is
+the one thing predc needs that Gren cannot supply -- see `Tool.Time`.
+-}
+port intlOut : Encode.Value -> Cmd msg
+
+
+port intlIn : (Decode.Value -> msg) -> Sub msg
+
+
+{-| The converter is the one tool that needs both pairs, and `Tool.Time.Wiring`
+says why: it talks to `bin/timezones.js` about zones and to Turbo Vision about
+which of its two windows should have the focus. The two record types are
+identical, so the field names are the only thing keeping them apart.
+-}
+timeWiring : Tool.Time.Wiring
+timeWiring =
+    { intl = { toJs = intlOut, fromJs = intlIn }
+    , tui = { toJs = tuiOut, fromJs = tuiIn }
+    }
+
+
 -- MODEL
 
 
@@ -92,10 +120,22 @@ type alias Model =
     , ascii : Maybe Tool.Ascii.Model
     , calc : Maybe Tool.Calc.Model
     , hex : Maybe Tool.Hex.Model
+    , time : Maybe Tool.Time.Model
     -- Which colour scheme, and where to write it down. The theme is a shell
     -- concern in the same way the menu bar is: it belongs to the program
     -- rather than to any tool, and every tool has to be told.
     , theme : Theme.Name
+    -- The other half of the config file, held here for the same reason the
+    -- theme is: it belongs to the program rather than to a tool, and it has to
+    -- outlive a tool that is closed and reopened.
+    --
+    -- `Maybe` because "never configured" and "configured to nothing" are
+    -- different answers -- see `Config`.
+    , timezones : Maybe (Array String)
+    -- Which zone this machine is in, from `Time.getZoneName`, and the default
+    -- the converter starts in when the config file has never been written.
+    -- `Nothing` only where there is no `Intl` to ask, which is not node.
+    , here : Maybe String
     , configPath : Maybe Path
     }
 
@@ -106,6 +146,7 @@ type Msg
     -- back through the shell because `update` is the shell's. This is the
     -- first tool that needed either.
     | FromHex Tool.Hex.Msg
+    | FromTime Tool.Time.Msg
     -- The config file was written, or was not. Either way there is nothing to
     -- do about it -- see `Config` for why -- and this exists only because a
     -- `Task` has to be turned into a `Cmd Msg` by something.
@@ -141,6 +182,13 @@ init env =
                 Config.where_ vars
         in
         Init.awaitTask (Config.load permission path) <| \config ->
+        -- Which zone this machine is in, and it costs no port: `Time.here` is
+        -- the useless one -- its own doc comment says it can never answer
+        -- `America/New_York` and will hand back `Etc/GMT-5` instead -- but
+        -- `getZoneName` reads `Intl.DateTimeFormat().resolvedOptions()` and
+        -- gives the IANA name. `Offset` is what a runtime with no `Intl` at
+        -- all answers, which is not node, and predc treats it as not knowing.
+        Init.awaitTask Time.getZoneName <| \zoneName ->
             let
                 shell =
                     { desktop = { cols = 80, rows = 23 }
@@ -148,7 +196,16 @@ init env =
                     , ascii = Nothing
                     , calc = Nothing
                     , hex = Nothing
+                    , time = Nothing
                     , theme = config.theme
+                    , timezones = config.timezones
+                    , here =
+                        when zoneName is
+                            Time.Name name ->
+                                Just name
+
+                            Time.Offset _ ->
+                                Nothing
                     , configPath = path
                     }
 
@@ -208,6 +265,16 @@ open command shell =
             Node.startProgram
                 { model = Tui.Start { shell | calc = Just Tool.Calc.init }
                 , command = Cmd.none
+                }
+
+        Cli.Time ->
+            let
+                step =
+                    Tool.Time.init shell.timezones shell.here
+            in
+            Node.startProgram
+                { model = Tui.Start { shell | time = Just step.model }
+                , command = Cmd.map FromTime step.command
                 }
 
         Cli.Hex Nothing ->
@@ -302,6 +369,20 @@ update msg model =
         Saved ->
             { model = model, command = Cmd.none }
 
+        FromTime sub ->
+            when model.time is
+                Just time ->
+                    let
+                        step =
+                            Tool.Time.receive timeWiring sub time
+                    in
+                    { model = { model | time = Just step.model }
+                    , command = Cmd.map FromTime step.command
+                    }
+
+                Nothing ->
+                    { model = model, command = Cmd.none }
+
         FromHex sub ->
             when model.hex is
                 Just hex ->
@@ -381,6 +462,16 @@ handleEvent event model =
                         , command = Tui.focus tui Tool.Hex.windowId
                         }
 
+            else if cmd == Tool.Time.command then
+                when model.time is
+                    Nothing ->
+                        openTime model
+
+                    Just _ ->
+                        { model = model
+                        , command = Tui.focus tui Tool.Time.windowId
+                        }
+
             else
                 -- Every other command belongs to a tool: its menu's, or one of
                 -- its buttons'. The shell does not know which, and does not
@@ -403,11 +494,35 @@ handleEvent event model =
             else if id == Tool.Hex.windowId then
                 { model = { model | hex = Nothing }, command = Cmd.none }
 
+            else if id == Tool.Time.windowId then
+                { model = { model | time = Nothing }, command = Cmd.none }
+
             else
-                { model = model, command = Cmd.none }
+                -- The zone picker is a window of the converter's rather than
+                -- the shell's, so closing it from its frame is the tool's news
+                -- and not this function's. Everything unrecognised goes the
+                -- same way, which is what stops the shell having to learn the
+                -- id of every window a tool decides to open.
+                toTools event model
 
         _ ->
             toTools event model
+
+
+{-| The converter is the first tool that has something to do before it can
+draw anything: it has to find out what time it is, and then what that time is
+called in five places. So opening it is a `Step` rather than a model, and its
+zones come from the shell because the shell is what read the config file.
+-}
+openTime : Model -> { model : Model, command : Cmd Msg }
+openTime model =
+    let
+        step =
+            Tool.Time.init model.timezones model.here
+    in
+    { model = { model | time = Just step.model }
+    , command = Cmd.map FromTime step.command
+    }
 
 
 chooseTheme : Theme.Name -> Model -> { model : Model, command : Cmd Msg }
@@ -418,7 +533,9 @@ chooseTheme name model =
     else
         { model = { model | theme = name }
         , command =
-            Config.save model.permission model.configPath { theme = name }
+            Config.save model.permission
+                model.configPath
+                { theme = name, timezones = model.timezones }
                 |> Task.perform (\_ -> Saved)
         }
 
@@ -440,29 +557,84 @@ toTools event model =
     let
         hex =
             Maybe.map (Tool.Hex.update hexPorts event) model.hex
+
+        time =
+            Maybe.map (Tool.Time.update timeWiring event) model.time
+
+        moved =
+            { model
+                | ascii = Maybe.map (Tool.Ascii.update event) model.ascii
+                , calc = Maybe.map (Tool.Calc.update event) model.calc
+                , hex = Maybe.map .model hex
+                , time = Maybe.map .model time
+            }
+
+        -- What the converter is displaying *is* what the config file should
+        -- say, so the shell writes it down whenever the two disagree.
+        --
+        -- Deliberately a comparison and not a message. The picker changes the
+        -- list from four different places -- Add, Remove, a double click in
+        -- either of two lists -- and a tool that had to remember to announce
+        -- each one is a tool with a fourth place to forget. Saving what is on
+        -- the screen cannot drift from what is on the screen. It also stays
+        -- silent for the case that matters most: opening the converter for the
+        -- first time shows the machine's own zone, which nobody chose, and
+        -- `zones` matching `timezones` at `Nothing` means that is not written
+        -- down as though they had.
+        chosen =
+            Maybe.map Tool.Time.zones moved.time
+
+        wrote =
+            chosen /= Nothing && chosen /= model.timezones
     in
     { model =
-        { model
-            | ascii = Maybe.map (Tool.Ascii.update event) model.ascii
-            , calc = Maybe.map (Tool.Calc.update event) model.calc
-            , hex = Maybe.map .model hex
-        }
-    , command =
-        when hex is
-            Just step ->
-                Cmd.map FromHex step.command
+        if wrote then
+            { moved | timezones = chosen }
 
-            Nothing ->
+        else
+            moved
+    , command =
+        Cmd.batch
+            [ when hex is
+                Just step ->
+                    Cmd.map FromHex step.command
+
+                Nothing ->
+                    Cmd.none
+            , when time is
+                Just step ->
+                    Cmd.map FromTime step.command
+
+                Nothing ->
+                    Cmd.none
+            , if wrote then
+                Config.save model.permission
+                    model.configPath
+                    { theme = model.theme, timezones = chosen }
+                    |> Task.perform (\_ -> Saved)
+
+              else
                 Cmd.none
+            ]
     }
 
 
 -- SUBSCRIPTIONS
 
 
+{-| The Turbo Vision port pair is `defineProgramOrExit`'s own and is not here.
+This is predc's second one, and it is subscribed only while the converter is
+open -- a reply that arrives for a tool the user has closed has nothing to
+land on, and the tool that asked for it is gone.
+-}
 subscriptions : Model -> Sub Msg
-subscriptions _ =
-    Sub.none
+subscriptions model =
+    when model.time is
+        Just _ ->
+            Sub.map FromTime (Tool.Time.subscriptions timeWiring)
+
+        Nothing ->
+            Sub.none
 
 
 -- VIEW
@@ -472,13 +644,22 @@ view : Model -> Tui.Ui
 view model =
     { menuBar = menuBar model
     , theme = Theme.palette model.theme
+    -- Exit, the four tools, and Close, and nothing else -- which is a change
+    -- the fourth tool forced. A status line is silently truncated at the
+    -- terminal's width, so a bar that will not fit is a bar that lies, and at
+    -- eighty columns there is room for six of these and not eight.
+    --
+    -- `F5` and `F6` came off rather than a tool, and it costs nothing: they
+    -- are on the Window menu with their shortcuts, and `TMenuBar` is
+    -- `ofPreProcess` exactly as `TStatusLine` is, so both still work from a
+    -- window with a focused canvas in it. Measured, not assumed. Close stayed
+    -- because it is the one window operation somebody has to be able to find.
     , statusLine =
         [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
         , { text = "~Alt-A~ ASCII", key = "Alt-A", cmd = Tool.Ascii.command }
         , { text = "~Alt-R~ RPN", key = "Alt-R", cmd = Tool.Calc.command }
         , { text = "~Alt-D~ Hex", key = "Alt-D", cmd = Tool.Hex.command }
-        , { text = "~F5~ Zoom", key = "F5", cmd = "zoom" }
-        , { text = "~F6~ Next", key = "F6", cmd = "next" }
+        , { text = "~Alt-C~ Time", key = "Alt-C", cmd = Tool.Time.command }
         , { text = "~Alt-F3~ Close", key = "Alt-F3", cmd = "close" }
         ]
     , windows =
@@ -499,6 +680,16 @@ view model =
             ++ (when model.hex is
                     Just hex ->
                         [ Tool.Hex.view (Theme.inks model.theme) hex ]
+
+                    Nothing ->
+                        []
+               )
+            -- The only tool that answers with more than one window: its zone
+            -- picker is a second window of its own rather than a modal, and
+            -- `Tool.Time` says why.
+            ++ (when model.time is
+                    Just time ->
+                        Tool.Time.windows model.desktop time
 
                     Nothing ->
                         []
@@ -531,6 +722,7 @@ menuBar model =
             [ Tool.Ascii.menuItem
             , Tool.Calc.menuItem
             , Tool.Hex.menuItem
+            , Tool.Time.menuItem
             , Tui.Separator
             , SubMenu
                 { title = "~C~olors"

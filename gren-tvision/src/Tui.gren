@@ -780,7 +780,13 @@ first for a week, because `Array.append fst second` makes `fst` the *postfix*.
     holds the caret, which is what a keypad or a toolbar wants when something
     else in the window is reading the keyboard. A `Canvas` has the same field
     for the same reason.
-  - `InputLine` -- a text field. `value` is written to the field only when it
+  - `InputLine` -- a text field. `maxLen` is how many characters the user may
+    type, and the rectangle needs **two columns more than that**: one the
+    field spends on itself and one for the caret to sit past the last
+    character. A rectangle any narrower still holds the whole value and shows
+    it scrolled, with a `\u{25C4}` where the first character was.
+
+    `value` is written to the field only when it
     changes *in the model*, so it never overwrites what the user is typing.
     `allowed` is the set of characters it will accept, as a string:
     `Just "0123456789"` is a field only digits can be typed into, and

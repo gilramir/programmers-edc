@@ -1,9 +1,8 @@
 module Config exposing (Config, default, load, save, where_)
 
-{-| What predc remembers between runs, which is one field and was always going
-to be more than one eventually.
+{-| What predc remembers between runs, which was one field and is now two.
 
-Three decisions, and the first two are about what *not* to do.
+Four decisions, and the first two are about what *not* to do.
 
 **Nothing here reports an error.** A missing config file is the normal case on
 a first run; an unreadable one is a directory somebody made read-only; a
@@ -23,6 +22,13 @@ will notice and can act on. A modal box saying so is the worse outcome.
 Doing it afterwards works and costs a visible flash: the program would open in
 Borland and repaint into the saved theme a moment later, once, every time.
 
+**Every field decodes on its own, and a missing one is its default rather than
+a failed parse.** That is what [`optional`](#) below is for, and the reason is
+the upgrade: a `config.json` written by the version before this one has a
+`theme` and no `timezones`, and reading it must keep the theme. A decoder built
+out of required fields would have thrown the whole file away and put the user
+back in Borland for having used an older predc yesterday.
+
 -}
 
 import Bytes exposing (Bytes)
@@ -36,12 +42,24 @@ import Theme
 
 
 type alias Config =
-    { theme : Theme.Name }
+    { theme : Theme.Name
+    -- The time zones the converter shows, in the order it shows them.
+    --
+    -- `Maybe` rather than a bare array, and the distinction is the whole point
+    -- of the field: `Nothing` is *never configured*, which renders as the
+    -- machine's own zone, and `Just []` is *configured to nothing*, which
+    -- renders as UTC and POSIX alone. Without the distinction, emptying the
+    -- list would put the local zone straight back the next time predc started
+    -- and there would be no way to say what the user plainly said.
+    , timezones : Maybe (Array String)
+    }
 
 
 default : Config
 default =
-    { theme = Theme.Borland }
+    { theme = Theme.Borland
+    , timezones = Nothing
+    }
 
 
 {-| `$XDG_CONFIG_HOME/predc/config.json`, or `~/.config/predc/config.json`
@@ -91,8 +109,26 @@ parse bytes =
 
 decoder : Decode.Decoder Config
 decoder =
-    Decode.map (\theme -> { theme = theme })
-        (Decode.field "theme" Theme.decode)
+    Decode.map2 (\theme timezones -> { theme = theme, timezones = timezones })
+        (optional "theme" Theme.decode default.theme)
+        (Decode.maybe (Decode.field "timezones" (Decode.array Decode.string)))
+
+
+{-| A field that may not be there, and is its default when it is not.
+
+`Decode.maybe` wrapped around the field rather than around the value, which is
+the distinction its own doc comment warns about: this succeeds with the default
+both when the key is absent and when what is under it is the wrong shape, and
+those are the same thing to a program that never reports a config error.
+
+`timezones` does not go through this, because for that field "absent" and "an
+empty array" are different answers and `Maybe` is the value rather than the
+handling of a mistake.
+-}
+optional : String -> Decode.Decoder a -> a -> Decode.Decoder a
+optional key decoder_ fallback =
+    Decode.maybe (Decode.field key decoder_)
+        |> Decode.map (Maybe.withDefault fallback)
 
 
 {-| Make the directory, then write the file, and ignore whichever of the two
@@ -117,7 +153,24 @@ save permission path config =
                 |> Task.onError (\_ -> Task.succeed {})
 
 
+{-| A `Nothing` writes no `timezones` key at all rather than a `null`, so that
+a config file predc has never been asked about time zones is
+indistinguishable from the one the version before this wrote. It is also the
+only shape that survives a round trip: `null` would have to decode back to
+`Nothing`, and so would a missing key, and then two spellings would mean one
+thing for no reason.
+-}
 encode : Config -> Encode.Value
 encode config =
-    Encode.object
+    Encode.object <|
         [ { key = "theme", value = Theme.encode config.theme } ]
+        ++ (when config.timezones is
+                Just zones ->
+                    [ { key = "timezones"
+                      , value = Encode.array Encode.string zones
+                      }
+                    ]
+
+                Nothing ->
+                    []
+           )
