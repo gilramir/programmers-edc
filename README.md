@@ -61,7 +61,9 @@ and drives the binding. See FINDINGS.
 ## Running it
 
 Everything happens inside devbox — the addon must be compiled by the same
-toolchain that will load it (see FINDINGS.md).
+toolchain that will load it (see FINDINGS.md). It does not have to: nothing in
+the repo shells out to `devbox`, and [Building without devbox](#building-without-devbox)
+below is the same recipe with the five packages installed by hand.
 
 ```sh
 devbox run build    # libtvision.a (PIC) + the addon
@@ -140,3 +142,68 @@ of record: what each port forced into the API, and what is left.
 
 `Enter` does not press buttons, select list items, or tick check boxes in Turbo
 Vision; `Space` does. See FINDINGS.
+
+## Building without devbox
+
+devbox supplies five things and nothing else — **node 22**, **gren 0.6**,
+**cmake**, **pkg-config** and **ncurses with its dev output**. Every script here
+(`build-tvision.sh`, the two `build.sh`, `run.sh`, `tools/run_tests.py`) is
+plain and only wants those on `PATH`.
+
+| | |
+|---|---|
+| node 22 | what this is pinned to and developed against |
+| `gren` 0.6.6 | `npm i -g gren-lang@0.6.6` — npm's `gren-lang` is that version and its bin is `gren` |
+| cmake, a C++17 compiler, make | `libtvision.a` and the addon |
+| pkg-config and the ncursesw dev files | `binding.gyp` calls `pkg-config --cflags/--libs ncursesw`, and tvision's own cmake `find_library`s `ncursesw` and fails hard without it |
+| python3 | node-gyp wants it, and every test driver is written in it — standard library only, nothing to `pip install` |
+
+On Debian and Ubuntu the system half is
+`build-essential cmake pkg-config libncurses-dev python3`; `libncurses-dev` is
+the package that ships `ncursesw.pc`.
+
+```sh
+git clone https://github.com/magiblot/tvision.git   # beside the other dirs
+tvision-node/scripts/build-tvision.sh
+(cd tvision-node         && npm install && npx node-gyp rebuild)
+(cd gren-tvision-runtime && npm install)
+(cd programmers-edc      && npm install)
+gren-tvision/build.sh
+programmers-edc/build.sh
+```
+
+That is `devbox run build` with the nix part taken out. `check` and `test` are
+the same:
+
+```sh
+python3 tools/check_consistency.py
+(cd gren-tvision && gren docs --output=/dev/null)
+(cd gren-tvision-runtime && node --test test/*.test.js)
+(cd gren-tvision/tests && ./run.sh)
+python3 tools/run_tests.py
+```
+
+`devbox run gren -- entries` is `gren-tvision/run.sh entries`, and
+`devbox run predc` is `programmers-edc/run.sh`.
+
+Four things that will bite:
+
+**Do not copy `build-tvision/` or `tvision-node/build/` from another machine.**
+Build both there. That is what the comment at the top of `build-tvision.sh` is
+about — a static archive and the `.node` that links it have to come from one
+toolchain and one libc, and inside devbox that is nix's gcc rather than the
+system's. Either host is fine; mixing them is not.
+
+**The `tvision/` checkout tracks upstream master**, not a pinned revision, and
+this repo occasionally turns on a fix as it lands — one recent commit did
+exactly that for a calendar bug reported upstream. A stale clone fails in ways
+that look like this repo's fault.
+
+**The first build needs network twice**: `gren make` fills `~/.cache/gren` with
+`gren-lang/core`, `gren-lang/node`, `gren-lang/url`, `gilramir/gren-argparse`
+and `gilramir/gren-bignum`, and node-gyp downloads node's headers.
+
+**The layout is load-bearing.** predc's `gren.json` names the package as
+`local:../gren-tvision`, each example's lists `"../../src"`, and the two npm
+packages depend on each other by `file:` path — so `programmers-edc/` cannot be
+built on its own, and the directories have to keep their relative positions.
