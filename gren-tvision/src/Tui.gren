@@ -10,9 +10,11 @@ module Tui exposing
     , Ports
     , Program
     , ProgramConfiguration
+    , ProgramConfigurationOrExit
     , Rect
     , Resize
     , Span
+    , Startup(..)
     , StatusItem
     , Theme
     , ThemePanel
@@ -25,6 +27,7 @@ module Tui exposing
     , borland
     , copyToClipboard
     , defineProgram
+    , defineProgramOrExit
     , dialog
     , fileDialog
     , findInEditor
@@ -191,6 +194,7 @@ its own is a pull-down, and one without is a command sitting on the bar.
 
 @docs Ports
 @docs Program, ProgramConfiguration, defineProgram
+@docs Startup, ProgramConfigurationOrExit, defineProgramOrExit
 @docs Ui, Window, View, Rect
 @docs Resize, resizable, resizeHeight, resizeWidth, fixedSize
 @docs WindowPalette
@@ -2040,9 +2044,33 @@ marks field values =
 
 {-| What [`defineProgram`](#defineProgram) returns, and the type your `main`
 should be annotated with.
+
+The model the runtime actually carries is a [`Startup`](#Startup), because a
+program built with [`defineProgramOrExit`](#defineProgramOrExit) may decide
+there is no program to run -- but that is this module's business, and
+`Tui.Program Model Msg` is what a `main` says either way.
 -}
 type alias Program model msg =
-    Node.Program model msg
+    Node.Program (Startup model) msg
+
+
+{-| Whether there is a terminal program to run at all.
+
+`init` returns one of these when the program is built with
+[`defineProgramOrExit`](#defineProgramOrExit). `Start` is the ordinary answer
+and carries the first model. `Exit` says that the program has nothing to put
+on the screen and that the command it was started with -- printing a `--help`,
+reporting a command line that was wrong -- is the whole of what it does.
+
+`Exit` is not "quit as soon as you have painted". Nothing is painted: no render
+message is sent, the runtime never starts Turbo Vision, and the terminal is
+never switched out from under whatever the output is being piped into. That is
+the difference that makes it worth having, and it is why the decision has to be
+made in `init` rather than answered by a later message.
+-}
+type Startup model
+    = Start model
+    | Exit
 
 
 {-| The same fields as `Node.defineProgram`, plus:
@@ -2072,45 +2100,124 @@ costs nothing beyond the JSON.
 -}
 defineProgram : Ports msg -> ProgramConfiguration model msg -> Program model msg
 defineProgram ports config =
-    Node.defineProgram
+    defineProgramOrExit ports
         { init =
             \env ->
                 Init.await (config.init env) <| \started ->
                     Node.startProgram
-                        { model = started.model
-                        , command =
-                            Cmd.batch
-                                [ started.command
-                                , render ports config started.model
-                                ]
+                        { model = Start started.model
+                        , command = started.command
                         }
-        , update =
-            \msg model ->
-                let
-                    stepped =
-                        config.update msg model
-                in
-                { model = stepped.model
-                , command =
-                    Cmd.batch
-                        [ stepped.command
-                        , render ports config stepped.model
-                        ]
-                }
-        , subscriptions =
-            \model ->
-                Sub.batch
-                    [ config.subscriptions model
-                    , ports.fromJs (decodeEvent >> config.onEvent)
-                    ]
+        , update = config.update
+        , subscriptions = config.subscriptions
+        , view = config.view
+        , onEvent = config.onEvent
         }
 
 
-render : Ports msg -> ProgramConfiguration model msg -> model -> Cmd msg
-render ports config model =
+{-| The same fields as [`ProgramConfiguration`](#ProgramConfiguration), except
+that `init` answers with a [`Startup`](#Startup) rather than with a model.
+-}
+type alias ProgramConfigurationOrExit model msg =
+    { init : Node.Environment -> Init.Task { model : Startup model, command : Cmd msg }
+    , update : msg -> model -> { model : model, command : Cmd msg }
+    , subscriptions : model -> Sub msg
+    , view : model -> Ui
+    , onEvent : Event -> msg
+    }
+
+
+{-| Build a program that may decide, before it paints, that it is not a
+terminal program this time.
+
+An application has a command line, and a command line has answers that are not
+a screen: `--help`, `--version`, a word that is not a command, a flag that
+wanted a value. Those are printed and the process exits, and the one thing that
+must not happen in between is Turbo Vision taking the terminal -- which is what
+the first render does, and what makes it a decision for `init` and nothing
+later.
+
+    init env =
+        when Argparse.Parser.run (Array.dropFirst 2 env.args) parser is
+            Argparse.Parser.HelpText doc ->
+                Node.startProgram
+                    { model = Tui.Exit
+                    , command =
+                        Stream.Log.line env.stdout (PP.toString doc)
+                            |> Task.execute
+                    }
+
+            Argparse.Parser.Success command ->
+                Node.startProgram
+                    { model = Tui.Start (modelFor command)
+                    , command = Cmd.none
+                    }
+
+After `Exit` the program is inert: no render is sent, `view` is never called,
+`update` and `subscriptions` are never reached, and the process ends when the
+command it was given has finished -- so set an exit code with
+`Node.setExitCode`, which waits, rather than with `Node.exitWithCode`, which
+does not wait for the write to reach a pipe.
+-}
+defineProgramOrExit : Ports msg -> ProgramConfigurationOrExit model msg -> Program model msg
+defineProgramOrExit ports config =
+    Node.defineProgram
+        { init =
+            \env ->
+                Init.await (config.init env) <| \started ->
+                    when started.model is
+                        Start model ->
+                            Node.startProgram
+                                { model = Start model
+                                , command =
+                                    Cmd.batch
+                                        [ started.command
+                                        , render ports config.view model
+                                        ]
+                                }
+
+                        Exit ->
+                            Node.startProgram
+                                { model = Exit
+                                , command = started.command
+                                }
+        , update =
+            \msg startup ->
+                when startup is
+                    Start model ->
+                        let
+                            stepped =
+                                config.update msg model
+                        in
+                        { model = Start stepped.model
+                        , command =
+                            Cmd.batch
+                                [ stepped.command
+                                , render ports config.view stepped.model
+                                ]
+                        }
+
+                    Exit ->
+                        { model = Exit, command = Cmd.none }
+        , subscriptions =
+            \startup ->
+                when startup is
+                    Start model ->
+                        Sub.batch
+                            [ config.subscriptions model
+                            , ports.fromJs (decodeEvent >> config.onEvent)
+                            ]
+
+                    Exit ->
+                        Sub.none
+        }
+
+
+render : Ports msg -> (model -> Ui) -> model -> Cmd msg
+render ports toUi model =
     let
         ui =
-            config.view model
+            toUi model
     in
     ports.toJs <|
         Encode.object

@@ -7,6 +7,7 @@
     "gren-version": "0.6.6",
     "dependencies": {
         "direct": {
+            "gilramir/gren-argparse": "2.0.0",
             "gilramir/gren-bignum": "1.0.0",
             "gilramir/gren-tvision": "local:../gren-tvision",
             "gren-lang/core": "7.4.2",

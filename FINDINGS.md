@@ -3652,3 +3652,149 @@ clipped and still honest.
 `ovf` can stay on the right because the value it marks is bounded: sixty-four
 bits of anything is a known width, and the marker is a comment on a number that
 fits. `~` is not a comment. It is part of how the number is written.
+
+## A program that is sometimes not a program: predc's command line
+
+`predc hex dump.bin` is an unremarkable thing to want. The hex viewer already
+opens a file dialog and walks a directory; a person who knows the name should
+be able to say it and get the dump. The parsing is unremarkable too --
+`gilramir/gren-argparse` describes a CLI as a value and hands back a typed
+command, and `Argparse.Parser.run` is a pure function over the tokens, so it
+can be called anywhere.
+
+The unremarkable part ends at `--help`, and what it ran into was not argparse
+and not the CLI at all. It was this:
+
+```gren
+defineProgram ports config =
+    Node.defineProgram
+        { init = \env ->
+            Init.await (config.init env) <| \started ->
+                Node.startProgram
+                    { model = started.model
+                    , command = Cmd.batch [ started.command, render ports config started.model ]
+                    }
+```
+
+A `Tui` program renders after `init`, always, and **the first render is what
+takes the terminal**: the runtime starts Turbo Vision the first time a render
+message arrives, and Turbo Vision writes `\x1b[?1049h` and owns the screen from
+then on. So a `--help` parsed in Gren printed its help *and* switched to the
+alternate screen, which is a thing you notice the moment you pipe it into a
+pager.
+
+### The race that was not worth winning
+
+There is an obvious-looking fix: put `Node.exitWithCode` in the same
+`Cmd.batch` as the render and rely on the process being gone before the port
+message is delivered. It was rejected twice over, and both reasons are worth
+writing down because they are general.
+
+The first is that the order is not a contract. Both are commands from one
+`init`, and which effect manager the runtime drains first is an implementation
+detail of the platform; a program whose correctness is "the exit happened to
+run before the port" is a program that breaks on a compiler upgrade with no
+diagnostic at all.
+
+The second is worse, and it is in the documentation of the function:
+`exitWithCode` "will not wait for tasks like http calls or file system writes
+to complete". A help text on the way into `less` is exactly such a write. The
+version of this that works on a terminal and truncates on a pipe is the version
+that would have shipped.
+
+So the decision has to be made *before* anything is rendered, which means it
+has to be made in `init`, which means `init` has to be able to say it.
+
+### `Startup`, and the alias that absorbed it
+
+```gren
+type Startup model
+    = Start model
+    | Exit
+
+defineProgramOrExit : Ports msg -> ProgramConfigurationOrExit model msg -> Program model msg
+```
+
+`init` answers with a `Startup` instead of a model. `Start` is the ordinary
+path. `Exit` says there is nothing to put on a screen and that the command it
+was handed -- print this, set that code -- is the whole of what the program
+does: no render is sent, so the runtime never starts Turbo Vision, `view` is
+never called, `update` and `subscriptions` are never reached, and node leaves
+when the write lands. `Node.setExitCode`, which waits, rather than
+`exitWithCode`, which does not.
+
+Three things about the shape are worth keeping.
+
+**The model type is where the flag lives, not a field beside it.** The runtime
+carries a `Startup model`, and the two states differ in what they *have*: a
+started program has a model, an exiting one has no use for one and should not
+have to invent one. `update` and `subscriptions` pattern-match it once and the
+`Exit` branch is inert.
+
+**`Tui.Program` swallowed the change whole.** It is an alias --
+`type alias Program model msg = Node.Program (Startup model) msg` -- so every
+`main : Tui.Program Model Msg` in the package, the fifteen examples included,
+is the same line it was before. That is the difference between a type alias and
+a type here, and it is why this cost one file.
+
+**`defineProgram` is now four lines of `defineProgramOrExit`**, wrapping the
+init in `Start`. Two entry points where one would do, and the alternative was
+changing the `init` of every program ever written against this package to get a
+capability that most of them will never use. `Argparse.Program` makes the same
+trade for the same reason, and has four.
+
+No protocol change, no C++, no runtime JavaScript. The whole of "do not paint"
+is *not sending a message*, which is the nicest shape a feature can have in a
+one-way protocol.
+
+### What predc has to do by hand, and why
+
+`Argparse.Program` is the runner that would normally handle all of this --
+help to stdout, errors to stderr, exit codes, colour. predc cannot use it: it
+is a `Node.SimpleProgram`, it ends in a process that exits, and predc's ends in
+one that paints. So `Main.init` matches on `CommandParseResult` itself, which
+is the manual shape argparse documents, and copies exactly one rule out of the
+runner -- colour only if `Terminal.initialize` says a terminal is attached and
+`NO_COLOR` is unset. (`Terminal.initialize` is a read of `process.stdout` and
+touches nothing, so asking it before Turbo Vision starts is safe.)
+
+One thing predc does that the runner does not: it wraps the help to the
+terminal's own width, `PP.defaultOptions.maxColumns` being
+`Math.maxSafeInteger` and a paragraph therefore being one very long line.
+`terminal.columns` when there is a terminal, eighty when there is not.
+
+### Two decisions in the CLI itself
+
+**An empty argument list is not the help text.** `Argparse.Parser.run []`
+answers `HelpText`, which is right for a tool whose every use is a subcommand
+and wrong for one whose commonest use is no subcommand at all. `predc` on its
+own opens the desktop it always opened, so `Main` checks for empty args before
+the parser sees them. This is the sort of thing that is easier to write down
+than to rediscover: the parser is not wrong, it is answering a different
+question than the one this program asks.
+
+**A file that does not exist is a message, not a refusal.** `predc hex
+nosuch.bin` opens the viewer with `ENOENT ...` on its message line rather than
+exiting 1 with a complaint. `Tool.Hex.openFile` is `statFile`, the same path
+the file dialog takes, and its `Failed` message already lands on that line --
+so the error appears where the person is already looking, and the window they
+asked for is open and a Ctrl-O away from the file they meant. The `Exit` path
+is for command lines that are *wrong*, not for ones that are right about a
+world that disagrees.
+
+The same three lines gave `predc hex ~/dumps` for free: `statFile` answers with
+*what the name is*, and a directory has meant "list it" since the dialog was
+written, so a directory on the command line opens the file dialog already
+standing in the right place. Nobody designed that. It is what reusing the
+tool's own entry point buys, and it is the argument against `Main` assembling a
+read of its own.
+
+### The check that pins it
+
+`\x1b[?1049h` in the byte stream is the whole test. `drive_cli.py` runs
+`--help`, `--version` and a bad command under a pty -- the case where a program
+*would* paint, since stdout is a terminal -- and asserts that neither the
+alternate screen nor mouse tracking nor a clear ever appears, alongside the
+exit code and the text. It then runs the same two through a pipe, which is the
+only way to tell stdout from stderr (a pty is one file) and the case where the
+colour has to come off and the width has to be eighty.

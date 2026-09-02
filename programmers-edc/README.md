@@ -63,7 +63,8 @@ It should also show the work week number for that month/year.
 
 # Building and running
 
-    devbox run predc          # build and run
+    devbox run predc                    # build and run
+    devbox run predc -- hex dump.bin    # ... on a file, straight into the viewer
     devbox run -- python3 tools/run_tests.py shell   # its pty tests
 
 predc is written as an ordinary, independent application: it depends on
@@ -80,15 +81,44 @@ Two things about it are temporary, and both are temporary for the same reason
     predc happens to sit in, because there is not yet a distributable way for a
     consumer to drive a Turbo Vision program through a pty.
 
+## The command line
+
+    predc                 the desktop, with nothing open
+    predc ascii           ... with the ASCII chart open
+    predc calc            ... with the RPN calculator open
+    predc hex [FILE]      ... with the hex viewer open, on FILE if you name one
+    predc --help          what the commands are
+    predc --version
+
+A command is a shortcut through the Tools menu and nothing more: the program it
+opens is the same program, every other tool is still one menu away, and there is
+no batch mode. `predc hex dump.bin` exists because somebody who already knows
+which file they want should not have to walk a file dialog to it. A name that
+is not a file opens the viewer anyway, with the reason on its message line --
+the dump is where you are looking, so that is where the complaint belongs. A
+name that is a *directory* opens the file dialog standing in it, which nobody
+designed: the command line asks the same question the dialog asks, so it gets
+the same answer.
+
+The parsing is `gilramir/gren-argparse`, but not its `Argparse.Program` runner,
+which is a `Node.SimpleProgram` and therefore the wrong thing to be when the
+successful path is a program that paints. `src/Cli.gren` describes the CLI as a
+value and `Main.init` matches on the result, which is the manual shape argparse
+documents. What that forced into gren-tvision is `Tui.defineProgramOrExit`: a
+`--help` has to print into a pipe or a pager without Turbo Vision ever taking
+the terminal, and only `init` can decide that, because the first render is what
+takes it. FINDINGS.md has the story.
+
 ## Layout
 
     bin/predc.js      the launcher: resolves main.js against itself, not the cwd
     src/Main.gren     the shell -- menu bar, status line, About, which tools are open
+    src/Cli.gren      the command line, as a value: one command per tool
     src/Tool/         one module per tool, each handing back a Tui.Window
     src/Ascii.gren    what ASCII says about a byte, shared by two of the tools
     src/Theme.gren    the three colour schemes, and the inks the tools paint with
     src/Config.gren   the one thing predc remembers between runs
-    test/drive_*.py   one pty driver per tool, plus the shell and the themes
+    test/drive_*.py   one pty driver per tool, plus the shell, the themes and the CLI
 
 ## The calculator's numbers
 

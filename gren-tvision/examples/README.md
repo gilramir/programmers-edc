@@ -1023,3 +1023,42 @@ undoing it means reimplementing the least documented code in the library to
 buy back a one-second freeze. It is a decision, not an oversight, and it is
 written where somebody would hit it: FINDINGS, this file, and
 `Tui.MenuItem`'s doc comment.
+
+## What predc's command line changed
+
+The one API change since the list emptied, and it came from the application
+rather than from an example: **a program built on this package can now decide,
+in `init`, that it is not a program this time.**
+
+`predc hex dump.bin` wanted a CLI, and a CLI has answers that are not a screen
+-- `--help`, `--version`, a word that is not a command. `Tui.defineProgram`
+renders after `init` unconditionally, and the first render is what starts Turbo
+Vision, so a help text printed itself *and* switched the terminal to the
+alternate screen. Racing `Node.exitWithCode` against the render was rejected:
+the order of two effect managers is not a contract, and `exitWithCode` does not
+wait for the write to reach a pipe -- which is where a help text usually goes.
+
+```gren
+type Startup model
+    = Start model
+    | Exit
+
+defineProgramOrExit : Ports msg -> ProgramConfigurationOrExit model msg -> Program model msg
+```
+
+`Exit` sends no render, so the runtime never starts Turbo Vision at all, and
+`view` is never called. It costs no protocol version, no C++ and no runtime
+JavaScript: the whole of "do not paint" is *not sending a message*, which is
+what a one-way protocol is good for.
+
+Two things about the shape are worth copying elsewhere. The flag lives in the
+model type rather than beside it -- an exiting program has no model and should
+not have to invent one -- and `Tui.Program` absorbed the change because it is an
+alias, so every `main : Tui.Program Model Msg` in these fifteen examples is
+untouched. `defineProgram` is now four lines of `defineProgramOrExit` that wrap
+the init in `Start`; two entry points where one would do, rather than changing
+the `init` of every program ever written against this package for a capability
+most of them will never use.
+
+FINDINGS has the rest, including what an application has to do by hand because
+`Argparse.Program` is a `Node.SimpleProgram` and cannot be the thing that paints.

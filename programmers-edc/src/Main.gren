@@ -21,15 +21,23 @@ as short as it is.
 
 -}
 
+import Argparse.Parser as Parser
+import Argparse.PrettyPrinter as PP
 import Array exposing (Array)
+import Bytes exposing (Bytes)
+import Cli
 import Config
+import Dict exposing (Dict)
 import FileSystem
 import FileSystem.Path exposing (Path)
 import Init
 import Json.Decode as Decode
 import Json.Encode as Encode
 import Node
+import Stream
+import Stream.Log
 import Task
+import Terminal
 import Theme
 import Tool.Ascii
 import Tool.Calc
@@ -104,28 +112,37 @@ type Msg
     | Saved
 
 
-{-| Three awaits, and the order is the only thing about them worth saying: the
-file system permission is an `Init.Task` and therefore has to be first, the
-environment says where the config file is, and the config file says which
-theme to start in.
+{-| Four awaits, and the order is the only thing about them worth saying: the
+file system permission is an `Init.Task` and therefore has to be first,
+`Terminal.initialize` answers whether anything is watching (it reads
+`process.stdout` and touches nothing, so it is safe to ask before Turbo Vision
+has the terminal), the environment says where the config file is, and the
+config file says which theme to start in.
 
 All of it before `startProgram`, which is what `Init.awaitTask` is for -- it
 takes the ordinary `Task Never a` that `getEnvironmentVariables` and
 `Config.load` are. Loading afterwards would work and would cost a visible
 flash: the first frame in Borland, repainted into the saved theme once, every
 single run.
+
+And this is where the command line is read, because it is the last moment at
+which the answer can be "there is no program to run". `Tui.Exit` is what says
+so: nothing is rendered, Turbo Vision is never started, and a `--help` on its
+way into a pager stays a `--help`. Everything below is one `when` over what
+`Argparse.Parser.run` made of the words.
 -}
-init : Node.Environment -> Init.Task { model : Model, command : Cmd Msg }
-init _ =
+init : Node.Environment -> Init.Task { model : Tui.Startup Model, command : Cmd Msg }
+init env =
     Init.await FileSystem.initialize <| \permission ->
-    Init.awaitTask Node.getEnvironmentVariables <| \env ->
+    Init.await Terminal.initialize <| \terminal ->
+    Init.awaitTask Node.getEnvironmentVariables <| \vars ->
         let
             path =
-                Config.where_ env
+                Config.where_ vars
         in
         Init.awaitTask (Config.load permission path) <| \config ->
-            Node.startProgram
-                { model =
+            let
+                shell =
                     { desktop = { cols = 80, rows = 23 }
                     , permission = permission
                     , ascii = Nothing
@@ -134,8 +151,143 @@ init _ =
                     , theme = config.theme
                     , configPath = path
                     }
+
+                -- node, the script, then the words the user typed.
+                args =
+                    Array.dropFirst 2 env.args
+            in
+            if Array.isEmpty args then
+                -- `predc` on its own is the desktop, and never the help text
+                -- that an empty argument list means to `Argparse.Parser.run`.
+                -- The tools are on the menu; that is what the menu is for.
+                Node.startProgram
+                    { model = Tui.Start shell, command = Cmd.none }
+
+            else
+                when Parser.run args Cli.parser is
+                    Parser.Success command ->
+                        open command shell
+
+                    Parser.HelpText doc ->
+                        printing (say terminal vars env.stdout doc) 0
+
+                    Parser.UnknownCommand word ->
+                        printing (say terminal vars env.stderr (unknown word)) 1
+
+                    Parser.BadFlags problem ->
+                        printing
+                            (say terminal vars env.stderr (Parser.flagErrorPrettified problem))
+                            1
+
+                    Parser.BadArguments problem ->
+                        printing
+                            (say terminal vars env.stderr (Parser.argumentErrorPrettified problem))
+                            1
+
+
+{-| The tool the command line asked for, open on the desktop the moment the
+first frame is drawn.
+
+Every one of these is the model the Tools menu would have produced, which is
+the point: a command line is a shortcut through the menu and not a second way
+into the program. The hex viewer with a path is the only one that starts a
+task, and it is the tool's own `openFile` rather than anything assembled here
+-- `Main` does not know what a file has to become before the viewer can show
+it, and should not learn.
+-}
+open : Cli.Command -> Model -> Init.Task { model : Tui.Startup Model, command : Cmd Msg }
+open command shell =
+    when command is
+        Cli.Ascii ->
+            Node.startProgram
+                { model = Tui.Start { shell | ascii = Just Tool.Ascii.init }
                 , command = Cmd.none
                 }
+
+        Cli.Calc ->
+            Node.startProgram
+                { model = Tui.Start { shell | calc = Just Tool.Calc.init }
+                , command = Cmd.none
+                }
+
+        Cli.Hex Nothing ->
+            Node.startProgram
+                { model = Tui.Start { shell | hex = Just (Tool.Hex.init shell.permission) }
+                , command = Cmd.none
+                }
+
+        Cli.Hex (Just file) ->
+            let
+                step =
+                    Tool.Hex.openFile shell.permission file
+            in
+            Node.startProgram
+                { model = Tui.Start { shell | hex = Just step.model }
+                , command = Cmd.map FromHex step.command
+                }
+
+
+{-| The command line was the whole of it: print, set the exit code, and stop.
+
+`Node.setExitCode` and not `Node.exitWithCode`, which does not wait for the
+write to land -- and a help text is exactly the thing somebody pipes into a
+pager. There is nothing to wait for it here: with `Tui.Exit` the program has no
+subscriptions and no window, so node runs out of work as soon as the line is
+written and leaves with the code.
+-}
+printing : Task.Task Never {} -> Int -> Init.Task { model : Tui.Startup Model, command : Cmd Msg }
+printing write code =
+    Node.startProgram
+        { model = Tui.Exit
+        , command =
+            write
+                |> Task.andThen (\_ -> Node.setExitCode code)
+                |> Task.execute
+        }
+
+
+{-| Colour if somebody is looking, and not if the output is a pipe or if
+NO_COLOR is set (<https://no-color.org>). This is `Argparse.Program`'s own rule,
+copied rather than called: predc cannot use that runner, because the runner
+ends in a process that exits and predc's ends in one that paints.
+-}
+say : Maybe Terminal.Configuration -> Dict String String -> Stream.Writable Bytes -> PP.Document -> Task.Task Never {}
+say terminal vars stream doc =
+    let
+        colourful =
+            terminal /= Nothing && not (Dict.member "NO_COLOR" vars)
+
+        -- A paragraph is a sequence of words until something says where the
+        -- line ends, and the honest answer to that is the terminal it is
+        -- being printed into. Eighty when there is no terminal, which is the
+        -- width every pipe has been assumed to have since the VT100.
+        width =
+            when terminal is
+                Just config ->
+                    config.columns
+
+                Nothing ->
+                    80
+    in
+    Stream.Log.line stream
+        (PP.toStringWithOptions
+            { PP.defaultOptions | maxColumns = width }
+            (if colourful then
+                doc
+
+             else
+                PP.stripColor doc
+            )
+        )
+
+
+unknown : String -> PP.Document
+unknown word =
+    PP.verticalBlock
+        [ PP.words ("There is no predc command called `" ++ word ++ "`.")
+        , PP.empty
+        , PP.words "Try `predc --help` for the ones there are."
+        ]
 
 
 -- UPDATE
@@ -469,7 +621,7 @@ aboutDialog model =
 
 main : Tui.Program Model Msg
 main =
-    Tui.defineProgram tui
+    Tui.defineProgramOrExit tui
         { init = init
         , update = update
         , subscriptions = subscriptions

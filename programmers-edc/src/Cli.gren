@@ -1,0 +1,94 @@
+module Cli exposing (Command(..), parser)
+
+{-| predc's command line.
+
+The program is a desktop with tools on it, and the command line says which tool
+you came for. That is the whole of it: there is no batch mode, no flag that
+changes what a tool does, and nothing here that cannot be reached from the
+Tools menu a second later. `predc hex dump.bin` exists because a person who
+already knows which file they want should not have to walk a file dialog to it.
+
+Parsing is a pure function -- `Argparse.Parser.run` takes the tokens and hands
+back a result -- so this module holds no `Task`, prints nothing, and is the
+same value whether it is being run or being read. `Main` decides what to do
+with each answer, which is where the interesting half is: a `--help` must print
+and exit *without* Turbo Vision ever taking the terminal, and that is a
+decision only `init` can make. See `Tui.defineProgramOrExit`.
+
+-}
+
+import Argparse.Parser as Parser
+import Argparse.PrettyPrinter as PP
+import FileSystem.Path exposing (Path)
+
+
+{-| Which tool to open on the way in.
+
+There is no constructor for "no tool": an empty command line never reaches the
+parser, because `Argparse.Parser.run` answers an empty argument list with the
+help text and that is not what `predc` on its own means. `Main` checks for it
+first.
+-}
+type Command
+    = Ascii
+    | Calc
+    -- `Nothing` is `predc hex`, which opens the viewer with no file in it --
+    -- the same window the Tools menu opens, and a Ctrl-O away from a file.
+    | Hex (Maybe Path)
+
+
+parser : Parser.App Command
+parser =
+    { name = "predc"
+    , version = "0.1.0"
+    , intro =
+        PP.verticalBlock
+            [ PP.words
+                "The programmer's every-day carry: small tools, one terminal window."
+            , PP.empty
+            , PP.words
+                ("With no command predc opens the desktop with nothing on it, and every "
+                    ++ "tool is on the Tools menu. A command opens that tool's window on "
+                    ++ "the way in; the program is the same either way, and the other "
+                    ++ "tools are still one menu away."
+                )
+            ]
+    , outro = PP.empty
+    , commands =
+        Parser.defineGroup
+            |> Parser.withCommand
+                { word = "ascii"
+                , arguments = Parser.noArgs
+                , flags = Parser.noFlags
+                , commonDescription = Just "Open the ASCII chart."
+                , summary = "The `ascii` command opens the ASCII chart:"
+                , example = PP.words "predc ascii"
+                , builder = \_args _flags -> Ascii
+                }
+            |> Parser.withCommand
+                { word = "calc"
+                , arguments = Parser.noArgs
+                , flags = Parser.noFlags
+                , commonDescription = Just "Open the RPN calculator."
+                , summary = "The `calc` command opens the RPN calculator:"
+                , example = PP.words "predc calc"
+                , builder = \_args _flags -> Calc
+                }
+            |> Parser.withCommand
+                { word = "hex"
+                , arguments =
+                    Parser.optionalArg
+                        { value = Parser.pathParser
+                        , help = "The file to open, if you already know which one"
+                        }
+                , flags = Parser.noFlags
+                , commonDescription = Just "Open the hex dump viewer."
+                , summary = "The `hex` command opens the hex dump viewer, on a file if you name one:"
+                , example =
+                    PP.verticalBlock
+                        [ PP.words "predc hex"
+                        , PP.words "predc hex /bin/ls"
+                        ]
+                , builder = \path _flags -> Hex path
+                }
+    }

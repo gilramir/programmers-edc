@@ -1,4 +1,4 @@
-module Tool.Hex exposing (Model, Msg, command, init, menu, menuItem, receive, update, view, windowId)
+module Tool.Hex exposing (Model, Msg, command, init, menu, menuItem, openFile, receive, update, view, windowId)
 
 {-| The hex dump viewer: offsets, sixteen bytes a row, and the printable
 rendering beside them.
@@ -395,6 +395,24 @@ init permission =
     , awaiting = Nothing
     , message = ""
     }
+
+
+{-| The same viewer, already pointed at a file: `predc hex dump.bin`.
+
+It is `statFile` and not a read, which is the same path the file dialog takes
+and for the same reason -- whether a name is a file or a directory is a
+question about the file system, and the answer decides between loading it and
+listing it. A name that is neither answers `Failed`, so the window opens with
+the reason on its message line rather than the program refusing to start over
+it. The dump is the place a person is looking; the complaint belongs there.
+-}
+openFile : FileSystem.Permission -> Path -> Step
+openFile permission path =
+    let
+        model =
+            init permission
+    in
+    { model = model, command = statFile model path }
 
 
 still : Model -> Step

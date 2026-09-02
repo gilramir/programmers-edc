@@ -59,6 +59,12 @@ tui =
 then `Tui.defineProgram tui { init, update, subscriptions, view, onEvent, menuBar, statusLine }`.
 The full version is in the module docs and in [`examples/hello`](examples/hello).
 
+An application with a command line wants `Tui.defineProgramOrExit` instead,
+whose `init` answers `Tui.Start model` or `Tui.Exit`. `Exit` sends no render,
+and since the first render is what starts Turbo Vision, a `--help` prints and
+the terminal is left exactly as it was found. Everything else about the two is
+the same.
+
 Build and run:
 
 ```sh
