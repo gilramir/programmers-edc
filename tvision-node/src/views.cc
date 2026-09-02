@@ -545,6 +545,18 @@ void JsEditor::handleEvent(TEvent &event)
     noteEditIfChanged();
 }
 
+void PaneScrollBar::handleEvent(TEvent &event)
+{
+    // `mouseInView` takes screen coordinates and converts them itself, which
+    // is the only reason the bar can ask the question of two views at once.
+    // The bar's own column counts as well as the pane's: a wheel turn with
+    // the pointer on the bar is the least surprising thing there is.
+    if (event.what == evMouseWheel && pane != nullptr &&
+        !mouseInView(event.mouse.where) && !pane->mouseInView(event.mouse.where))
+        return;
+    TScrollBar::handleEvent(event);
+}
+
 void JsScrollBar::scrollDraw()
 {
     TScrollBar::scrollDraw();
@@ -937,7 +949,7 @@ TView *buildItems(const Napi::Env &env, TGroup *win, const Napi::Value &value,
             // immediately to the right of the list's own rectangle, which is
             // a rule an author can lay out against.
             TRect listRect = getRect(env, it, "listBox");
-            TScrollBar *sb = new TScrollBar(
+            PaneScrollBar *sb = new PaneScrollBar(
                 TRect(listRect.b.x, listRect.a.y, listRect.b.x + 1, listRect.b.y));
             // What standardScrollBar(sbHandleKeyboard) actually sets: the bar
             // sees keystrokes the focused list did not want, which is how
@@ -945,6 +957,8 @@ TView *buildItems(const Napi::Env &env, TGroup *win, const Napi::Value &value,
             sb->options |= ofPostProcess;
             win->insert(sb);
             JsListBox *list = new JsListBox(listRect, sb, id);
+            // Which pane the wheel belongs to, now that there is one.
+            sb->pane = list;
             std::string chooses = getString(it, "chooses");
             if (!chooses.empty())
                 list->chooses = g_commands.intern(chooses);
@@ -962,15 +976,18 @@ TView *buildItems(const Napi::Env &env, TGroup *win, const Napi::Value &value,
             // below -- the rule a list box already follows, one direction
             // more. TEditor drives both itself; nothing here has to.
             TRect box = getRect(env, it, "editor");
-            TScrollBar *down = new TScrollBar(
+            PaneScrollBar *down = new PaneScrollBar(
                 TRect(box.b.x, box.a.y, box.b.x + 1, box.b.y));
-            TScrollBar *across = new TScrollBar(
+            PaneScrollBar *across = new PaneScrollBar(
                 TRect(box.a.x, box.b.y, box.b.x, box.b.y + 1));
             down->options |= ofPostProcess;
             across->options |= ofPostProcess;
             win->insert(down);
             win->insert(across);
-            made = new JsEditor(box, across, down, id);
+            JsEditor *editor = new JsEditor(box, across, down, id);
+            down->pane = editor;
+            across->pane = editor;
+            made = editor;
             }
         else if (type == "canvas")
             {

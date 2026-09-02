@@ -183,6 +183,35 @@ public:
     }
 };
 
+// The scroll bar a list box or an editor makes for itself, which takes the
+// mouse wheel only when the pointer is over the pane it scrolls.
+//
+// The wheel is not a positional event. `views.h` defines
+// `positionalEvents = evMouse & ~evMouseWheel`, so `TGroup::handleEvent` does
+// not look for the view under the pointer at all: it offers a wheel turn to
+// every view in z-order until one clears it, and `TScrollBar` is the only
+// stock view that asks for `evMouseWheel`. In a window that is one pane and
+// its bar that is exactly right -- the wheel works wherever the pointer is,
+// which is what a reader expects. In a window with three lists side by side
+// it means the frontmost bar answers for the whole window, and the frontmost
+// bar is the last one inserted: in the time zone picker, turning the wheel
+// over the zone list scrolled the `Displaying` column beside it and the list
+// under the pointer never moved.
+//
+// So the bar answers for a region instead of for the window -- its own column
+// and the pane it belongs to. A window with one list is unchanged, because
+// the pointer is over that list.
+class PaneScrollBar : public TScrollBar {
+public:
+    PaneScrollBar(const TRect &bounds) noexcept : TScrollBar(bounds) {}
+
+    // The view this bar scrolls. Set after construction rather than passed
+    // to it, because `TListViewer` wants the bar to exist first.
+    TView *pane = nullptr;
+
+    virtual void handleEvent(TEvent &event) override;
+};
+
 class JsListBox : public TListViewer {
 public:
     JsListBox(const TRect &bounds, TScrollBar *scrollBar, std::string id) noexcept

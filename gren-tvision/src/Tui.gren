@@ -816,7 +816,11 @@ first for a week, because `Array.append fst second` makes `fst` the *postfix*.
   - `ListBox` -- gets a scroll bar of its own, in the single column
     immediately to the **right** of its rectangle, so leave one. (Turbo Vision
     puts it on the window's frame, which is right for a window that is a list
-    and nothing else and wrong for anything with two panes in it.) Moving the
+    and nothing else and wrong for anything with two panes in it.) That bar
+    takes the mouse wheel only while the pointer is over the list or over the
+    bar itself, so several lists side by side each scroll under their own
+    pointer -- which is not how Turbo Vision routes a wheel turn, and is the
+    reason this bar is not the stock one. Moving the
     highlight sends a
     [`Focused`](#Event) event; committing an entry (`Space`, or a double
     click) sends a [`Selected`](#Event) one. `focused` is that highlight seen
@@ -861,9 +865,12 @@ first for a week, because `Array.append fst second` makes `fst` the *postfix*.
     takes the thumb straight to the pointer -- this fork of Turbo Vision does
     not page with the mouse, so `pageStep` is reached only from the keyboard
     (`Ctrl-Left`/`Ctrl-Right`, `PgUp`/`PgDn`). The wheel is three `arrowStep`s
-    and reaches the bar from anywhere in the window. Every one of those is a
-    single click: unlike other focusable views, a scroll bar does not spend
-    the first one taking focus.
+    and reaches the bar from anywhere in the window, because Turbo Vision does
+    not deliver a wheel turn to the view under the pointer -- so a window with
+    two of these in it, or one of these and a `ListBox`, sends every turn to
+    whichever was listed last. Every one of those is a single click: unlike
+    other focusable views, a scroll bar does not spend the first one taking
+    focus.
   - `Canvas` -- paints exactly the lines it is given, and sends
     [`KeyPressed`](#Event) and [`Clicked`](#Event) events while focused. This is
     the escape hatch for anything the stock controls cannot express: Turbo

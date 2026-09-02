@@ -224,7 +224,9 @@ tree to produce a case that hit it.
 **And it moved a scroll bar.** `TWindow::standardScrollBar` puts a list's bar
 on the window frame, which is right for a window that is a list and nothing
 else and wrong for two panes side by side. A list box's scroll bar now occupies
-the column immediately to the right of the list, so leave one.
+the column immediately to the right of the list, so leave one. That column is
+also the bar's answer to the mouse wheel: it takes a turn over its own list and
+over itself, and nowhere else. See the wheel note under tvdemo.
 
 There is no "Please Wait" window, either. The original scans the whole drive in
 a constructor and has to put one up; `FileSystem.listDirectory` is a task, a
@@ -509,8 +511,19 @@ canvas and a model for the same reason `TScroller` went.
 here does anything to make it. `TScrollBar` puts `evMouseWheel` in its own
 event mask, so a wheel turn scrolls the bar and arrives in the model as an
 ordinary `Scrolled`. One caveat inherited from Turbo Vision: `positionalEvents`
-excludes `evMouseWheel` (`views.h`), so a wheel event goes to whatever has
-*focus* rather than to whatever is under the pointer.
+excludes `evMouseWheel` (`views.h`), so a wheel turn is not delivered to the
+view under the pointer — nor to the focused one. It is offered to every view in
+z-order until one takes it, and a scroll bar is the only thing that ever does,
+so the *frontmost* bar in a window used to answer for the whole window.
+
+Since predc's time zone picker, that is no longer true of a bar a `ListBox` or
+an `Editor` makes for itself: those take a wheel turn only over their own pane,
+which is what makes three lists side by side scroll independently. A `ScrollBar`
+the model owns is still window-wide, because the binding cannot know what it
+scrolls. **So a window with a model-owned `ScrollBar` and a second scrollable
+pane still sends every wheel turn to that bar** — `dir` is one, and its tree
+cannot be wheeled. `FINDINGS.md`, *The wheel that turned the wrong list*, has
+the shape of the fix if it is wanted.
 
 ### The coverage gaps, all closed
 

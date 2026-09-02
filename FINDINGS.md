@@ -3886,8 +3886,10 @@ tell them apart.
 The keyboard and the wheel were both fine throughout and are the better tools
 for this job anyway: `PgUp`/`PgDn` page by the model's `pageStep`, and the
 wheel is `3 * arrowStep` and reaches the bar from anywhere in the window --
-including with the pointer over the dump, because a `Canvas` does not consume
-`evMouseWheel` and Turbo Vision passes it up.
+including with the pointer over the dump. Not because the `Canvas` passes it
+up: a wheel turn never goes to the view under the pointer in the first place,
+which is a stronger fact than it looks and is the subject of *The wheel that
+turned the wrong list*, below.
 
 ## The double click that arrived and had nowhere to go
 
@@ -4304,3 +4306,101 @@ two Chicago mornings, year 70 meaning 70, a name node has never heard of.
 `TZ` is set for the whole pty run, which is what turns "the machine's own zone"
 from a fact about whoever is running the suite into something a check can
 assert. node honours it and `getZoneName` reports it.
+
+## The wheel that turned the wrong list
+
+Reported from the time zone picker: *"I selected Asia, then in the Zone list
+I'm trying to scroll, but instead it's trying to scroll the Displaying column."*
+Exactly right, and the pointer had nothing to do with it -- the Displaying
+column would have taken that wheel turn from anywhere in the window.
+
+### A wheel turn is not a positional event
+
+```cpp
+// views.h
+positionalEvents    = evMouse & ~evMouseWheel,
+```
+
+Which is the whole finding. `TGroup::handleEvent` has three routes and the
+wheel takes the third:
+
+```cpp
+else if( event.what )
+    {
+    phase = phFocused;
+    if( (event.what & positionalEvents) != 0 )
+        doHandleEvent( firstThat( hasMouse, &event ), &hs );   // a click
+    else
+        forEach( doHandleEvent, &hs );                          // a wheel turn
+    }
+```
+
+A click is delivered to the view under the pointer. A wheel turn is offered to
+*every* view in z-order until one clears it, and `TScrollBar` is the only stock
+view that asks for `evMouseWheel` at all (`tscrlbar.cpp:57` puts it in the
+`eventMask`; nothing else in the library does). So the wheel belongs to
+whichever scroll bar is frontmost in the window, wherever the pointer is -- and
+frontmost means last inserted, because `TGroup::insert` puts a view at the
+front. The picker inserts its three lists left to right, so `Displaying`'s bar
+was in front of the zone list's, and turning the wheel anywhere in that window
+moved the rightmost column.
+
+This is not a bug in Turbo Vision. In a window that is one pane and its bar --
+which is every window in `tvision/examples/` -- it is the better rule: the
+wheel works over the text, over the frame, over the status area, everywhere,
+and the alternative would be worse. It takes a window with more than one
+scrollable pane to see it at all, and this repo did not have one until predc
+put three lists side by side.
+
+### The bar answers for a region instead of for the window
+
+`PaneScrollBar` in `tvnode.h`, and it is the whole change:
+
+```cpp
+if (event.what == evMouseWheel && pane != nullptr &&
+    !mouseInView(event.mouse.where) && !pane->mouseInView(event.mouse.where))
+    return;
+TScrollBar::handleEvent(event);
+```
+
+The bar a `listBox` or an `editor` makes for itself now knows which view it
+scrolls, and takes a wheel turn only over that view or over its own column.
+`mouseInView` takes screen coordinates and converts them itself, which is why
+the question can be asked of two views in one line. A single-pane window is
+unchanged, because the pointer is over the pane.
+
+`pane` is set after construction rather than passed in: `TListViewer`'s
+constructor wants its scroll bar to already exist, so the bar cannot know its
+list at the moment it is built.
+
+### What is deliberately not covered, and where it still bites
+
+A `ScrollBar` the *model* asked for by id is left window-wide. It scrolls
+something the binding cannot see -- in `predc hex` it is a `Canvas` the model
+paints -- so there is no pane to name, and "reaches the bar from anywhere in
+the window" is the documented behaviour that section relied on.
+
+The cost is that the same bug is still live one level over, in
+`examples/dir`: a tree `ListBox` on the left and a model-owned `ScrollBar` for
+the file pane on the right, and the file bar is inserted last. Turning the
+wheel over the *tree* scrolls the *files*. The fix would be a `for` field on
+`ScrollBar` naming the view it drives, which is the shape `label` and
+`history` already use -- the target listed before the bar, looked up by id --
+and it is a four-place change rather than a one-line one. Left undone
+deliberately, and written down here so it is not rediscovered.
+
+### Driving a wheel from a test
+
+`\x1b[<65;col;rowM` -- SGR codes 64 and 65 instead of a button, and a press
+with no release, because a wheel has nothing to let go of
+(`termio.cpp:541`). `Pty.wheel()` in the harness.
+
+One turn is `3 * arrowStep`, so on a nine-row list the first three turns only
+walk the highlight down inside what is already on the screen and the fourth is
+the first one that scrolls. A check that turned the wheel once and looked at
+the top row would have passed before the fix and after it.
+
+The check that bites hardest is the one on the *area* list, because it reads
+out in text: choosing an area writes its prefix into `Find`, so a wheel that
+reaches the areas at all is a wheel that changes the box. The zone list can
+only be checked by what scrolled; the area list says which pane got the event.

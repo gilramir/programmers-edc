@@ -136,6 +136,18 @@ class Pty:
     def right_click(self, col, row, settle=0.5):
         self.click(col, row, settle=settle, button=2)
 
+    def wheel(self, col, row, down=True, turns=1, settle=0.5):
+        """Turn the mouse wheel at 1-based (col, row).
+
+        Codes 64 and 65 rather than a button, and a press with no release:
+        a wheel has nothing to let go of, and `termio.cpp:541` reads the two
+        out of the same SGR sequence a click arrives in. One turn is three
+        `arrowStep`s, so a nine-row list needs four of them to move a row.
+        """
+        code = 65 if down else 64
+        for _ in range(turns):
+            self.send(f"\x1b[<{code};{col};{row}M".encode(), settle=settle)
+
     def wait(self, timeout=5):
         end = time.time() + timeout
         while time.time() < end:

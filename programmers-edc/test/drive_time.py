@@ -31,6 +31,12 @@ a testable claim rather than a fact about the machine the suite happens to be
 on. node honours it, `Intl.DateTimeFormat().resolvedOptions().timeZone` reports
 it, and `Time.getZoneName` is what predc reads.
 
+**Three lists side by side means three wheels.** A wheel turn is not a
+positional event in Turbo Vision, so the picker's rightmost scroll bar used to
+answer for the whole window and the list under the pointer never moved. The
+checks below turn the wheel over two of the three panes and read which one
+went.
+
 This suite also pins a bug it found in the binding: `TInputLine`'s constructor
 takes a *limit* and stores `maxLen = limit - 1`, so a field declared four
 characters wide held three and a four-digit year came out as `202`. Every check
@@ -183,6 +189,53 @@ def click_button(app, caption):
     return False
 
 
+def picker_heading(app):
+    """The row the picker's three column headings are on, zero-based."""
+    lines = app.render().split("\n")
+    for r, line in enumerate(lines):
+        if all(h in line for h in ("Area", "Zone", "Displaying")):
+            return r, line
+    return None, None
+
+
+def pane(app, head):
+    """One of the picker's three lists, top to bottom.
+
+    Sliced out by column rather than searched for by name, because the whole
+    question here is which of the three a zone was read from -- and a zone that
+    has been chosen is in two of them at once. The headings sit at the same
+    left edge as the lists under them, so the heading row is the ruler."""
+    r, heading = picker_heading(app)
+    edges = [heading.index(h) for h in ("Area", "Zone", "Displaying")]
+    edges.append(heading.rindex("║"))
+    lo = heading.index(head)
+    hi = edges[edges.index(lo) + 1]
+    out = []
+    for line in app.render().split("\n")[r + 1:]:
+        # The scroll bar lives in the column beside its list and is inside this
+        # slice; its glyphs and the window's own frame come off the ends.
+        cell = line[lo:hi].strip(" ░│║▲▼■▒▓")
+        if not cell:
+            break
+        out.append(cell)
+    return out
+
+
+def pane_point(app, head, nth=2):
+    """A point inside one of the picker's lists, `nth` rows below its
+    heading, for the wheel to be turned over."""
+    r, heading = picker_heading(app)
+    return (heading.index(head) + 3, r + 1 + nth)
+
+
+def find_text(app):
+    """What is in the Find box, without the count that shares its line."""
+    for line in app.render().split("\n"):
+        if "Find" in line:
+            return re.split(r"\s{2,}", line[line.index("Find") + 4:].strip())[0]
+    return None
+
+
 def config_of(home):
     path = os.path.join(home, ".config", "predc", "config.json")
     if not os.path.exists(path):
@@ -328,6 +381,46 @@ def main():
           (config_of(home) or {}).get("timezones")
           == ["America/Chicago", "Asia/Seoul", "Asia/Katmandu"],
           str(config_of(home)))
+
+    # ---- the wheel turns the list it is pointing at ----
+    #
+    # A wheel turn is not a positional event: `views.h` defines
+    # `positionalEvents = evMouse & ~evMouseWheel`, so `TGroup::handleEvent`
+    # never asks which view is under the pointer -- it offers the turn to every
+    # view in z-order until one clears it, and `TScrollBar` is the only stock
+    # view that asks for `evMouseWheel` at all. The frontmost bar therefore
+    # answered for the whole window, and the frontmost is the last one
+    # inserted: turning the wheel over the zone list scrolled `Displaying`, two
+    # panes to the right, while the list under the pointer sat still. In a
+    # window that is one list and its bar the old rule is invisible and right;
+    # it takes three lists side by side to see it. `PaneScrollBar` in
+    # `tvnode.h` is the answer -- a list's own bar takes the wheel only over
+    # its own list.
+    type_in_find(app, "Asia/", clear=True)
+    zones = pane(app, "Zone")
+    chosen = pane(app, "Displaying")
+    check("the whole area is on offer again", zones[0] == "Asia/Aden", str(zones))
+    check("with the three chosen zones beside it",
+          chosen == ["America/Chicago", "Asia/Seoul", "Asia/Katmandu"], str(chosen))
+
+    # Four turns and not one: a turn is three `arrowStep`s and the list is nine
+    # rows deep, so the first three only move the highlight down inside what is
+    # already on the screen. Nothing above the tenth row can prove anything.
+    where = pane_point(app, "Zone")
+    app.wheel(where[0], where[1], turns=4)
+    check("the wheel scrolls the list under the pointer",
+          pane(app, "Zone")[0] != zones[0], str(pane(app, "Zone")))
+    check("and not the one two panes over",
+          pane(app, "Displaying") == chosen, str(pane(app, "Displaying")))
+
+    # The area list under the pointer, which says the same thing from the other
+    # end and says it in text: choosing an area writes its prefix into Find, so
+    # a wheel that reaches the areas at all is a wheel that changes the box.
+    before = find_text(app)
+    where = pane_point(app, "Area")
+    app.wheel(where[0], where[1], turns=1)
+    check("an area under the pointer answers for itself",
+          find_text(app) != before, str((before, find_text(app))))
 
     click_button(app, "Done")
     check("Done closes the picker", "Time zones" not in app.render(), app.render())
