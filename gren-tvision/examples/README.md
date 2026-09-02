@@ -1192,10 +1192,17 @@ modal. The established alternative is `Tool.Hex`'s -- close it and reopen it
 one directory down -- which resets the caret and is fine for a directory and
 useless for a keystroke.
 
-predc's picker is therefore an **ordinary window** of the tool's, with Done
-where Cancel would have been. Nothing was lost: a modal is for a question and
-this is a workspace, it blocks nothing, and the converter behind it keeps
-working. But the gap is real and this is where it is written down.
+predc's picker is therefore an **ordinary window** of the tool's. Nothing was
+lost: a modal is for a question and this is a workspace, it blocks nothing, and
+the converter behind it keeps working. But the gap is real and this is where it
+is written down.
+
+It has a Cancel now, and getting one is the interesting part of being a
+workspace rather than a form. Every add, remove and reorder is applied to the
+converter as it happens, so there is no draft to discard: Cancel is an *undo*,
+to a list remembered when the window opened. A modal would have got the cheap
+version of that for free and would have had to give up the live preview to do
+it, which is the trade the whole design was making anyway.
 
 If it is ever closed, the shape to reach for is the one `Tui.Ui` already has
 for everything else -- a `modal : Maybe DialogSpec` field rendered every
@@ -1222,3 +1229,67 @@ said only "wrong window in front".
 This is not a defect to fix in the package, but it is a fact about it that
 nothing wrote down: `Tui.focus` is a request about the render it accompanies,
 and a render caused by a `Cmd`'s eventual answer is a different render.
+
+## `Focused` is the list box's contract, not the area list's feature
+
+predc's picker has three list boxes and handled `Focused` for one of them, and
+the bug that came of it is worth this package's attention rather than only that
+program's: **Add** added the first row of the zone list however far down the
+highlight had been clicked, arrowed or wheeled.
+
+The event's own doc comment has said the rule since the day it was added:
+
+> `Focused` — the highlight in a list box moved, by arrow key, mouse or a
+> render that replaced the list. **This is how the model learns which entry an
+> "Edit" or "Delete" button should act on**; Turbo Vision's own examples read
+> the list's `focused` member at the moment they need it, which a program that
+> cannot call into C++ has no way to do.
+
+So nothing here is wrong and nothing needs changing. What is worth writing down
+is the *shape of the mistake*, because it will happen again to anyone with more
+than one list in a window: the picker's area list needed `Focused` for a
+visible and interesting reason — choosing an area writes its prefix into the
+filter box — and that is exactly what made handling it look like an area-list
+feature rather than the contract every list box has. `Selected` carries an
+index of its own, so `Space` and a double click stayed right the whole time and
+hid it.
+
+The lesson for a driver, which cost more than the fix: **exercise a widget by
+every route the user has, not by the one the model treats as canonical.** Every
+picker check went through click-then-`Space`, which sends `Selected`, so the
+stale copy was never read. One check that pressed the button instead would have
+caught it on the day the picker was written.
+
+## What a toggle in a window is, now that `Changed` exists
+
+predc's converter grew a live-clock mode, and the widget question it asked has
+a better answer than the one it was nearly given: **a `CheckBoxes` cluster in
+an ordinary window reports a tick, through `Changed`.** That is exactly what
+protocol 8 was for and the event's doc comment says so, but `diff.js` still
+carried a comment describing the world before it — "a box the user ticks is
+reported only when a dialog is answered" — attached to a write-back rule that
+is still correct for an unrelated reason. A stale explanation on a right line
+reads exactly like documentation. It is fixed.
+
+Building it settled the fact rather than arguing it: a one-item cluster in the
+converter's button row toggles the mode. predc keeps a button anyway, because
+it sits in a row of buttons and a caption can say what pressing it *does* where
+a tick can only say what is true — a design choice, which is what it should
+have been all along.
+
+Two smaller facts fell out of the same mode, both about swapping widgets rather
+than about the clock:
+
+**`InputLine` writes its text one column in.** Making fields read-only by
+rendering `StaticText` in their place is the natural move for a model that
+re-renders, and it slides the whole table one column left of its heading unless
+the static text starts at `x1 + 1`: `TInputLine::draw` writes at offset 1
+inside its own rectangle (`tinputli.cpp:144`), and the two spare columns an
+input line's rectangle carries are its margins, which a static text has none
+of. Worth knowing before anyone else swaps one for the other.
+
+**A window's title is patched, not rebuilt.** `Time converter` becomes
+`Time converter -- live` when the mode changes, and the differ handles it with
+`setTitle` — the same reason a window's rectangle and palette are not
+structural. A mode indicator in a title is therefore free, which is not obvious
+from a package where a view's own rectangle is structural.

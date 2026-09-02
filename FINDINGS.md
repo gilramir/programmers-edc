@@ -4597,14 +4597,29 @@ The reply carries back the instant it was asked about, so `Answered` writing
 `posix` from it is a no-op rather than a second that stutters: it arrives in
 milliseconds, while this side is still on the second that sent it.
 
-### A button with two captions, because a check box cannot report
+### A button with two captions, and the check box that would have worked
 
-A toggle wants a check box, and `CheckBoxes` was the wrong widget for a reason
-worth writing down: **a cluster reports what is ticked only when a dialog is
-answered.** The converter is a window and is never answered, so the model would
-never learn that the box had been ticked at all. The state has to be readable
-from a button caption instead, and the caption says what pressing it does --
-`~L~ive clock`, then `~S~top clock`.
+A toggle wants a check box, and the first draft of this note said `CheckBoxes`
+could not be one -- *"a cluster reports what is ticked only when a dialog is
+answered"*. That was wrong, and it was wrong because of a stale comment in
+`diff.js` that is still describing the world before protocol 8. `Changed` is
+exactly the event that closed this hole, its own doc comment says so in as many
+words, and `JsCheckBoxes::handleEvent` sends `noteChangedFlags` on any change
+with no dialog anywhere near it. Building it proved it: a one-item cluster in
+the converter's button row, `Alt-L`, and the clock started.
+
+**The lesson is about the comment, not the cluster.** A note that explains a
+limit is a load-bearing claim, and when the limit is lifted the note becomes a
+lie that reads like documentation. `diff.js`'s comment was right about the
+*rule* it guards -- write a cluster back only when the model changed it -- and
+its stated reason had been false for several protocol versions. It is fixed,
+and it is the second time in this file that a stale explanation for a correct
+rule has cost an hour.
+
+So the button is a design choice and not a constraint: it sits in a row of
+buttons with `Now` and `Zones...`, and a caption can say what pressing it does
+where a tick can only say what is true. The title bar carries the state --
+`Time converter -- live` -- which is the job the check box would have done.
 
 `L` and `S` because both are free, and the two letters that read best were not:
 `~C~lock` binds Alt-C, the status line is `ofPreProcess` and already has Alt-C

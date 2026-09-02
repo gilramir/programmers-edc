@@ -122,11 +122,18 @@ function createDiffer(tv, onClosed = () => {}) {
         }
         break;
       case 'checkBoxes':
-        // A cluster holds state the model cannot see -- a box the user ticks
-        // is reported only when a dialog is answered -- so the same rule as an
-        // input line applies, and for the same reason: write it back only when
-        // the *model* changed it, never merely because it disagrees with the
-        // screen.
+        // Write it back only when the *model* changed it, never merely because
+        // it disagrees with the screen -- the same rule as an input line, and
+        // for the same reason: the user is mid-gesture in it and the screen is
+        // ahead of the model on purpose.
+        //
+        // This comment used to justify that with "a box the user ticks is
+        // reported only when a dialog is answered", which stopped being true
+        // at protocol 8: `Changed` reports a tick in an ordinary window. The
+        // rule survived its explanation, which is the dangerous shape -- a
+        // stale reason on a correct line reads exactly like documentation, and
+        // it cost predc's clock toggle an hour of believing a check box could
+        // not report.
         if (JSON.stringify(before.value) !== JSON.stringify(after.value)) {
           tv.setValue(after.id, after.value);
         }

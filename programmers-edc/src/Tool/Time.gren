@@ -1446,11 +1446,13 @@ tableViews fx names interior shown hidden model =
                 , isDefault = False
                 , takesFocus = True
                 }
-           -- One button and two captions rather than a check box, and not for
-           -- want of a check box: a `CheckBoxes` cluster reports what is
-           -- ticked only when a dialog is answered, and this window is not a
-           -- dialog and is never answered. So the state has to be readable
-           -- from the caption, and the caption says what pressing it does.
+           -- One button and two captions rather than a check box. A check
+           -- box would have worked -- `CheckBoxes` in an ordinary window
+           -- reports a tick through `Changed`, which is what protocol 8 was
+           -- for, and it was tried -- but it sits in a row of buttons, so it
+           -- is a button, and a button's caption can say what pressing it
+           -- does where a tick can only say what is true. The title bar
+           -- carries the state.
            --
            -- `L` and `S` because both are free. The status line has Alt-X,
            -- Alt-A, Alt-R, Alt-D and Alt-C, and it is `ofPreProcess`, so it
