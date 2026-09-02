@@ -262,7 +262,17 @@ public:
     {
         // Not selectable by default -- the one a list box owns should not be
         // in the tab order. One the model asked for by id should be.
-        options |= ofSelectable;
+        //
+        // And `ofFirstClick` with it, or the two together are worse than
+        // either alone. `TView::handleEvent` swallows a mouse-down on a
+        // selectable view that is not focused unless the view says the first
+        // click counts, so a bar that had only been made selectable took the
+        // caret on one click and moved on the next -- and nothing on the
+        // screen says which of the two the next click is. A list box's own
+        // bar has neither option and therefore acts on the first click; a
+        // scroll bar is a control whose whole purpose is to be clicked, and
+        // making it reachable by Tab must not make it worse with a mouse.
+        options |= ofSelectable | ofFirstClick;
     }
 
     virtual void scrollDraw() override;

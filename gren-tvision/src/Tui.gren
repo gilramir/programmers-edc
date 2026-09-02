@@ -188,9 +188,15 @@ its own is a pull-down, and one without is a command sitting on the bar.
   - **The first click on an inactive window is spent activating it** and does
     not reach the control underneath. The same rule applies one level down: a
     control that can take focus and does not have it spends the first click
-    taking it, so a scroll bar beside a focused canvas needs two clicks to
-    move. A view that cannot take focus -- `takesFocus = False` -- has no
-    first click to spend, which is one more reason to say so where it is true.
+    taking it, so a `Canvas` with `takesFocus = True` beside another one needs
+    two clicks to reach. A view that cannot take focus -- `takesFocus = False`
+    -- has no first click to spend, which is one more reason to say so where it
+    is true.
+
+    A [`ScrollBar`](#View) is the exception, and deliberately: it is reachable
+    by Tab *and* acts on the first click, because a control whose whole purpose
+    is to be clicked must not behave differently depending on something no
+    screen shows. See `Scrolled` for what a click on one does.
 
 @docs Ports
 @docs Program, ProgramConfiguration, defineProgram
@@ -826,6 +832,13 @@ first for a week, because `Array.append fst second` makes `fst` the *postfix*.
     box makes for itself. Moving it sends a [`Scrolled`](#Event) event, and
     `value` written back from the model moves it. Whether it is horizontal or
     vertical is decided by its rectangle: one column wide is vertical.
+    A click on the *arrows* steps by `arrowStep` and a click anywhere else
+    takes the thumb straight to the pointer -- this fork of Turbo Vision does
+    not page with the mouse, so `pageStep` is reached only from the keyboard
+    (`Ctrl-Left`/`Ctrl-Right`, `PgUp`/`PgDn`). The wheel is three `arrowStep`s
+    and reaches the bar from anywhere in the window. Every one of those is a
+    single click: unlike other focusable views, a scroll bar does not spend
+    the first one taking focus.
   - `Canvas` -- paints exactly the lines it is given, and sends
     [`KeyPressed`](#Event) and [`Clicked`](#Event) events while focused. This is
     the escape hatch for anything the stock controls cannot express: Turbo
@@ -1117,8 +1130,8 @@ type alias StatusItem =
     what this event carries.
     `isDouble` marks the second click of a double click; the first arrived on
     its own a moment earlier, so a view that acts on both will act twice.
-  - `Scrolled` -- a [`ScrollBar`](#View) moved, by arrow, page, drag or key.
-    A drag reports only where it ended: the intermediate positions are
+  - `Scrolled` -- a [`ScrollBar`](#View) moved, by arrow, click, drag, wheel or
+    key. A drag reports only where it ended: the intermediate positions are
     collapsed, because a model that re-rendered on each of them would redraw
     the window a dozen times per gesture.
   - `Resized` -- how big the **desktop** is, in character cells. It arrives

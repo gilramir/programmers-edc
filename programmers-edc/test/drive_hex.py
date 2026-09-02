@@ -326,24 +326,42 @@ def main():
           int(where(app).split("(")[1].split(")")[0]) == int(row_two, 16) + 3,
           where(app))
 
-    # 11. The scroll bar. Two clicks and not one: the first is spent taking
-    #     the caret off the canvas, which is TView's rule for any focusable
-    #     view and not something about scroll bars.
+    # 11. The scroll bar, on one click and not two. The caret is on the canvas
+    #     -- everything above put it there -- and `TView::handleEvent` swallows
+    #     a mouse-down on a selectable view that has not got it, unless the
+    #     view says the first click counts. `JsScrollBar` says so, and this is
+    #     the check that says it still does: a bar you have to click twice is a
+    #     bar whose behaviour depends on something no screen shows.
+    #     The bottom row of the bar is its down arrow -- the bar and the dump
+    #     are the same height -- so this is one arrowStep, and it used to take
+    #     two clicks to get it.
     go_to(app, "0")
     click_at(app, SCROLL_AT, FIRST_ROW + ROWS - 1)
-    click_at(app, SCROLL_AT, FIRST_ROW + ROWS - 1)
-    check("the scroll bar scrolls the dump", offsets(app)[0] == "00000010",
-          str(offsets(app)[:2]))
+    check("one click on the scroll bar scrolls the dump",
+          offsets(app)[0] == "00000010", str(offsets(app)[:2]))
     check("and drags the cursor along, so the lines below still describe "
           "something on screen",
           where(app).startswith("Offset 00000010 (16)"), where(app))
 
-    # ...and the caret has to be taken back off it the same way, which is why
-    # the keys below work again.
+    #     A click on the bar itself takes the thumb to the pointer rather than
+    #     paging -- magiblot's divergence from Borland's, which pages -- so the
+    #     same click twice is the same offset twice, and that is the check that
+    #     tells the two apart.
+    click_at(app, SCROLL_AT, FIRST_ROW + ROWS // 2)
+    landed = offsets(app)[0]
+    check("a click on the bar goes where the pointer is, not a page down",
+          landed not in ("00000000", "00000010"), landed)
+    click_at(app, SCROLL_AT, FIRST_ROW + ROWS // 2)
+    check("and clicking the same place again is the same place",
+          offsets(app)[0] == landed, f"{landed} -> {offsets(app)[0]}")
+
+    # The caret is on the bar now, and it takes two clicks to get it back to
+    # the dump -- a canvas is selectable and says nothing about first clicks,
+    # so it is the case the scroll bar no longer is.
     click_at(app, HEX_AT, FIRST_ROW)
     click_at(app, HEX_AT, FIRST_ROW)
     check("clicking the dump takes the caret back",
-          where(app).startswith("Offset 00000010 (16)"), where(app))
+          where(app).startswith("Offset " + offsets(app)[0]), where(app))
 
     # 12. The window resizes in one direction and not the other.
     #

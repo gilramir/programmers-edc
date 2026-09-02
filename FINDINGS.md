@@ -3798,3 +3798,78 @@ alternate screen nor mouse tracking nor a clear ever appears, alongside the
 exit code and the text. It then runs the same two through a pipe, which is the
 only way to tell stdout from stderr (a pty is one file) and the case where the
 colour has to come off and the width has to be eighty.
+
+## The scroll bar you had to click twice
+
+`predc hex README.md`, a scroll bar on the right of the dump, and clicking it
+was described exactly right: *"I click it and it sometimes advances the view; I
+click it again, especially at a higher point, and it doesn't move."* Both
+halves of that are true and they have different causes, which is why it felt
+like neither.
+
+### The half that was a bug: the first click was eaten
+
+```cpp
+void TView::handleEvent(TEvent& event)
+{
+    if( event.what == evMouseDown )
+        if(!(state & (sfSelected | sfDisabled)) && (options & ofSelectable) )
+            if( !focus() || !(options & ofFirstClick) )
+                clearEvent(event);
+}
+```
+
+`TScrollBar::handleEvent` calls that first, so a selectable bar that has not
+got the caret consumes the mouse-down and does nothing else with it. The caret
+is on the dump canvas -- everything a person does in this tool puts it there --
+so the *first* click on the bar moved nothing, the second moved, and clicking
+back into the dump made the next bar click dead again. Nothing on the screen
+says which of the two the next click is: a frame says which *window* is active
+and there is no mark at all for which view inside it has the caret.
+
+And it was ours. `JsScrollBar` sets `options |= ofSelectable`, so that a bar
+the model asked for by id is reachable by Tab, and Turbo Vision's own bars --
+the one a `TListViewer` makes for itself -- are not selectable at all and
+therefore never hit that branch. Making the bar keyboard-reachable had quietly
+made it worse with a mouse than the one it was modelled on.
+
+`ofFirstClick` is the option that exists for exactly this, and it is one line:
+
+    options |= ofSelectable | ofFirstClick;
+
+The rule to carry forward: **`ofSelectable` on a control whose whole purpose is
+to be clicked needs `ofFirstClick` with it.** A button, a check box, a scroll
+bar. The two-click rule is right for a *window* -- activating one is a real act
+-- and right for a canvas, which is a surface rather than a control. It is
+wrong for a widget.
+
+### The half that was not a bug: a click does not page
+
+magiblot's `TScrollBar` diverges from Borland's here, and the comment in
+`tscrlbar.cpp` says so:
+
+```cpp
+default:            // Otherwise, move the thumb along the mouse cursor.
+    ...
+    setValue( int(((long(p - 1) * (maxVal - minVal) + ((s - 2) >> 1)) / (s - 2)) + minVal) );
+```
+
+Every mouse-down that is not on an arrow takes the thumb *to the pointer* and
+drags from there. There is no `sbPageUp`/`sbPageDown` mouse path at all, so
+`pageStep` is reached only from the keyboard. That is the modern behaviour and
+worth keeping, but it has a consequence nobody expects from a Turbo Vision
+program: **the bar's resolution is the number of cells it is tall.** A
+sixteen-row bar has thirteen usable positions, so on a nine-kilobyte file one
+cell is forty-six rows, and clicking two cells apart is a ninety-two-row jump
+while clicking twice in the same cell is nothing at all. That is the "it
+doesn't move" -- the pointer was already where the thumb was.
+
+Which is also why the fix matters more than it looks: with the first click
+eaten, *both* explanations were live at once, and no sequence of clicks could
+tell them apart.
+
+The keyboard and the wheel were both fine throughout and are the better tools
+for this job anyway: `PgUp`/`PgDn` page by the model's `pageStep`, and the
+wheel is `3 * arrowStep` and reaches the bar from anywhere in the window --
+including with the pointer over the dump, because a `Canvas` does not consume
+`evMouseWheel` and Turbo Vision passes it up.

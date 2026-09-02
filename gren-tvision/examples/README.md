@@ -1062,3 +1062,24 @@ most of them will never use.
 
 FINDINGS has the rest, including what an application has to do by hand because
 `Argparse.Program` is a `Node.SimpleProgram` and cannot be the thing that paints.
+
+## The scroll bar that had to be clicked twice
+
+Reported from the application rather than found by a test, and fixed in the
+binding: `JsScrollBar` set `options |= ofSelectable` so a model-owned bar would
+be reachable by Tab, and `TView::handleEvent` swallows a mouse-down on a
+selectable view that has not got the caret unless the view also says
+`ofFirstClick`. So the first click on the bar took focus and moved nothing, and
+whether the next one worked depended on where the caret was -- which no screen
+shows. `options |= ofSelectable | ofFirstClick` is the whole fix.
+
+**The rule: `ofSelectable` on a control whose purpose is to be clicked needs
+`ofFirstClick` with it.** The two-click rule is right for a window and for a
+canvas, and wrong for a widget.
+
+The other half of the same report was not a bug. magiblot's `TScrollBar` takes
+the thumb to the pointer on any click that is not an arrow, where Borland's
+paged, so `pageStep` is keyboard-only and the bar's resolution is the number of
+cells it is tall -- one cell of a sixteen-row bar is forty-six rows of a
+nine-kilobyte file. Both are now in `Tui.View`'s doc comment, and FINDINGS has
+the measurements.
