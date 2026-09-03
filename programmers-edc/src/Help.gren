@@ -1,0 +1,596 @@
+module Help exposing
+    ( Model
+    , Session
+    , command
+    , detect
+    , init
+    , menuItem
+    , opened
+    , update
+    , view
+    , windowId
+    )
+
+{-| One window that answers "why can I not paste into this?".
+
+It exists because the answer is genuinely hard and every layer of it is silent.
+There are five stores on unix that people call the clipboard; Turbo Vision
+touches one of them; a mouse selection fills a different one; over ssh none is
+reachable and no setting changes that; and the thing that *does* work is not a
+clipboard operation at all, but the terminal typing at the program. Somebody
+who hits this in predc will conclude the program is broken, because every part
+of the machinery that failed did so without saying anything.
+
+**It measures rather than guesses.** The environment says whether there is a
+display, an ssh session and a multiplexer, and that settles most of it -- but
+whether a *terminal* will hand its clipboard back is in no variable, so the
+window asks for the clipboard when it opens and reads the answer's
+`fromSystem`. That one fact decides whether `p` can ever work here, and this
+way it is a measurement rather than a table lookup.
+
+**What to press comes first and why comes second**, which is the opposite of
+how the subject is usually written down. Somebody in front of a terminal that
+will not paste wants three lines; the page-long version is
+`gren-tvision/doc/clipboard.md`, and the last line here says so.
+
+-}
+
+import Array exposing (Array)
+import Dict exposing (Dict)
+import String
+import Theme exposing (Inks)
+import Tui exposing (Span, View(..))
+
+
+-- NAMES
+
+
+command : String
+command =
+    "help.clipboard"
+
+
+windowId : String
+windowId =
+    "help.clipboard"
+
+
+canvasId : String
+canvasId =
+    "help.clipboard.text"
+
+
+scrollId : String
+scrollId =
+    "help.clipboard.scroll"
+
+
+menuItem : Tui.MenuItem
+menuItem =
+    Tui.Item
+        { title = "~C~opying and pasting"
+        , cmd = command
+        -- `F1` because it is where help has been since before Turbo Vision,
+        -- and because nothing else in predc wants it: the status line is all
+        -- Alt-keys and Alt-F3, and the Window menu has F5 and F6.
+        , key = "F1"
+        , shortcut = "F1"
+        }
+
+
+-- SHAPE
+
+
+openRows : Int
+openRows =
+    17
+
+
+{-| The text column. Sixty-nine because the widest line is sixty-eight and
+prose wants one column of air after it; the window is `lineWidth + 3` wide,
+which is the two frame columns plus the one the scroll bar sits on.
+-}
+lineWidth : Int
+lineWidth =
+    69
+
+
+{-| How many rows of a window of this height are text.
+
+Three are spoken for whatever the height is: the two frame rows and the blank
+one under the text. Written once because it is used twice -- to lay the window
+out and to turn a resize into a row count -- and the two agreeing is what makes
+`PgDn` move by exactly what is on the screen.
+-}
+rowsIn : Int -> Int
+rowsIn height =
+    max 1 (height - 3)
+
+
+-- MODEL
+
+
+{-| What this machine is, as far as the clipboard is concerned.
+
+Read once at start-up because `Node.getEnvironmentVariables` is an `Init.Task`
+and nothing later can ask for one -- the same reason the file system permission
+is held in the shell's model.
+-}
+type alias Session =
+    { display : Bool
+    , wayland : Bool
+    , ssh : Bool
+    , tmux : Bool
+    , screen : Bool
+    , term : String
+    }
+
+
+{-| What the environment says.
+
+`SSH_CONNECTION` is tested first rather than `SSH_TTY`, because `sshd` sets it
+for every session including ones with no tty. None of the three is
+authoritative -- anybody can unset any of them -- which is why the window shows
+what it found as well as what it concluded.
+-}
+detect : Dict String String -> Session
+detect env =
+    let
+        set name =
+            when Dict.get name env is
+                Just value ->
+                    not (String.isEmpty value)
+
+                Nothing ->
+                    False
+    in
+    { display = set "DISPLAY"
+    , wayland = set "WAYLAND_DISPLAY"
+    , ssh = set "SSH_CONNECTION" || set "SSH_TTY" || set "SSH_CLIENT"
+    , tmux = set "TMUX"
+    , screen = set "STY"
+    , term =
+        when Dict.get "TERM" env is
+            Just value ->
+                value
+
+            Nothing ->
+                "(unset)"
+    }
+
+
+{-| Whether the terminal will hand its clipboard back, which no variable says.
+
+`Asking` is a state the window can be in for a moment and, on a terminal that
+never answers, for ever -- so it is drawn rather than waited for, and the
+answer replaces it whenever it arrives. Same shape and same reason as the hex
+viewer's "Asking for the clipboard..." line.
+-}
+type Probe
+    = Asking
+    | Answered Bool
+
+
+type alias Model =
+    { session : Session
+    , probe : Probe
+    , top : Int
+    , rows : Int
+    }
+
+
+init : Session -> Model
+init session =
+    { session = session, probe = Asking, top = 0, rows = openRows }
+
+
+type alias Step msg =
+    { model : Model, command : Cmd msg }
+
+
+still : Model -> Step msg
+still model =
+    { model = model, command = Cmd.none }
+
+
+{-| Opening the window asks for the clipboard, and the *answer* is the point
+rather than the text: `fromSystem` is what says whether the read reached
+anything outside this process, and the text is dropped on the floor.
+
+One request per opening rather than one per run, which is the cheaper mistake.
+A terminal's answer can change under a running program -- tmux's
+`set-clipboard` is a live setting and so is kitty's `clipboard_control` -- and
+a window somebody opened *because* they just changed one should not be
+answering out of a cache.
+-}
+opened : Tui.Ports msg -> Session -> Step msg
+opened ports session =
+    { model = init session, command = Tui.readClipboard ports }
+
+
+-- UPDATE
+
+
+update : Tui.Event -> Model -> Step msg
+update event model =
+    when event is
+        Tui.WindowResized it ->
+            if it.id == windowId then
+                still (at model.top { model | rows = rowsIn (it.rect.y2 - it.rect.y1) })
+
+            else
+                still model
+
+        Tui.KeyPressed pressed ->
+            if pressed.id == canvasId then
+                still (pressKey pressed.key model)
+
+            else
+                still model
+
+        Tui.Scrolled bar ->
+            if bar.id == scrollId then
+                still (at bar.value model)
+
+            else
+                still model
+
+        -- The probe's answer, and the guard is the one both pasting tools use:
+        -- `Asking` is what says this window was the thing that asked. Every
+        -- open tool is handed every event, so without it a paste made in the
+        -- hex viewer would be read here as a measurement.
+        Tui.ClipboardText it ->
+            when model.probe is
+                Asking ->
+                    still { model | probe = Answered it.fromSystem }
+
+                Answered _ ->
+                    still model
+
+        _ ->
+            still model
+
+
+pressKey : String -> Model -> Model
+pressKey key model =
+    let
+        last =
+            max 0 (Array.length (rows model) - model.rows)
+    in
+    when key is
+        "Up" ->
+            at (model.top - 1) model
+
+        "Down" ->
+            at (model.top + 1) model
+
+        "PgUp" ->
+            at (model.top - model.rows) model
+
+        "PgDn" ->
+            at (model.top + model.rows) model
+
+        "Home" ->
+            at 0 model
+
+        "Ctrl-Home" ->
+            at 0 model
+
+        "End" ->
+            at last model
+
+        "Ctrl-End" ->
+            at last model
+
+        _ ->
+            model
+
+
+at : Int -> Model -> Model
+at top model =
+    { model | top = clamp 0 (max 0 (Array.length (rows model) - model.rows)) top }
+
+
+-- WHAT IT SAYS
+
+
+{-| A line, before a theme has been applied to it.
+
+The text is built without `Inks` and painted afterwards, which is not tidiness:
+`update` has to count the lines to scroll them and `update` has no theme. One
+array that both halves agree about is what stops the scroll bar and the text
+drifting apart.
+-}
+type Line
+    = Head String
+    | Text String
+    | Warn String
+    | Gap
+
+
+paint : Inks -> Line -> Array Span
+paint inks line =
+    when line is
+        Head text ->
+            [ Tui.ink inks.ruler text ]
+
+        Text text ->
+            [ Tui.plain text ]
+
+        Warn text ->
+            [ Tui.ink inks.alert text ]
+
+        Gap ->
+            []
+
+
+{-| Every line of it. The visible ones are taken from here, and the scroll bar
+counts it.
+-}
+rows : Model -> Array Line
+rows model =
+    yours model ++ pressing model ++ pasting ++ copying ++ table ++ stores
+
+
+{-| The half that is about *this* machine, and the reason to open the window at
+all. It goes first because somebody with a broken paste wants the answer, not
+the background.
+-}
+yours : Model -> Array Line
+yours model =
+    let
+        it =
+            model.session
+
+        here =
+            it.display || it.wayland
+
+        place =
+            if it.ssh && it.tmux then
+                "Over ssh, inside tmux."
+
+            else if it.ssh && it.screen then
+                "Over ssh, inside screen."
+
+            else if it.ssh then
+                "Over ssh."
+
+            else if it.tmux then
+                "This machine, inside tmux."
+
+            else if it.screen then
+                "This machine, inside screen."
+
+            else
+                "This machine, no multiplexer."
+    in
+    [ Head "THIS SESSION"
+    , Gap
+    , Text ("  " ++ place ++ "   TERM=" ++ it.term)
+    , if it.wayland then
+        Text "  WAYLAND_DISPLAY is set, so wl-copy and wl-paste are tried first."
+
+      else if it.display then
+        Text "  DISPLAY is set, so xsel and xclip are tried first."
+
+      else
+        Text "  No DISPLAY, no WAYLAND_DISPLAY: xclip, xsel and wl-copy are not"
+    , if here then
+        Gap
+
+      else
+        Text "  tried at all -- the display they would talk to is the far end's."
+    , Gap
+    ]
+        ++ (when model.probe is
+                Asking ->
+                    [ Text "  Asking the terminal for its clipboard..." ]
+
+                Answered True ->
+                    [ Text "  Measured: something outside this program answered a clipboard"
+                    , Text "  read, so p and P work here."
+                    ]
+
+                Answered False ->
+                    [ Warn "  Measured: nothing outside this program answered a clipboard"
+                    , Warn "  read, so p and P cannot reach your clipboard here."
+                    , Text "  There is no setting that changes this. Paste with the terminal"
+                    , Text "  instead -- the next section is how."
+                    ]
+           )
+        ++ [ Gap ]
+
+
+{-| The section that is the point of the window, and the only other one that
+knows where it is: `prefix ]` is the answer for somebody inside tmux and noise
+for everybody else, so it is there only when `TMUX` is.
+-}
+pressing : Model -> Array Line
+pressing model =
+    [ Head "WHAT TO PRESS"
+    , Gap
+    , Text "  Paste into predc    Ctrl-Shift-V, or Shift-Insert, with the caret"
+    , Text "                      in a field. This always works: your terminal"
+    , Text "                      sends the text as keystrokes, and typing is"
+    , Text "                      the one route nothing can block."
+    , Gap
+    , Text "                      The fields that take bytes are the Unicode"
+    , Text "                      decoder's Bytes box and the hex viewer's"
+    , Text "                      Bytes | Type bytes...  Both accept text or"
+    , Text "                      hex digits; the radio beside them says which."
+    , Gap
+    ]
+        ++ (if model.session.tmux then
+                [ Text "  From tmux           prefix [ to select, then prefix ] with the"
+                , Text "                      caret in a field. tmux types the buffer at"
+                , Text "                      predc, so this works where p does not."
+                , Gap
+                ]
+
+            else
+                []
+           )
+        ++ [ Text "  From a selection    Shift and middle-click. A plain middle-click"
+           , Text "                      will not paste -- predc reads the mouse, so"
+           , Text "                      the terminal never sees the button, and on a"
+           , Text "                      window frame it moves the window instead."
+           , Gap
+           , Text "  Inside predc        Ctrl-Ins copies, Shift-Ins pastes and"
+           , Text "                      Shift-Del cuts, in every field here. They use"
+           , Text "                      predc's own clipboard, so they work with no"
+           , Text "                      system clipboard at all -- y in one window"
+           , Text "                      then Shift-Ins in another needs no terminal."
+           , Gap
+           , Text "  Out of predc        y copies. Whether it reaches the rest of the"
+           , Text "                      machine is the next section but one."
+           , Gap
+           ]
+
+
+pasting : Array Line
+pasting =
+    [ Head "WHY A PASTE MAY NOT ARRIVE"
+    , Gap
+    , Text "  Two different things are called pasting and only one of them can"
+    , Text "  fail."
+    , Gap
+    , Text "  predc asks for the clipboard -- p, P, Shift-Ins. It needs a route:"
+    , Text "  a helper program that talks to a display, or an escape sequence"
+    , Text "  the terminal answers. Over ssh there is no display, and the"
+    , Text "  sequence is not even sent unless the terminal has already proved"
+    , Text "  it answers one. tmux never proves it and never forwards it."
+    , Gap
+    , Text "  The terminal types at predc -- Ctrl-Shift-V, Shift-Insert,"
+    , Text "  tmux's prefix ]. Your terminal reads its own clipboard, on the"
+    , Text "  machine you are sitting at, and sends the characters down the"
+    , Text "  connection like typing. Nothing can stop this working."
+    , Gap
+    , Text "  So the fix for a paste is never a setting. It is a field, and"
+    , Text "  predc has two."
+    , Gap
+    ]
+
+
+copying : Array Line
+copying =
+    [ Head "WHY A COPY MAY NOT ARRIVE"
+    , Gap
+    , Text "  Copying out is the easier direction and does have a setting."
+    , Gap
+    , Text "  With a display, predc runs wl-copy, xsel or xclip. Without one it"
+    , Text "  hands the text to the terminal as an OSC 52 escape sequence, and"
+    , Text "  that is the only route that crosses ssh."
+    , Gap
+    , Text "  predc says the terminal did not confirm it rather than that the"
+    , Text "  copy failed, and the difference is real: the sequence goes out"
+    , Text "  every time, and a terminal that took it usually does not say so."
+    , Text "  The message means nobody confirmed, not that nobody took it."
+    , Gap
+    , Text "  tmux swallows it by default. One line fixes that:"
+    , Gap
+    , Text "      set -g set-clipboard on          # in ~/.tmux.conf"
+    , Gap
+    , Text "  That is about copying only. It does nothing for a paste."
+    , Gap
+    ]
+
+
+table : Array Line
+table =
+    [ Head "EVERY ENVIRONMENT"
+    , Gap
+    , Text "  Where you are                    Copy out          p and P"
+    , Text "  -------------------------------  ----------------  ---------------"
+    , Text "  Local X11 or Wayland             works             works"
+    , Text "  Local, selected with the mouse   --                never: PRIMARY"
+    , Text "  Local in tmux, no DISPLAY        needs tmux line   never"
+    , Text "  ssh, ordinary terminal           if allowed        never"
+    , Text "  ssh, kitty with reads allowed    works             works"
+    , Text "  ssh, inside tmux                 needs tmux line   never"
+    , Text "  Linux virtual console            nothing to take   nothing to give"
+    , Gap
+    , Text "  The right-hand column is why predc has fields -- and why it never"
+    , Text "  has to be the answer: Ctrl-Shift-V works in every row above."
+    , Gap
+    ]
+
+
+stores : Array Line
+stores =
+    [ Head "WHY IT IS THIS CONFUSING"
+    , Gap
+    , Text "  Unix has no single clipboard. It has six, they hold different"
+    , Text "  text, and nothing on the screen says which one you are looking at:"
+    , Gap
+    , Text "    X11 CLIPBOARD    an explicit Copy fills it; Ctrl-V pastes it"
+    , Text "    X11 PRIMARY      selecting with the mouse fills it; middle-"
+    , Text "                     click pastes it"
+    , Text "    X11 cut buffers  effectively nothing has used these since 1990"
+    , Text "    Wayland's        a different protocol again"
+    , Text "    the terminal's   the only one that exists over ssh, because it"
+    , Text "                     belongs to the machine you are sitting at"
+    , Text "    tmux buffers     a private one per multiplexer, on top"
+    , Gap
+    , Text "  Turbo Vision reads and writes X11 CLIPBOARD and never PRIMARY."
+    , Text "  So text you selected with the mouse is not text predc can ask"
+    , Text "  for, even on your own machine with xclip installed. Paste it in"
+    , Text "  instead, with Shift and middle-click."
+    , Gap
+    , Text "  The long version, with the measurements behind all of this, is"
+    , Text "  gren-tvision/doc/clipboard.md."
+    ]
+
+
+-- VIEW
+
+
+view : Inks -> Model -> Tui.Window
+view inks model =
+    { id = windowId
+    , title = "Copying and pasting"
+    -- Narrower than the hex viewer and the decoder, because this is prose and
+    -- eighty columns of it is a wall. It is also why the window is offset
+    -- rather than at the left edge: it is meant to be read in front of the
+    -- window that raised the question, not to replace it.
+    , rect = { x1 = 4, y1 = 1, x2 = 4 + lineWidth + 3, y2 = 1 + openRows + 3 }
+    , resize = Tui.resizeHeight
+    , palette = Tui.BlueWindow
+    , canClose = True
+    , canMove = True
+    , views =
+        [ Grows
+            { grow = Tui.stretchHeight
+            , view =
+                Canvas
+                    { id = canvasId
+                    , rect = { x1 = 1, y1 = 1, x2 = 1 + lineWidth, y2 = 1 + openRows }
+                    , lines = shown inks model
+                    , cursor = Nothing
+                    , takesFocus = True
+                    }
+            }
+        , Grows
+            { grow = Tui.stretchHeight
+            , view =
+                ScrollBar
+                    { id = scrollId
+                    -- On the frame, which is where Turbo Vision puts a scroll
+                    -- bar: the window is `lineWidth + 3` wide, so the last
+                    -- column is the border and this is it.
+                    , rect = { x1 = 1 + lineWidth, y1 = 1, x2 = 2 + lineWidth, y2 = 1 + openRows }
+                    , value = model.top
+                    , min = 0
+                    , max = max 0 (Array.length (rows model) - model.rows)
+                    , pageStep = model.rows
+                    , arrowStep = 1
+                    , for = ""
+                    }
+            }
+        ]
+    }
+
+
+shown : Inks -> Model -> Array (Array Span)
+shown inks model =
+    Array.map (paint inks)
+        (Array.takeFirst model.rows (Array.dropFirst model.top (rows model)))

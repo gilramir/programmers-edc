@@ -30,6 +30,7 @@ import Config
 import Dict exposing (Dict)
 import FileSystem
 import FileSystem.Path exposing (Path)
+import Help
 import Init
 import Json.Decode as Decode
 import Json.Encode as Encode
@@ -123,6 +124,14 @@ type alias Model =
     , hex : Maybe Tool.Hex.Model
     , time : Maybe Tool.Time.Model
     , unicode : Maybe Tool.Unicode.Model
+    -- The help window, which is a window like a tool's and is not one: it is
+    -- on the Help menu rather than the Tools menu, and what it explains is the
+    -- program rather than being a thing the program does.
+    , help : Maybe Help.Model
+    -- What the environment said at start-up, which the help window needs and
+    -- nothing else does. Held here because `Node.getEnvironmentVariables` is
+    -- an `Init.Task` -- the same reason the file system permission is.
+    , session : Help.Session
     -- Which colour scheme, and where to write it down. The theme is a shell
     -- concern in the same way the menu bar is: it belongs to the program
     -- rather than to any tool, and every tool has to be told.
@@ -200,6 +209,8 @@ init env =
                     , hex = Nothing
                     , time = Nothing
                     , unicode = Nothing
+                    , help = Nothing
+                    , session = Help.detect vars
                     , theme = config.theme
                     , timezones = config.timezones
                     , here =
@@ -493,6 +504,31 @@ handleEvent event model =
                         , command = Tui.focus tui Tool.Unicode.windowId
                         }
 
+            else if
+                -- The one window that has something to do when it is *re*-opened
+                -- as well as when it is opened: it measures whether this terminal
+                -- will hand a clipboard back, and that can change under a running
+                -- program. So a second F1 on an open window asks again rather than
+                -- only bringing it to the front.
+                cmd == Help.command
+            then
+                let
+                    step =
+                        Help.opened tui model.session
+                in
+                { model = { model | help = Just step.model }
+                , command =
+                    Cmd.batch
+                        [ step.command
+                        , when model.help is
+                            Just _ ->
+                                Tui.focus tui Help.windowId
+
+                            Nothing ->
+                                Cmd.none
+                        ]
+                }
+
             else
                 -- Every other command belongs to a tool: its menu's, or one of
                 -- its buttons'. The shell does not know which, and does not
@@ -520,6 +556,9 @@ handleEvent event model =
 
             else if id == Tool.Unicode.windowId then
                 { model = { model | unicode = Nothing }, command = Cmd.none }
+
+            else if id == Help.windowId then
+                { model = { model | help = Nothing }, command = Cmd.none }
 
             else
                 -- The zone picker is a window of the converter's rather than
@@ -599,6 +638,9 @@ toTools event model =
                 , hex = Maybe.map .model hex
                 , time = Maybe.map .model time
                 , unicode = Maybe.map .model unicode
+                -- Like the chart and the calculator, it starts nothing and so
+                -- has nothing to hand back but a model.
+                , help = Maybe.map (\it -> (Help.update event it).model) model.help
             }
 
         -- What the converter is displaying *is* what the config file should
@@ -751,6 +793,13 @@ view model =
                     Nothing ->
                         []
                )
+            ++ (when model.help is
+                    Just help ->
+                        [ Help.view (Theme.inks model.theme) help ]
+
+                    Nothing ->
+                        []
+               )
             ++ (when model.unicode is
                     Just unicode ->
                         [ Tool.Unicode.view (Theme.inks model.theme) unicode ]
@@ -817,7 +866,11 @@ menuBar model =
            , SubMenu
                 { title = "~H~elp"
                 , key = ""
-                , items = [ Item { title = "~A~bout...", cmd = "about", key = "", shortcut = "" } ]
+                , items =
+                    [ Help.menuItem
+                    , Tui.Separator
+                    , Item { title = "~A~bout...", cmd = "about", key = "", shortcut = "" }
+                    ]
                 }
            ]
 

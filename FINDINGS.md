@@ -5241,3 +5241,79 @@ fact about editors rather than a missing three lines of status line.
 `examples/edit` and `predc` both name them now, as invisible status entries. In
 `edit` that means the Find dialog's field takes a paste, which is a real thing
 to want there: what you search for is usually something you are looking at.
+
+## The window that measures instead of explaining
+
+Two commits of clipboard work left `doc/clipboard.md` correct and predc's users
+no better off, because a user in front of a terminal that will not paste does
+not read a repository. So **Help | Copying and pasting** (`F1`), which is the
+same subject in the program.
+
+The design decision worth writing down is that **it is a measurement rather
+than a page**. Most of the answer is in the environment -- `DISPLAY`,
+`WAYLAND_DISPLAY`, `SSH_CONNECTION`, `TMUX`, `STY`, `TERM` -- and `Help.detect`
+reads all six at start-up, because `Node.getEnvironmentVariables` is an
+`Init.Task` and nothing later can ask for one.
+
+But the fact that actually settles it is in none of them. Whether a *terminal*
+will hand its clipboard back is decided by `hasFullOsc52`, which is set by a
+reply to a capability query and is invisible from Gren. What is visible is
+`ClipboardText.fromSystem`: false means nothing outside answered. So opening
+the window fires a `readClipboard` and keeps the boolean, throwing the text
+away. One line of the window is then a fact about this terminal rather than a
+row of a table:
+
+    Measured: nothing outside this program answered a clipboard
+    read, so p and P cannot reach your clipboard here.
+
+**It asks again on every opening rather than caching**, which is the cheaper
+mistake in both directions. `set-clipboard` is a live tmux setting and so is
+kitty's `clipboard_control`, so somebody who opens this window *because* they
+just changed one is exactly the person a cached answer would mislead.
+
+### What to press first, why second
+
+Written the opposite way round from every explanation of this subject,
+including the one in `doc/clipboard.md`. Somebody whose paste did nothing wants
+three lines. The background is real and is underneath, where it belongs: the
+two different mechanisms both called pasting, what the tmux line does and does
+not fix, a row per environment, and the six stores.
+
+### Three things the shape of it forced
+
+**Text and theme are separated.** `update` has to count lines to scroll them
+and `update` has no `Inks`, so the body is an `Array Line` of
+`Head`/`Text`/`Warn`/`Gap` and `paint` applies the theme at render time. One
+array both halves agree about is what stops the scroll bar and the text
+drifting apart -- and the alternative, a second `lineCount` function, is a
+thing that drifts by construction.
+
+**A window that is not a tool.** It lives at `src/Help.gren` rather than in
+`src/Tool/`, because `Tool/` means "on the Tools menu, a thing the program
+does" and this is neither. It is otherwise exactly a tool's shape -- `command`,
+`windowId`, `init`, `update`, `view` -- which is what let the shell take it
+with four lines.
+
+**Re-opening does something.** Every other window in predc answers a second
+`Alt-`key by coming to the front. This one measures again, so the command
+branch is a `Help.opened` plus a `Tui.focus` rather than one or the other.
+
+### The menu entry that broke four checks in two other suites
+
+Adding one entry to the Help menu moved **About** down two rows, and three
+checks in `drive_shell.py` and one in `drive_ascii.py` failed -- all of them
+about the About box centring itself, none of them about the Help menu. Both
+drivers were clicking the *n*-th line of the pull-down.
+
+`drive_hex.py` already had the rule written down, from the last time this
+happened to it: reach a menu entry by the letter it underlines, never by
+counting lines. It is in `bytes_menu` there and now in `menu` here, with the
+same note. A convention that lives in one driver is a convention the next one
+does not have.
+
+### And a table whose columns were wrong
+
+The first version was written by hand and the columns did not line up, because
+`works` is five characters and `needs tmux line` is fifteen. It is generated
+with `ljust` now and pasted in. A table nobody can read is worse than a
+paragraph, and in a terminal there is no layout engine to hide behind.

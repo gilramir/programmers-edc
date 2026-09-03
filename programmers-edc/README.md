@@ -121,6 +121,8 @@ takes it. FINDINGS.md has the story.
     bin/timezones.js  the IANA database, behind a port pair -- the one thing
                       predc needs that Gren has no answer for
     src/Tool/         one module per tool, each handing back a Tui.Window
+    src/Help.gren     the one window that is not a tool: Help | Copying and
+                      pasting, which measures this session and explains it
     src/Ascii.gren    what ASCII says about a byte, shared by two of the tools
     src/Theme.gren    the three colour schemes, and the inks the tools paint with
     src/Config.gren   the one thing predc remembers between runs
@@ -313,6 +315,36 @@ nothing. Measured on a tmux 3.4 with an `xterm*` terminal outside it:
 So one line in `~/.tmux.conf`:
 
     set -g set-clipboard on
+
+### The window that explains all this
+
+**Help | Copying and pasting** (`F1`) is the whole of the section below, in the
+program, for the person who is not going to read a README. It opens on *this*
+session rather than on the background:
+
+    THIS SESSION
+
+      Over ssh, inside tmux.   TERM=screen-256color
+      No DISPLAY, no WAYLAND_DISPLAY: xclip, xsel and wl-copy are not
+      tried at all -- the display they would talk to is the far end's.
+
+      Measured: nothing outside this program answered a clipboard
+      read, so p and P cannot reach your clipboard here.
+      There is no setting that changes this. Paste with the terminal
+      instead -- the next section is how.
+
+**Measured, not guessed.** The environment settles most of it, but whether a
+*terminal* will hand its clipboard back is in no variable -- and it is the fact
+that decides whether `p` can ever work. So the window asks for the clipboard
+when it opens and reads `fromSystem` off the answer. It asks again on each
+opening rather than caching, because `set-clipboard` and kitty's
+`clipboard_control` are live settings and a window somebody opened *because*
+they just changed one should not be answering out of a cache.
+
+What to press comes first and why comes second, which is the opposite of how
+this subject is usually written down. Underneath that are the two mechanisms
+both called pasting, what the tmux line does and does not fix, a row per
+environment, and the six stores unix calls a clipboard.
 
 ### Pasting over ssh
 

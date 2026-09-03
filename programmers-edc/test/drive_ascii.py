@@ -226,10 +226,12 @@ def main():
           str(numbers(app.render())))
 
     # The shell is still there behind the tool.
+    #    By the letter it underlines and not by counting rows: adding
+    #    **Copying and pasting** to the Help menu moved About down two, and the
+    #    four checks that broke were about neither.
     bar = app.render().split("\n")[0]
-    at = bar.index("Help")
-    app.click(at + 1, 1, settle=0.6)
-    app.click(at + 3, 3, settle=0.9)
+    app.click(bar.index("Help") + 1, 1, settle=0.6)
+    app.send(b"a", settle=0.9)
     check("the shell's About still opens over a tool",
           "every-day carry" in app.render(), app.render())
     app.send(b"\r", settle=0.9)

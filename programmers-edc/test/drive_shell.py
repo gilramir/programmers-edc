@@ -24,14 +24,18 @@ sys.path.insert(0, os.path.join(ROOT, "..", "tvision-node", "test"))
 from harness import Pty, Checks, node_argv
 
 
-def menu(app, item, entry):
-    """Open a pull-down by clicking its name, then click the `entry`-th line in
-    it (1-based). Row 0 is the menu bar and row 1 is the box's own border, so
-    the first entry is on row 2 -- which is row 3 to `click`."""
+def menu(app, item, letter, settle=0.9):
+    """Open a pull-down by clicking its name, then pick an entry by the letter
+    it underlines.
+
+    By the letter and **not** by counting lines, which is the rule the hex
+    viewer's driver already writes down and this one learned the same way:
+    adding **Copying and pasting** to the Help menu moved About down two rows
+    and broke three checks that were about neither.
+    """
     bar = app.render().split("\n")[0]
-    at = bar.index(item)
-    app.click(at + 1, 1, settle=0.6)
-    app.click(at + 3, entry + 2, settle=0.9)
+    app.click(bar.index(item) + 1, 1, settle=0.6)
+    app.send(letter, settle=settle)
 
 
 def box_edges(screen, title):
@@ -80,7 +84,7 @@ def main():
     # About is a message box, so it centres itself -- which is the only thing
     # in the shell that needs the desktop's size, and therefore the only
     # evidence that `Resized` reached the model at startup.
-    menu(app, "Help", 1)
+    menu(app, "Help", b"a")
     about = app.render()
     check("About opened", "every-day carry" in about, about)
     edges = box_edges(about, "About")
@@ -95,7 +99,7 @@ def main():
     # About box would be off-centre afterwards if Resized never arrived. Shrink
     # the terminal and open it again: same test, a size the default cannot fake.
     app.resize(70, 20)
-    menu(app, "Help", 1)
+    menu(app, "Help", b"a")
     edges = box_edges(app.render(), "About")
     check("Resized reaches the model: the box re-centres on the new width",
           edges is not None and abs(edges[0] - (69 - edges[1])) <= 1,
