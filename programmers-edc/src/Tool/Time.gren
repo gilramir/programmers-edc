@@ -1688,18 +1688,24 @@ chooser desktop picker =
                     ([ { name = "All", count = Array.length picker.all } ] ++ areas picker.all)
             , focused = 0
             , chooses = ""
+            , columns = 1
+            , top = 0
             }
         , ListBox
             { id = pickerZones
             , rect = { x1 = 19, y1 = listTop, x2 = 44, y2 = listBottom }
             , items = found
             , focused = picker.highlight
+            , columns = 1
+            , top = 0
             , chooses = ""
             }
         , ListBox
             { id = pickerChosen
             , rect = { x1 = 46, y1 = listTop, x2 = 65, y2 = listBottom }
             , items = picker.chosen
+            , columns = 1
+            , top = 0
             , focused = picker.picked
             , chooses = ""
             }

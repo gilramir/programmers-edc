@@ -242,8 +242,8 @@ TCluster	press	used	the binding calls it; not itself a thing a Gren program name
 TCluster	movedTo	internal	a hook for a subclass to hear the highlight move
 TCluster	setData	internal	a virtual the binding overrides or inherits, not a call a model makes
 TCluster	setState	internal	a virtual the binding overrides or inherits, not a call a model makes
-TCluster	setButtonState	todo	greying out one box of a cluster; setEnabled works on commands, and a cluster item is not one
-TCluster	buttonState	todo	the read side of the same thing
+TCluster	setButtonState	bound	`available`, one flag per box of a CheckBoxes, RadioButtons or MultiCheckBoxes
+TCluster	buttonState	used	the read side, which TCluster consults before it lets a hotkey or an arrow reach a box
 TCluster	build	internal	object-stream persistence; no view here is serialised
 TCheckBoxes	draw	internal	a virtual the binding overrides or inherits, not a call a model makes
 TCheckBoxes	mark	used	the binding calls it; not itself a thing a Gren program names
@@ -338,8 +338,8 @@ TListViewer	focusItemNum	used	the binding calls it; not itself a thing a Gren pr
 TListViewer	shutDown	internal	a virtual the binding overrides or inherits, not a call a model makes
 TListViewer	hScrollBar	used	the binding calls it; not itself a thing a Gren program names
 TListViewer	vScrollBar	used	a list makes its own bar and the differ knows not to touch it
-TListViewer	numCols	todo	a list of more than one column; TListViewer has always had them and no ListBox field says so
-TListViewer	topItem	todo	which row is at the top -- a model can move the highlight and cannot scroll under it
+TListViewer	numCols	bound	ListBox's `columns`
+TListViewer	topItem	bound	ListBox's `top`
 TListViewer	focused	used	the binding calls it; not itself a thing a Gren program names
 TListViewer	range	used	the binding calls it; not itself a thing a Gren program names
 TListViewer	build	internal	object-stream persistence; no view here is serialised
@@ -660,7 +660,7 @@ flags	sfActive	internal	whether a window is the active one, which TVision mainta
 flags	sfSelected	used	current within its owner; the focusing click turns on this and not sfFocused
 flags	sfFocused	used	the caret is in this view
 flags	sfDragging	internal	set while the user is dragging a window
-flags	sfDisabled	todo	greying out a *view*: setEnabled greys a command, and an InputLine, ListBox or Canvas has none
+flags	sfDisabled	bound	the `Enabled` wrapper, which works on any view because sfDisabled is TView's
 flags	sfModal	used	the modal stack sets it
 flags	sfDefault	internal	the default button, which Button's isDefault decides
 flags	sfExposed	internal	whether any cell of the view can be seen

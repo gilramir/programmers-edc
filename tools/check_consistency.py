@@ -49,14 +49,18 @@ def gren_view_variants(src):
     return re.findall(r"^\s*[=|]\s*(\w+)", block.group(1), re.M)
 
 
-# `Grows` is the one constructor of `View` that is not a widget: it wraps
-# another view to say which of its edges follow the window, and encodes as a
-# `grow` field on the view it wraps rather than as a wire type of its own. It
-# therefore has no branch in the four-layer walk and never will. Naming it here
-# rather than loosening the walk is what keeps the walk exact for the other
-# nine -- and check 2b below verifies that the wrapper really is plumbed, so
-# this line is an exemption rather than a hole.
-WRAPPER_VARIANTS = {"Grows"}
+# The constructors of `View` that are not widgets. Each wraps another view and
+# encodes as a *field* on the view it wraps rather than as a wire type of its
+# own, so neither has a branch in the four-layer walk and neither ever will:
+#
+#   Grows     which of a view's edges follow the window when it is resized
+#   Enabled   whether the view can be used at all, which is TView's sfDisabled
+#             and therefore true of every widget rather than of any one of them
+#
+# Naming them here rather than loosening the walk is what keeps the walk exact
+# for the widgets -- and check 2b below verifies that a wrapper really is
+# plumbed, so these are exemptions rather than holes.
+WRAPPER_VARIANTS = {"Grows", "Enabled"}
 
 
 def gren_encoder_types(src):

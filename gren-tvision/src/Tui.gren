@@ -840,8 +840,29 @@ first for a week, because `Array.append fst second` makes `fst` the *postfix*.
     has crossed the port the dialog is still open with nothing able to close
     it. Turbo Vision's own `TFileDialog` does exactly this translation, in
     C++, inside the dialog (`cmFileDoubleClicked` becomes `cmOK`).
+    `columns` divides the list's rectangle and fills each column downwards, so
+    a two-column list of nine items puts five on the left and four on the
+    right. `1` is the ordinary list. This is what Turbo Vision's own
+    `TListViewer` has always done and what a list too long for its window often
+    wants instead of a scroll bar.
+
+    `top` is which item is drawn on the *first row*, which is a different
+    sentence from `focused` and is the only place in this package where a model
+    can put the highlight out of sight. Turbo Vision moves this itself to keep
+    the focused item visible and offers no way to say it, because a list's
+    scroll bar tracks `focused` and not this. `0` is the top, and the next
+    thing that moves the highlight scrolls it back into view of its own accord.
   - `CheckBoxes` -- a group of boxes, ticked with `Space`. `checked` is one
-    flag per item.
+    flag per item, and `available` one *more* flag per item: a box whose flag
+    is `False` is drawn grey, is skipped by the arrow keys and cannot be
+    ticked, which is how a form says that a choice does not apply right now
+    rather than hiding it and moving everything below it up. `[]` -- the
+    ordinary case -- says nothing about any box, and an array shorter than the
+    cluster says nothing about the ones past its end.
+
+    `available` and [`Enabled`](#View) are different things and both are worth
+    having: this greys one box, and `Enabled` greys the whole cluster, because
+    a cluster is one view however many boxes are in it.
   - `MultiCheckBoxes` -- the same cluster with more than two states per box.
     `marks` is one character per state, in order, drawn between the brackets:
     `" ?X"` is a box that cycles blank, `?`, `X`. `states` is one index into
@@ -852,8 +873,10 @@ first for a week, because `Array.append fst second` makes `fst` the *postfix*.
     *items* × *bits per state* has to fit in 32 -- eight boxes of four states,
     sixteen of three, and the binding says so rather than dropping the last
     few.
+
+    `available` works exactly as it does on `CheckBoxes`.
   - `RadioButtons` -- a group of which exactly one is chosen; `selected` is its
-    index.
+    index. `available` works exactly as it does on `CheckBoxes`.
   - `Label` -- text bound to another control by its id, so `Alt-`*x* on the
     label focuses the control. **List the control before its label**: the label
     has to name a view that already exists.
@@ -959,7 +982,7 @@ changes size. See [`Grow`](#Grow).
 
     Grows
         { grow = Tui.stretch
-        , view = ListBox { id = "entries", rect = ..., items = ..., focused = 0, chooses = "" }
+        , view = ListBox { id = "entries", rect = ..., items = ..., focused = 0, chooses = "", columns = 1, top = 0 }
         }
 
 It is opt-in because most views do not want it, and a wrapper rather than a
@@ -968,6 +991,29 @@ all. It takes a record because a Gren variant takes at most one argument, which
 is also what makes it look like every other constructor here. It encodes as a
 field on the view it wraps, so nothing downstream has a `Grows` to handle.
 Wrapping a wrapper is legal and the outer one wins.
+
+`Enabled` is the second of them and works the same way:
+
+    Enabled
+        { enabled = model.fileIsOpen
+        , view = Button { id = "save", ... }
+        }
+
+A view wrapped in `Enabled False` is drawn in the palette's grey, is skipped by
+`Tab`, and is handed no keystroke and no click. It is a wrapper for the same
+reason `Grows` is -- being available is `TView`'s `sfDisabled` and so is true
+of *every* widget rather than of any one of them, and a view that is always
+available should not have to say so.
+
+**This is not [`setEnabled`](#setEnabled), and the difference is the reason it
+exists.** That greys a *command*, everywhere it appears -- a menu entry, a
+status line entry, a button carrying it. A view with no command had no way to
+be unavailable at all, which is every input line, list box, scroll bar and
+canvas in the package. Use `setEnabled` for a command and this for a view; a
+button has both and either will do.
+
+Changing it does not rebuild the view, so an input line keeps what was typed
+into it and a list keeps its highlight while it is unavailable.
 
 The first control in the list gets focus when the window opens -- the first
 that *can* take it, so a row of `takesFocus = False` buttons is skipped. Turbo
@@ -986,15 +1032,16 @@ type View
     | Button { id : String, rect : Rect, title : String, cmd : String, isDefault : Bool, takesFocus : Bool }
     | InputLine { id : String, rect : Rect, maxLen : Int, value : String, allowed : Maybe String }
     | History { id : String, for : String, items : Array String }
-    | ListBox { id : String, rect : Rect, items : Array String, focused : Int, chooses : String }
-    | CheckBoxes { id : String, rect : Rect, items : Array String, checked : Array Bool }
-    | MultiCheckBoxes { id : String, rect : Rect, items : Array String, marks : String, states : Array Int }
-    | RadioButtons { id : String, rect : Rect, items : Array String, selected : Int }
+    | ListBox { id : String, rect : Rect, items : Array String, focused : Int, chooses : String, columns : Int, top : Int }
+    | CheckBoxes { id : String, rect : Rect, items : Array String, checked : Array Bool, available : Array Bool }
+    | MultiCheckBoxes { id : String, rect : Rect, items : Array String, marks : String, states : Array Int, available : Array Bool }
+    | RadioButtons { id : String, rect : Rect, items : Array String, selected : Int, available : Array Bool }
     | ScrollBar { id : String, rect : Rect, value : Int, min : Int, max : Int, pageStep : Int, arrowStep : Int, for : String }
     | Label { id : String, rect : Rect, text : String, for : String }
     | Canvas { id : String, rect : Rect, lines : Array (Array Span), cursor : Maybe { x : Int, y : Int }, takesFocus : Bool }
     | Editor { id : String, rect : Rect }
     | Grows { grow : Grow, view : View }
+    | Enabled { enabled : Bool, view : View }
 
 
 {-| A run of characters on a [`Canvas`](#View) line, painted in one colour.
@@ -1677,6 +1724,8 @@ fileDialog spec =
 
                         Nothing ->
                             ""
+                , columns = 1
+                , top = 0
                 }
             , StaticText
                 { id = "filePath"
@@ -2451,12 +2500,45 @@ encodeWindow window =
 
 encodeView : View -> Encode.Value
 encodeView view =
+    Encode.object (encodeViewFields view ++ wrapperFields view)
+
+
+{-| What the wrappers around a view contribute, outermost first.
+
+Two of them now, and they nest in any order, so this walks down rather than
+matching one level. `keepFirst` is what makes the *outer* one win when the same
+wrapper appears twice, which is the rule the single wrapper had by accident --
+it reached the inner view through `encodeViewFields`, which dropped the inner
+wrapper's field on the way past.
+-}
+wrapperFields : View -> Array { key : String, value : Encode.Value }
+wrapperFields view =
     when view is
         Grows v ->
-            Encode.object (encodeViewFields v.view ++ growFields v.grow)
+            growFields v.grow ++ wrapperFields v.view
+
+        Enabled v ->
+            Array.pushLast
+                { key = "enabled", value = Encode.bool v.enabled }
+                (wrapperFields v.view)
+                |> keepFirst
 
         _ ->
-            Encode.object (encodeViewFields view)
+            []
+
+
+keepFirst : Array { key : String, value : Encode.Value } -> Array { key : String, value : Encode.Value }
+keepFirst fields =
+    Array.foldl
+        (\field kept ->
+            if Array.any (\seen -> seen.key == field.key) kept then
+                kept
+
+            else
+                Array.pushLast field kept
+        )
+        []
+        fields
 
 
 growFields : Grow -> Array { key : String, value : Encode.Value }
@@ -2482,6 +2564,9 @@ encodeViewFields view =
         -- Wrapping a wrapper: the outer one has already contributed its field,
         -- so this only has to get past it to the view underneath.
         Grows v ->
+            encodeViewFields v.view
+
+        Enabled v ->
             encodeViewFields v.view
 
         StaticText v ->
@@ -2531,6 +2616,8 @@ encodeViewFields view =
             , { key = "items", value = Encode.array Encode.string v.items }
             , { key = "focused", value = Encode.int v.focused }
             , { key = "chooses", value = Encode.string v.chooses }
+            , { key = "columns", value = Encode.int v.columns }
+            , { key = "top", value = Encode.int v.top }
             ]
 
         CheckBoxes v ->
@@ -2539,6 +2626,7 @@ encodeViewFields view =
             , { key = "rect", value = encodeRect v.rect }
             , { key = "items", value = Encode.array Encode.string v.items }
             , { key = "value", value = Encode.array Encode.bool v.checked }
+            , { key = "enabledItems", value = Encode.array Encode.bool v.available }
             ]
 
         MultiCheckBoxes v ->
@@ -2548,6 +2636,7 @@ encodeViewFields view =
             , { key = "items", value = Encode.array Encode.string v.items }
             , { key = "marks", value = Encode.string v.marks }
             , { key = "value", value = Encode.array Encode.int v.states }
+            , { key = "enabledItems", value = Encode.array Encode.bool v.available }
             ]
 
         RadioButtons v ->
@@ -2556,6 +2645,7 @@ encodeViewFields view =
             , { key = "rect", value = encodeRect v.rect }
             , { key = "items", value = Encode.array Encode.string v.items }
             , { key = "value", value = Encode.int v.selected }
+            , { key = "enabledItems", value = Encode.array Encode.bool v.available }
             ]
 
         ScrollBar v ->

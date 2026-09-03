@@ -35,6 +35,9 @@ function fakeTv(initiallyOpen = []) {
     setLines: (id, lines) => calls.push(['setLines', id, lines]),
     setCursor: (id, x, y, visible) => calls.push(['setCursor', id, x, y, visible]),
     setScroll: (...args) => calls.push(['setScroll', ...args]),
+    setViewEnabled: (id, on) => calls.push(['setViewEnabled', id, on]),
+    setListTop: (id, top) => calls.push(['setListTop', id, top]),
+    setItemsEnabled: (id, flags) => calls.push(['setItemsEnabled', id, flags]),
   };
 }
 
@@ -465,4 +468,91 @@ test('a list whose items did not change is not re-focused', () => {
   tv.calls.length = 0;
   differ.apply([listWin(['a', 'b', 'c'], 1)]);
   assert.deepEqual(tv.calls, []);
+});
+
+
+// `enabled`, `top` and `enabledItems` -- the three fields the API audit found
+// missing and the reason it exists. All three are patched rather than
+// structural, which is the part worth testing here: a window rebuilt to grey a
+// button out would throw away what was typed into the field beside it.
+
+test('greying a view out patches it rather than rebuilding the window', () => {
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  const button = (enabled) => win({
+    items: [{ type: 'button', id: 'ok', rect: [2, 1, 12, 3], title: 'OK', enabled }],
+  });
+  differ.apply([button(true)]);
+  tv.calls.length = 0;
+  differ.apply([button(false)]);
+  assert.deepEqual(tv.calls, [['setViewEnabled', 'ok', false]]);
+});
+
+test('a view that never mentions enabled is enabled, and is not written to', () => {
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  // `undefined` and `true` mean the same thing, so a model that starts naming
+  // the field must not read as a change -- and one that never names it must
+  // never be written to at all.
+  const plain = win({ items: [{ type: 'button', id: 'ok', rect: [2, 1, 12, 3], title: 'OK' }] });
+  const said = win({
+    items: [{ type: 'button', id: 'ok', rect: [2, 1, 12, 3], title: 'OK', enabled: true }],
+  });
+  differ.apply([plain]);
+  tv.calls.length = 0;
+  differ.apply([said]);
+  assert.deepEqual(tv.calls, []);
+});
+
+test('a list scrolls under its highlight without being rebuilt', () => {
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  const list = (top) => win({
+    items: [{ type: 'listBox', id: 'l', rect: [2, 1, 20, 8],
+              items: ['a', 'b', 'c'], focused: 0, chooses: '', columns: 1, top }],
+  });
+  differ.apply([list(0)]);
+  tv.calls.length = 0;
+  differ.apply([list(2)]);
+  assert.deepEqual(tv.calls, [['setListTop', 'l', 2]]);
+});
+
+test('the top is written after the highlight, because moving one moves the other', () => {
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  const list = (items, top) => win({
+    items: [{ type: 'listBox', id: 'l', rect: [2, 1, 20, 8],
+              items, focused: 1, chooses: '', columns: 1, top }],
+  });
+  differ.apply([list(['a', 'b', 'c'], 0)]);
+  tv.calls.length = 0;
+  differ.apply([list(['a', 'b', 'c', 'd'], 2)]);
+  const order = tv.calls.map((c) => c[0]);
+  assert.deepEqual(order, ['setItems', 'setValue', 'setListTop']);
+});
+
+test("a cluster's own boxes are greyed one at a time", () => {
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  const boxes = (available) => win({
+    items: [{ type: 'checkBoxes', id: 'c', rect: [2, 1, 20, 5],
+              items: ['a', 'b'], value: [false, false], enabledItems: available }],
+  });
+  differ.apply([boxes([true, true])]);
+  tv.calls.length = 0;
+  differ.apply([boxes([true, false])]);
+  assert.deepEqual(tv.calls, [['setItemsEnabled', 'c', [true, false]]]);
+});
+
+test('the number of columns is structural, because a list cannot be re-divided', () => {
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  const list = (columns) => win({
+    items: [{ type: 'listBox', id: 'l', rect: [2, 1, 20, 8],
+              items: ['a'], focused: 0, chooses: '', columns, top: 0 }],
+  });
+  differ.apply([list(1)]);
+  tv.calls.length = 0;
+  differ.apply([list(2)]);
+  assert.deepEqual(tv.calls, [['close', 'w'], ['window', 'w']]);
 });

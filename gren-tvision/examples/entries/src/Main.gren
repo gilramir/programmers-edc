@@ -412,14 +412,28 @@ listWindow model =
         , Grows
             { grow = Tui.stretchWidth
             , view =
-                InputLine
-                    -- Three columns short of the list below it, because the
-                    -- history drop-down goes in them.
-                    { id = "filter"
-                    , rect = { x1 = 10, y1 = 1, x2 = 40, y2 = 2 }
-                    , maxLen = 40
-                    , value = model.filter
-                    , allowed = Nothing
+                -- Nothing to filter, so nothing to type: Clear empties the
+                -- list and the box goes grey until something is added again.
+                --
+                -- `Enabled` and not `setEnabled`, and this is the case that
+                -- shows why the two are different: an input line carries no
+                -- command, so the command-shaped one has nothing to take hold
+                -- of. It is also a wrapper rather than a rebuild, which is
+                -- what leaves whatever was typed in the box while it is
+                -- unavailable -- and puts it back, still filtering, when the
+                -- list fills up again.
+                Enabled
+                    { enabled = not (Array.isEmpty model.items)
+                    , view =
+                        InputLine
+                            -- Three columns short of the list below it,
+                            -- because the history drop-down goes in them.
+                            { id = "filter"
+                            , rect = { x1 = 10, y1 = 1, x2 = 40, y2 = 2 }
+                            , maxLen = 40
+                            , value = model.filter
+                            , allowed = Nothing
+                            }
                     }
             }
         -- The drop-down has no rectangle of its own -- it takes the three
@@ -452,6 +466,8 @@ listWindow model =
                     -- `Selected` event and nothing else: there is no dialog
                     -- here for a command to end.
                     , chooses = ""
+                    , columns = 1
+                    , top = 0
                     }
             }
         -- Both vertical edges follow, so this keeps its one-row height and

@@ -4790,3 +4790,94 @@ follows the pointer; it is the one that drags to screen (1, 1), the top-left
 corner of the desktop and nowhere near the chart. It arrives anyway, and it
 arrives with negative coordinates. Nothing else asserts that the capture is
 real.
+
+## Surveying the library instead of the examples
+
+Coverage here was decided by porting the C++ examples one at a time, and the
+method has a failure mode that took until now to name: **it finds what an
+example happened to need, and nothing else.** `examples/README.md` said "the
+widget set is complete" and meant it — every `TView` subclass was wrapped. Every
+gap found since has been a *member* of one of those subclasses. `maxLen` off by
+one. A scroll bar with no `ofFirstClick`. A list box that could not say what a
+double click meant. No motion event to hear a drag with. Each one found by
+writing an application against the binding, which is the most expensive place
+to find anything.
+
+`tools/audit_api.py` asks the other question and `tools/decisions.tsv` holds the
+answers: every public member of every wrapped class needs a line saying what was
+decided about it, and a member with no line fails `check`.
+
+### The verdict that makes it worth anything is `used`
+
+The first draft had `bound` and `internal` and would have been useless.
+"The C++ mentions it" is not "a Gren program can ask for it", and a survey that
+conflates them produces exactly the false comfort that "the widget set is
+complete" produced. `TView::makeLocal` is called by the binding on every click
+and is not a capability anybody can name; `TListViewer::numCols` was called by
+nothing and was a capability people wanted. So the file distinguishes `bound`
+(reachable from Gren), `used` (the binding calls it, and no model names it),
+`internal`, `skipped` with a reason, and `todo` with what the gap would buy.
+
+### A member-level walk cannot see a flag
+
+Turbo Vision keeps much of its configurability in *bits* — `options`, `state`,
+`growMode`, a window's `flags` — so a walk over members sees one member called
+`options` and calls it covered. `ofFirstClick` is a bit, and a scroll bar that
+had to be clicked twice is what finding it cost. Auditing the bit names
+separately found four more gaps that the member walk had missed, including the
+one that turned out to matter most.
+
+### `setEnabled` greys a command, and most views do not have one
+
+`Tui.setEnabled` disables a *command*, everywhere it appears — a menu entry, a
+status line entry, a button carrying it. An `InputLine`, a `ListBox`, a
+`ScrollBar` and a `Canvas` carry no command at all, so `sfDisabled` was
+unreachable and **there was no way to say that a control is not available**.
+Not a corner: it is what every form does while it is waiting for something, and
+it had been missing since the first window this package drew.
+
+It is the `Enabled` wrapper now, for the reason `Grows` is one — being
+available is `TView`'s, so it is true of every widget rather than of any one of
+them. Two things fell out of adding a second wrapper. `encodeView` had been
+matching one level and now walks down, and "the outer one wins" had been true
+by accident (the inner wrapper's field was dropped on the way past rather than
+overridden) and is now `keepFirst`, which is deliberate. And
+`check_consistency.py`'s exemption became a set: a wrapper has no wire type of
+its own and never will, and naming them is what keeps the four-layer walk exact
+for the widgets.
+
+### The check for a disabled view is what it refuses, not what colour it is
+
+Turbo Vision greys a disabled view *and* skips it in the tab order *and* hands
+it no keystroke and no click (`TGroup::doHandleEvent` tests `sfDisabled` before
+anything else). The first driver check read the foreground colour off the cell
+and could not tell the difference between a greyed field and the same field —
+the palette answers 97 either way at that column. Typing at it and finding the
+characters absent is the assertion that means something, and it is the half a
+screenshot cannot show.
+
+The same shape one level down: `TCluster::buttonState` gates both the arrow
+keys and the hotkey (`tcluster.cpp:170`), so `available` on a cluster is
+checked by pressing Down and landing two boxes further on.
+
+### `topItem` is the one field that can hide the highlight
+
+A list's vertical scroll bar tracks `focused` and not `topItem`
+(`tlstview.cpp:159-183`): Turbo Vision moves the top itself to keep the focused
+item visible and offers no way to say it. So `top` is the only field in this
+package with which a model can put the highlight out of sight, and that is
+deliberate — "scroll the list" and "move the highlight" are two sentences, and
+deciding which one a model meant on its behalf is worse than doing what it
+said. The next thing that moves the highlight scrolls it back.
+
+It has to be written **after** `focused` at both ends, the builder and the
+differ, because moving the highlight scrolls the list: a `top` written first is
+a `top` undone, silently.
+
+### And one that looked exactly like the feature not working
+
+A cluster's captions carry hotkey tildes, so the rule `!/phone/i.test(name)`
+tested against `~P~hone` and matched nothing: every box came out available and
+the new flag appeared to do nothing at all. The driver caught it. Worth
+remembering because the failure is indistinguishable from a broken binding
+until you print the string.

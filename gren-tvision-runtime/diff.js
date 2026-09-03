@@ -17,17 +17,25 @@ const MUTABLE = {
   staticText: ['text'],
   inputLine: ['value'],
   history: ['items'],
-  listBox: ['items', 'focused'],
+  listBox: ['items', 'focused', 'top'],
   canvas: ['lines', 'cursorAt'],
-  checkBoxes: ['value'],
-  multiCheckBoxes: ['value'],
-  radioButtons: ['value'],
+  checkBoxes: ['value', 'enabledItems'],
+  multiCheckBoxes: ['value', 'enabledItems'],
+  radioButtons: ['value', 'enabledItems'],
   scrollBar: ['value', 'min', 'max', 'pageStep', 'arrowStep'],
 };
+
+// `enabled` belongs to every type rather than to any of them: it is sfDisabled,
+// which is TView's, so a canvas and a check box are greyed by the same call.
+// Listing it here rather than in each row above is also what keeps a type that
+// has no other mutable field -- a button, a label -- from being rebuilt when
+// the only thing that changed is whether it is available.
+const MUTABLE_ANY = ['enabled'];
 
 function skeleton(view) {
   const copy = { ...view };
   for (const field of MUTABLE[view.type] || []) delete copy[field];
+  for (const field of MUTABLE_ANY) delete copy[field];
   return JSON.stringify(copy);
 }
 
@@ -75,6 +83,23 @@ function createDiffer(tv, onClosed = () => {}) {
   let pending = null;
 
   function patchView(before, after) {
+    // Before the switch and outside it, because this one is TView's and so is
+    // true of every type below. `undefined` and `true` are the same thing --
+    // a view that says nothing about being enabled is enabled -- so compare
+    // what they mean rather than what they are, or a model that starts naming
+    // the field would disable nothing and be told nothing.
+    const was = before.enabled !== false;
+    const now = after.enabled !== false;
+    if (was !== now) tv.setViewEnabled(after.id, now);
+
+    // The same argument one level down, for the three cluster types: which
+    // boxes are available is TCluster's `enableMask`, not sfDisabled, because
+    // a cluster is one view however many boxes it holds. Out here rather than
+    // in each of the three cases below, which are otherwise identical.
+    if (JSON.stringify(before.enabledItems) !== JSON.stringify(after.enabledItems)) {
+      if (after.enabledItems) tv.setItemsEnabled(after.id, after.enabledItems);
+    }
+
     switch (after.type) {
       case 'staticText':
         // Compared against the *previous description*, never against what is
@@ -107,6 +132,12 @@ function createDiffer(tv, onClosed = () => {}) {
         // model says 1, the list says 0, and the list is the one that reports.
         if (rebuilt || before.focused !== after.focused) {
           tv.setValue(after.id, after.focused);
+        }
+        // After the highlight, for the same reason the builder writes it last:
+        // moving the highlight scrolls the list to keep it visible, so a `top`
+        // written first would be undone by the `focused` written after it.
+        if (rebuilt || before.top !== after.top) {
+          if (after.top !== undefined) tv.setListTop(after.id, after.top);
         }
         break;
       }

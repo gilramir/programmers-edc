@@ -220,9 +220,35 @@ public:
 
 class JsListBox : public TListViewer {
 public:
-    JsListBox(const TRect &bounds, TScrollBar *scrollBar, std::string id) noexcept
-        : TListViewer(bounds, 1, nullptr, scrollBar), viewId(std::move(id))
+    // `columns` is TListViewer's own `aNumCols`, and it belongs in the
+    // constructor rather than in an assignment afterwards because the base
+    // constructor uses it to size the horizontal scroll bar it may make.
+    JsListBox(const TRect &bounds, TScrollBar *scrollBar, std::string id,
+              short columns = 1) noexcept
+        : TListViewer(bounds, columns, nullptr, scrollBar),
+          viewId(std::move(id))
     {
+    }
+
+    // Which item is drawn on the first row. TListViewer moves this itself to
+    // keep the focused item visible and offers no way to say it, because its
+    // scroll bar tracks `focused` and not this (tlstview.cpp:159-183).
+    //
+    // So this is the one place in the binding where the model can put the
+    // highlight off screen. That is deliberate: "scroll the list" and "move
+    // the highlight" are two sentences, a model that says only the first means
+    // only the first, and the next thing that moves the highlight scrolls it
+    // back into view of its own accord.
+    void setTop(short item)
+    {
+        if (item < 0)
+            item = 0;
+        if (range > 0 && item > range - 1)
+            item = range - 1;
+        if (topItem == item)
+            return;
+        topItem = item;
+        drawView();
     }
 
     virtual void getText(char *dest, short item, short maxLen) override;

@@ -447,6 +447,19 @@ def main():
     app.send(b"\x1by", settle=1.0)
     check("Yes empties the list", "Entries (0)" in app.render(), app.render())
 
+    # The filter box is wrapped in `Enabled` on there being something to
+    # filter, so an empty list is also the check on a view with no command
+    # being made unavailable -- which `setEnabled` cannot do, because what it
+    # takes hold of is the command.
+    #
+    # Asserted by what it does rather than by its colour. A disabled view draws
+    # in the palette's grey, and reading that off the screen is a check about
+    # the palette; Turbo Vision handing it no keystroke at all is the part the
+    # model asked for, and it is the half a screenshot cannot show.
+    app.send(b"zz", settle=0.7)
+    check("and the filter box takes no keystrokes with nothing to filter",
+          "zz" not in app.render(), app.render().split("\n")[2])
+
     app.send(b"\x1bx", settle=1.0)
     code = app.wait(timeout=6)
     check("exit code 0", code == 0, f"exit={code}")

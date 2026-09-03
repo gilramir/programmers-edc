@@ -40,8 +40,22 @@ function formDialog(initial) {
         value: initial ? initial.interests : [true, false, false, false] },
       { type: 'label', rect: [3, 6, 26, 7], text: 'Interests', for: 'interests' },
 
+      // `enabledItems` -- one boolean per box, and the rule every form has:
+      // "Phone" is not a way to contact somebody whose phone number you do not
+      // have. A greyed box is skipped by the arrow keys and cannot be chosen,
+      // which is what makes this different from drawing a note beside it.
+      //
+      // Set when the dialog is built, because a dialog's views are built once:
+      // typing a number into the field above does not light it up until the
+      // dialog is opened again.
       { id: 'contact', type: 'radioButtons', rect: [30, 7, 52, 10],
-        items: CONTACT, value: initial ? initial.contact : 0 },
+        items: CONTACT, value: initial ? initial.contact : 0,
+        // The tildes come off first: a caption is `~P~hone` and matching
+        // `phone` against it finds nothing, which is a mistake that looks
+        // exactly like the flag not working.
+        enabledItems: CONTACT.map(
+          (name) => !/phone/i.test(name.replace(/~/g, ''))
+                    || !!(initial && initial.phone)) },
       { type: 'label', rect: [30, 6, 52, 7], text: 'Contact by', for: 'contact' },
 
       { type: 'button', rect: [14, 12, 26, 14], title: '~O~K', cmd: 'ok', default: true },
@@ -88,13 +102,22 @@ function showRecords() {
       title: 'Records',
       rect: [1, 2, 79, 16],
       items: [
-        { id: 'records', type: 'canvas', rect: [2, 1, 76, 11], selectable: false, color: 6 },
+        // `enabled` -- sfDisabled, which is TView's, so it works on a canvas
+      // exactly as it works on a button. A canvas carries no command, so
+      // tv.setEnabled() has nothing to take hold of and this is the only way
+      // to say that it is not available yet.
+      { id: 'records', type: 'canvas', rect: [2, 1, 76, 11], selectable: false,
+        color: 6, enabled: records.length > 0 },
       ],
     });
   }
   tv.setLines('records', records.length
     ? records.map(describe)
     : ['(no records yet -- File > New record)']);
+  // The window is built once and outlives the change, so the state that was a
+  // field at build time is a call afterwards. Both routes end in the same
+  // setState, which is the point.
+  tv.setViewEnabled('records', records.length > 0);
 }
 
 tv.start({

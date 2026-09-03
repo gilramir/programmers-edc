@@ -139,6 +139,9 @@ module.exports = {
   exists: addon.exists,
   focus: addon.focus,
   setText: addon.setText,
+  setViewEnabled: addon.setViewEnabled,
+  setListTop: addon.setListTop,
+  setItemsEnabled: addon.setItemsEnabled,
   setItems: addon.setItems,
 
   // An editor's document, which is the one thing in this binding that does not

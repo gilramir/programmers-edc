@@ -39,6 +39,20 @@ def main():
           "cluster not rendered")
     check("radio buttons drawn", "( ) Phone" in form, "cluster not rendered")
 
+    # 2b. `enabledItems`: "Phone" is not a way to reach somebody whose phone
+    #     number you do not have, and a new record has none -- so the box is
+    #     there and is not available. Asserted by what it does rather than by
+    #     its colour: Alt-P is its hotkey, and a greyed box does not answer one.
+    #     A note drawn beside it would have looked the same and behaved
+    #     differently, which is the whole reason the flag exists.
+    before = open(LOG).read()
+    app.send(b"\x1bp", settle=0.5)
+    check("a greyed box in a cluster does not answer its hotkey",
+          "changed: contact 1" not in open(LOG).read()[len(before):],
+          repr(open(LOG).read()[-200:]))
+    check("and the radio is still where it was", "(•) Email" in app.render()
+          or "( ) Phone" in app.render(), app.render())
+
     # 3. Labels are bound to controls: Alt-M focuses Name, Alt-H focuses Phone.
     #    Not Alt-N and Alt-P -- the status line's Alt-N is global and beats even
     #    a modal dialog, and Alt-P is claimed by the Phone radio button. Hotkeys
@@ -59,19 +73,30 @@ def main():
     # 4b. Every one of those edits was reported as it happened. That is the
     #     half Turbo Vision does not do: it keeps a cluster's state in a
     #     protected `value` and an input line's in `data`, and a program reads
-    #     them when the dialog is answered and not before. Alt-P is the Phone
-    #     *radio button* rather than the Phone field -- see above -- so it is
-    #     also how the radio is moved; Alt-E puts it back for step 5.
-    app.send(b"\x1bp", settle=0.4)
-    app.send(b"\x1be", settle=0.4)
+    #     them when the dialog is answered and not before.
+    #
+    #     Driven with a click and an arrow rather than with Alt-P, which 2b has
+    #     just spent on proving that the Phone box does not answer it. The
+    #     arrow is the better instrument anyway: the dialog is at [12, 3] and
+    #     the cluster at [30, 7] inside it, so Email is screen (42, 10) and the
+    #     box below it is the greyed Phone. Pressing Down once and landing on
+    #     None is the check that a disabled box is *skipped* rather than merely
+    #     drawn grey -- which is the half that makes this different from a
+    #     label somebody was told not to click.
+    app.click(43, 11, settle=0.4)
+    app.send(b"\x1b[B", settle=0.5)
     logged = open(LOG).read()
     check("typing was reported as it happened",
           "changed: name Ada Lovelace" in logged, repr(logged[-400:]))
     check("a check box was reported as one boolean per box",
           "changed: interests [true,true,false,false]" in logged, repr(logged[-400:]))
-    check("a radio button was reported as an index",
-          "changed: contact 1" in logged and "changed: contact 0" in logged,
+    check("the arrows step over a greyed box rather than onto it",
+          "changed: contact 2" in logged and "changed: contact 1" not in logged,
           repr(logged[-400:]))
+    # Back to Email for step 5, which reads the answer out of the dialog.
+    app.send(b"\x1b[A", settle=0.5)
+    check("and step over it going back the other way",
+          "changed: contact 0" in open(LOG).read(), repr(open(LOG).read()[-300:]))
 
     # 5. Enter presses the default button (OK).
     app.send(b"\r", settle=1.0)
@@ -87,6 +112,13 @@ def main():
     app.send(b"\x1bl", settle=0.8)
     logged = open(LOG).read()
     check("an enabled command fires", "command: list" in logged, repr(logged[-200:]))
+
+    # 6b. The window's canvas is `enabled` on there being a record, and there
+    #     is one now. A canvas carries no command, so tv.setEnabled() has
+    #     nothing to take hold of and tv.setViewEnabled() is the only route --
+    #     which is the gap the API audit found and this is the check on it.
+    check("a view with no command was brought back by setViewEnabled",
+          "Ada Lovelace" in app.render(), app.render())
 
     # 7. A submenu inside a submenu.
     app.send(b"\x1bf", settle=0.5)

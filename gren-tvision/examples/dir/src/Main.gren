@@ -639,6 +639,8 @@ dirWindow model =
             -- In a window, so a double click is a `Selected` and the model
             -- decides what it means -- here, expanding a branch.
             , chooses = ""
+            , columns = 1
+            , top = 0
             }
         , Canvas
             { id = "files"

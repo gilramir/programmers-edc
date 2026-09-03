@@ -917,6 +917,45 @@ static uchar growModeOf(const Napi::Object &it)
     return mode;
 }
 
+// A cluster's `enabled` field: one boolean per box, so that a form can grey out
+// the choices that do not apply without taking the whole cluster away.
+//
+// `setButtonState` and not `sfDisabled`: disabling the *view* greys every box
+// in it, and a cluster is one view however many boxes it has. TCluster keeps a
+// bit per item in `enableMask` and skips a disabled one when the arrows walk
+// past, which is the behaviour that makes this worth having rather than
+// drawing a grey label.
+//
+// An absent array leaves every box alone, and an array shorter than the
+// cluster says nothing about the boxes past its end -- both so that a model
+// that does not care says nothing at all.
+static void applyItemsEnabled(const Napi::Object &it, TCluster *cluster,
+                              uint32_t count)
+{
+    Napi::Value v = it.Get("enabledItems");
+    if (!v.IsArray())
+        return;
+    Napi::Array flags = v.As<Napi::Array>();
+    uint32_t n = flags.Length() < count ? flags.Length() : count;
+
+    // A *mask* and not an index -- `setButtonState(uint32_t aMask, Boolean)`
+    // ors or clears every bit it is given at once (tcluster.cpp:299), so the
+    // two calls below are the whole cluster rather than one box each. Calling
+    // it per box would work and would recompute `ofSelectable` n times.
+    uint32_t on = 0, off = 0;
+    for (uint32_t i = 0; i < n; ++i)
+        {
+        if (flags.Get(i).ToBoolean().Value())
+            on |= 1u << i;
+        else
+            off |= 1u << i;
+        }
+    if (on != 0)
+        cluster->setButtonState(on, True);
+    if (off != 0)
+        cluster->setButtonState(off, False);
+}
+
 TView *buildItems(const Napi::Env &env, TGroup *win, const Napi::Value &value,
                   const std::string &windowId)
 {
@@ -1031,6 +1070,14 @@ TView *buildItems(const Napi::Env &env, TGroup *win, const Napi::Value &value,
             // immediately to the right of the list's own rectangle, which is
             // a rule an author can lay out against.
             TRect listRect = getRect(env, it, "listBox");
+            // TListViewer has had columns since 1990 and nothing here said so.
+            // They divide the list's own rectangle and fill downwards, so a
+            // two-column list of nine items puts five on the left and four on
+            // the right -- which is what a list too long for its window often
+            // wants instead of a scroll bar.
+            int columns = getInt(it, "columns", 1);
+            if (columns < 1)
+                columns = 1;
             PaneScrollBar *sb = new PaneScrollBar(
                 TRect(listRect.b.x, listRect.a.y, listRect.b.x + 1, listRect.b.y));
             // What standardScrollBar(sbHandleKeyboard) actually sets: the bar
@@ -1038,16 +1085,31 @@ TView *buildItems(const Napi::Env &env, TGroup *win, const Napi::Value &value,
             // PgUp and PgDn reach it.
             sb->options |= ofPostProcess;
             win->insert(sb);
-            JsListBox *list = new JsListBox(listRect, sb, id);
+            JsListBox *list = new JsListBox(listRect, sb, id, (short) columns);
             // Which pane the wheel belongs to, now that there is one.
             sb->pane = list;
             std::string chooses = getString(it, "chooses");
             if (!chooses.empty())
                 list->chooses = g_commands.intern(chooses);
+            // TListViewer has had columns since 1990 and nothing here said
+            // so. `numCols` divides the list's own rectangle, and the viewer
+            // fills the columns downwards -- so a two-column list of nine
+            // items puts five on the left and four on the right, which is what
+            // a list too long for its window wants rather than a scroll bar.
+            //
             if (it.Has("items"))
                 list->setItems(getStringArray(it.Get("items")));
             if (it.Has("focused"))
                 list->focusItemNum((short) getInt(it, "focused", 0));
+            // After `focusItemNum`, which scrolls the list to keep the
+            // highlight visible and would otherwise undo this. Saying where
+            // the window starts *and* where the highlight is are two different
+            // sentences, and a model gets to say both -- including the pair
+            // that puts the highlight off screen, because the alternative is
+            // deciding on the model's behalf which of its two sentences it
+            // meant.
+            if (it.Has("top"))
+                list->setTop((short) getInt(it, "top", 0));
             made = list;
             }
         else if (type == "editor")
@@ -1130,6 +1192,7 @@ TView *buildItems(const Napi::Env &env, TGroup *win, const Napi::Value &value,
                 new JsCheckBoxes(getRect(env, it, "checkBoxes"), chain, count, id);
             if (it.Has("value"))
                 boxes->setBits(checkedBits(it.Get("value")));
+            applyItemsEnabled(it, boxes, count);
             made = boxes;
             }
         else if (type == "multiCheckBoxes")
@@ -1164,6 +1227,7 @@ TView *buildItems(const Napi::Env &env, TGroup *win, const Napi::Value &value,
                 new JsRadioButtons(getRect(env, it, "radioButtons"), chain, id);
             (void) count;
             radio->setSelected((uint32_t) getInt(it, "value", 0));
+            applyItemsEnabled(it, radio, count);
             made = radio;
             }
         else
@@ -1176,7 +1240,20 @@ TView *buildItems(const Napi::Env &env, TGroup *win, const Napi::Value &value,
         made->growMode = growModeOf(it);
 
         win->insert(made);
-        if (firstSelectable == nullptr && (made->options & ofSelectable) != 0)
+
+        // After insert and not before. `setState` walks up to the owner to
+        // redraw and to hand the caret on, and a view with no owner has
+        // nowhere to hand it: disabling before the insert leaves the view grey
+        // and still first in the tab order.
+        //
+        // A disabled view is skipped for focus by `TGroup`, so it must not be
+        // what the window opens on either -- hence the check below rather than
+        // the `ofSelectable` test alone.
+        if (!getBool(it, "enabled", true))
+            made->setState(sfDisabled, True);
+
+        if (firstSelectable == nullptr && (made->options & ofSelectable) != 0 &&
+            (made->state & sfDisabled) == 0)
             firstSelectable = made;
         if (!id.empty())
             g_views.addView(id, made, type, windowId);
@@ -1361,6 +1438,75 @@ static Napi::Value SetText(const Napi::CallbackInfo &info)
         return Napi::Boolean::New(env, false);
 
     ((JsStaticText *) ref->view)->setText(info[1].ToString().Utf8Value());
+    return Napi::Boolean::New(env, true);
+}
+
+// tv.setViewEnabled(id, on) -- grey a view out, or bring it back.
+//
+// Not the same thing as `tv.setEnabled(command, on)` beside it, and the
+// difference is the reason this exists: that one greys a *command* wherever it
+// appears, and a view without a command -- an input line, a list box, a canvas,
+// a scroll bar -- had no way to be unavailable at all.
+//
+// `sfDisabled` is Turbo Vision's own: a disabled view draws in the palette's
+// grey, is skipped by Tab, and is handed no positional or keyboard event
+// (`TGroup::doHandleEvent` checks it before anything else). So nothing here has
+// to remember that a view is off; the state is the view's.
+static Napi::Value SetViewEnabled(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    ViewRef *ref = g_views.find(info[0].ToString().Utf8Value());
+    if (ref == nullptr)
+        return Napi::Boolean::New(env, false);
+
+    bool on = info[1].ToBoolean().Value();
+    // Disabling the view the caret is in would leave the caret in a view that
+    // cannot be typed into, so hand it on first -- to the next view that will
+    // have it, which is what Tab does.
+    if (!on && (ref->view->state & sfFocused) != 0 && ref->view->owner != nullptr)
+        ref->view->owner->selectNext(False);
+    ref->view->setState(sfDisabled, on ? False : True);
+    return Napi::Boolean::New(env, true);
+}
+
+// tv.setListTop(id, item) -- which entry a list box draws on its first row.
+static Napi::Value SetListTop(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    ViewRef *ref = g_views.find(info[0].ToString().Utf8Value());
+    if (ref == nullptr || ref->kind != "listBox")
+        return Napi::Boolean::New(env, false);
+
+    ((JsListBox *) ref->view)->setTop((short) info[1].ToNumber().Int32Value());
+    return Napi::Boolean::New(env, true);
+}
+
+// tv.setItemsEnabled(id, [bool]) -- one boolean per box of a cluster.
+static Napi::Value SetItemsEnabled(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    ViewRef *ref = g_views.find(info[0].ToString().Utf8Value());
+    if (ref == nullptr || !info[1].IsArray())
+        return Napi::Boolean::New(env, false);
+    if (ref->kind != "checkBoxes" && ref->kind != "radioButtons" &&
+        ref->kind != "multiCheckBoxes")
+        return Napi::Boolean::New(env, false);
+
+    Napi::Array flags = info[1].As<Napi::Array>();
+    uint32_t on = 0, off = 0;
+    for (uint32_t i = 0; i < flags.Length() && i < 32; ++i)
+        {
+        if (flags.Get(i).ToBoolean().Value())
+            on |= 1u << i;
+        else
+            off |= 1u << i;
+        }
+    TCluster *cluster = (TCluster *) ref->view;
+    if (on != 0)
+        cluster->setButtonState(on, True);
+    if (off != 0)
+        cluster->setButtonState(off, False);
+    cluster->drawView();
     return Napi::Boolean::New(env, true);
 }
 
@@ -1710,6 +1856,9 @@ void registerViewApi(Napi::Env env, Napi::Object exports)
     exports.Set("setEnabled", Napi::Function::New(env, SetEnabled));
     exports.Set("window", Napi::Function::New(env, Window));
     exports.Set("setText", Napi::Function::New(env, SetText));
+    exports.Set("setViewEnabled", Napi::Function::New(env, SetViewEnabled));
+    exports.Set("setListTop", Napi::Function::New(env, SetListTop));
+    exports.Set("setItemsEnabled", Napi::Function::New(env, SetItemsEnabled));
     exports.Set("setItems", Napi::Function::New(env, SetItems));
     exports.Set("setEditorText", Napi::Function::New(env, SetEditorText));
     exports.Set("readEditor", Napi::Function::New(env, ReadEditor));

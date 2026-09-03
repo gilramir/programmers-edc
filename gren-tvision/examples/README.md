@@ -1374,3 +1374,55 @@ and `TEventQueue` — not the terminal — is what turns that into
 already down. The check worth copying from `drive_ascii.py` is the drag to
 screen (1, 1), the corner of the desktop: it arrives at the chart anyway, with
 negative coordinates. Nothing else asserts that the capture is real.
+
+## What the API audit found first: a view that cannot be turned off
+
+`tools/audit_api.py` walks Turbo Vision's public surface rather than an
+example's needs, and the first thing it said was the one nobody would have
+gone looking for: **`setEnabled` greys a *command*, and a view without one
+could not be greyed at all.** An `InputLine`, a `ListBox`, a `ScrollBar` and a
+`Canvas` carry no command, so there was no way to say that a control is not
+available — which is what every form does while it is waiting for something.
+
+It is `Enabled` now, and it is a **wrapper** for the reason `Grows` is one:
+being available is `sfDisabled`, which belongs to `TView`, so it is true of
+every widget rather than of any one of them, and a view that is always
+available should not have to say so. That also makes it the second wrapper, so
+`encodeView` walks down through any nesting instead of matching one level, and
+`check_consistency.py`'s exemption list is a set rather than a name.
+
+**A disabled view is not a colour.** Turbo Vision draws it grey, and it also
+skips it in the tab order and hands it no keystroke and no click — which is
+what makes it different from drawing a note beside the control. `entries` puts
+its filter box behind one (nothing to filter, nothing to type) and the check
+that pins it types at the box rather than reading its colour, because the
+colour is the palette's business and the refusal is what the model asked for.
+
+Three more from the same pass, all of them members of classes that were already
+wrapped and none of them reachable before:
+
+**`available` on a cluster**, one flag per box. `sfDisabled` greys a whole
+cluster, because a cluster is one view however many boxes it holds; this greys
+one box, and `TCluster` then skips it for the arrow keys *and* refuses its
+hotkey (`buttonState` gates both). `tvision-node/examples/form.js` greys
+"Phone" for a record with no phone number, which is the rule every form has,
+and `drive_form.py` checks the arrows stepping over it in both directions.
+
+**`columns` on a `ListBox`.** `TListViewer` has taken a column count since 1990
+and nothing here passed one. It divides the list's rectangle and fills each
+column downwards, which is what a list too long for its window often wants
+instead of a scroll bar. Structural, because a list cannot be re-divided in
+place.
+
+**`top` on a `ListBox`**, which is the one field in the package that lets a
+model put the highlight out of sight. A list's scroll bar tracks `focused` and
+not `topItem`, so Turbo Vision moves the top itself and offers no way to say
+it; "scroll the list" and "move the highlight" are two sentences and a model
+that says only the first means only the first. Written after `focused` at both
+ends — the builder and the differ — because moving the highlight scrolls the
+list, so a `top` written first is a `top` undone.
+
+**One mistake worth keeping**, because it looks exactly like the feature not
+working: a caption is `~P~hone`, and matching `phone` against it finds nothing.
+The first version of the check greyed no box at all and the driver was right to
+fail.

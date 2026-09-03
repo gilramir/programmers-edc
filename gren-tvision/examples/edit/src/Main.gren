@@ -409,6 +409,7 @@ searchDialog model replace =
                         }
                     , items = [ "~C~ase sensitive", "Whole w~o~rds only" ]
                     , checked = [ previous.matchCase, previous.wholeWords ]
+                    , available = []
                     }
                , Tui.Button
                     { id = "ok"
