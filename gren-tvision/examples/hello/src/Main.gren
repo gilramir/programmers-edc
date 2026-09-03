@@ -117,6 +117,15 @@ view model =
               , rect = { x1 = 22, y1 = 8, x2 = 58, y2 = 13 }
               , resize = Tui.resizable
               , palette = Tui.BlueWindow
+              -- No close box, because this window is not the user's to close:
+              -- it is here exactly while the model has an answer to show, so
+              -- closing it would put it straight back on the next render --
+              -- a flick on the screen and nothing else. The alternative is to
+              -- handle `WindowClosed` and clear the answer, which is a fine
+              -- program and a different one; this says the window is not a
+              -- thing you close.
+              , canClose = False
+              , canMove = True
               , views =
                     [ StaticText
                         { id = "answerText"

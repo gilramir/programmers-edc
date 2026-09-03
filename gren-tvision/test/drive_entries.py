@@ -286,6 +286,12 @@ def main():
     #    nothing at all. The flag was already True, the render found no
     #    difference, and the window stayed where it was. Take the focus away
     #    with a click and ask for it back.
+    #
+    #    Answered by `Tui.bringToFront` since the API audit, where it used to
+    #    be `Tui.focus`. Both pass these two checks, because a Turbo Vision
+    #    window carries `ofTopSelect` and focusing one raises it -- but the
+    #    command means "show me that window", and saying so is better than
+    #    relying on a flag on a class to make the other sentence come true.
     app.click(50, 3, settle=0.8)
     check("clicking the clock window activated it", active(app.render(), "Gren"))
     app.send(b"\x1bl", settle=1.2)
@@ -344,11 +350,21 @@ def main():
     #     is open, which is the whole reason it is not a nested event loop --
     #     `THistory::handleEvent` calls `owner->execView()`, and doing that
     #     here would stop Node's loop dead for as long as the list was up.
+    # Before the first filter is remembered there is nothing behind the arrow,
+    # so the arrow is not drawn -- `Visible`, which is sfVisible and not the
+    # same thing as leaving the view out of the render. Leaving it out would be
+    # a structural change, and the window would be torn down and rebuilt the
+    # moment a filter was remembered, taking the caret with it.
+    check("a history arrow with nothing behind it is not drawn",
+          arrow(app) is None, app.render())
+
     app.send(b"e", settle=1.2)
     app.send(b"\t", settle=0.6)
     app.send(b" ", settle=1.0)
     check("choosing from a filtered list is what remembers the filter",
           "Selected: Gren" in app.render(), app.render())
+    check("and that is what puts the arrow there", arrow(app) is not None,
+          app.render())
 
     app.send(b"\x1b[Z", settle=0.6)
     app.send(b"\x7f", settle=0.8)
@@ -361,7 +377,7 @@ def main():
           app.render())
 
     at = arrow(app)
-    check("the filter box has a history arrow beside it", at is not None,
+    check("the filter box still has its history arrow", at is not None,
           app.render())
     app.click(at[0], at[1], settle=1.2)
     check("it drops down the filters that found something, newest first",

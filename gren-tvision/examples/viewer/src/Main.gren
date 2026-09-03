@@ -241,6 +241,8 @@ viewerWindow model =
     , rect = { x1 = 1, y1 = 1, x2 = 77, y2 = 21 }
     , resize = Tui.resizable
     , palette = Tui.BlueWindow
+    , canClose = True
+    , canMove = True
     , views =
         [ Canvas
             { id = "text"

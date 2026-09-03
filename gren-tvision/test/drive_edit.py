@@ -134,6 +134,42 @@ def main():
               body(app, 5) == ["alpha", "XYZbeta", "gamma", "alpha", "alpha"],
               str(body(app, 5)))
 
+        # The Edit menu is told the truth on every keystroke now, out of the
+        # three facts `Edited` carries beside the caret. Nothing had a way to
+        # ask for these before the API audit, so Undo and Cut were lit whether
+        # or not they would do anything.
+        #
+        # A greyed menu entry draws in the palette's grey, which is what this
+        # reads -- unlike a disabled *view*, an entry is only ever looked at,
+        # so how it looks is what it does.
+        app.send(b"\x1be", settle=0.8)
+        menu = app.render()
+        undo_row = [i for i, r in enumerate(menu.split("\n")) if "Undo" in r][0]
+        cut_row = [i for i, r in enumerate(menu.split("\n")) if "Cut" in r][0]
+        undo_ink = app.display().fg_at(
+            menu.split("\n")[undo_row].index("Undo"), undo_row)
+        cut_ink = app.display().fg_at(
+            menu.split("\n")[cut_row].index("Cu"), cut_row)
+        # Compared against each other rather than against a number: which grey
+        # a disabled entry is drawn in belongs to the palette, and the claim
+        # here is that the two entries are in different states -- there is
+        # something to undo and there is nothing selected to cut.
+        check("Undo and Cut are drawn differently, because only one would do "
+              "anything", undo_ink != cut_ink, f"both {undo_ink}")
+        check("and it is Cut that is greyed", cut_ink == 90, str(cut_ink))
+        app.send(b"\x1b", settle=0.5)
+
+        # The Insert key is the user's and not the model's, so overwrite mode
+        # is a fact the model is told rather than one it sets -- and the status
+        # line says it where every editor since 1983 has.
+        check("the status line starts in insert mode", "INS" in app.render(),
+              app.render().split("\n")[-2])
+        app.send(b"\x1b[2~", settle=0.6)
+        check("and the Insert key is reported, not merely obeyed",
+              "OVR" in app.render(), app.render().split("\n")[-2])
+        app.send(b"\x1b[2~", settle=0.6)
+        check("and back again", "INS" in app.render(), app.render().split("\n")[-2])
+
         # Undo from the Edit menu. `"undo"` is a built-in command name, so it
         # reaches the editor without the model handling it at all -- the same
         # bargain demo's Windows menu makes.

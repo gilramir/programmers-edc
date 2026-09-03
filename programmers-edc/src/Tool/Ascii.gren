@@ -287,6 +287,8 @@ view inks model =
     -- handle, no zoom box.
     , resize = Tui.fixedSize
     , palette = Tui.BlueWindow
+    , canClose = True
+    , canMove = True
     , views =
         [ Canvas
             { id = canvasId

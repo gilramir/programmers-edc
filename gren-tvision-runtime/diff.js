@@ -30,7 +30,7 @@ const MUTABLE = {
 // Listing it here rather than in each row above is also what keeps a type that
 // has no other mutable field -- a button, a label -- from being rebuilt when
 // the only thing that changed is whether it is available.
-const MUTABLE_ANY = ['enabled'];
+const MUTABLE_ANY = ['enabled', 'visible'];
 
 function skeleton(view) {
   const copy = { ...view };
@@ -91,6 +91,14 @@ function createDiffer(tv, onClosed = () => {}) {
     const was = before.enabled !== false;
     const now = after.enabled !== false;
     if (was !== now) tv.setViewEnabled(after.id, now);
+
+    // sfVisible, and TView's like the one above. Hidden is not the same as
+    // absent: leaving the view out of the render is a rebuild, and a rebuild
+    // is what throws away the document in an editor and the highlight in a
+    // list. This keeps the view and stops drawing it.
+    const shown = before.visible !== false;
+    const shows = after.visible !== false;
+    if (shown !== shows) tv.setViewVisible(after.id, shows);
 
     // The same argument one level down, for the three cluster types: which
     // boxes are available is TCluster's `enableMask`, not sfDisabled, because
@@ -233,6 +241,18 @@ function createDiffer(tv, onClosed = () => {}) {
             } else {
               const before = current.get(window.id);
               if (before.title !== window.title) tv.setTitle(window.id, window.title);
+              // Whether the user may close or move it, which TFrame reads on
+              // every paint -- so a redraw and not a rebuild, like the title
+              // and the palette beside it. Undefined is `true`: a window that
+              // says nothing about closing can be closed, which is what every
+              // window did before the fields existed.
+              if ((before.canClose !== false) !== (window.canClose !== false) ||
+                  (before.canMove !== false) !== (window.canMove !== false)) {
+                tv.setWindowFlags(window.id, {
+                  canClose: window.canClose !== false,
+                  canMove: window.canMove !== false,
+                });
+              }
               if (before.palette !== window.palette) {
                 tv.setWindowPalette(window.id, window.palette);
               }

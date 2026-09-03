@@ -40,6 +40,17 @@ def main():
           "the dialog result never reached the model")
     check("the answer is in the model", "You feel terrific." in answered, answered[8 * 81:12 * 81])
 
+    # `canClose = False`: this window exists exactly while the model has an
+    # answer, so a close box would put it straight back on the next render.
+    # Checked twice over, because the box being absent and the window refusing
+    # to go are two different claims and only the second is what was asked for.
+    title_row = [row for row in answered.split("\n") if "You said" in row][0]
+    check("a window that cannot be closed has no close box on its frame",
+          "[■]" not in title_row, title_row)
+    app.send(b"\x1b\x1bOR", settle=0.8)   # Alt-F3, which closes a window
+    check("and Alt-F3 leaves it where it is",
+          "You said" in app.render(), app.render())
+
     app.send(b"\x1bx", settle=1.0)
     code = app.wait(timeout=6)
     check("exit code 0", code == 0, f"exit={code}")

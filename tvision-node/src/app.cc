@@ -84,6 +84,14 @@ struct EditNote {
     bool modified = false;
     int line = 0;
     int column = 0;
+    // The three facts an editor knows and a model cannot ask for. They ride
+    // here rather than being fetched because this port has never had a
+    // synchronous query, and because all three change for the same reasons the
+    // caret does -- so they are already free on an event that was being sent
+    // anyway.
+    bool canUndo = false;
+    bool hasSelection = false;
+    bool overwrite = false;
 };
 
 std::vector<EditNote> g_editNotes;
@@ -804,17 +812,19 @@ void noteChangedMarks(const std::string &id, const std::vector<int> &states)
     pushChange(note);
 }
 
-void noteEdited(const std::string &id, bool modified, int line, int column)
+void noteEdited(const std::string &id, bool modified, int line, int column,
+                bool canUndo, bool hasSelection, bool overwrite)
 {
     if (g_onEdit.IsEmpty() || g_shuttingDown)
         return;
+    EditNote note{id, modified, line, column, canUndo, hasSelection, overwrite};
     for (EditNote &existing : g_editNotes)
         if (existing.id == id)
             {
-            existing = EditNote{id, modified, line, column};
+            existing = note;
             return;
             }
-    g_editNotes.push_back(EditNote{id, modified, line, column});
+    g_editNotes.push_back(note);
 }
 
 static void flushEdited()
@@ -834,7 +844,10 @@ static void flushEdited()
         callJs(g_onEdit, {Napi::String::New(env, note.id),
                           Napi::Boolean::New(env, note.modified),
                           Napi::Number::New(env, note.line),
-                          Napi::Number::New(env, note.column)});
+                          Napi::Number::New(env, note.column),
+                          Napi::Boolean::New(env, note.canUndo),
+                          Napi::Boolean::New(env, note.hasSelection),
+                          Napi::Boolean::New(env, note.overwrite)});
 }
 
 static void flushChanged()

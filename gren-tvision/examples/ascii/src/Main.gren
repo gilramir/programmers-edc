@@ -290,6 +290,8 @@ chartWindow model =
     -- stops offering something that cannot happen.
     , resize = Tui.fixedSize
     , palette = Tui.BlueWindow
+    , canClose = True
+    , canMove = True
     , views =
         [ Canvas
             { id = "chart"

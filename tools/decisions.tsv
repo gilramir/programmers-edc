@@ -29,8 +29,8 @@ TView	moveTo	internal	painting, which is Turbo Vision's once the model has said 
 TView	setBounds	used	the binding calls it; not itself a thing a Gren program names
 TView	getHelpCtx	internal	a virtual the binding overrides or inherits, not a call a model makes
 TView	valid	internal	a virtual the binding overrides or inherits, not a call a model makes
-TView	hide	todo	hiding a view without destroying it, which is what keeps an Editor's document while it is off screen
-TView	show	todo	the other half of hide
+TView	hide	bound	the `Visible` wrapper
+TView	show	bound	the `Visible` wrapper
 TView	draw	internal	a virtual the binding overrides or inherits, not a call a model makes
 TView	drawView	internal	painting, which is Turbo Vision's once the model has said what to paint
 TView	exposed	skipped	whether any cell of a view is visible; a model that needs this is asking about paint
@@ -82,7 +82,7 @@ TView	nextView	internal	z-order walking, inside a group
 TView	prevView	internal	z-order walking, inside a group
 TView	prev	used	the binding calls it; not itself a thing a Gren program names
 TView	next	used	the binding calls it; not itself a thing a Gren program names
-TView	makeFirst	todo	z-order; today a window comes to the front only as a side effect of being rebuilt
+TView	makeFirst	bound	`Tui.bringToFront`, through TView::select, which a window's ofTopSelect turns into a makeFirst
 TView	putInFrontOf	internal	painting, which is Turbo Vision's once the model has said what to paint
 TView	TopView	internal	the modal stack keeps its own top
 TView	writeBuf	internal	painting, which is Turbo Vision's once the model has said what to paint
@@ -401,8 +401,8 @@ TEditor	getPalette	internal	a virtual the binding overrides or inherits, not a c
 TEditor	handleEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
 TEditor	initBuffer	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
 TEditor	initContextMenu	internal	a virtual the binding overrides or inherits, not a call a model makes
-TEditor	insertBuffer	todo	inserting text at the cursor, as against replacing the document
-TEditor	insertFrom	todo	see insertBuffer
+TEditor	insertBuffer	bound	`Tui.insertIntoEditor`, through insertText, which is the same call with the buffer arithmetic done
+TEditor	insertFrom	skipped	inserting one editor's selection into another; there is one editor per id here and no gesture that spans two
 TEditor	insertText	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
 TEditor	scrollTo	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
 TEditor	search	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
@@ -426,7 +426,7 @@ TEditor	drawLines	internal	painting, which is Turbo Vision's once the model has 
 TEditor	formatLine	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
 TEditor	find	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
 TEditor	getMousePtr	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
-TEditor	hasSelection	todo	whether anything is selected, which decides whether Cut should be enabled
+TEditor	hasSelection	bound	`hasSelection` on the Edited event
 TEditor	hideSelect	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
 TEditor	isClipboard	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
 TEditor	lineEnd	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
@@ -446,7 +446,7 @@ TEditor	setBufLen	internal	the editor keeps its own document, so its buffer arit
 TEditor	setCurPtr	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
 TEditor	startSelect	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
 TEditor	toggleEncoding	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
-TEditor	toggleInsMode	todo	the command that flips it
+TEditor	toggleInsMode	used	the Insert key, whose effect reaches the model as isOverwrite
 TEditor	unlock	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
 TEditor	update	internal	painting, which is Turbo Vision's once the model has said what to paint
 TEditor	checkScrollBar	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
@@ -468,11 +468,11 @@ TEditor	drawPtr	internal	painting, which is Turbo Vision's once the model has sa
 TEditor	delCount	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
 TEditor	insCount	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
 TEditor	isValid	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
-TEditor	canUndo	todo	whether Undo would do anything, which decides whether to grey it
+TEditor	canUndo	bound	`canUndo` on the Edited event
 TEditor	modified	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
 TEditor	selecting	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
-TEditor	overwrite	todo	insert versus overwrite mode, likewise
-TEditor	autoIndent	todo	an editor option a program would want to offer
+TEditor	overwrite	bound	`isOverwrite` on the Edited event; the Insert key is the user's, so it is reported and not set
+TEditor	autoIndent	bound	Editor's `autoIndent`
 TEditor	editorDialog	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
 TEditor	editorFlags	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
 TEditor	findStr	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
@@ -652,7 +652,7 @@ TRect	Union	skipped	Gren has its own Rect and its own arithmetic
 TRect	contains	used	the binding calls it; not itself a thing a Gren program names
 TRect	isEmpty	skipped	see TRect::Union
 TRect	b	used	the binding calls it; not itself a thing a Gren program names
-flags	sfVisible	todo	hiding a view without destroying it; see TView::hide
+flags	sfVisible	bound	the `Visible` wrapper
 flags	sfCursorVis	used	Canvas's cursor field turns it on and off
 flags	sfCursorIns	skipped	the fat insert-mode cursor, which only an editor has an opinion about
 flags	sfShadow	skipped	a window's drop shadow, which Turbo Vision puts on dialogs and nothing here has wanted to move
@@ -691,7 +691,7 @@ flags	dmLimitLoY	skipped	see dmLimitLoX
 flags	dmLimitHiX	skipped	see dmLimitLoX
 flags	dmLimitHiY	skipped	see dmLimitLoX
 flags	dmLimitAll	skipped	see dmLimitLoX
-flags	wfMove	todo	a window that cannot be moved; beWindow() sets all four of these together and no model can say otherwise
+flags	wfMove	bound	Window's `canMove`
 flags	wfGrow	used	Resize
-flags	wfClose	todo	a window with no close box, which is the one of the four somebody will want first
+flags	wfClose	bound	Window's `canClose`
 flags	wfZoom	used	Resize

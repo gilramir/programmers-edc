@@ -351,6 +351,8 @@ calendarWindow showing today =
     , rect = { x1 = 1, y1 = 1, x2 = 23, y2 = 11 }
     , resize = Tui.resizable
     , palette = Tui.BlueWindow
+    , canClose = True
+    , canMove = True
     , views =
         [ Canvas
             { id = "month"

@@ -2003,6 +2003,8 @@ view inks model =
     -- layout choice -- so the frame does not offer it.
     , resize = Tui.resizeHeight
     , palette = Tui.BlueWindow
+    , canClose = True
+    , canMove = True
     , views =
         [ Canvas
             { id = "hex.header"

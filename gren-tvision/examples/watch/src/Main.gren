@@ -689,6 +689,8 @@ jobWindow model index job =
     , rect = frame (Array.length model.jobs) index
     , resize = Tui.resizable
     , palette = Tui.BlueWindow
+    , canClose = True
+    , canMove = True
     , views =
         [ Canvas
             { id = "out-" ++ String.fromInt index

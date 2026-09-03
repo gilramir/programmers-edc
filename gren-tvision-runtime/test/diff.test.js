@@ -36,6 +36,9 @@ function fakeTv(initiallyOpen = []) {
     setCursor: (id, x, y, visible) => calls.push(['setCursor', id, x, y, visible]),
     setScroll: (...args) => calls.push(['setScroll', ...args]),
     setViewEnabled: (id, on) => calls.push(['setViewEnabled', id, on]),
+    setWindowFlags: (id, flags) => calls.push(['setWindowFlags', id, flags]),
+    setViewVisible: (id, on) => calls.push(['setViewVisible', id, on]),
+    bringToFront: (id) => calls.push(['bringToFront', id]),
     setListTop: (id, top) => calls.push(['setListTop', id, top]),
     setItemsEnabled: (id, flags) => calls.push(['setItemsEnabled', id, flags]),
   };
@@ -554,5 +557,85 @@ test('the number of columns is structural, because a list cannot be re-divided',
   differ.apply([list(1)]);
   tv.calls.length = 0;
   differ.apply([list(2)]);
+  assert.deepEqual(tv.calls, [['close', 'w'], ['window', 'w']]);
+});
+
+test('taking a window\'s close box away is a redraw, not a rebuild', () => {
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  differ.apply([win({ canClose: true })]);
+  tv.calls.length = 0;
+  differ.apply([win({ canClose: false })]);
+  assert.deepEqual(tv.calls, [
+    ['setWindowFlags', 'w', { canClose: false, canMove: true }],
+  ]);
+});
+
+test('a window that never mentions its flags is not written to', () => {
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  differ.apply([win()]);
+  tv.calls.length = 0;
+  differ.apply([win({ canClose: true, canMove: true })]);
+  assert.deepEqual(tv.calls, []);
+});
+
+test('hiding a view keeps it, where leaving it out would rebuild the window', () => {
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  const withHistory = (visible) => win({
+    items: [
+      { type: 'staticText', id: 't', rect: [2, 1, 30, 2], text: 'hello' },
+      { type: 'history', id: 'h', for: 't', items: ['a'], visible },
+    ],
+  });
+  differ.apply([withHistory(false)]);
+  tv.calls.length = 0;
+  differ.apply([withHistory(true)]);
+  assert.deepEqual(tv.calls, [['setViewVisible', 'h', true]]);
+});
+
+test('taking a view out of the render is still a rebuild, which is the difference', () => {
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  differ.apply([win({
+    items: [
+      { type: 'staticText', id: 't', rect: [2, 1, 30, 2], text: 'hello' },
+      { type: 'history', id: 'h', for: 't', items: ['a'] },
+    ],
+  })]);
+  tv.calls.length = 0;
+  differ.apply([win()]);
+  assert.deepEqual(tv.calls, [['close', 'w'], ['window', 'w']]);
+});
+
+test('hidden and disabled are two fields and do not disturb each other', () => {
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  const both = (visible, enabled) => win({
+    items: [{ type: 'button', id: 'b', rect: [2, 1, 12, 3], title: 'Go', visible, enabled }],
+  });
+  differ.apply([both(true, true)]);
+  tv.calls.length = 0;
+  differ.apply([both(false, false)]);
+  assert.deepEqual(tv.calls, [
+    ['setViewEnabled', 'b', false],
+    ['setViewVisible', 'b', false],
+  ]);
+});
+
+test('an editor may set autoIndent, and changing it rebuilds', () => {
+  // Structural on purpose: it is not in MUTABLE, so a model that changes its
+  // mind gets a new editor -- and an editor is the one view that loses its
+  // contents when rebuilt, which is exactly why this must be a decision the
+  // model makes once rather than a thing it toggles.
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  const ed = (autoIndent) => win({
+    items: [{ type: 'editor', id: 'e', rect: [2, 1, 40, 8], autoIndent }],
+  });
+  differ.apply([ed(false)]);
+  tv.calls.length = 0;
+  differ.apply([ed(true)]);
   assert.deepEqual(tv.calls, [['close', 'w'], ['window', 'w']]);
 });

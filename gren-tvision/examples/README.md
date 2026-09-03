@@ -1426,3 +1426,84 @@ list, so a `top` written first is a `top` undone.
 working: a caption is `~P~hone`, and matching `phone` against it finds nothing.
 The first version of the check greyed no box at all and the driver was right to
 fail.
+
+## Windows that refuse, views that are not there, and z-order on purpose
+
+Four more from the audit, all of them about `TView` and `TWindow` rather than
+about any widget.
+
+**`canClose` and `canMove` on a `Window`.** `beWindow()` turned on all four of
+Turbo Vision's window flags together and `Resize` already spoke for two of
+them, so these are the other two. The one worth having is `canClose = False`,
+and `examples/hello` shows why: its window exists exactly while the model has
+an answer to show, so closing it put it straight back on the next render — a
+flick on the screen and nothing else. Handling `WindowClosed` and clearing the
+answer is a fine program and a different one; this says the window is not a
+thing you close. `TFrame::draw` reads the flags on every paint, so both are a
+redraw rather than a rebuild.
+
+**`Visible`, the third wrapper.** `sfVisible`, and the same shape as `Enabled`
+for the same reason. Hiding is not the same as leaving the view out of the
+render: leaving it out is a *structural* change, so the window is torn down and
+built again, and the caret, an editor's document and a list's highlight go with
+it. `entries` hides its history arrow until there is something behind it — an
+arrow that opens an empty list is an offer of nothing — and the check that pins
+it is that the window is still there and still focused afterwards.
+
+Three wrappers is where the design starts to earn itself: `encodeView` walks
+down through any nesting now instead of matching one level, and
+`WRAPPER_VARIANTS` in `check_consistency.py` is a set with a sentence beside it
+saying why a wrapper never has a wire type.
+
+**`Tui.bringToFront`.** Until now the only way to raise a window was to change
+something *structural* about it so that the differ rebuilt it in front. That
+worked — which is why nobody noticed — and it threw away the caret and every
+list highlight on the way, which is the exact thing this package exists to
+avoid. FINDINGS had it written up as a surprise; it is a call now.
+
+It is `TView::select` underneath rather than `makeFirst`, though the audit named
+the gap after the second: a `TWindow` carries `ofTopSelect`, so selecting one
+raises it *and* hands it the caret, and raising a window without focusing it is
+a state no Turbo Vision program has. `entries` answers **Window | List** with it
+instead of `Tui.focus`; both pass the two checks that were already there,
+because focusing a window raises it — but the command means "show me that
+window", and saying so beats relying on a flag on a class to make the other
+sentence true.
+
+## The last six, which were all one question about the editor
+
+`decisions.tsv` has no `todo` lines left, and the six that were are all
+`TEditor`. They turned out to be one question with three answers, which is why
+they closed together.
+
+**What the model owns** is `autoIndent`, and it is a field on `Editor`. Turbo
+Vision reads it when Enter is pressed and copies the leading whitespace of the
+line above; nothing but the program has an opinion about it. Structural, and
+that is not an oversight: an editor is the one view that loses its contents
+when rebuilt, so a setting that rebuilds it is a setting a program makes once.
+
+**What the user owns** is insert-versus-overwrite. It is deliberately *not* a
+field, because the Insert key is the user's: a field the user can move is a
+field the model spends its time writing back, which is the trap an input line's
+`value` already documents. It arrives on `Edited` as `isOverwrite` instead, and
+`examples/edit` puts it in the status line where every editor since 1983 has.
+
+**What neither owns** is `canUndo` and `hasSelection` — facts about the
+document that change under both of them. Asking would have been the synchronous
+query this port has never had, so they ride on `Edited`, which was being sent
+on every keystroke anyway and already carried the caret for the same reason.
+The payoff is small and exact: `examples/edit` greys **Undo** when there is
+nothing to undo and **Cut** when nothing is selected, which it previously could
+not know and therefore left lit — offering two actions that would do nothing.
+
+**And one call.** `insertIntoEditor` puts text in at the caret where
+`setEditorText` replaces the document. Two calls rather than one because the
+document crosses this port exactly twice per file by design, and a program that
+had to read it back, splice in a string and write it again would be moving a
+whole file through Gren to add three characters. It goes in through
+`insertText`, which is `insertBuffer` with the arithmetic done, so the undo
+record and the scroll bars land where typing would have left them.
+
+`insertFrom` is the one member of the six that stayed shut: it inserts one
+editor's selection into another, and there is one editor per id here with no
+gesture that spans two.

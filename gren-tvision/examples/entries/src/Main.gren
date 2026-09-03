@@ -139,7 +139,13 @@ handleEvent event model =
         -- window is already in the description.
         Command "list" ->
             { model = { model | listOpen = True }
-            , command = Tui.focus tui "list"
+            , command =
+                -- `bringToFront` and not `focus`: the window may be open and
+                -- buried under another one, and answering "show me that
+                -- window" by moving the caret into something the user cannot
+                -- see is answering a different question. Raising it hands it
+                -- the caret as well, which is what `focus` was here for.
+                Tui.bringToFront tui "list"
             }
 
         Command _ ->
@@ -356,6 +362,8 @@ clockWindow model =
         }
     , resize = Tui.resizable
     , palette = Tui.BlueWindow
+    , canClose = True
+    , canMove = True
     , views =
         [ StaticText
             { id = "clockTime"
@@ -398,6 +406,8 @@ listWindow model =
     -- the model is not told about the second one at all.
     , resize = Tui.resizable
     , palette = Tui.BlueWindow
+    , canClose = True
+    , canMove = True
     , views =
         -- A control in an ordinary window, which is the thing this API could
         -- not see until protocol 8. Turbo Vision reports neither a keystroke
@@ -448,10 +458,20 @@ listWindow model =
         , Grows
             { grow = Tui.pinRight
             , view =
-                History
-                    { id = "filterHistory"
-                    , for = "filter"
-                    , items = model.recentFilters
+                -- A drop-down arrow that opens an empty list is an offer of
+                -- nothing, so it is not drawn until there is something behind
+                -- it. `Visible` rather than leaving it out of the render:
+                -- taking a view out is a structural change and rebuilds the
+                -- window, which would close it and take the caret with it
+                -- every time the first filter was remembered.
+                Visible
+                    { visible = not (Array.isEmpty model.recentFilters)
+                    , view =
+                        History
+                            { id = "filterHistory"
+                            , for = "filter"
+                            , items = model.recentFilters
+                            }
                     }
             }
         , Grows

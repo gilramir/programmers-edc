@@ -121,8 +121,10 @@ function run(grenModule, options = {}) {
             // writes the value back into the control the user is using.
             // An editor was edited, or its caret moved. Deliberately without
             // the document: see `editorText` below for how one travels.
-            onEdit: (id, modified, line, column) =>
-              send({ type: 'edited', id, modified: !!modified, line, column }),
+            onEdit: (id, modified, line, column, canUndo, hasSelection, overwrite) =>
+              send({ type: 'edited', id, modified: !!modified, line, column,
+                     canUndo: !!canUndo, hasSelection: !!hasSelection,
+                     overwrite: !!overwrite }),
             // The clipboard's answer, which arrives when it arrives: a
             // terminal that owns the clipboard is asked for it with an escape
             // sequence and replies through the input stream, so this can be
@@ -205,6 +207,13 @@ function run(grenModule, options = {}) {
         if (started) tv.focus(message.id);
         break;
 
+      // Raising a window, which is not queued the way focus is: a window can
+      // only be raised once it exists, and one that does not exist yet will be
+      // built in front anyway, which is what the model asked for.
+      case 'bringToFront':
+        if (started) tv.bringToFront(message.id);
+        break;
+
       // A context menu, which is a Cmd for the same reason a dialog is: it is
       // modal, and what comes back is the user's answer. Unlike a dialog it
       // needs no plumbing on the way back at all -- the command the user chose
@@ -222,6 +231,13 @@ function run(grenModule, options = {}) {
       // The two halves of an editor's document, and the only pair of messages
       // in this protocol that carry one. A render cannot: `view` runs on every
       // tick of every subscription, and a file does not belong in it.
+      // The other way text gets into an editor, and the one that keeps what
+      // is already there: setEditorText replaces the document, this puts
+      // characters in at the caret the way typing them would.
+      case 'insertIntoEditor':
+        tv.insertIntoEditor(message.id, message.text);
+        break;
+
       case 'setEditorText':
         tv.setEditorText(message.id, message.text);
         break;

@@ -607,14 +607,27 @@ int JsEditor::searchAndReplace(const std::string &what, bool replace,
 void JsEditor::noteEditIfChanged()
 {
     bool nowModified = modified == True;
+    // `hasSelection` is not const in TEditor, so it is called rather than
+    // read; the other two are members. All three are compared as well as the
+    // caret, because a model that greys Undo on this has to hear the update
+    // where *only* undoability changed -- the first Ctrl-Z of a session moves
+    // nothing else.
+    bool nowUndo = canUndo == True;
+    bool nowSelected = hasSelection() == True;
+    bool nowOverwrite = overwrite == True;
     if (nowModified == lastModified && curPos.y == lastLine &&
-        curPos.x == lastColumn)
+        curPos.x == lastColumn && nowUndo == lastCanUndo &&
+        nowSelected == lastHasSelection && nowOverwrite == lastOverwrite)
         return;
     lastModified = nowModified;
     lastLine = curPos.y;
     lastColumn = curPos.x;
+    lastCanUndo = nowUndo;
+    lastHasSelection = nowSelected;
+    lastOverwrite = nowOverwrite;
     if (!viewId.empty())
-        noteEdited(viewId, nowModified, curPos.y, curPos.x);
+        noteEdited(viewId, nowModified, curPos.y, curPos.x, nowUndo,
+                   nowSelected, nowOverwrite);
 }
 
 // The same sandwich as every other widget that reports: there is no one method
@@ -1131,6 +1144,12 @@ TView *buildItems(const Napi::Env &env, TGroup *win, const Napi::Value &value,
             JsEditor *editor = new JsEditor(box, across, down, id);
             down->pane = editor;
             across->pane = editor;
+            // A mode the model sets and the user cannot: TEditor reads it when
+            // Enter is pressed and copies the leading whitespace of the line
+            // above. `overwrite` is not here beside it on purpose -- the user
+            // owns that one, with the Insert key, so it is reported on
+            // `Edited` rather than being written.
+            editor->autoIndent = getBool(it, "autoIndent", false) ? True : False;
             made = editor;
             }
         else if (type == "canvas")
@@ -1251,6 +1270,8 @@ TView *buildItems(const Napi::Env &env, TGroup *win, const Napi::Value &value,
         // the `ofSelectable` test alone.
         if (!getBool(it, "enabled", true))
             made->setState(sfDisabled, True);
+        if (!getBool(it, "visible", true))
+            made->setState(sfVisible, False);
 
         if (firstSelectable == nullptr && (made->options & ofSelectable) != 0 &&
             (made->state & sfDisabled) == 0)
@@ -1301,6 +1322,23 @@ static void applyResize(const Napi::Object &spec, JsWindow *win)
         return;
     Napi::Object r = v.As<Napi::Object>();
     win->setResize(getBool(r, "width", true), getBool(r, "height", true));
+}
+
+// A window's `canClose` and `canMove`. `beWindow()` turns on all four of
+// TWindow's flags together -- move, grow, close and zoom -- and `resize`
+// already speaks for the second and fourth, so these are the other two.
+//
+// A window with no close box is the one somebody wants first: a program whose
+// main window *is* the program has nothing sensible to do when the user closes
+// it, and telling them so afterwards is worse than not drawing the box.
+// `TFrame::draw` reads the flags on every paint, so both are patchable rather
+// than structural.
+static void applyWindowFlags(const Napi::Object &spec, JsWindow *win)
+{
+    if (spec.Has("canClose"))
+        win->setFlag(wfClose, getBool(spec, "canClose", true));
+    if (spec.Has("canMove"))
+        win->setFlag(wfMove, getBool(spec, "canMove", true));
 }
 
 // A window's `palette` field: "blue", "cyan" or "gray". Absent means blue,
@@ -1408,6 +1446,7 @@ static Napi::Value Window(const Napi::CallbackInfo &info)
                                  getString(spec, "title").c_str(), id);
     win->beWindow();
     applyResize(spec, win);
+    applyWindowFlags(spec, win);
     applyWindowPalette(spec, win);
     g_views.addWindow(id, win);
 
@@ -1507,6 +1546,94 @@ static Napi::Value SetItemsEnabled(const Napi::CallbackInfo &info)
     if (off != 0)
         cluster->setButtonState(off, False);
     cluster->drawView();
+    return Napi::Boolean::New(env, true);
+}
+
+// tv.insertIntoEditor(id, text) -- put text in at the caret, replacing the
+// selection if there is one.
+//
+// Not `setEditorText`, which replaces the document: this is the call a "paste"
+// or an "insert template" is made of, and the difference matters because the
+// document only crosses the port twice per file by design.
+//
+// `insertText` and not `insertBuffer`: the first is the same call with the
+// buffer arithmetic done for us (`editors.h:219`), and going through it means
+// the undo record, the modified flag and the scroll bars are all updated the
+// way typing would have updated them.
+static Napi::Value InsertIntoEditor(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    ViewRef *ref = g_views.find(info[0].ToString().Utf8Value());
+    if (ref == nullptr || ref->kind != "editor")
+        return Napi::Boolean::New(env, false);
+
+    std::string text = info[1].ToString().Utf8Value();
+    return Napi::Boolean::New(
+        env, ((JsEditor *) ref->view)->insertAtCaret(text));
+}
+
+// tv.bringToFront(id) -- put a window in front of the others and make it the
+// active one.
+//
+// `select()` and not `makeFirst()`, though the gap this closes was named after
+// the second: `TWindow` carries `ofTopSelect`, and `TView::select` calls
+// `makeFirst()` for a view that has it (tview.cpp:732) *and* hands it the
+// caret. Raising a window without focusing it is a state no Turbo Vision
+// program has, and nothing has asked for one.
+//
+// Until now the only way to raise a window was to change something structural
+// about it so that the differ tore it down and built it again -- which worked,
+// which FINDINGS records as a surprise rather than a feature, and which threw
+// away the caret and every list highlight in it on the way.
+static Napi::Value BringToFront(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    JsWindow *win = g_views.findWindow(info[0].ToString().Utf8Value());
+    if (win == nullptr)
+        return Napi::Boolean::New(env, false);
+    win->select();
+    return Napi::Boolean::New(env, true);
+}
+
+// tv.setViewVisible(id, on) -- draw a view, or stop drawing it.
+//
+// Different from `setViewEnabled` beside it and worth both: a disabled view is
+// drawn grey and refuses, a hidden one is not drawn at all and the space it had
+// is the window's ground. What makes hiding worth having rather than leaving
+// the view out of the render is that the view survives -- an Editor keeps its
+// document, a list keeps its highlight, an input line keeps what was typed --
+// where leaving it out is a rebuild and throws all of that away.
+static Napi::Value SetViewVisible(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    ViewRef *ref = g_views.find(info[0].ToString().Utf8Value());
+    if (ref == nullptr)
+        return Napi::Boolean::New(env, false);
+
+    bool on = info[1].ToBoolean().Value();
+    // Hiding the view with the caret would leave the caret nowhere, so pass it
+    // on first -- the same rule, and the same call, as disabling one.
+    if (!on && (ref->view->state & sfFocused) != 0 && ref->view->owner != nullptr)
+        ref->view->owner->selectNext(False);
+    ref->view->setState(sfVisible, on ? True : False);
+    return Napi::Boolean::New(env, true);
+}
+
+// tv.setWindowFlags(id, {canClose, canMove}) -- whether the user may close or
+// move a window, in place. Both are read by TFrame on every paint, so this is a
+// redraw rather than a rebuild.
+static Napi::Value SetWindowFlags(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    JsWindow *win = g_views.findWindow(info[0].ToString().Utf8Value());
+    if (win == nullptr || !info[1].IsObject())
+        return Napi::Boolean::New(env, false);
+
+    Napi::Object o = info[1].As<Napi::Object>();
+    if (o.Has("canClose"))
+        win->setFlag(wfClose, getBool(o, "canClose", true));
+    if (o.Has("canMove"))
+        win->setFlag(wfMove, getBool(o, "canMove", true));
     return Napi::Boolean::New(env, true);
 }
 
@@ -1857,6 +1984,10 @@ void registerViewApi(Napi::Env env, Napi::Object exports)
     exports.Set("window", Napi::Function::New(env, Window));
     exports.Set("setText", Napi::Function::New(env, SetText));
     exports.Set("setViewEnabled", Napi::Function::New(env, SetViewEnabled));
+    exports.Set("setWindowFlags", Napi::Function::New(env, SetWindowFlags));
+    exports.Set("bringToFront", Napi::Function::New(env, BringToFront));
+    exports.Set("insertIntoEditor", Napi::Function::New(env, InsertIntoEditor));
+    exports.Set("setViewVisible", Napi::Function::New(env, SetViewVisible));
     exports.Set("setListTop", Napi::Function::New(env, SetListTop));
     exports.Set("setItemsEnabled", Napi::Function::New(env, SetItemsEnabled));
     exports.Set("setItems", Napi::Function::New(env, SetItems));

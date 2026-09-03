@@ -1360,6 +1360,8 @@ table desktop model =
     , rect = { x1 = 1, y1 = 1, x2 = 2 + interior, y2 = 1 + furniture + shown + 2 }
     , resize = Tui.fixedSize
     , palette = Tui.BlueWindow
+    , canClose = True
+    , canMove = True
     , views = tableViews fx names interior shown hidden model
     }
 
@@ -1638,6 +1640,8 @@ chooser desktop picker =
     , rect = { x1 = 6, y1 = 3, x2 = 74, y2 = 3 + listBottom + 7 }
     , resize = Tui.fixedSize
     , palette = Tui.BlueWindow
+    , canClose = True
+    , canMove = True
     , views =
         [ StaticText
             { id = "time.findlabel"

@@ -73,6 +73,7 @@ type alias Model =
     , modified : Bool
     , line : Int
     , column : Int
+    , overwrite : Bool
     , status : String
     -- What Find last asked for. Search again is this program re-issuing it,
     -- because the search string is a thing only the model has.
@@ -114,6 +115,7 @@ init env =
                 , modified = False
                 , line = 0
                 , column = 0
+                , overwrite = False
                 , search = Nothing
                 , status =
                     when wanted is
@@ -196,8 +198,19 @@ handleEvent event model =
                     | modified = model.modified || it.isModified
                     , line = it.line
                     , column = it.column
+                    , overwrite = it.isOverwrite
                 }
-            , command = Cmd.none
+            , command =
+                -- The Edit menu, told the truth on every keystroke. Undo and
+                -- Cut are the two entries that are wrong more often than they
+                -- are right: a program that leaves them lit offers an action
+                -- that does nothing, and until `Edited` carried these two
+                -- facts there was no way to ask.
+                Cmd.batch
+                    [ Tui.setEnabled tui "editor.undo" it.canUndo
+                    , Tui.setEnabled tui "editor.cut" it.hasSelection
+                    , Tui.setEnabled tui "editor.copy" it.hasSelection
+                    ]
             }
 
         -- Saving is two steps for the same reason opening a directory was in
@@ -485,6 +498,18 @@ view model =
         [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
         , { text = "~F2~ Save", key = "F2", cmd = "save" }
         , { text = "~F7~ Again", key = "F7", cmd = "searchAgain" }
+        -- Where every editor since 1983 has put it. The Insert key is the
+        -- user's, not the model's, so this is a fact the model is *told*
+        -- rather than one it sets.
+        , { text =
+                if model.overwrite then
+                    "OVR"
+
+                else
+                    "INS"
+          , key = ""
+          , cmd = ""
+          }
         , { text = "", key = "F10", cmd = "menu" }
         ]
     , windows = [ editorWindow model ]
@@ -532,6 +557,8 @@ editorWindow model =
         }
     , resize = Tui.resizable
     , palette = Tui.BlueWindow
+    , canClose = True
+    , canMove = True
     , views =
         [ Grows
             { grow = Tui.stretch
@@ -539,6 +566,7 @@ editorWindow model =
                 Editor
                     { id = "body"
                     , rect = { x1 = 1, y1 = 1, x2 = 75, y2 = 17 }
+                    , autoIndent = False
                     }
             }
         -- The caption Turbo Vision would have drawn with a TIndicator on the

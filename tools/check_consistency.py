@@ -56,11 +56,12 @@ def gren_view_variants(src):
 #   Grows     which of a view's edges follow the window when it is resized
 #   Enabled   whether the view can be used at all, which is TView's sfDisabled
 #             and therefore true of every widget rather than of any one of them
+#   Visible   whether it is drawn at all, which is sfVisible and the same shape
 #
 # Naming them here rather than loosening the walk is what keeps the walk exact
 # for the widgets -- and check 2b below verifies that a wrapper really is
 # plumbed, so these are exemptions rather than holes.
-WRAPPER_VARIANTS = {"Grows", "Enabled"}
+WRAPPER_VARIANTS = {"Grows", "Enabled", "Visible"}
 
 
 def gren_encoder_types(src):

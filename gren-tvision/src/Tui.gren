@@ -25,6 +25,7 @@ module Tui exposing
     , Window
     , WindowPalette(..)
     , borland
+    , bringToFront
     , copyToClipboard
     , defineProgram
     , defineProgramOrExit
@@ -37,6 +38,7 @@ module Tui exposing
     , flags
     , focus
     , ink
+    , insertIntoEditor
     , line
     , marks
     , messageBox
@@ -209,8 +211,8 @@ its own is a pull-down, and one without is a command sitting on the bar.
 @docs Theme, ThemePanel, Pair, Tint, borland
 @docs MenuItem, StatusItem, PopupItem, popupMenu
 @docs Event, Value, DialogSpec
-@docs dialog, quit, setEnabled, setDoubleClickDelay, focus
-@docs setEditorText, readEditor, findInEditor, replaceInEditor
+@docs dialog, quit, setEnabled, setDoubleClickDelay, focus, bringToFront
+@docs setEditorText, insertIntoEditor, readEditor, findInEditor, replaceInEditor
 @docs copyToClipboard, readClipboard
 @docs messageBox, MessageButton, okButtons, okCancelButtons, yesNoButtons, yesNoCancelButtons
 @docs fileDialog
@@ -648,6 +650,18 @@ report of where it is. The user can move and resize one, and the runtime does
 not write the model's rectangle back over that -- it compares against what the
 model last rendered, so a rectangle that has not changed is a window left
 alone. [`WindowResized`](#Event) is how a model that wants to know finds out.
+
+`canClose` and `canMove` are the other two of Turbo Vision's four window flags;
+[`Resize`](#Resize) already speaks for the two that grow and zoom it. `False`
+takes the close box off the frame and pins the window where it is, and both are
+redrawn rather than rebuilt, so a window may change its mind without losing the
+caret.
+
+**A window with no close box is the one to reach for first.** A program whose
+main window *is* the program has nothing sensible to do when the user closes
+it, and answering a [`WindowClosed`](#Event) by reopening the window is a flick
+on the screen where not drawing the box is silence. `True` for both is what
+every window did before the fields existed.
 -}
 type alias Window =
     { id : String
@@ -655,6 +669,8 @@ type alias Window =
     , rect : Rect
     , resize : Resize
     , palette : WindowPalette
+    , canClose : Bool
+    , canMove : Bool
     , views : Array View
     }
 
@@ -945,8 +961,17 @@ first for a week, because `Array.append fst second` makes `fst` the *postfix*.
     render message. So the editor owns the buffer and the model owns the
     *file*: [`setEditorText`](#setEditorText) puts a document in,
     [`readEditor`](#readEditor) asks for it back, and what arrives in between
-    is an [`Edited`](#Event) event carrying whether the document is modified
-    and where the caret is — three numbers, not a file.
+    is an [`Edited`](#Event) event carrying whether the document is modified,
+    where the caret is, and the three facts a program greys its Edit menu on —
+    a handful of numbers and booleans, not a file.
+    [`insertIntoEditor`](#insertIntoEditor) is the third call, and the one that
+    puts text in without replacing what is already there.
+
+    `autoIndent` is the one setting the model owns: Enter copies the leading
+    whitespace of the line above. Turbo Vision's other editor mode, insert
+    versus overwrite, is **not** a field here, because the Insert key is the
+    user's and a field the user can move is a field the model would spend its
+    time writing back. It arrives on `Edited` as `isOverwrite` instead.
 
     **Give it a fixed rectangle and let [`Grows`](#Grow) resize it.** This is
     the one sharp edge of a view whose contents are not in the view. A
@@ -1039,9 +1064,10 @@ type View
     | ScrollBar { id : String, rect : Rect, value : Int, min : Int, max : Int, pageStep : Int, arrowStep : Int, for : String }
     | Label { id : String, rect : Rect, text : String, for : String }
     | Canvas { id : String, rect : Rect, lines : Array (Array Span), cursor : Maybe { x : Int, y : Int }, takesFocus : Bool }
-    | Editor { id : String, rect : Rect }
+    | Editor { id : String, rect : Rect, autoIndent : Bool }
     | Grows { grow : Grow, view : View }
     | Enabled { enabled : Bool, view : View }
+    | Visible { visible : Bool, view : View }
 
 
 {-| A run of characters on a [`Canvas`](#View) line, painted in one colour.
@@ -1272,6 +1298,14 @@ type alias StatusItem =
     saying "12:4" and a Save that lights up when there is something to save are
     what a program wants on every keystroke, and a file is not. Coalesced per
     editor at the pump, so typing a word is one event.
+
+    `canUndo`, `hasSelection` and `isOverwrite` ride along for the same reason
+    the rest does: they are what a program greys **Undo** and **Cut** on and
+    what it puts in the `OVR` corner of a status line, they change for the same
+    reasons the caret does, and asking for them would be the synchronous query
+    this port has never had. `isOverwrite` is the one of the three the *user*
+    moves -- the Insert key -- which is why it is reported rather than being a
+    field on the view.
   - `EditorText` -- the answer to [`readEditor`](#readEditor), and the only
     event that carries a document. Ask for one when you are about to write it
     to a file.
@@ -1323,7 +1357,7 @@ type Event
     | Resized { cols : Int, rows : Int }
     | WindowResized { id : String, rect : Rect }
     | Changed { id : String, value : Value }
-    | Edited { id : String, isModified : Bool, line : Int, column : Int }
+    | Edited { id : String, isModified : Bool, line : Int, column : Int, canUndo : Bool, hasSelection : Bool, isOverwrite : Bool }
     | EditorText { id : String, text : String }
     | Searched { id : String, matches : Int }
     | Copied { toSystem : Bool }
@@ -1843,6 +1877,32 @@ setEditorText ports id body =
             ]
 
 
+{-| Put text into an [`Editor`](#View) at the caret, replacing the selection if
+there is one.
+
+The other half of [`setEditorText`](#setEditorText), which replaces the whole
+document. This is what an "insert template", a "paste this" or a "put the file
+name in" is made of, and it matters that they are two calls: the document
+crosses this port exactly twice per file by design, and a program that had to
+read it back, splice a string into it and write it again would be moving the
+whole file through Gren to add three characters.
+
+It goes in the way typing would -- the undo record, the modified flag and the
+scroll bars all end up where they would have been -- so the
+[`Edited`](#Event) that follows says what the document is now, `canUndo`
+included.
+
+-}
+insertIntoEditor : Ports msg -> String -> String -> Cmd msg
+insertIntoEditor ports id body =
+    ports.toJs <|
+        Encode.object
+            [ { key = "type", value = Encode.string "insertIntoEditor" }
+            , { key = "id", value = Encode.string id }
+            , { key = "text", value = Encode.string body }
+            ]
+
+
 {-| Ask an [`Editor`](#View) for its document. The answer arrives as an
 [`EditorText`](#Event) event.
 
@@ -2107,6 +2167,34 @@ focus ports id =
     ports.toJs <|
         Encode.object
             [ { key = "type", value = Encode.string "focus" }
+            , { key = "id", value = Encode.string id }
+            ]
+
+
+{-| Put a window in front of the others, and give it the caret.
+
+Both, and not one or the other: a `Window` carries Turbo Vision's `ofTopSelect`,
+so selecting one raises it, and raising one without focusing it is a state no
+Turbo Vision program has.
+
+Until this existed the only way to raise a window was to change something
+*structural* about it, so that the render tore it down and built it again in
+front. That worked, which is why it went unnoticed for so long, and it threw
+away the caret and every list highlight in the window on the way -- the exact
+thing a declarative layer exists to avoid. A model that has been relying on it
+should ask for this instead.
+
+An id that names nothing is ignored, and nothing comes back: the user raises
+windows too, by clicking them, so a model that tracked what it last asked for
+would be describing the past. Use [`WindowResized`](#Event) and the events for
+what is true now.
+
+-}
+bringToFront : Ports msg -> String -> Cmd msg
+bringToFront ports id =
+    ports.toJs <|
+        Encode.object
+            [ { key = "type", value = Encode.string "bringToFront" }
             , { key = "id", value = Encode.string id }
             ]
 
@@ -2494,6 +2582,8 @@ encodeWindow window =
                         GrayWindow ->
                             "gray"
           }
+        , { key = "canClose", value = Encode.bool window.canClose }
+        , { key = "canMove", value = Encode.bool window.canMove }
         , { key = "items", value = Encode.array encodeView window.views }
         ]
 
@@ -2520,6 +2610,12 @@ wrapperFields view =
         Enabled v ->
             Array.pushLast
                 { key = "enabled", value = Encode.bool v.enabled }
+                (wrapperFields v.view)
+                |> keepFirst
+
+        Visible v ->
+            Array.pushLast
+                { key = "visible", value = Encode.bool v.visible }
                 (wrapperFields v.view)
                 |> keepFirst
 
@@ -2567,6 +2663,9 @@ encodeViewFields view =
             encodeViewFields v.view
 
         Enabled v ->
+            encodeViewFields v.view
+
+        Visible v ->
             encodeViewFields v.view
 
         StaticText v ->
@@ -2672,6 +2771,7 @@ encodeViewFields view =
             [ { key = "type", value = Encode.string "editor" }
             , { key = "id", value = Encode.string v.id }
             , { key = "rect", value = encodeRect v.rect }
+            , { key = "autoIndent", value = Encode.bool v.autoIndent }
             ]
 
         Canvas v ->
@@ -2883,19 +2983,25 @@ eventDecoder =
                             (Decode.field "done" Decode.bool)
 
                     "edited" ->
-                        Decode.map4
-                            (\id isModified row col ->
+                        Decode.map7
+                            (\id isModified row col undoable selected typeOver ->
                                 Edited
                                     { id = id
                                     , isModified = isModified
                                     , line = row
                                     , column = col
+                                    , canUndo = undoable
+                                    , hasSelection = selected
+                                    , isOverwrite = typeOver
                                     }
                             )
                             (Decode.field "id" Decode.string)
                             (Decode.field "modified" Decode.bool)
                             (Decode.field "line" Decode.int)
                             (Decode.field "column" Decode.int)
+                            (Decode.field "canUndo" Decode.bool)
+                            (Decode.field "hasSelection" Decode.bool)
+                            (Decode.field "overwrite" Decode.bool)
 
                     "editorText" ->
                         Decode.map2

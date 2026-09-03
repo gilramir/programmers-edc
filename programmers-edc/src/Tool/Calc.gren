@@ -1000,6 +1000,8 @@ view inks model =
     -- window would be the same keypad with a gap beside it.
     , resize = Tui.fixedSize
     , palette = Tui.BlueWindow
+    , canClose = True
+    , canMove = True
     , views =
         [ Canvas
             { id = canvasId

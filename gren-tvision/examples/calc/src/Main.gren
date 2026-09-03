@@ -399,6 +399,8 @@ calculatorWindow model =
     -- window focuses when it opens.
     , resize = Tui.resizable
     , palette = Tui.BlueWindow
+    , canClose = True
+    , canMove = True
     , views =
         Array.pushFirst
             (Canvas

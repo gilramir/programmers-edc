@@ -724,6 +724,18 @@ public:
                          const std::string &replacement, bool matchCase,
                          bool wholeWords, bool all);
 
+    // Text in at the caret, replacing the selection. `insertText` is
+    // `insertBuffer` with the buffer arithmetic done for us (editors.h:219),
+    // so the undo record, the modified flag and the scroll bars all end up
+    // where typing the same characters would have left them -- and the model
+    // is told afterwards, through the same sandwich every other edit uses.
+    bool insertAtCaret(const std::string &text)
+    {
+        Boolean ok = insertText(text.data(), (uint) text.size(), False);
+        noteEditIfChanged();
+        return ok == True;
+    }
+
 private:
     // Queued only when something the model would notice actually changed --
     // an arrow key that moves the caret within a line reports, one that runs
@@ -734,6 +746,12 @@ private:
     bool lastModified = false;
     int lastLine = -1;
     int lastColumn = -1;
+    // Seeded to the impossible so that the first notification always goes out:
+    // a model that greys Undo needs to be told it is off before anything has
+    // happened, not only when something has.
+    bool lastCanUndo = true;
+    bool lastHasSelection = true;
+    bool lastOverwrite = true;
 };
 
 class JsWindow : public TDialog {
@@ -864,6 +882,20 @@ public:
     // window that only grows downwards is still worth dragging and still worth
     // zooming, and sizeLimits is what makes the zoom full-height rather than
     // full-screen.
+    // One of TWindow's flag bits, on or off, with the frame redrawn to match.
+    // `TFrame::draw` consults `flags` for which corners it puts a close box and
+    // a zoom box in, so nothing else has to be rebuilt.
+    void setFlag(ushort bit, bool on)
+    {
+        ushort was = flags;
+        if (on)
+            flags |= bit;
+        else
+            flags &= ~bit;
+        if (flags != was && frame != nullptr)
+            frame->drawView();
+    }
+
     void setResize(bool width, bool height)
     {
         canResizeWidth = width;
@@ -1000,7 +1032,8 @@ void noteChangedMarks(const std::string &id, const std::vector<int> &states);
 // An Editor was edited, or its caret moved. Queued and coalesced per id like
 // the value notes, and for the same reason: typing a word is one note, not one
 // per letter. It deliberately does not carry the document -- see JsEditor.
-void noteEdited(const std::string &id, bool modified, int line, int column);
+void noteEdited(const std::string &id, bool modified, int line, int column,
+                bool canUndo, bool hasSelection, bool overwrite);
 
 // Queued for the same reason, and more urgently: setValue() calls scrollDraw()
 // directly, so a render that moves a scroll bar would call back into JS from

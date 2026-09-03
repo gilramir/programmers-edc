@@ -4881,3 +4881,103 @@ tested against `~P~hone` and matched nothing: every box came out available and
 the new flag appeared to do nothing at all. The driver caught it. Worth
 remembering because the failure is indistinguishable from a broken binding
 until you print the string.
+
+## Hidden, disabled, and absent are three things
+
+The audit's second batch, and the interesting part is that all three of these
+were expressible before by *accident* and each accident cost something.
+
+**Absent** — leaving a view out of the render — is a structural change, so the
+differ tears the window down and builds it again. That is right when the view
+is genuinely gone and wrong as a way of saying "not now": it throws away the
+caret, an editor's document and every list highlight in the window. `entries`
+would have rebuilt its window the first time a filter was remembered, because
+that is the moment the history arrow would have appeared.
+
+**Disabled** is `sfDisabled`: drawn grey, skipped by Tab, handed no event.
+**Hidden** is `sfVisible`: not drawn at all, and the view survives. Neither was
+reachable, and the two are different enough that both are worth having --
+a control that is unavailable should say so, and a control that has nothing
+behind it should not be there.
+
+Both are wrappers, which makes three of them, and three is where the shape had
+to be made deliberate rather than incidental. `encodeView` had matched one
+level of `Grows`; it walks down now. And "the outer wrapper wins" had been true
+because the inner one's field was *dropped on the way past* rather than
+overridden -- an accident that read like a rule. `keepFirst` is the rule.
+
+### Raising a window used to be a side effect of breaking it
+
+The only way to bring a window to the front was to change something structural
+about it, so that the differ closed it and built a new one -- in front, because
+a new window is. It worked. It is written up two sections above this file as
+"a rebuilt window comes to the front, one update later than you think", filed
+as a surprise to be careful of, and nobody noticed that the reason it was a
+surprise is that the thing it was standing in for did not exist.
+
+`Tui.bringToFront` is `TView::select` and not `makeFirst`, although the gap was
+named after `makeFirst`. A `TWindow` sets `ofTopSelect` in its constructor
+(twindow.cpp:50) and `TView::select` calls `makeFirst()` for a view that has it
+(tview.cpp:732), so selecting raises *and* focuses -- and a raised window
+without the caret is a state Turbo Vision has no way to be in. Wrapping the
+narrower call would have offered a shape the library does not have.
+
+### The check that a window cannot be closed is two checks
+
+The close box being absent and the window refusing to go are different claims,
+and only the second is what the model asked for: `TFrame::draw` gates the icon
+on `wfClose` (tframe.cpp:96) and `TFrame::handleEvent` gates the *command* on
+it separately. A binding could get one right and the other wrong. `drive_hello.py`
+asserts both, and the first run of it failed for a third reason entirely --
+the example's `main.js` had not been rebuilt after the source changed, so the
+driver was running the old program. Worth knowing: a pty driver tests the build,
+not the source, and a stale build fails in ways that look like the feature.
+
+## Who owns a setting decides where it lives
+
+The last six gaps were all on `TEditor` and closed together, because they were
+one question: **who moves this?** The answer picked the mechanism each time,
+and the rule generalises past editors.
+
+*The model owns it* → a field on the view. `autoIndent` is this. Structural
+here rather than patched, which is a second decision and a deliberate one: an
+editor is the only view that loses its contents when rebuilt, so a setting that
+rebuilds it had better be one a program makes once.
+
+*The user owns it* → an event, and **not** a field. Insert-versus-overwrite is
+this. A field the user can move is a field the model writes back on the next
+render, which is the exact trap `value` on an input line already documents and
+the reason the runtime records what a view reported before the model is asked.
+Making `overwrite` a field would have re-created that bug in a place with no
+existing defence.
+
+*Nobody owns it* — it is a fact about the document that changes under both →
+also an event, for a different reason. `canUndo` and `hasSelection` could only
+otherwise be *asked for*, and this port has never had a synchronous query. They
+ride on `Edited`, which was already being sent on every keystroke and already
+carried the caret on exactly the same argument.
+
+What that bought is small and precise, and is the sort of thing that had been
+quietly wrong for months: `examples/edit` now greys **Undo** when there is
+nothing to undo and **Cut** when nothing is selected. Before this it could not
+know, so both stayed lit and the program offered two actions that would do
+nothing.
+
+### Seeding the "last seen" flags to the impossible
+
+`JsEditor` reports only when something changed, which is what stops a burst of
+arrow keys being a burst of events. The three new facts join that comparison —
+and their `last*` members are seeded to `true` rather than to `false`, so that
+the *first* notification always goes out. A model that greys Undo needs to be
+told it is unavailable before anything has happened, not only once something
+has; seeded the other way, an editor opens with a lit Undo and stays that way
+until the first keystroke.
+
+### And the check that says which grey
+
+A disabled *view* is checked by what it refuses, because a colour read off the
+screen is a claim about the palette. A disabled *menu entry* is the opposite:
+an entry is only ever looked at, so how it looks is what it does. The check
+compares Undo's ink against Cut's rather than against a number -- the claim is
+that the two are in different states -- and only then names the colour of the
+one that is greyed.

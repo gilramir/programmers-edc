@@ -490,6 +490,8 @@ listWindow model =
     -- to make the space useful, so neither is resizable.
     , resize = Tui.fixedSize
     , palette = Tui.BlueWindow
+    , canClose = True
+    , canMove = True
     , views =
         [ ListBox
             { id = "keys"
@@ -544,6 +546,8 @@ detailWindow model =
     , rect = { x1 = 46, y1 = 0, x2 = 79, y2 = 17 }
     , resize = Tui.fixedSize
     , palette = Tui.BlueWindow
+    , canClose = True
+    , canMove = True
     , views =
         [ field 1 "Name" record.name
         , field 3 "Company" record.company
