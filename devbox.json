@@ -67,6 +67,7 @@
       ],
       "check": [
         "python3 tools/check_consistency.py",
+        "python3 tools/audit_api.py",
         "(cd gren-tvision && gren docs --output=/dev/null)",
         "(cd gren-tvision-runtime && node --test test/*.test.js)",
         "(cd gren-tvision/tests && ./run.sh)"

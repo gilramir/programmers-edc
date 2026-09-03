@@ -1,0 +1,697 @@
+# What was decided about every public member of every class the binding wraps.
+# Written and checked by tools/audit_api.py -- see that file for why.
+#
+# class <TAB> member <TAB> verdict <TAB> note
+#
+#   bound      reachable from Gren today
+#   used       the binding calls it, and it is not itself something a Gren
+#              program names -- geometry, a setter a render goes through
+#   internal   Turbo Vision's own plumbing: painting, buffers, stream
+#              persistence, virtuals a subclass overrides and a caller never calls
+#   skipped    a decision not to offer it, with the reason
+#   todo       a gap somebody has agreed is a gap, with what it would buy
+#
+# A member with no line here is one nobody has looked at, and that is what the
+# audit fails on. `todo` lines are reported and do not fail.
+TView	genRefs	internal	object-stream persistence; no view here is serialised
+TView	sizeLimits	internal	a virtual the binding overrides or inherits, not a call a model makes
+TView	getBounds	used	the binding calls it; not itself a thing a Gren program names
+TView	getExtent	used	the binding calls it; not itself a thing a Gren program names
+TView	getClipRect	internal	the clipping rectangle a draw is limited to
+TView	mouseInView	used	the binding calls it; not itself a thing a Gren program names
+TView	containsMouse	used	the popup menu asks it
+TView	locate	used	the binding calls it; not itself a thing a Gren program names
+TView	dragView	skipped	the user drags a window; nothing has wanted to drag one on the user's behalf
+TView	calcBounds	used	the binding calls it; not itself a thing a Gren program names
+TView	changeBounds	internal	a virtual the binding overrides or inherits, not a call a model makes
+TView	growTo	skipped	a window's rectangle is the model's and a render is how it changes
+TView	moveTo	internal	painting, which is Turbo Vision's once the model has said what to paint
+TView	setBounds	used	the binding calls it; not itself a thing a Gren program names
+TView	getHelpCtx	internal	a virtual the binding overrides or inherits, not a call a model makes
+TView	valid	internal	a virtual the binding overrides or inherits, not a call a model makes
+TView	hide	todo	hiding a view without destroying it, which is what keeps an Editor's document while it is off screen
+TView	show	todo	the other half of hide
+TView	draw	internal	a virtual the binding overrides or inherits, not a call a model makes
+TView	drawView	internal	painting, which is Turbo Vision's once the model has said what to paint
+TView	exposed	skipped	whether any cell of a view is visible; a model that needs this is asking about paint
+TView	focus	used	the binding calls it; not itself a thing a Gren program names
+TView	hideCursor	used	the binding calls it; not itself a thing a Gren program names
+TView	drawHide	internal	painting, which is Turbo Vision's once the model has said what to paint
+TView	drawShow	internal	painting, which is Turbo Vision's once the model has said what to paint
+TView	drawUnderRect	internal	painting, which is Turbo Vision's once the model has said what to paint
+TView	drawUnderView	internal	painting, which is Turbo Vision's once the model has said what to paint
+TView	dataSize	internal	a virtual the binding overrides or inherits, not a call a model makes
+TView	getData	internal	a virtual the binding overrides or inherits, not a call a model makes
+TView	setData	internal	a virtual the binding overrides or inherits, not a call a model makes
+TView	awaken	internal	a virtual the binding overrides or inherits, not a call a model makes
+TView	blockCursor	used	the binding calls it; not itself a thing a Gren program names
+TView	normalCursor	skipped	Canvas has blockCursor as a field; the other shape is the default
+TView	resetCursor	internal	a virtual the binding overrides or inherits, not a call a model makes
+TView	setCursor	used	the binding calls it; not itself a thing a Gren program names
+TView	showCursor	used	the binding calls it; not itself a thing a Gren program names
+TView	drawCursor	internal	painting, which is Turbo Vision's once the model has said what to paint
+TView	clearEvent	used	the binding calls it; not itself a thing a Gren program names
+TView	eventAvail	skipped	the pump owns the queue
+TView	getEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TView	handleEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TView	putEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TView	commandEnabled	used	the binding calls it; not itself a thing a Gren program names
+TView	disableCommands	used	the binding calls it; not itself a thing a Gren program names
+TView	enableCommands	skipped	setEnabled takes one command; a set is the model's loop
+TView	disableCommand	used	the binding calls it; not itself a thing a Gren program names
+TView	enableCommand	used	the binding calls it; not itself a thing a Gren program names
+TView	getCommands	used	the binding calls it; not itself a thing a Gren program names
+TView	setCommands	used	the binding calls it; not itself a thing a Gren program names
+TView	setCmdState	skipped	setEnabled is the pair of enable/disable underneath it
+TView	endModal	internal	a virtual the binding overrides or inherits, not a call a model makes
+TView	execute	internal	a virtual the binding overrides or inherits, not a call a model makes
+TView	getColor	used	the binding calls it; not itself a thing a Gren program names
+TView	getPalette	internal	a virtual the binding overrides or inherits, not a call a model makes
+TView	mapColor	skipped	palette indirection, which is what the palette example decided against
+TView	getState	skipped	the model is the state; asking a view what it is would be the query this port has never had
+TView	select	used	the binding calls it; not itself a thing a Gren program names
+TView	setState	internal	a virtual the binding overrides or inherits, not a call a model makes
+TView	keyEvent	skipped	a blocking read of the next key -- a nested loop by another name
+TView	mouseEvent	used	the binding calls it; not itself a thing a Gren program names
+TView	textEvent	skipped	see keyEvent
+TView	setTimer	skipped	a Gren program has Time subscriptions, which are the same thing and are already its own
+TView	killTimer	skipped	see setTimer
+TView	makeGlobal	used	the binding calls it; not itself a thing a Gren program names
+TView	makeLocal	used	the binding calls it; not itself a thing a Gren program names
+TView	nextView	internal	z-order walking, inside a group
+TView	prevView	internal	z-order walking, inside a group
+TView	prev	used	the binding calls it; not itself a thing a Gren program names
+TView	next	used	the binding calls it; not itself a thing a Gren program names
+TView	makeFirst	todo	z-order; today a window comes to the front only as a side effect of being rebuilt
+TView	putInFrontOf	internal	painting, which is Turbo Vision's once the model has said what to paint
+TView	TopView	internal	the modal stack keeps its own top
+TView	writeBuf	internal	painting, which is Turbo Vision's once the model has said what to paint
+TView	writeChar	internal	painting, which is Turbo Vision's once the model has said what to paint
+TView	writeLine	internal	painting, which is Turbo Vision's once the model has said what to paint
+TView	writeStr	internal	painting, which is Turbo Vision's once the model has said what to paint
+TView	size	used	the binding calls it; not itself a thing a Gren program names
+TView	options	used	the binding calls it; not itself a thing a Gren program names
+TView	eventMask	used	the binding calls it; not itself a thing a Gren program names
+TView	state	used	the binding calls it; not itself a thing a Gren program names
+TView	origin	used	a view's position, which setBounds writes
+TView	cursor	used	the binding calls it; not itself a thing a Gren program names
+TView	growMode	used	the binding calls it; not itself a thing a Gren program names
+TView	dragMode	skipped	which edges a drag is limited to; Resize says the same thing in the model's words
+TView	helpCtx	used	the binding calls it; not itself a thing a Gren program names
+TView	commandSetChanged	internal	a global flag TVision sets when commands move
+TView	curCommandSet	used	the binding calls it; not itself a thing a Gren program names
+TView	owner	used	the binding calls it; not itself a thing a Gren program names
+TView	showMarkers	skipped	Borland's arrows around the focused control, off since 1990 and off here
+TView	errorAttr	skipped	the colour of a view that failed to draw; nothing here can fail that way
+TView	shutDown	internal	a virtual the binding overrides or inherits, not a call a model makes
+TView	build	internal	object-stream persistence; no view here is serialised
+TGroup	genRefs	internal	object-stream persistence; no view here is serialised
+TGroup	shutDown	internal	a virtual the binding overrides or inherits, not a call a model makes
+TGroup	execView	used	the binding calls it; not itself a thing a Gren program names
+TGroup	execute	internal	a virtual the binding overrides or inherits, not a call a model makes
+TGroup	awaken	internal	a virtual the binding overrides or inherits, not a call a model makes
+TGroup	insertView	internal	Turbo Vision's own plumbing
+TGroup	remove	used	the binding calls it; not itself a thing a Gren program names
+TGroup	removeView	internal	Turbo Vision's own plumbing
+TGroup	resetCurrent	internal	Turbo Vision's own plumbing
+TGroup	setCurrent	used	the binding calls it; not itself a thing a Gren program names
+TGroup	selectNext	internal	Turbo Vision's own plumbing
+TGroup	firstThat	used	the binding calls it; not itself a thing a Gren program names
+TGroup	focusNext	internal	Turbo Vision's own plumbing
+TGroup	forEach	internal	Turbo Vision's own plumbing
+TGroup	insert	used	the binding calls it; not itself a thing a Gren program names
+TGroup	insertBefore	internal	Turbo Vision's own plumbing
+TGroup	current	used	the binding calls it; not itself a thing a Gren program names
+TGroup	at	used	the binding calls it; not itself a thing a Gren program names
+TGroup	firstMatch	internal	Turbo Vision's own plumbing
+TGroup	indexOf	internal	Turbo Vision's own plumbing
+TGroup	first	used	the binding calls it; not itself a thing a Gren program names
+TGroup	setState	internal	a virtual the binding overrides or inherits, not a call a model makes
+TGroup	handleEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TGroup	drawSubViews	internal	painting, which is Turbo Vision's once the model has said what to paint
+TGroup	changeBounds	internal	a virtual the binding overrides or inherits, not a call a model makes
+TGroup	dataSize	internal	a virtual the binding overrides or inherits, not a call a model makes
+TGroup	getData	internal	a virtual the binding overrides or inherits, not a call a model makes
+TGroup	setData	internal	a virtual the binding overrides or inherits, not a call a model makes
+TGroup	draw	internal	a virtual the binding overrides or inherits, not a call a model makes
+TGroup	redraw	used	the binding calls it; not itself a thing a Gren program names
+TGroup	lock	used	the binding calls it; not itself a thing a Gren program names
+TGroup	unlock	used	the binding calls it; not itself a thing a Gren program names
+TGroup	resetCursor	internal	a virtual the binding overrides or inherits, not a call a model makes
+TGroup	endModal	internal	a virtual the binding overrides or inherits, not a call a model makes
+TGroup	eventError	internal	a virtual the binding overrides or inherits, not a call a model makes
+TGroup	getHelpCtx	internal	a virtual the binding overrides or inherits, not a call a model makes
+TGroup	valid	internal	a virtual the binding overrides or inherits, not a call a model makes
+TGroup	freeBuffer	internal	Turbo Vision's own plumbing
+TGroup	getBuffer	internal	Turbo Vision's own plumbing
+TGroup	last	used	the binding calls it; not itself a thing a Gren program names
+TGroup	clip	internal	Turbo Vision's own plumbing
+TGroup	phase	internal	Turbo Vision's own plumbing
+TGroup	buffer	used	the binding calls it; not itself a thing a Gren program names
+TGroup	lockFlag	internal	Turbo Vision's own plumbing
+TGroup	endState	used	the binding calls it; not itself a thing a Gren program names
+TGroup	build	internal	object-stream persistence; no view here is serialised
+TWindow	close	used	the binding calls it; not itself a thing a Gren program names
+TWindow	getPalette	internal	a virtual the binding overrides or inherits, not a call a model makes
+TWindow	getTitle	used	the differ writes titles with setTitle and never reads one back
+TWindow	handleEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TWindow	initFrame	internal	a virtual the binding overrides or inherits, not a call a model makes
+TWindow	setState	internal	a virtual the binding overrides or inherits, not a call a model makes
+TWindow	sizeLimits	internal	a virtual the binding overrides or inherits, not a call a model makes
+TWindow	standardScrollBar	used	the binding calls it; not itself a thing a Gren program names
+TWindow	zoom	used	the binding calls it; not itself a thing a Gren program names
+TWindow	shutDown	internal	a virtual the binding overrides or inherits, not a call a model makes
+TWindow	flags	used	the binding calls it; not itself a thing a Gren program names
+TWindow	zoomRect	used	the binding calls it; not itself a thing a Gren program names
+TWindow	number	used	the binding calls it; not itself a thing a Gren program names
+TWindow	palette	used	the binding calls it; not itself a thing a Gren program names
+TWindow	frame	used	the binding calls it; not itself a thing a Gren program names
+TWindow	title	used	the binding calls it; not itself a thing a Gren program names
+TWindow	build	internal	object-stream persistence; no view here is serialised
+TFrame	draw	internal	a virtual the binding overrides or inherits, not a call a model makes
+TFrame	getPalette	internal	a virtual the binding overrides or inherits, not a call a model makes
+TFrame	handleEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TFrame	setState	internal	a virtual the binding overrides or inherits, not a call a model makes
+TFrame	build	internal	object-stream persistence; no view here is serialised
+TDialog	getPalette	internal	a virtual the binding overrides or inherits, not a call a model makes
+TDialog	handleEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TDialog	valid	internal	a virtual the binding overrides or inherits, not a call a model makes
+TDialog	build	internal	object-stream persistence; no view here is serialised
+TBackground	draw	internal	a virtual the binding overrides or inherits, not a call a model makes
+TBackground	getPalette	internal	a virtual the binding overrides or inherits, not a call a model makes
+TBackground	pattern	skipped	the character the desktop is filled with; one ▒ has been the answer since 1990
+TBackground	build	internal	object-stream persistence; no view here is serialised
+TDeskTop	cascade	used	the binding calls it; not itself a thing a Gren program names
+TDeskTop	handleEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TDeskTop	initBackground	internal	a virtual the binding overrides or inherits, not a call a model makes
+TDeskTop	tile	used	the binding calls it; not itself a thing a Gren program names
+TDeskTop	tileError	internal	a virtual the binding overrides or inherits, not a call a model makes
+TDeskTop	shutDown	internal	a virtual the binding overrides or inherits, not a call a model makes
+TDeskTop	background	used	the binding calls it; not itself a thing a Gren program names
+TDeskTop	build	internal	object-stream persistence; no view here is serialised
+TProgram	canMoveFocus	internal	a virtual the binding overrides or inherits, not a call a model makes
+TProgram	executeDialog	internal	a virtual the binding overrides or inherits, not a call a model makes
+TProgram	getEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TProgram	getPalette	internal	a virtual the binding overrides or inherits, not a call a model makes
+TProgram	handleEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TProgram	idle	internal	a virtual the binding overrides or inherits, not a call a model makes
+TProgram	initScreen	internal	a virtual the binding overrides or inherits, not a call a model makes
+TProgram	outOfMemory	internal	a virtual the binding overrides or inherits, not a call a model makes
+TProgram	putEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TProgram	run	internal	a virtual the binding overrides or inherits, not a call a model makes
+TProgram	insertWindow	internal	a virtual the binding overrides or inherits, not a call a model makes
+TProgram	setScreenMode	internal	a virtual the binding overrides or inherits, not a call a model makes
+TProgram	validView	internal	a virtual the binding overrides or inherits, not a call a model makes
+TProgram	shutDown	internal	a virtual the binding overrides or inherits, not a call a model makes
+TProgram	setTimer	skipped	see TView::setTimer
+TProgram	killTimer	skipped	see TView::setTimer
+TProgram	suspend	internal	a virtual the binding overrides or inherits, not a call a model makes
+TProgram	resume	internal	a virtual the binding overrides or inherits, not a call a model makes
+TProgram	initStatusLine	internal	a virtual the binding overrides or inherits, not a call a model makes
+TProgram	initMenuBar	internal	a virtual the binding overrides or inherits, not a call a model makes
+TProgram	initDeskTop	internal	a virtual the binding overrides or inherits, not a call a model makes
+TProgram	appPalette	skipped	which of the three application palettes is in force; the theme replaces it
+TProgram	eventTimeoutMs	used	the binding calls it; not itself a thing a Gren program names
+TApplication	suspend	internal	a virtual the binding overrides or inherits, not a call a model makes
+TApplication	resume	internal	a virtual the binding overrides or inherits, not a call a model makes
+TApplication	cascade	used	the binding calls it; not itself a thing a Gren program names
+TApplication	dosShell	internal	a virtual the binding overrides or inherits, not a call a model makes
+TApplication	getTileRect	internal	the rectangle Tile and Cascade divide up
+TApplication	handleEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TApplication	tile	used	the binding calls it; not itself a thing a Gren program names
+TApplication	writeShellMsg	internal	a virtual the binding overrides or inherits, not a call a model makes
+TButton	draw	internal	a virtual the binding overrides or inherits, not a call a model makes
+TButton	drawState	internal	painting, which is Turbo Vision's once the model has said what to paint
+TButton	getPalette	internal	a virtual the binding overrides or inherits, not a call a model makes
+TButton	handleEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TButton	makeDefault	skipped	isDefault is a field of the model's render, so a re-render moves it
+TButton	press	used	the binding calls it; not itself a thing a Gren program names
+TButton	setState	internal	a virtual the binding overrides or inherits, not a call a model makes
+TButton	title	used	the binding calls it; not itself a thing a Gren program names
+TButton	build	internal	object-stream persistence; no view here is serialised
+TCluster	dataSize	internal	a virtual the binding overrides or inherits, not a call a model makes
+TCluster	drawBox	internal	painting, which is Turbo Vision's once the model has said what to paint
+TCluster	drawMultiBox	internal	painting, which is Turbo Vision's once the model has said what to paint
+TCluster	getData	internal	a virtual the binding overrides or inherits, not a call a model makes
+TCluster	getHelpCtx	internal	a virtual the binding overrides or inherits, not a call a model makes
+TCluster	getPalette	internal	a virtual the binding overrides or inherits, not a call a model makes
+TCluster	handleEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TCluster	mark	used	the binding calls it; not itself a thing a Gren program names
+TCluster	multiMark	used	MultiCheckBoxes is built on it
+TCluster	press	used	the binding calls it; not itself a thing a Gren program names
+TCluster	movedTo	internal	a hook for a subclass to hear the highlight move
+TCluster	setData	internal	a virtual the binding overrides or inherits, not a call a model makes
+TCluster	setState	internal	a virtual the binding overrides or inherits, not a call a model makes
+TCluster	setButtonState	todo	greying out one box of a cluster; setEnabled works on commands, and a cluster item is not one
+TCluster	buttonState	todo	the read side of the same thing
+TCluster	build	internal	object-stream persistence; no view here is serialised
+TCheckBoxes	draw	internal	a virtual the binding overrides or inherits, not a call a model makes
+TCheckBoxes	mark	used	the binding calls it; not itself a thing a Gren program names
+TCheckBoxes	press	used	the binding calls it; not itself a thing a Gren program names
+TCheckBoxes	build	internal	object-stream persistence; no view here is serialised
+TRadioButtons	draw	internal	a virtual the binding overrides or inherits, not a call a model makes
+TRadioButtons	mark	used	the binding calls it; not itself a thing a Gren program names
+TRadioButtons	movedTo	internal	see TCluster::movedTo
+TRadioButtons	press	used	the binding calls it; not itself a thing a Gren program names
+TRadioButtons	setData	internal	a virtual the binding overrides or inherits, not a call a model makes
+TRadioButtons	build	internal	object-stream persistence; no view here is serialised
+TMultiCheckBoxes	dataSize	internal	a virtual the binding overrides or inherits, not a call a model makes
+TMultiCheckBoxes	draw	internal	a virtual the binding overrides or inherits, not a call a model makes
+TMultiCheckBoxes	getData	internal	a virtual the binding overrides or inherits, not a call a model makes
+TMultiCheckBoxes	multiMark	used	the states array is this
+TMultiCheckBoxes	press	used	the binding calls it; not itself a thing a Gren program names
+TMultiCheckBoxes	setData	internal	a virtual the binding overrides or inherits, not a call a model makes
+TMultiCheckBoxes	build	internal	object-stream persistence; no view here is serialised
+TInputLine	dataSize	internal	a virtual the binding overrides or inherits, not a call a model makes
+TInputLine	draw	internal	a virtual the binding overrides or inherits, not a call a model makes
+TInputLine	getData	internal	a virtual the binding overrides or inherits, not a call a model makes
+TInputLine	getPalette	internal	a virtual the binding overrides or inherits, not a call a model makes
+TInputLine	handleEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TInputLine	selectAll	used	the binding calls it; not itself a thing a Gren program names
+TInputLine	setData	internal	a virtual the binding overrides or inherits, not a call a model makes
+TInputLine	setState	internal	a virtual the binding overrides or inherits, not a call a model makes
+TInputLine	valid	internal	a virtual the binding overrides or inherits, not a call a model makes
+TInputLine	setValidator	used	the binding calls it; not itself a thing a Gren program names
+TInputLine	data	used	the binding calls it; not itself a thing a Gren program names
+TInputLine	maxLen	used	the binding calls it; not itself a thing a Gren program names
+TInputLine	maxWidth	skipped	how wide the text may draw, as against how much of it there is; the rectangle decides that here
+TInputLine	maxChars	used	the storage limit, which is maxLen + 1 -- the off-by-one that cost a four-digit year
+TInputLine	curPos	used	the binding calls it; not itself a thing a Gren program names
+TInputLine	firstPos	used	the binding calls it; not itself a thing a Gren program names
+TInputLine	selStart	used	the binding calls it; not itself a thing a Gren program names
+TInputLine	selEnd	used	the binding calls it; not itself a thing a Gren program names
+TInputLine	build	internal	object-stream persistence; no view here is serialised
+TLabel	draw	internal	a virtual the binding overrides or inherits, not a call a model makes
+TLabel	getPalette	internal	a virtual the binding overrides or inherits, not a call a model makes
+TLabel	handleEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TLabel	shutDown	internal	a virtual the binding overrides or inherits, not a call a model makes
+TLabel	build	internal	object-stream persistence; no view here is serialised
+TStaticText	draw	internal	a virtual the binding overrides or inherits, not a call a model makes
+TStaticText	getPalette	internal	a virtual the binding overrides or inherits, not a call a model makes
+TStaticText	getText	used	the binding calls it; not itself a thing a Gren program names
+TStaticText	build	internal	object-stream persistence; no view here is serialised
+TParamText	getText	skipped	formatting is Gren's; a StaticText takes the finished string
+TParamText	setText	skipped	formatting is Gren's; a StaticText takes the finished string
+TParamText	getTextLen	skipped	formatting is Gren's; a StaticText takes the finished string
+TParamText	build	internal	object-stream persistence; no view here is serialised
+TScrollBar	draw	internal	a virtual the binding overrides or inherits, not a call a model makes
+TScrollBar	getPalette	internal	a virtual the binding overrides or inherits, not a call a model makes
+TScrollBar	handleEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TScrollBar	scrollDraw	used	the binding calls it; not itself a thing a Gren program names
+TScrollBar	scrollStep	internal	how far one part of the bar moves it
+TScrollBar	setParams	used	the binding calls it; not itself a thing a Gren program names
+TScrollBar	setRange	used	the binding calls it; not itself a thing a Gren program names
+TScrollBar	setStep	used	setParams writes all five in one call
+TScrollBar	setValue	used	the binding calls it; not itself a thing a Gren program names
+TScrollBar	drawPos	internal	painting, which is Turbo Vision's once the model has said what to paint
+TScrollBar	getPos	internal	the thumb's pixel position
+TScrollBar	getSize	internal	the thumb's length
+TScrollBar	value	used	the binding calls it; not itself a thing a Gren program names
+TScrollBar	chars	skipped	the five characters a bar is drawn with
+TScrollBar	minVal	bound	ScrollBar's min
+TScrollBar	maxVal	bound	ScrollBar's max
+TScrollBar	pgStep	bound	ScrollBar's pageStep
+TScrollBar	arStep	bound	ScrollBar's arrowStep
+TScrollBar	build	internal	object-stream persistence; no view here is serialised
+TScroller	changeBounds	internal	a virtual the binding overrides or inherits, not a call a model makes
+TScroller	getPalette	internal	a virtual the binding overrides or inherits, not a call a model makes
+TScroller	handleEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TScroller	scrollDraw	skipped	a scrolling pane is a model and a Canvas here; see `viewer`
+TScroller	scrollTo	skipped	a scrolling pane is a model and a Canvas here; see `viewer`
+TScroller	setLimit	skipped	a scrolling pane is a model and a Canvas here; see `viewer`
+TScroller	setState	internal	a virtual the binding overrides or inherits, not a call a model makes
+TScroller	checkDraw	skipped	a scrolling pane is a model and a Canvas here; see `viewer`
+TScroller	shutDown	internal	a virtual the binding overrides or inherits, not a call a model makes
+TScroller	delta	skipped	a scrolling pane is a model and a Canvas here; see `viewer`
+TScroller	build	internal	object-stream persistence; no view here is serialised
+TListViewer	changeBounds	internal	a virtual the binding overrides or inherits, not a call a model makes
+TListViewer	draw	internal	a virtual the binding overrides or inherits, not a call a model makes
+TListViewer	focusItem	used	the binding calls it; not itself a thing a Gren program names
+TListViewer	getPalette	internal	a virtual the binding overrides or inherits, not a call a model makes
+TListViewer	getText	used	the binding calls it; not itself a thing a Gren program names
+TListViewer	isSelected	internal	whether a row is the highlighted one, asked while drawing
+TListViewer	handleEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TListViewer	selectItem	used	the binding calls it; not itself a thing a Gren program names
+TListViewer	setRange	used	the binding calls it; not itself a thing a Gren program names
+TListViewer	setState	internal	a virtual the binding overrides or inherits, not a call a model makes
+TListViewer	focusItemNum	used	the binding calls it; not itself a thing a Gren program names
+TListViewer	shutDown	internal	a virtual the binding overrides or inherits, not a call a model makes
+TListViewer	hScrollBar	used	the binding calls it; not itself a thing a Gren program names
+TListViewer	vScrollBar	used	a list makes its own bar and the differ knows not to touch it
+TListViewer	numCols	todo	a list of more than one column; TListViewer has always had them and no ListBox field says so
+TListViewer	topItem	todo	which row is at the top -- a model can move the highlight and cannot scroll under it
+TListViewer	focused	used	the binding calls it; not itself a thing a Gren program names
+TListViewer	range	used	the binding calls it; not itself a thing a Gren program names
+TListViewer	build	internal	object-stream persistence; no view here is serialised
+TListBox	dataSize	internal	a virtual the binding overrides or inherits, not a call a model makes
+TListBox	getData	internal	a virtual the binding overrides or inherits, not a call a model makes
+TListBox	getText	used	the binding calls it; not itself a thing a Gren program names
+TListBox	newList	used	a re-render replaces the items through it
+TListBox	setData	internal	a virtual the binding overrides or inherits, not a call a model makes
+TListBox	list	used	the binding calls it; not itself a thing a Gren program names
+TListBox	build	internal	object-stream persistence; no view here is serialised
+TSortedListBox	handleEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TSortedListBox	newList	skipped	a sorted list is a model that sorts; the ListBox takes the order it is given
+TSortedListBox	list	skipped	a sorted list is a model that sorts; the ListBox takes the order it is given
+TSortedListBox	build	internal	object-stream persistence; no view here is serialised
+THistory	draw	internal	a virtual the binding overrides or inherits, not a call a model makes
+THistory	getPalette	internal	a virtual the binding overrides or inherits, not a call a model makes
+THistory	handleEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+THistory	initHistoryWindow	internal	a virtual the binding overrides or inherits, not a call a model makes
+THistory	recordHistory	used	the binding calls it; not itself a thing a Gren program names
+THistory	shutDown	internal	a virtual the binding overrides or inherits, not a call a model makes
+THistory	build	internal	object-stream persistence; no view here is serialised
+TMenuBar	draw	internal	a virtual the binding overrides or inherits, not a call a model makes
+TMenuBar	getItemRect	used	the binding calls it; not itself a thing a Gren program names
+TMenuBar	build	internal	object-stream persistence; no view here is serialised
+TMenuBox	draw	internal	a virtual the binding overrides or inherits, not a call a model makes
+TMenuBox	getItemRect	used	the binding calls it; not itself a thing a Gren program names
+TMenuBox	build	internal	object-stream persistence; no view here is serialised
+TMenuView	execute	internal	a virtual the binding overrides or inherits, not a call a model makes
+TMenuView	findItem	used	the binding calls it; not itself a thing a Gren program names
+TMenuView	getItemRect	used	the binding calls it; not itself a thing a Gren program names
+TMenuView	getHelpCtx	internal	a virtual the binding overrides or inherits, not a call a model makes
+TMenuView	getPalette	internal	a virtual the binding overrides or inherits, not a call a model makes
+TMenuView	handleEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TMenuView	hotKey	internal	matching a keystroke against a menu's tildes
+TMenuView	newSubView	internal	building a pull-down
+TMenuView	build	internal	object-stream persistence; no view here is serialised
+TStatusLine	draw	internal	a virtual the binding overrides or inherits, not a call a model makes
+TStatusLine	getPalette	internal	a virtual the binding overrides or inherits, not a call a model makes
+TStatusLine	handleEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TStatusLine	hint	used	the binding calls it; not itself a thing a Gren program names
+TStatusLine	update	internal	painting, which is Turbo Vision's once the model has said what to paint
+TStatusLine	build	internal	object-stream persistence; no view here is serialised
+TIndicator	draw	internal	a virtual the binding overrides or inherits, not a call a model makes
+TIndicator	getPalette	internal	a virtual the binding overrides or inherits, not a call a model makes
+TIndicator	setState	internal	a virtual the binding overrides or inherits, not a call a model makes
+TIndicator	setValue	used	the binding calls it; not itself a thing a Gren program names
+TIndicator	build	internal	object-stream persistence; no view here is serialised
+TEditor	genRefs	internal	object-stream persistence; no view here is serialised
+TEditor	shutDown	internal	a virtual the binding overrides or inherits, not a call a model makes
+TEditor	bufChar	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	bufPtr	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	changeBounds	internal	a virtual the binding overrides or inherits, not a call a model makes
+TEditor	convertEvent	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	cursorVisible	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	deleteSelect	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	doneBuffer	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	draw	internal	a virtual the binding overrides or inherits, not a call a model makes
+TEditor	getPalette	internal	a virtual the binding overrides or inherits, not a call a model makes
+TEditor	handleEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TEditor	initBuffer	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	initContextMenu	internal	a virtual the binding overrides or inherits, not a call a model makes
+TEditor	insertBuffer	todo	inserting text at the cursor, as against replacing the document
+TEditor	insertFrom	todo	see insertBuffer
+TEditor	insertText	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	scrollTo	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	search	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	setBufSize	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	setCmdState	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	setSelect	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	setState	internal	a virtual the binding overrides or inherits, not a call a model makes
+TEditor	trackCursor	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	undo	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	updateCommands	internal	painting, which is Turbo Vision's once the model has said what to paint
+TEditor	valid	internal	a virtual the binding overrides or inherits, not a call a model makes
+TEditor	charPos	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	charPtr	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	clipCopy	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	clipCut	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	clipPaste	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	deleteRange	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	doUpdate	internal	painting, which is Turbo Vision's once the model has said what to paint
+TEditor	doSearchReplace	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	drawLines	internal	painting, which is Turbo Vision's once the model has said what to paint
+TEditor	formatLine	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	find	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	getMousePtr	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	hasSelection	todo	whether anything is selected, which decides whether Cut should be enabled
+TEditor	hideSelect	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	isClipboard	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	lineEnd	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	lineMove	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	lineStart	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	indentedLineStart	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	lock	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	newLine	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	nextChar	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	nextLine	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	nextWord	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	prevChar	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	prevLine	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	prevWord	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	replace	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	setBufLen	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	setCurPtr	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	startSelect	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	toggleEncoding	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	toggleInsMode	todo	the command that flips it
+TEditor	unlock	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	update	internal	painting, which is Turbo Vision's once the model has said what to paint
+TEditor	checkScrollBar	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	hScrollBar	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	vScrollBar	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	indicator	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	buffer	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	bufSize	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	bufLen	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	gapLen	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	selStart	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	selEnd	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	curPtr	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	curPos	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	delta	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	limit	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	drawLine	internal	painting, which is Turbo Vision's once the model has said what to paint
+TEditor	drawPtr	internal	painting, which is Turbo Vision's once the model has said what to paint
+TEditor	delCount	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	insCount	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	isValid	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	canUndo	todo	whether Undo would do anything, which decides whether to grey it
+TEditor	modified	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	selecting	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	overwrite	todo	insert versus overwrite mode, likewise
+TEditor	autoIndent	todo	an editor option a program would want to offer
+TEditor	editorDialog	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	editorFlags	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	findStr	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	replaceStr	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	lockCount	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	updateFlags	internal	painting, which is Turbo Vision's once the model has said what to paint
+TEditor	keyState	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	getText	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	nextCharAndPos	internal	the editor keeps its own document, so its buffer arithmetic is not the model's
+TEditor	build	internal	object-stream persistence; no view here is serialised
+TMemo	getData	internal	a virtual the binding overrides or inherits, not a call a model makes
+TMemo	setData	internal	a virtual the binding overrides or inherits, not a call a model makes
+TMemo	dataSize	internal	a virtual the binding overrides or inherits, not a call a model makes
+TMemo	getPalette	internal	a virtual the binding overrides or inherits, not a call a model makes
+TMemo	handleEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TMemo	build	internal	object-stream persistence; no view here is serialised
+TFileEditor	fileName	skipped	the model owns the path; the editor is handed text and asked for text
+TFileEditor	doneBuffer	used	the binding calls it; not itself a thing a Gren program names
+TFileEditor	handleEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TFileEditor	initBuffer	used	the binding calls it; not itself a thing a Gren program names
+TFileEditor	loadFile	used	the binding calls it; not itself a thing a Gren program names
+TFileEditor	save	used	the binding calls it; not itself a thing a Gren program names
+TFileEditor	saveAs	skipped	see fileName -- writing the file is FileSystem's, in Gren
+TFileEditor	saveFile	skipped	see fileName
+TFileEditor	setBufSize	used	the binding calls it; not itself a thing a Gren program names
+TFileEditor	shutDown	internal	a virtual the binding overrides or inherits, not a call a model makes
+TFileEditor	updateCommands	internal	painting, which is Turbo Vision's once the model has said what to paint
+TFileEditor	valid	internal	a virtual the binding overrides or inherits, not a call a model makes
+TFileEditor	build	internal	object-stream persistence; no view here is serialised
+TEditWindow	close	used	the binding calls it; not itself a thing a Gren program names
+TEditWindow	getTitle	used	see TWindow::getTitle
+TEditWindow	handleEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TEditWindow	sizeLimits	internal	a virtual the binding overrides or inherits, not a call a model makes
+TEditWindow	editor	used	the binding calls it; not itself a thing a Gren program names
+TEditWindow	build	internal	object-stream persistence; no view here is serialised
+TTerminal	genRefs	internal	object-stream persistence; no view here is serialised
+TTerminal	do_sputn	skipped	scrolling output is a model and a Canvas here; see `watch`
+TTerminal	bufInc	skipped	scrolling output is a model and a Canvas here; see `watch`
+TTerminal	canInsert	skipped	scrolling output is a model and a Canvas here; see `watch`
+TTerminal	draw	internal	a virtual the binding overrides or inherits, not a call a model makes
+TTerminal	nextLine	skipped	scrolling output is a model and a Canvas here; see `watch`
+TTerminal	prevLines	skipped	scrolling output is a model and a Canvas here; see `watch`
+TTerminal	queEmpty	skipped	scrolling output is a model and a Canvas here; see `watch`
+TOutline	adjust	skipped	a tree is a model and a ListBox here; see `dir`
+TOutline	getRoot	skipped	a tree is a model and a ListBox here; see `dir`
+TOutline	getNumChildren	skipped	a tree is a model and a ListBox here; see `dir`
+TOutline	getNext	skipped	a tree is a model and a ListBox here; see `dir`
+TOutline	getChild	skipped	a tree is a model and a ListBox here; see `dir`
+TOutline	getText	skipped	a tree is a model and a ListBox here; see `dir`
+TOutline	isExpanded	skipped	a tree is a model and a ListBox here; see `dir`
+TOutline	hasChildren	skipped	a tree is a model and a ListBox here; see `dir`
+TOutline	root	skipped	a tree is a model and a ListBox here; see `dir`
+TOutline	build	internal	object-stream persistence; no view here is serialised
+TOutlineViewer	adjust	skipped	a tree is a model and a ListBox here; see `dir`
+TOutlineViewer	draw	internal	a virtual the binding overrides or inherits, not a call a model makes
+TOutlineViewer	focused	skipped	a tree is a model and a ListBox here; see `dir`
+TOutlineViewer	getNext	skipped	a tree is a model and a ListBox here; see `dir`
+TOutlineViewer	getChild	skipped	a tree is a model and a ListBox here; see `dir`
+TOutlineViewer	getGraph	internal	a virtual the binding overrides or inherits, not a call a model makes
+TOutlineViewer	getNumChildren	skipped	a tree is a model and a ListBox here; see `dir`
+TOutlineViewer	getNode	skipped	a tree is a model and a ListBox here; see `dir`
+TOutlineViewer	getPalette	internal	a virtual the binding overrides or inherits, not a call a model makes
+TOutlineViewer	getRoot	skipped	a tree is a model and a ListBox here; see `dir`
+TOutlineViewer	getText	skipped	a tree is a model and a ListBox here; see `dir`
+TOutlineViewer	handleEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TOutlineViewer	hasChildren	skipped	a tree is a model and a ListBox here; see `dir`
+TOutlineViewer	isExpanded	skipped	a tree is a model and a ListBox here; see `dir`
+TOutlineViewer	isSelected	skipped	a tree is a model and a ListBox here; see `dir`
+TOutlineViewer	selected	skipped	a tree is a model and a ListBox here; see `dir`
+TOutlineViewer	setState	internal	a virtual the binding overrides or inherits, not a call a model makes
+TOutlineViewer	update	internal	painting, which is Turbo Vision's once the model has said what to paint
+TOutlineViewer	expandAll	skipped	a tree is a model and a ListBox here; see `dir`
+TOutlineViewer	firstThat	skipped	a tree is a model and a ListBox here; see `dir`
+TOutlineViewer	forEach	skipped	a tree is a model and a ListBox here; see `dir`
+TOutlineViewer	createGraph	internal	a virtual the binding overrides or inherits, not a call a model makes
+TOutlineViewer	foc	skipped	a tree is a model and a ListBox here; see `dir`
+TOutlineViewer	build	internal	object-stream persistence; no view here is serialised
+TStringView	data	used	the binding calls it; not itself a thing a Gren program names
+TStringView	size	used	the binding calls it; not itself a thing a Gren program names
+TStringView	empty	used	the binding calls it; not itself a thing a Gren program names
+TStringView	front	used	the binding calls it; not itself a thing a Gren program names
+TStringView	back	used	the binding calls it; not itself a thing a Gren program names
+TStringView	substr	used	the binding calls it; not itself a thing a Gren program names
+TStringView	begin	used	the binding calls it; not itself a thing a Gren program names
+TStringView	cbegin	internal	iteration over a string view
+TStringView	end	used	the binding calls it; not itself a thing a Gren program names
+TStringView	cend	internal	iteration over a string view
+TColorSelector	draw	internal	a virtual the binding overrides or inherits, not a call a model makes
+TColorSelector	handleEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TColorSelector	build	internal	object-stream persistence; no view here is serialised
+TMonoSelector	draw	internal	a virtual the binding overrides or inherits, not a call a model makes
+TMonoSelector	handleEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TMonoSelector	mark	skipped	the three levels of palette indirection are not offered; see `palette`
+TMonoSelector	newColor	skipped	the three levels of palette indirection are not offered; see `palette`
+TMonoSelector	press	skipped	the three levels of palette indirection are not offered; see `palette`
+TMonoSelector	movedTo	skipped	the three levels of palette indirection are not offered; see `palette`
+TMonoSelector	build	internal	object-stream persistence; no view here is serialised
+TColorDialog	dataSize	internal	a virtual the binding overrides or inherits, not a call a model makes
+TColorDialog	getData	internal	a virtual the binding overrides or inherits, not a call a model makes
+TColorDialog	handleEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TColorDialog	setData	internal	a virtual the binding overrides or inherits, not a call a model makes
+TColorDialog	pal	skipped	the three levels of palette indirection are not offered; see `palette`
+TColorDialog	getIndexes	skipped	the three levels of palette indirection are not offered; see `palette`
+TColorDialog	setIndexes	skipped	the three levels of palette indirection are not offered; see `palette`
+TColorDialog	build	internal	object-stream persistence; no view here is serialised
+TFileDialog	getData	internal	a virtual the binding overrides or inherits, not a call a model makes
+TFileDialog	getFileName	skipped	Tui.fileDialog builds the same dialog out of stock views, so the model owns the filtering
+TFileDialog	handleEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TFileDialog	setData	internal	a virtual the binding overrides or inherits, not a call a model makes
+TFileDialog	valid	internal	a virtual the binding overrides or inherits, not a call a model makes
+TFileDialog	shutDown	internal	a virtual the binding overrides or inherits, not a call a model makes
+TFileDialog	sizeLimits	internal	a virtual the binding overrides or inherits, not a call a model makes
+TFileDialog	fileName	skipped	Tui.fileDialog builds the same dialog out of stock views, so the model owns the filtering
+TFileDialog	fileList	skipped	Tui.fileDialog builds the same dialog out of stock views, so the model owns the filtering
+TFileDialog	wildCard	skipped	Tui.fileDialog builds the same dialog out of stock views, so the model owns the filtering
+TFileDialog	directory	skipped	Tui.fileDialog builds the same dialog out of stock views, so the model owns the filtering
+TFileDialog	build	internal	object-stream persistence; no view here is serialised
+TDirListBox	getText	skipped	Tui.fileDialog builds the same dialog out of stock views
+TDirListBox	isSelected	skipped	Tui.fileDialog builds the same dialog out of stock views
+TDirListBox	selectItem	skipped	Tui.fileDialog builds the same dialog out of stock views
+TDirListBox	newDirectory	skipped	Tui.fileDialog builds the same dialog out of stock views
+TDirListBox	setState	internal	a virtual the binding overrides or inherits, not a call a model makes
+TDirListBox	list	skipped	Tui.fileDialog builds the same dialog out of stock views
+TDirListBox	build	internal	object-stream persistence; no view here is serialised
+TChDirDialog	TDirListBox	skipped	Tui.fileDialog builds the same dialog out of stock views
+TChDirDialog	dataSize	internal	a virtual the binding overrides or inherits, not a call a model makes
+TChDirDialog	getData	internal	a virtual the binding overrides or inherits, not a call a model makes
+TChDirDialog	handleEvent	internal	a virtual the binding overrides or inherits, not a call a model makes
+TChDirDialog	setData	internal	a virtual the binding overrides or inherits, not a call a model makes
+TChDirDialog	valid	internal	a virtual the binding overrides or inherits, not a call a model makes
+TChDirDialog	shutDown	internal	a virtual the binding overrides or inherits, not a call a model makes
+TChDirDialog	sizeLimits	internal	a virtual the binding overrides or inherits, not a call a model makes
+TChDirDialog	build	internal	object-stream persistence; no view here is serialised
+TValidator	error	used	the binding calls it; not itself a thing a Gren program names
+TValidator	isValidInput	used	the binding calls it; not itself a thing a Gren program names
+TValidator	isValid	used	the binding calls it; not itself a thing a Gren program names
+TValidator	transfer	internal	moving a field's value in and out of a validator
+TValidator	validate	used	the binding calls it; not itself a thing a Gren program names
+TValidator	status	used	the binding calls it; not itself a thing a Gren program names
+TValidator	options	used	the binding calls it; not itself a thing a Gren program names
+TValidator	build	internal	object-stream persistence; no view here is serialised
+TFilterValidator	error	used	the binding calls it; not itself a thing a Gren program names
+TFilterValidator	isValidInput	used	the binding calls it; not itself a thing a Gren program names
+TFilterValidator	isValid	used	the binding calls it; not itself a thing a Gren program names
+TFilterValidator	build	internal	object-stream persistence; no view here is serialised
+TRangeValidator	error	skipped	only TFilterValidator is wrapped; see gap 8
+TRangeValidator	isValid	skipped	only TFilterValidator is wrapped; see gap 8
+TRangeValidator	transfer	skipped	only TFilterValidator is wrapped; see gap 8
+TRangeValidator	build	internal	object-stream persistence; no view here is serialised
+TLookupValidator	isValid	skipped	only TFilterValidator is wrapped; see gap 8
+TLookupValidator	lookup	skipped	only TFilterValidator is wrapped; see gap 8
+TLookupValidator	build	internal	object-stream persistence; no view here is serialised
+TPXPictureValidator	error	skipped	only TFilterValidator is wrapped; see gap 8
+TPXPictureValidator	isValidInput	skipped	only TFilterValidator is wrapped; see gap 8
+TPXPictureValidator	isValid	skipped	only TFilterValidator is wrapped; see gap 8
+TPXPictureValidator	picture	skipped	only TFilterValidator is wrapped; see gap 8
+TPXPictureValidator	build	internal	object-stream persistence; no view here is serialised
+TStringLookupValidator	error	skipped	only TFilterValidator is wrapped; see gap 8
+TStringLookupValidator	lookup	skipped	only TFilterValidator is wrapped; see gap 8
+TStringLookupValidator	newStringList	skipped	only TFilterValidator is wrapped; see gap 8
+TStringLookupValidator	build	internal	object-stream persistence; no view here is serialised
+TPalette	data	used	the binding calls it; not itself a thing a Gren program names
+TCommandSet	has	used	the binding calls it; not itself a thing a Gren program names
+TCommandSet	disableCmd	used	setEnabled is built on it
+TCommandSet	enableCmd	used	setEnabled is built on it
+TCommandSet	isEmpty	internal	whether a set has any command in it
+TDrawBuffer	moveChar	internal	painting, which is Turbo Vision's once the model has said what to paint
+TDrawBuffer	moveStr	internal	painting, which is Turbo Vision's once the model has said what to paint
+TDrawBuffer	moveCStr	internal	painting, which is Turbo Vision's once the model has said what to paint
+TDrawBuffer	moveBuf	internal	painting, which is Turbo Vision's once the model has said what to paint
+TDrawBuffer	putAttribute	internal	painting, which is Turbo Vision's once the model has said what to paint
+TDrawBuffer	putChar	internal	painting, which is Turbo Vision's once the model has said what to paint
+TRect	move	used	the binding calls it; not itself a thing a Gren program names
+TRect	grow	used	the binding calls it; not itself a thing a Gren program names
+TRect	intersect	used	the binding calls it; not itself a thing a Gren program names
+TRect	Union	skipped	Gren has its own Rect and its own arithmetic
+TRect	contains	used	the binding calls it; not itself a thing a Gren program names
+TRect	isEmpty	skipped	see TRect::Union
+TRect	b	used	the binding calls it; not itself a thing a Gren program names
+flags	sfVisible	todo	hiding a view without destroying it; see TView::hide
+flags	sfCursorVis	used	Canvas's cursor field turns it on and off
+flags	sfCursorIns	skipped	the fat insert-mode cursor, which only an editor has an opinion about
+flags	sfShadow	skipped	a window's drop shadow, which Turbo Vision puts on dialogs and nothing here has wanted to move
+flags	sfActive	internal	whether a window is the active one, which TVision maintains
+flags	sfSelected	used	current within its owner; the focusing click turns on this and not sfFocused
+flags	sfFocused	used	the caret is in this view
+flags	sfDragging	internal	set while the user is dragging a window
+flags	sfDisabled	todo	greying out a *view*: setEnabled greys a command, and an InputLine, ListBox or Canvas has none
+flags	sfModal	used	the modal stack sets it
+flags	sfDefault	internal	the default button, which Button's isDefault decides
+flags	sfExposed	internal	whether any cell of the view can be seen
+flags	ofSelectable	used	takesFocus
+flags	ofTopSelect	skipped	clicking a view brings its whole window to the front; the frame already does this
+flags	ofFirstClick	used	on a ScrollBar, which is what stopped it needing two clicks
+flags	ofFramed	used	a window's frame
+flags	ofPreProcess	skipped	seeing an event before the focused view does, which is how the menu bar and status line get their hotkeys -- offering it to a model would put a keyboard handler above the caret
+flags	ofPostProcess	used	the reason a command reaches the model wherever the caret is
+flags	ofBuffered	skipped	a group keeping its own off-screen buffer; memory against redraws, and the differ already decides what redraws
+flags	ofTileable	used	whether Tile and Cascade move this window
+flags	ofCenterX	skipped	a view that centres itself in its owner; the model does the arithmetic and knows the answer
+flags	ofCenterY	skipped	see ofCenterX
+flags	ofCentered	skipped	see ofCenterX
+flags	ofValidate	skipped	whether a validator may refuse to let the caret leave; only TFilterValidator is wrapped and it refuses keystrokes instead
+flags	gfGrowLoX	used	Grows
+flags	gfGrowLoY	used	Grows
+flags	gfGrowHiX	used	Grows
+flags	gfGrowHiY	used	Grows
+flags	gfGrowAll	used	a window that follows the desktop
+flags	gfGrowRel	used	growing in proportion rather than by the same number of cells
+flags	gfFixed	skipped	a view that keeps its size when its owner grows; not growing is the default
+flags	dmDragMove	skipped	which drags a view allows; the user moves windows and the model does not
+flags	dmDragGrow	skipped	see dmDragMove
+flags	dmDragGrowLeft	skipped	see dmDragMove
+flags	dmLimitLoX	skipped	how far off its owner a view may be dragged
+flags	dmLimitLoY	skipped	see dmLimitLoX
+flags	dmLimitHiX	skipped	see dmLimitLoX
+flags	dmLimitHiY	skipped	see dmLimitLoX
+flags	dmLimitAll	skipped	see dmLimitLoX
+flags	wfMove	todo	a window that cannot be moved; beWindow() sets all four of these together and no model can say otherwise
+flags	wfGrow	used	Resize
+flags	wfClose	todo	a window with no close box, which is the one of the four somebody will want first
+flags	wfZoom	used	Resize
