@@ -147,6 +147,15 @@ gotoFieldId =
     "hex.goto.offset"
 
 
+{-| The one that asks whether a copy this large is really wanted. It is a
+[`messageBox`](Tui#messageBox) rather than anything of its own, so all it
+needs is a name nothing else answers to.
+-}
+copyDialogId : String
+copyDialogId =
+    "hex.copy.confirm"
+
+
 menuItem : MenuItem
 menuItem =
     Item { title = "Hex ~d~ump viewer", cmd = command, key = "Alt-D", shortcut = "Alt-D" }
@@ -203,6 +212,26 @@ decoding it into an `Array Int` is not something anybody notices.
 chunkSize : Int
 chunkSize =
     16384
+
+
+{-| How much a copy takes without asking first.
+
+The chunk above is a fact about the program and this is not: a copy larger than
+the chunk is read from the file for the purpose, so nothing about *predc*
+stands in the way of copying a whole file. What stands in the way is that a
+gigabyte rendered into a string is a gigabyte of string, and the first anybody
+would hear of it is the process dying with the terminal still in its alternate
+screen.
+
+So there is no ceiling, only a point past which the question gets asked out
+loud, with the real number in it. That is the reason this number does not have
+to be defensible the way a refusal's would: being asked costs one keystroke, so
+it can be wrong by a factor of ten in either direction and nobody is stopped
+from doing anything. A megabyte is about where a copy stops being instant.
+-}
+copyWithoutAsking : Int
+copyWithoutAsking =
+    1048576
 
 
 {-| Where the columns are, in the canvas's own coordinates. Each of these is
@@ -268,6 +297,11 @@ type alias Model =
     -- read. The clipboard replies with an event and every open tool is handed
     -- every event, so without this a paste in another tool would land here.
     , awaiting : Maybe Reading
+    -- A copy the chunk could not answer: what it is for and how much of the
+    -- file it wants. It sits here across two different waits -- the question
+    -- asked of the user, and then the read -- because both end in the same
+    -- place and neither event carries what the copy was.
+    , copying : Maybe Copying
     , message : String
     }
 
@@ -293,6 +327,17 @@ offset extends the mark without any of them knowing that it does.
 -}
 type alias Marking =
     { anchor : Int, grain : Grain }
+
+
+{-| A copy waiting for something: for the user to say yes to its size, or for
+the bytes to arrive from the file.
+
+The range is the guard as well as the payload, the same way `wanted` guards a
+chunk read: press `y` twice on two different marks and the first read's answer
+is for a copy nobody is waiting for any more.
+-}
+type alias Copying =
+    { shape : Shape, range : Range }
 
 
 type Grain
@@ -325,6 +370,7 @@ really there.
 type Reading
     = Characters
     | HexDigits
+    | DumpText
 
 
 {-| What is on the screen: how big it is, what to call it, and where more of
@@ -370,6 +416,11 @@ type Msg
     = Listed { path : Path, entries : Array { path : Path, entityType : FileSystem.EntityType } }
     | Statted { path : Path, meta : FileSystem.Metadata }
     | ReadBack { range : Range, bytes : Bytes }
+    -- The same read as `ReadBack` and deliberately not the same message: this
+    -- one's bytes are for the clipboard and must not become the chunk, which
+    -- would move the window the user is looking at and be sixteen thousand
+    -- bytes wrong about what is in memory.
+    | CopyBack { range : Range, bytes : Bytes }
     | Failed String
 
 
@@ -393,6 +444,7 @@ init permission =
     , marking = Nothing
     , yanked = Nothing
     , awaiting = Nothing
+    , copying = Nothing
     , message = ""
     }
 
@@ -558,6 +610,9 @@ update ports event model =
         Tui.Command "hex.pasteHex" ->
             askClipboard ports HexDigits model
 
+        Tui.Command "hex.pasteDump" ->
+            askClipboard ports DumpText model
+
         Tui.Command "hex.copyHex" ->
             yank ports AsHex model
 
@@ -597,6 +652,9 @@ update ports event model =
 
             else if closed.id == gotoDialogId then
                 answerGoto closed model
+
+            else if closed.id == copyDialogId then
+                answerCopy closed model
 
             else
                 still model
@@ -661,6 +719,7 @@ receive ports msg model =
                             , marking = Nothing
                             , yanked = Nothing
                             , awaiting = Nothing
+                            , copying = Nothing
                             , browsing = Nothing
                             , recent = remember (Path.toPosixString it.path) model.recent
                             , message =
@@ -689,8 +748,24 @@ receive ports msg model =
             else
                 still model
 
+        -- The bytes a copy went and got. `copying` is the guard as well as the
+        -- payload: press `y` on one mark and then another before the first
+        -- read lands, and this is what says which of the two answers is the
+        -- one still wanted.
+        CopyBack it ->
+            when model.copying is
+                Just copying ->
+                    if copying.range == it.range then
+                        copyNow ports copying.shape copying.range (toByteArray it.bytes) model
+
+                    else
+                        still model
+
+                Nothing ->
+                    still model
+
         Failed reason ->
-            still { model | message = reason }
+            still { model | copying = Nothing, message = reason }
 
 
 -- KEYS
@@ -988,6 +1063,31 @@ paste reading text model =
                         else
                             showBytes codes "pasted hex" model
 
+            DumpText ->
+                when dumpBytes text is
+                    Err reason ->
+                        still { model | message = reason }
+
+                    Ok taken ->
+                        let
+                            shown =
+                                showBytes taken.codes "pasted dump" model
+                        in
+                        -- The dump's own offsets are not kept -- see
+                        -- `dumpBytes` -- so they are said once instead, here,
+                        -- where the person who pasted it is looking.
+                        still
+                            { shown.model
+                                | message =
+                                    "Read "
+                                        ++ String.fromInt (Array.length taken.codes)
+                                        ++ " bytes, from a dump of "
+                                        ++ offsetText taken.base
+                                        ++ "-"
+                                        ++ offsetText (taken.base + Array.length taken.codes - 1)
+                                        ++ "."
+                            }
+
 
 {-| A pasted buffer is a file whose every byte is already in the chunk, which
 is why so little of this program had to learn about it: `covers` says yes to
@@ -1006,6 +1106,7 @@ showBytes codes name model =
             , highlights = []
             , marking = Nothing
             , yanked = Nothing
+            , copying = Nothing
             , message = ""
         }
 
@@ -1018,10 +1119,12 @@ three bytes.
 **Anything else is refused, and named.** The temptation is to keep the hex and
 drop the rest, which would let a whole `xxd` dump be pasted -- and would read
 its offset column and its printable column as data, and produce a buffer that
-is wrong in a way nobody can see. Refusing means the one thing this cannot
-currently take is a dump with its offsets still on it, and the message says so
-rather than leaving somebody to work it out from a screen of plausible
-rubbish.
+is wrong in a way nobody can see.
+
+The message names the character that stopped it *and* the command that would
+have taken it, because there is one now: [`dumpBytes`](#dumpBytes) reads a dump
+by its offsets rather than by what its columns look like. Two commands and no
+sniffing, still -- what changed is that the refusal has somewhere to point.
 -}
 hexBytes : String -> Result String (Array Int)
 hexBytes text =
@@ -1044,7 +1147,7 @@ hexBytes text =
             Err
                 ("That is not hex: '"
                     ++ String.fromChar stray.first
-                    ++ "' is not a hex digit. Offsets and a printable column have to come off first."
+                    ++ "' is not a hex digit. Paste a dump reads one of those."
                 )
 
         Nothing ->
@@ -1066,6 +1169,384 @@ hexBytes text =
 isSeparator : Char -> Bool
 isSeparator char =
     String.contains (String.fromChar char) " \t\n\r,;:-"
+
+
+{-| A whole hex dump, offsets and printable column and all: `xxd`, `xxd -g1`,
+`hexdump -C`, `od -A x -t x1z`, and the ones this program writes itself.
+
+This is a third paste command rather than a cleverer version of the second, and
+the reason is the one written on [`Reading`](#Reading): a program that works
+out for itself what it is being handed is a program that is sometimes silently
+wrong about what it is showing. So `P` still refuses a dump and this still
+refuses bare hex, and each says which it wanted.
+
+**A dump says how wide it is, and it says it in the offset column.** The gap
+between one line's offset and the next is exactly how many bytes that line
+carried, so nothing has to guess where the hex stops and the printable column
+starts: take that many byte pairs and stop. Which matters, because `beef`,
+`cafe` and `decade` sit as comfortably in a printable column as in a hex one --
+and a rule about two spaces would cut this program's own dumps in half, since
+they put a double space in the middle of the hex field.
+
+Two things follow, and both are the price of not guessing:
+
+  - **A dump of one line is refused**, because one offset is not two and there
+    is nothing to subtract. That is the honest answer rather than a shortfall:
+    a single line is exactly the case where the printable column cannot be told
+    from more hex.
+  - **A short last line is read only as far as the full lines' hex reached.**
+    Every line of a dump pads its hex field to the same width, so the printable
+    column starts at the same character on the short line as on the long ones,
+    and stopping where the long ones stopped cannot run into it.
+
+A `*` is read rather than refused. `hexdump` writes one for a run of identical
+rows, and the offsets on either side of it say exactly how many rows it stands
+for -- so expanding it is reading the format, not guessing at it, and any dump
+of a file with a zeroed region has one.
+-}
+dumpBytes : String -> Result String { codes : Array Int, base : Int }
+dumpBytes text =
+    let
+        lines =
+            String.lines text
+                |> Array.map String.trimRight
+                |> Array.keepIf (\line -> String.trim line /= "")
+    in
+    readDumpLines lines
+        |> Result.andThen assembleDump
+
+
+{-| One line of a dump: what its offset says, what came after the offset, and
+whether it was a `*` standing in for the rows before it.
+-}
+type alias DumpLine =
+    { offset : Int, rest : String, isRepeat : Bool }
+
+
+{-| Every line, or the first reason one of them is not a dump line.
+
+The width check is what keeps a page of bare hex from being read as a column of
+offsets: `48 65 6c` would otherwise be offset 0x48 carrying two bytes, and
+four digits is the narrowest offset column anything prints.
+-}
+readDumpLines : Array String -> Result String (Array DumpLine)
+readDumpLines lines =
+    let
+        widths =
+            lines
+                |> Array.mapAndKeepJust offsetToken
+                |> Array.map (\found -> String.count found.digits)
+    in
+    when Array.first widths is
+        Nothing ->
+            Err "That is not a dump: no line begins with an offset."
+
+        Just width ->
+            if width < 4 then
+                Err "That is not a dump: an offset column is at least four digits wide."
+
+            else if Array.any (\each -> each /= width) widths then
+                Err "That is not a dump: its offsets are not all the same width."
+
+            else
+                let
+                    parsed =
+                        Array.mapAndKeepJust (readDumpLine width) lines
+                in
+                if Array.length parsed /= Array.length lines then
+                    Err "That is not a dump: a line does not begin with an offset."
+
+                else
+                    Ok parsed
+
+
+readDumpLine : Int -> String -> Maybe DumpLine
+readDumpLine width line =
+    if String.trim line == "*" then
+        Just { offset = 0, rest = "", isRepeat = True }
+
+    else
+        offsetToken line
+            |> Maybe.andThen
+                (\found ->
+                    if String.count found.digits /= width then
+                        Nothing
+
+                    else
+                        fromHex found.digits
+                            |> Maybe.map
+                                (\offset ->
+                                    { offset = offset, rest = found.rest, isRepeat = False }
+                                )
+                )
+
+
+{-| The offset at the front of a line: hex digits, then `xxd`'s colon or
+everybody else's space, then the rest of the line.
+
+What identifies the field is the run of hex digits at the very front; the
+punctuation after it only has to be one of the two things that are ever there.
+A line with nothing after the offset at all is `hexdump`'s last line, which is
+the size of the file rather than a row of it.
+-}
+offsetToken : String -> Maybe { digits : String, rest : String }
+offsetToken line =
+    let
+        digits =
+            String.takeFirst (leadingHexDigits line) line
+
+        after =
+            String.dropFirst (String.count digits) line
+    in
+    if String.isEmpty digits then
+        Nothing
+
+    else if String.startsWith ":" after then
+        Just { digits = digits, rest = String.dropFirst 1 after }
+
+    else if String.startsWith " " after || String.isEmpty after then
+        Just { digits = digits, rest = after }
+
+    else
+        Nothing
+
+
+leadingHexDigits : String -> Int
+leadingHexDigits text =
+    String.foldl
+        (\char state ->
+            if state.stopped || not (Char.isHexDigit char) then
+                { state | stopped = True }
+
+            else
+                { state | count = state.count + 1 }
+        )
+        { count = 0, stopped = False }
+        text
+        |> .count
+
+
+{-| The bytes, once the lines are known to be lines.
+
+The whole of the format's ambiguity is settled here by two numbers taken from
+the first pair of lines that are a row apart: how many bytes a row holds, and
+how far into a line the hex field can reach.
+-}
+assembleDump : Array DumpLine -> Result String { codes : Array Int, base : Int }
+assembleDump lines =
+    when { first = Array.first lines, shape = dumpShape lines } is
+        { first = Nothing } ->
+            Err "That is not a dump: no line begins with an offset."
+
+        { shape = Nothing } ->
+            if Array.any .isRepeat lines then
+                -- Every row after the first was elided, which happens to a
+                -- file that is all one byte. The offsets say how far the run
+                -- goes and nothing says how wide a row of it was.
+                Err "Every row here is a *, so nothing in this dump says how wide a row is."
+
+            else
+                -- The one real limitation, and it belongs to dumps rather than
+                -- to this: with a single offset there is no second one to
+                -- subtract it from, so nothing says where the hex column ends
+                -- -- and `beef` is as good a word as it is a number.
+                Err "One line is not enough: it takes two offsets to say how wide the hex column is."
+
+        { first = Just first, shape = Just shape } ->
+            Array.foldl (stepDump shape)
+                (Ok
+                    { bytes = Builder.empty 64
+                    , at = first.offset
+                    , previous = []
+                    , repeating = False
+                    }
+                )
+                lines
+                |> Result.map
+                    (\state ->
+                        { codes = Builder.toArray state.bytes, base = first.offset }
+                    )
+
+
+{-| How many bytes a row holds, and how many characters of a line its hex field
+can occupy.
+
+Both come from the first two lines that are adjacent, neither a `*`, and a
+positive distance apart. The second is measured rather than assumed: read the
+row's worth of bytes off the first of the pair and see where the reading
+stopped.
+-}
+dumpShape : Array DumpLine -> Maybe { row : Int, chars : Int }
+dumpShape lines =
+    Array.map2
+        (\a b ->
+            { line = a, span = b.offset - a.offset, ok = not a.isRepeat && not b.isRepeat }
+        )
+        lines
+        (Array.dropFirst 1 lines)
+        |> Array.findFirst (\each -> each.ok && each.span > 0)
+        |> Maybe.map .value
+        |> Maybe.map
+            (\found ->
+                { row = found.span
+                , chars = (takeHexBytes found.span (String.count found.line.rest) found.line.rest).consumed
+                }
+            )
+
+
+type alias DumpState =
+    { bytes : Builder.Builder Int
+    , at : Int
+    , previous : Array Int
+    , repeating : Bool
+    }
+
+
+stepDump : { row : Int, chars : Int } -> DumpLine -> Result String DumpState -> Result String DumpState
+stepDump shape line state =
+    when state is
+        Err reason ->
+            Err reason
+
+        Ok sofar ->
+            if line.isRepeat then
+                -- Held until the next line, whose offset is the only thing
+                -- that says how many rows this stands for.
+                Ok { sofar | repeating = True }
+
+            else if line.offset < sofar.at then
+                Err
+                    ("This dump goes backwards, from "
+                        ++ offsetText sofar.at
+                        ++ " to "
+                        ++ offsetText line.offset
+                        ++ "."
+                    )
+
+            else
+                fillTo shape line sofar
+                    |> Result.map
+                        (\filled ->
+                            let
+                                found =
+                                    takeHexBytes shape.row shape.chars line.rest
+                            in
+                            { bytes = Builder.append found.codes filled.bytes
+                            , at = line.offset + Array.length found.codes
+                            , previous = found.codes
+                            , repeating = False
+                            }
+                        )
+
+
+{-| Catch up to a line whose offset is further on than the bytes so far reach.
+
+A `*` before it means the gap is the row above, written out again as many times
+as it fits -- which the offsets make exact. Without one the dump simply skips,
+and a buffer with a hole in it that looks like a buffer is the thing this whole
+tool exists not to produce.
+-}
+fillTo : { row : Int, chars : Int } -> DumpLine -> DumpState -> Result String DumpState
+fillTo shape line sofar =
+    let
+        gap =
+            line.offset - sofar.at
+    in
+    if gap == 0 then
+        Ok sofar
+
+    else if not sofar.repeating then
+        Err
+            ("This dump skips from "
+                ++ offsetText sofar.at
+                ++ " to "
+                ++ offsetText line.offset
+                ++ "."
+            )
+
+    else if Array.isEmpty sofar.previous || Math.modBy (Array.length sofar.previous) gap /= 0 then
+        Err
+            ("The * before "
+                ++ offsetText line.offset
+                ++ " does not stand for a whole number of rows."
+            )
+
+    else
+        Ok
+            { sofar
+                | bytes =
+                    Array.foldl (\again into -> Builder.append again into)
+                        sofar.bytes
+                        (Array.repeat (divideBy (Array.length sofar.previous) gap) sofar.previous)
+                , at = line.offset
+            }
+
+
+{-| Read up to `count` bytes out of a line's hex field, looking no further than
+`limit` characters into it, and say how far the reading got.
+
+Hex digits are taken in pairs and spaces separate them, which is what lets one
+function read `4865 6c6c`, `48 65 6c 6c` and `48656c6c` without being told
+which it is looking at. `consumed` is the index just past the last digit taken,
+and it is the number [`dumpShape`](#dumpShape) turns into the column the short
+last line must not read past.
+
+**Anything that is not a hex digit or a space ends the field**, which is the
+second of the two guards and the one that catches an unpadded dump. `od` does
+not pad its last line, so the column that stops the others lands in the middle
+of its printable text -- but its printable column is fenced in `>` and `<`,
+`hexdump`'s in `|`, and a full stop or a letter does just as well. Between the
+two guards, a short line is read to the end of its own hex and no further:
+whichever of the column and the fence comes first wins.
+-}
+takeHexBytes : Int -> Int -> String -> { codes : Array Int, consumed : Int }
+takeHexBytes count limit text =
+    let
+        final =
+            String.foldl
+                (\char state ->
+                    if state.taken >= count || state.index >= limit || state.ended then
+                        state
+
+                    else if not (Char.isHexDigit char) && char /= ' ' then
+                        { state | ended = True }
+
+                    else if Char.isHexDigit char then
+                        when state.half is
+                            Just high ->
+                                { state
+                                    | half = Nothing
+                                    , codes = Builder.pushLast (high * 16 + digitValue char) state.codes
+                                    , taken = state.taken + 1
+                                    , consumed = state.index + 1
+                                    , index = state.index + 1
+                                }
+
+                            Nothing ->
+                                { state | half = Just (digitValue char), index = state.index + 1 }
+
+                    else
+                        { state | index = state.index + 1 }
+                )
+                { codes = Builder.empty count
+                , half = Nothing
+                , taken = 0
+                , index = 0
+                , consumed = 0
+                , ended = False
+                }
+                text
+    in
+    { codes = Builder.toArray final.codes, consumed = final.consumed }
+
+
+{-| The value of one hex digit, which [`fromHex`](#fromHex) already knows how
+to find and this needs one at a time rather than a string at a time.
+-}
+digitValue : Char -> Int
+digitValue char =
+    String.firstIndexOf (String.toUpper (String.fromChar char)) "0123456789ABCDEF"
+        |> Maybe.withDefault 0
 
 
 -- COPYING
@@ -1095,29 +1576,171 @@ yank ports shape model =
             when bytesIn model range is
                 -- The file was never held, only a window of it, so a mark
                 -- dragged across more of the file than the chunk covers is a
-                -- range this program genuinely does not have. Saying so is
-                -- better than copying the part it happens to be holding: a
-                -- dump missing its middle looks exactly like a dump.
+                -- range this program does not have *yet*. It used to refuse
+                -- here, with the size of the chunk in the message, which told
+                -- the user about predc's chunking rather than about their
+                -- file. Now it goes and gets it.
                 Nothing ->
-                    still
-                        { model
-                            | message =
-                                "That is "
-                                    ++ String.fromInt (range.end - range.start)
-                                    ++ " bytes and only "
-                                    ++ String.fromInt chunkSize
-                                    ++ " are in memory at a time."
-                        }
+                    fetchToCopy ports { shape = shape, range = range } model
 
                 Just codes ->
-                    { model =
-                        { model
-                            | marking = Nothing
-                            , yanked = Just (describeYank shape range)
-                            , message = ""
+                    copyNow ports shape range codes model
+
+
+{-| The copy itself, once the bytes are in hand from wherever.
+
+The mark goes here and not one step earlier, so that a copy which asks a
+question and is answered No leaves the mark where it was. The paint stays
+either way: `y` is a read.
+-}
+copyNow : Tui.Ports Msg -> Shape -> Range -> Array Int -> Model -> Step
+copyNow ports shape range codes model =
+    { model =
+        { model
+            | marking = Nothing
+            , copying = Nothing
+            , yanked = Just (describeYank shape range)
+            , message = ""
+        }
+    , command = Tui.copyToClipboard ports (render shape range codes)
+    }
+
+
+{-| A copy the chunk cannot answer: read the range for the purpose, and ask
+first if it is big enough to be worth asking about.
+
+The read is deliberately not the one [`load`](#load) does. That one fills the
+chunk, which is what the window is drawn from -- so borrowing it would scroll
+the file out from under somebody who pressed `y`, and would still be holding
+the wrong sixteen thousand bytes at the end of it. These bytes are for the
+clipboard and go nowhere else.
+-}
+fetchToCopy : Tui.Ports Msg -> Copying -> Model -> Step
+fetchToCopy ports copying model =
+    when model.open is
+        -- Both unreachable rather than defensive. A pasted buffer *is* its
+        -- chunk, so `bytesIn` answered above and this is not on the way here;
+        -- and with nothing open there is no mark and no highlight, so there
+        -- was no range to copy.
+        Nothing ->
+            still model
+
+        Just source ->
+            when source.from is
+                Pasted ->
+                    still model
+
+                OnDisk path ->
+                    if copying.range.end <= copying.range.start then
+                        still model
+
+                    else if copying.range.end - copying.range.start > copyWithoutAsking then
+                        { model = { model | copying = Just copying, message = "" }
+                        , command = Tui.dialog ports (copyDialog copying model)
                         }
-                    , command = Tui.copyToClipboard ports (render shape range codes)
-                    }
+
+                    else
+                        startCopyRead path copying model
+
+
+startCopyRead : Path -> Copying -> Model -> Step
+startCopyRead path copying model =
+    { model =
+        { model
+            | copying = Just copying
+            , message =
+                "Reading "
+                    ++ String.fromInt (copying.range.end - copying.range.start)
+                    ++ " bytes..."
+        }
+    , command = fetch (\it -> CopyBack it) model.permission path copying.range
+    }
+
+
+{-| The question, with the two numbers that make it a question: how much of the
+file, and how much text that turns into.
+
+The second is the one that matters and the one nobody has in their head. A
+range is bytes because a file is; what goes on the clipboard is three
+characters a byte as hex and rather more than four as a dump, and a person who
+has just marked four megabytes has not multiplied it by anything.
+-}
+copyDialog : Copying -> Model -> Tui.DialogSpec
+copyDialog copying model =
+    let
+        count =
+            copying.range.end - copying.range.start
+    in
+    Tui.messageBox
+        { id = copyDialogId
+        , title = "Copy"
+        , text =
+            "That is "
+                ++ String.fromInt count
+                ++ " bytes -- about "
+                ++ approximateSize (textSize copying.shape count)
+                ++ " of text.\nCopy it?"
+        , buttons = Tui.yesNoButtons
+        , desktop = model.desktop
+        }
+
+
+{-| How many characters [`render`](#render) will make of this many bytes.
+
+Both are exact but for the last row, which is not worth the arithmetic when the
+answer is about to be rounded to two significant figures anyway.
+-}
+textSize : Shape -> Int -> Int
+textSize shape count =
+    when shape is
+        -- Two digits and a space, less the one at the end that is not there.
+        AsHex ->
+            max 0 (count * 3 - 1)
+
+        -- A whole dump line is `lineWidth` characters and a newline, for
+        -- sixteen bytes.
+        AsDump ->
+            divideBy bytesPerRow (count + bytesPerRow - 1) * (lineWidth + 1)
+
+
+{-| Two significant figures and a unit, because the question being asked is
+"is that a lot?" and eleven digits do not answer it.
+-}
+approximateSize : Int -> String
+approximateSize count =
+    if count < 1024 then
+        String.fromInt count ++ " bytes"
+
+    else if count < 1048576 then
+        String.fromInt (divideBy 1024 count) ++ " KB"
+
+    else if count < 1073741824 then
+        String.fromInt (divideBy 1048576 count) ++ " MB"
+
+    else
+        String.fromInt (divideBy 1073741824 count) ++ " GB"
+
+
+{-| The answer to [`copyDialog`](#copyDialog). Anything but Yes drops the copy
+and leaves the mark alone.
+-}
+answerCopy : { id : String, cmd : String, values : Json.Decode.Value } -> Model -> Step
+answerCopy closed model =
+    when model.copying is
+        Nothing ->
+            still model
+
+        Just copying ->
+            if closed.cmd /= "yes" then
+                still { model | copying = Nothing }
+
+            else
+                when Maybe.map .from model.open is
+                    Just (OnDisk path) ->
+                        startCopyRead path copying model
+
+                    _ ->
+                        still { model | copying = Nothing }
 
 
 {-| What a yank would take: the mark, or failing that the highlight the cursor
@@ -1524,6 +2147,20 @@ puts them together.
 -}
 read : FileSystem.Permission -> Path -> Range -> Cmd Msg
 read permission path range =
+    fetch (\it -> ReadBack it) permission path range
+
+
+{-| The read itself, which two different things want for two different reasons
+-- the chunk the window is drawn from, and a copy too big to come out of it.
+
+They are one function and two messages rather than one of each, because what
+separates them is entirely what happens to the bytes afterwards: one lot
+becomes `model.chunk` and the other goes straight to the clipboard. Sharing the
+*message* would mean the copy's bytes replacing the window's, which is a bug
+that would look like the file scrolling on its own.
+-}
+fetch : ({ range : Range, bytes : Bytes } -> Msg) -> FileSystem.Permission -> Path -> Range -> Cmd Msg
+fetch answer permission path range =
     FileSystem.readFileStream permission (FileSystem.Between { start = range.start, end = range.end - 1 }) path
         |> Task.mapError FileSystem.errorToString
         |> Task.andThen
@@ -1536,7 +2173,7 @@ read permission path range =
             (\result ->
                 when result is
                     Ok bytes ->
-                        ReadBack { range = range, bytes = bytes }
+                        answer { range = range, bytes = bytes }
 
                     Err reason ->
                         Failed reason
@@ -1910,6 +2547,12 @@ menu =
             [ Item { title = "~O~pen file...", cmd = "hex.open", key = "", shortcut = "" }
             , Item { title = "~P~aste as text", cmd = "hex.pasteText", key = "", shortcut = "p" }
             , Item { title = "Paste he~x~ bytes", cmd = "hex.pasteHex", key = "", shortcut = "P" }
+            -- The one entry on this menu with no key beside it, and the only
+            -- one that does not want one. `p` and `P` are how a hex dump gets
+            -- looked at; pasting a dump *back* is something somebody does once
+            -- with a bug report, which is a thing to find on a menu rather
+            -- than a thing to have in the fingers.
+            , Item { title = "Paste a d~u~mp", cmd = "hex.pasteDump", key = "", shortcut = "" }
             , Separator
             , Item { title = "~G~o to offset...", cmd = "hex.goto", key = "", shortcut = "" }
             , Item { title = "~T~op of file", cmd = "hex.top", key = "", shortcut = "Ctrl-Home" }

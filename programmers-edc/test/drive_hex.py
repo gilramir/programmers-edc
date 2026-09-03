@@ -96,6 +96,21 @@ def copied(app, mark):
     return base64.b64decode(found[-1]).decode() if found else ""
 
 
+def forget_copies(app):
+    """Drop the big `OSC 52` payloads out of the replay buffer.
+
+    `Pty.display()` feeds the whole stream to a fresh emulator on every render,
+    deliberately -- "the buffers here are small and a stateful emulator that
+    could drift is not worth the debugging". A megabyte copied to the clipboard
+    is four megabytes of base64 on the wire, and every check after it replays
+    them: it took this suite from half a minute to nearly three.
+
+    None of it is screen output, so taking it back out changes nothing the
+    emulator would have drawn. Call it once the copy has been read.
+    """
+    app.buf = re.sub(rb"\x1b\]52;;[A-Za-z0-9+/=]{1024,}\x07", b"", app.buf)
+
+
 def paste(app, text, key=b"p", settle=1.1):
     """Press a paste key and answer the OSC 52 it sends.
 
@@ -104,6 +119,19 @@ def paste(app, text, key=b"p", settle=1.1):
     put anything it likes on it. Returns whether predc actually asked."""
     mark = len(app.buf)
     app.send(key, settle=0.7)
+    asked = b"\x1b]52;;?\x07" in app.buf[mark:]
+    app.send(b"\x1b]52;;" + base64.b64encode(text.encode()) + b"\x07", settle=settle)
+    return asked
+
+
+def paste_dump(app, text, settle=1.3):
+    """Paste a dump, which is a menu entry and not a key.
+
+    Reached by the letter it underlines, like everything else on this menu --
+    which is what stops these checks depending on where the entry sits.
+    """
+    mark = len(app.buf)
+    bytes_menu(app, b"u", settle=0.8)
     asked = b"\x1b]52;;?\x07" in app.buf[mark:]
     app.send(b"\x1b]52;;" + base64.b64encode(text.encode()) + b"\x07", settle=settle)
     return asked
@@ -205,6 +233,11 @@ def main():
         f.write(b"Hello, hex!")
     with open(os.path.join(work, "empty.bin"), "wb") as f:
         pass
+    # One byte over the point where a copy stops being taken for granted, so
+    # that the two sides of that line are one file apart rather than a
+    # judgement about how big is big.
+    with open(os.path.join(work, "big.bin"), "wb") as f:
+        f.write(bytes(i % 256 for i in range(1048577)))
 
     # A temporary HOME, so that this driver reads no config file but the one
     # it did not write. predc remembers its colour scheme in
@@ -692,14 +725,54 @@ def main():
           "Copied" in status(app) and "did not confirm" not in status(app),
           status(app))
 
-    #     And the one thing a viewer that never holds its file cannot do.
+    #     A mark bigger than the 16 KB chunk, which this used to refuse with
+    #     the size of the chunk in the message -- a sentence about predc's
+    #     insides rather than about the file. It reads the range for the
+    #     purpose now, so the whole forty kilobytes come back, and the check
+    #     is arithmetic: the fixture's byte at offset n is n % 256, so the
+    #     text is 40960 pairs beginning 00 01 02 and ending FF.
     app.send(b"V", settle=0.6)
     app.send(b"\x1b[1;5F", settle=1.2)              # Ctrl-End
-    app.send(b"y", settle=0.9)
-    check("a mark bigger than the chunk is refused, and says by how much",
-          "40960 bytes" in status(app) and "16384" in status(app), status(app))
+    mark = len(app.buf)
+    app.send(b"y", settle=2.5)
+    took = copied(app, mark)
+    check("a mark bigger than the chunk is read from the file and copied whole",
+          len(took) == SIZE * 3 - 1, f"{len(took)} chars, wanted {SIZE * 3 - 1}")
+    check("and it is the right bytes at both ends of it",
+          took.startswith("00 01 02 03") and took.endswith("FD FE FF"),
+          repr(took[:11] + " ... " + took[-11:]))
+    check("with no question asked, because forty kilobytes is not worth one",
+          "Copied 40960 bytes as hex" in status(app), status(app))
+    forget_copies(app)
+
+    #     Past a megabyte it asks, with the two numbers that make it a
+    #     question: the range in bytes, and what that turns into as text.
+    #     `big.bin` is one byte over the line on purpose.
+    open_file(app, "big.bin", settle=2.0)
+    app.send(b"V", settle=0.6)
+    app.send(b"\x1b[1;5F", settle=1.5)              # Ctrl-End
+    app.send(b"y", settle=1.2)
+    screen = app.render()
+    check("a copy past a megabyte asks first", "Copy it?" in screen, screen)
+    check("and the question carries the size of the range",
+          "1048577 bytes" in screen, screen)
+    check("and what it becomes as text, which is the number nobody has in "
+          "their head", "3 MB of text" in screen, screen)
+
+    #     No is not a refusal: the mark is still out, so the answer to "that
+    #     is more than I meant" is to shrink it rather than to make it again.
+    mark = len(app.buf)
+    app.send(b"\x1bn", settle=1.2)
+    check("No copies nothing", copied(app, mark) == "", repr(copied(app, mark)))
+    check("and leaves the mark where it was",
+          "MARK" in status(app), status(app))
+
+    app.send(b"y", settle=1.2)
+    app.send(b"\x1by", settle=6.0)
+    check("Yes copies the whole megabyte",
+          "Copied 1048577 bytes as hex" in status(app), status(app))
+    forget_copies(app)
     app.send(b"\x1b", settle=0.5)
-    bytes_menu(app, b"hc", settle=1.0)
 
     # 15. Pasting, which is the other half of the clipboard and the second way
     #     of getting something to look at. The driver has claimed OSC 52
@@ -746,6 +819,98 @@ def main():
     paste(app, "abc", key=b"P")
     check("an odd number of digits is refused too, with the count",
           "3 hex digits" in status(app), status(app))
+
+    # 15b. Which is what the third command is for. A dump carries its own
+    #      offsets, and the gap between two of them is exactly how many bytes
+    #      the first one held -- so nothing has to guess where the hex column
+    #      stops and the printable one starts. These are the four formats
+    #      somebody actually has on their clipboard.
+    check("Paste a dump asks the clipboard too",
+          paste_dump(app, "00000000: 4865 6c6c 6f2c 2068 6578 2120 4865 6c6c  Hello, hex! Hell\n"
+                          "00000010: 6f2c 2068 6578 210a                      o, hex!.\n"))
+    check("an xxd dump is read as the bytes it shows",
+          rows(app)[0].startswith("00000000  48 65 6C 6C 6F 2C 20 68  65 78 21 20 48 65 6C 6C"),
+          rows(app)[0])
+    check("and the title says which of the three pastes made it",
+          "pasted dump" in line_at(app, 1) and "(24 bytes)" in line_at(app, 1),
+          line_at(app, 1))
+    check("and the offsets it had are said once, since the buffer starts at 0",
+          "00000000-00000017" in status(app), status(app))
+
+    paste_dump(app, "00000000  48 65 6c 6c 6f 2c 20 68  65 78 21 20 48 65 6c 6c  |Hello, hex! Hell|\n"
+                    "00000010  6f 2c 20 68 65 78 21 0a                           |o, hex!.|\n"
+                    "00000018\n")
+    check("hexdump -C is read too, fences and trailing offset and all",
+          "(24 bytes)" in line_at(app, 1) and
+          rows(app)[1].startswith("00000010  6F 2C 20 68 65 78 21 0A"),
+          line_at(app, 1) + " / " + rows(app)[1])
+
+    paste_dump(app, "000000 48 65 6c 6c 6f 2c 20 68 65 78 21 20 62 65 65 66  >Hello, hex! beef<\n"
+                    "000010 6f 2c 20 62 65 65 66 0a  >o, beef.<\n")
+    check("od -A x -t x1z too, whose last line is not padded at all",
+          "(24 bytes)" in line_at(app, 1), line_at(app, 1))
+
+    #      Which is the check that matters, because `beef` is a word and a
+    #      number both, and it is sitting in the printable column of the line
+    #      above. A rule about two spaces, or about what looks like hex, reads
+    #      it as data; the offsets do not.
+    check("and the beef in its printable column is not read as four bytes -- "
+          "which would have made it twenty-eight",
+          rows(app)[1].startswith("00000010  6F 2C 20 62 65 65 66 0A") and
+          rows(app)[1][10:58].strip().endswith("0A"),
+          rows(app)[1])
+
+    #      A `*` is `hexdump`'s way of writing "and so on", and the offsets on
+    #      either side of it say exactly how many rows it stands for -- so it
+    #      is expanded rather than refused. Sixteen bytes, thirty-two more the
+    #      star stands for, sixteen, four: sixty-eight.
+    paste_dump(app, "00000000  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  ................\n"
+                    "*\n"
+                    "00000030  01 02 03 04 05 06 07 08  09 0a 0b 0c 0d 0e 0f 10  ................\n"
+                    "00000040  11 12 13 14                                       ....\n")
+    check("a * is expanded, because the offsets say how many rows it is",
+          "(68 bytes)" in line_at(app, 1), line_at(app, 1))
+    check("and what it stood for is the row above it, written out again",
+          rows(app)[1].startswith("00000010  00 00 00 00"), rows(app)[1])
+
+    #      And the four refusals, which are the same discipline as `P`'s: a
+    #      buffer that is wrong in a way nobody can see is the one thing this
+    #      must never produce.
+    paste_dump(app, "00000000  62 65 65 66                                       beef\n")
+    check("one line of a dump is refused, because one offset is not two",
+          "One line is not enough" in status(app), status(app))
+
+    paste_dump(app, "00000000  48 65 6c 6c 6f 2c 20 68  65 78 21 20 48 65 6c 6c  Hello, hex! Hell\n"
+                    "00000030  6f 2c 20 68 65 78 21 0a                           o, hex!.\n")
+    check("a dump with a hole in it is refused, and says where the hole is",
+          "skips from 00000010 to 00000030" in status(app), status(app))
+
+    paste_dump(app, "00000000  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  ................\n"
+                    "*\n00001000\n")
+    check("a dump that is nothing but a * says what it cannot know",
+          "how wide a row is" in status(app), status(app))
+
+    paste_dump(app, "48 65 6c 6c 6f\n2c 20 68 65 78\n")
+    check("and bare hex is refused by the command that wants offsets, which "
+          "is the other half of P refusing a dump",
+          "not a dump" in status(app), status(app))
+
+    #      The round trip, which is the check the other twelve are for: what
+    #      Copy as a dump puts on the clipboard is what Paste a dump reads
+    #      back. Three rows of the sample file, whose byte at offset n is
+    #      n % 256, out and in again.
+    open_file(app, "sample.bin", settle=1.8)
+    app.send(b"V", settle=0.5)
+    app.send(b"\x1b[B" * 2, settle=0.7)
+    mark = len(app.buf)
+    bytes_menu(app, b"d", settle=1.2)
+    ours = copied(app, mark)
+    check("Copy as a dump gave three whole rows", ours.count("\n") == 2, repr(ours))
+    paste_dump(app, ours)
+    check("and predc reads its own dump back, which is the round trip",
+          "(48 bytes)" in line_at(app, 1) and
+          rows(app)[2].startswith("00000020  20 21 22 23"),
+          line_at(app, 1) + " / " + rows(app)[2])
 
     paste(app, "")
     check("and an empty clipboard says that instead of showing nothing",

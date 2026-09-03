@@ -194,6 +194,55 @@ the hex and dropping the rest -- so a whole `xxd` dump, offsets and printable
 column included, is refused with the character that stopped it rather than read
 as data in three places at once.
 
+### Pasting a dump back in
+
+**Bytes | Paste a dump** is the third of them, and it is the one that takes
+what `P` refuses: `xxd`, `xxd -g1`, `hexdump -C`, `od -A x -t x1z`, and what
+**Copy as a dump** above puts on the clipboard. A dump out of a bug report goes
+straight back to being bytes.
+
+It is the only entry on that menu with no key beside it, deliberately. `p` and
+`P` are how this thing gets something to look at; pasting a dump back is
+something done once, with a bug report, which is a thing to find on a menu
+rather than to have in the fingers.
+
+**A dump says how wide it is, and it says it in the offset column.** The gap
+between one line's offset and the next is exactly how many bytes that line
+carried, so nothing has to work out where the hex stops and the printable
+column starts -- take that many pairs and stop. Which is the whole difficulty,
+because this is a real line of a real dump:
+
+    00000000  62 65 65 66 62 65 65 66  62 65 65 66 62 65 65 66  beefbeefbeefbeef
+
+and every rule that reads it by looking at it reads twenty-four bytes off a row
+of sixteen. A rule about two spaces does no better -- the dumps above put a
+double space in the middle of the hex field.
+
+Two things follow, and both are the price of not guessing:
+
+  - **A dump of one line is refused.** One offset is not two, so there is
+    nothing to subtract -- and one line is exactly the case where a printable
+    column cannot be told from more hex.
+  - **A short last line is read only as far as the full lines' hex reached**,
+    or as far as its own hex runs, whichever stops first. The first of those is
+    what `xxd` and `hexdump` pad for; the second is for `od`, which does not
+    pad but fences its printable column in `>` and `<`.
+
+A `*` is read rather than refused. `hexdump` writes one for a run of identical
+rows, and the offsets either side of it say exactly how many rows it stands
+for, so expanding it is reading the format and not guessing at it -- any dump
+of a file with a zeroed region has one. A dump that is *nothing but* a `*` says
+so instead, because then nothing is left that says how wide a row was.
+
+The bytes start at zero whatever the dump's own offsets were, and the message
+line says what they were:
+
+    Read 256 bytes, from a dump of 00001000-000010FF.
+
+Anything that is not one of these -- a hole between two offsets, offsets of
+different widths, bare hex with no offsets at all -- is refused and named,
+which is the same discipline as `P`'s and for the same reason.
+
 ## Copying
 
 `y` copies what is marked as hex -- `00 01 02 03` -- and **Bytes | Copy as a
@@ -201,8 +250,23 @@ dump** copies the same range as the rows on the screen, offsets and printable
 column included. With nothing marked, both take the highlight the cursor is
 sitting in, which is the other reason to paint one.
 
-The viewer holds 16 KB of the file at a time, so a mark dragged across more of
-it than that is refused with the number rather than copied with a hole in it.
+The viewer holds 16 KB of the file at a time, and a mark can be the whole file
+-- `v`, `Ctrl-End` -- so a copy larger than that is read from the file for the
+purpose. There is no ceiling on it. What there is, past a megabyte, is a
+question:
+
+    That is 4201984 bytes -- about 17 MB of text.
+    Copy it?
+
+Two numbers because they are two different sizes, and the second is the one
+nobody has in their head: a byte is three characters as hex and rather more
+than four as a dump. Under the megabyte nothing is asked, which is why the
+number does not have to be defensible the way a refusal's would -- being asked
+costs one keypress, so it can be wrong either way and nobody is stopped from
+doing anything.
+
+**No is not a refusal**: the mark is still out afterwards, so the answer to
+"that is more than I meant" is to shrink it rather than to make it again.
 
 ### When the copy does not reach the rest of the machine
 

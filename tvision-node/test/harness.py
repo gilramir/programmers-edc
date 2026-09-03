@@ -52,6 +52,8 @@ class Pty:
             os._exit(127)
         fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
         self.buf = b""
+        # The last replay, and what it was a replay of. See `display`.
+        self.replayed = None
 
     def resize(self, cols, rows, settle=1.5):
         """Resize the terminal, the way dragging a window's corner does.
@@ -92,7 +94,25 @@ class Pty:
 
         Replay the whole stream every time: the buffers here are small and a
         stateful emulator that could drift is not worth the debugging.
+
+        Every time, but not more than once per stream. A replay is a pure
+        function of the bytes and the size, so a second call with neither of
+        them changed can only produce what the first one did -- and a check
+        that reads the screen twice, once for the condition and once for the
+        message to print if it fails, is the commonest shape in every driver
+        here. Keeping the last one is not a stateful emulator: nothing carries
+        over between two different buffers, and the moment a byte arrives the
+        whole replay happens again from the beginning.
         """
+        # The bytes themselves and not their length. A driver may take bytes
+        # back *out* of the buffer -- `drive_hex.py` drops the megabyte-long
+        # `OSC 52` payloads it has already read -- so two different streams can
+        # be the same length, and a key that could not tell them apart would
+        # hand back the wrong screen once in a very long while. Hashing a few
+        # megabytes is a millisecond; replaying them is most of a second.
+        key = (hash(self.buf), len(self.buf), self.cols, self.rows, self.widest, self.tallest)
+        if self.replayed is not None and self.replayed[0] == key:
+            return self.replayed[1]
         screen = Screen(cols=self.widest, rows=self.tallest).feed(
             self.buf.decode("utf-8", "replace")
         )
@@ -100,7 +120,9 @@ class Pty:
         # that later *shrank* still holds what it drew when it was bigger.
         # A real one would have thrown those cells away, and TVision only
         # repaints inside the current size, so crop to it.
-        return screen.crop(self.cols, self.rows)
+        cropped = screen.crop(self.cols, self.rows)
+        self.replayed = (key, cropped)
+        return cropped
 
     def render(self):
         """What the screen looks like *now*. Good for "what does X say"."""
