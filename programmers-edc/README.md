@@ -52,6 +52,8 @@ Or do that command at time T, or after T seconds.
 Decodes bytes (or, string representation of hex bytes)
 as utf-8 or utf-16
 
+**Done** -- see "Reading bytes as Unicode" below.
+
 
 ## Calender view
 
@@ -87,6 +89,7 @@ Two things about it are temporary, and both are temporary for the same reason
     predc ascii           ... with the ASCII chart open
     predc calc            ... with the RPN calculator open
     predc time            ... with the time zone converter open, at this moment
+    predc unicode         ... with the Unicode decoder open
     predc hex [FILE]      ... with the hex viewer open, on FILE if you name one
     predc --help          what the commands are
     predc --version
@@ -455,6 +458,72 @@ existed for.
 Every reply carries the whole window rather than one row. One request per
 keystroke instead of one per zone, and no moment where the table is half
 updated because three answers arrived and two have not.
+
+## Reading bytes as Unicode
+
+**Tools | Unicode decoder** (`Alt-U`) is the only tool here with no place on
+the status line, because at eighty columns there is no room for a sixth entry
+and a status line that will not fit is a status line that quietly stops
+mentioning how to close a window. Its `Alt-U` is on its menu entry instead,
+which works from anywhere for the same reason `Alt-F3` does: a menu bar is
+offered every key before the window under it gets one.
+
+Paste bytes into it -- `p` for text, `P` for hex digits, the hex viewer's two
+commands -- and it shows one character to a row: where it starts, the bytes it
+was made of, its code point, the character itself, and a word about what it is.
+`8` reads them as UTF-8, `l` and `b` as UTF-16 in either order, and `y` puts
+the code points on the clipboard as `U+0048 U+00E9 U+1F600`, which is the one
+thing here that nothing else on the machine will give you.
+
+Nothing is guessed. UTF-16 is two commands rather than one that looks at the
+first two bytes, because a byte order mark is a choice somebody made and not a
+fact about the bytes -- half the UTF-16 in the world has none. A `FF FE` that
+turns up is named as what it is.
+
+### The point of it is the rows that are wrong
+
+    00000000  48            U+0048   H    ASCII
+    00000001  C3 A9         U+00E9   é    Latin-1 supplement
+    00000003  C0 80         --            overlong: 2 bytes for U+0000
+    00000005  ED A0 80      --            U+D800 is a surrogate, not UTF-8
+    00000008  F0 9F 98 80   U+1F600  😀    plane 1, outside the BMP
+    0000000C  E2 82         --            E2 starts 3 bytes and only 2 are left
+
+Every decoder on the machine will read those bytes for you. Almost none will
+tell you that `C0 80` is an overlong encoding of `U+0000` rather than a null --
+the oldest way there is past a filter looking for a literal zero byte -- or
+that `ED A0 80` is a surrogate, which is how a half-converted UTF-16 string
+gives itself away, or *which* of two bytes was the one that ran out.
+`TextDecoder`, in node and in every browser, answers all of those with `U+FFFD`
+and moves on. That is right for a program and useless for a person trying to
+find out why a file will not load.
+
+So the decoders are written out by hand in `src/Tool/Unicode.gren`, and what
+they hand back is either a code point or a sentence. The line under the rows
+counts both: `19 characters, 3 of them broken` is an answer, where `19
+characters` is arithmetic.
+
+Two Gren bugs are relevant and both are worked around rather than waited on.
+`String.Parser.Advanced` hands its predicate the leading surrogate of a non-BMP
+character instead of the character ([core#138][138]), so there is no parser in
+here -- the decoders walk an `Array Int`. And the literal `\u{FFFF}` compiles
+to two code units ([compiler#384][384]); only that one code point is affected,
+`U+FFFD` is fine, and there is no such literal in the file.
+
+[138]: https://github.com/gren-lang/core/issues/138
+[384]: https://github.com/gren-lang/compiler/issues/384
+
+### What it made the test harness learn
+
+`harness.py`'s little terminal emulator advanced exactly one column per
+character, which was fine for fifteen examples of boxes and ASCII and is wrong
+the moment a decoder shows you `한`. It counts East Asian Wide and Fullwidth as
+two columns now, and **Ambiguous as one** -- which is not a detail, because
+`é`, `│`, `·` and `▲` are all Ambiguous and every box Turbo Vision draws is
+made of them.
+
+That was also the thing standing in front of testing anything translated, so
+i18n is one step less expensive than it was.
 
 ## Colors
 

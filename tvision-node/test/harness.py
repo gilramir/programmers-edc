@@ -22,6 +22,7 @@ import struct
 import sys
 import termios
 import time
+import unicodedata
 
 COLS, ROWS = 80, 25
 
@@ -255,6 +256,29 @@ class Checks:
         return 0
 
 
+def cell_width(ch):
+    """How many columns a character takes on the screen.
+
+    Two for East Asian Wide and Fullwidth -- CJK, and the emoji, which Unicode
+    classifies `W`. **One for Ambiguous**, which is not a detail: `é`, `│`, `·`
+    and `▲` are all `A`, and every box a Turbo Vision program draws is made of
+    them. A terminal only widens those if it is told to, and TVision assumes it
+    was not.
+
+    Zero for a combining mark, which is why this returns a number rather than a
+    boolean.
+
+    It exists because a decoder that shows you the character it decoded is a
+    decoder whose output is half CJK and emoji, and an emulator that counted
+    every character as one column would report a screen that slid left by one
+    for each of them. This is also what stood in front of testing anything
+    translated -- see `programmers-edc/README.md` on i18n.
+    """
+    if unicodedata.combining(ch):
+        return 0
+    return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+
+
 def latest_int(text, pattern):
     """Highest number matched by `pattern` anywhere in the output so far."""
     found = [int(m) for m in re.findall(pattern, text)]
@@ -318,9 +342,30 @@ class Screen:
     def _put(self, ch):
         if self.col >= self.cols:
             self.col = self.cols - 1
+        width = cell_width(ch)
+
+        if width == 0:
+            # A combining mark belongs to the character before it and takes no
+            # column of its own. Written into the same cell, so that cell holds
+            # two code points -- which is what it is.
+            back = max(0, self.col - 1)
+            self.grid[self.row][back] += ch
+            return
+
         self.grid[self.row][self.col] = ch
         self.attrs[self.row][self.col] = (self.fg, self.bg)
         self.col += 1
+
+        if width == 2 and self.col < self.cols:
+            # The right half. A wide character is one code point standing in
+            # two columns, so the cell beside it is filled with a space rather
+            # than left as whatever was there -- which keeps a row's string
+            # index and its column the same number, the thing every driver in
+            # this repo counts on.
+            self.grid[self.row][self.col] = " "
+            self.attrs[self.row][self.col] = (self.fg, self.bg)
+            self.col += 1
+
         if self.col >= self.cols:
             self.col = self.cols - 1
 

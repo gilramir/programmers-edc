@@ -33,6 +33,7 @@ type Command
     = Ascii
     | Calc
     | Time
+    | Unicode
     -- `Nothing` is `predc hex`, which opens the viewer with no file in it --
     -- the same window the Tools menu opens, and a Ctrl-O away from a file.
     | Hex (Maybe Path)
@@ -83,6 +84,15 @@ parser =
                 , summary = "The `time` command opens the time zone converter, at the current moment:"
                 , example = PP.words "predc time"
                 , builder = \_args _flags -> Time
+                }
+            |> Parser.withCommand
+                { word = "unicode"
+                , arguments = Parser.noArgs
+                , flags = Parser.noFlags
+                , commonDescription = Just "Open the Unicode decoder."
+                , summary = "The `unicode` command opens the Unicode decoder, with nothing in it:"
+                , example = PP.words "predc unicode"
+                , builder = \_args _flags -> Unicode
                 }
             |> Parser.withCommand
                 { word = "hex"

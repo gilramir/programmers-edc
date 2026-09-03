@@ -44,6 +44,7 @@ import Tool.Ascii
 import Tool.Calc
 import Tool.Hex
 import Tool.Time
+import Tool.Unicode
 import Tui exposing (Event(..), MenuItem(..), View(..))
 
 
@@ -121,6 +122,7 @@ type alias Model =
     , calc : Maybe Tool.Calc.Model
     , hex : Maybe Tool.Hex.Model
     , time : Maybe Tool.Time.Model
+    , unicode : Maybe Tool.Unicode.Model
     -- Which colour scheme, and where to write it down. The theme is a shell
     -- concern in the same way the menu bar is: it belongs to the program
     -- rather than to any tool, and every tool has to be told.
@@ -197,6 +199,7 @@ init env =
                     , calc = Nothing
                     , hex = Nothing
                     , time = Nothing
+                    , unicode = Nothing
                     , theme = config.theme
                     , timezones = config.timezones
                     , here =
@@ -275,6 +278,12 @@ open command shell =
             Node.startProgram
                 { model = Tui.Start { shell | time = Just step.model }
                 , command = Cmd.map FromTime step.command
+                }
+
+        Cli.Unicode ->
+            Node.startProgram
+                { model = Tui.Start { shell | unicode = Just Tool.Unicode.init }
+                , command = Cmd.none
                 }
 
         Cli.Hex Nothing ->
@@ -472,6 +481,18 @@ handleEvent event model =
                         , command = Tui.focus tui Tool.Time.windowId
                         }
 
+            else if cmd == Tool.Unicode.command then
+                when model.unicode is
+                    Nothing ->
+                        { model = { model | unicode = Just Tool.Unicode.init }
+                        , command = Cmd.none
+                        }
+
+                    Just _ ->
+                        { model = model
+                        , command = Tui.focus tui Tool.Unicode.windowId
+                        }
+
             else
                 -- Every other command belongs to a tool: its menu's, or one of
                 -- its buttons'. The shell does not know which, and does not
@@ -496,6 +517,9 @@ handleEvent event model =
 
             else if id == Tool.Time.windowId then
                 { model = { model | time = Nothing }, command = Cmd.none }
+
+            else if id == Tool.Unicode.windowId then
+                { model = { model | unicode = Nothing }, command = Cmd.none }
 
             else
                 -- The zone picker is a window of the converter's rather than
@@ -561,12 +585,20 @@ toTools event model =
         time =
             Maybe.map (Tool.Time.update timeWiring event) model.time
 
+        -- No `Cmd.map`, and no port record of its own. The decoder starts no
+        -- tasks, so every command it can produce is an outbound port send that
+        -- never answers -- which makes its `update` polymorphic in the message
+        -- type and lets it take the shell's own ports unchanged.
+        unicode =
+            Maybe.map (Tool.Unicode.update tui event) model.unicode
+
         moved =
             { model
                 | ascii = Maybe.map (Tool.Ascii.update event) model.ascii
                 , calc = Maybe.map (Tool.Calc.update event) model.calc
                 , hex = Maybe.map .model hex
                 , time = Maybe.map .model time
+                , unicode = Maybe.map .model unicode
             }
 
         -- What the converter is displaying *is* what the config file should
@@ -604,6 +636,12 @@ toTools event model =
             , when time is
                 Just step ->
                     Cmd.map FromTime step.command
+
+                Nothing ->
+                    Cmd.none
+            , when unicode is
+                Just step ->
+                    step.command
 
                 Nothing ->
                     Cmd.none
@@ -694,6 +732,13 @@ view model =
                     Nothing ->
                         []
                )
+            ++ (when model.unicode is
+                    Just unicode ->
+                        [ Tool.Unicode.view (Theme.inks model.theme) unicode ]
+
+                    Nothing ->
+                        []
+               )
     , overlays = []
     }
 
@@ -723,6 +768,7 @@ menuBar model =
             , Tool.Calc.menuItem
             , Tool.Hex.menuItem
             , Tool.Time.menuItem
+            , Tool.Unicode.menuItem
             , Tui.Separator
             , SubMenu
                 { title = "~C~olors"
@@ -791,6 +837,13 @@ toolMenus model =
         ++ (when model.hex is
                 Just _ ->
                     [ Tool.Hex.menu ]
+
+                Nothing ->
+                    []
+           )
+        ++ (when model.unicode is
+                Just _ ->
+                    [ Tool.Unicode.menu ]
 
                 Nothing ->
                     []

@@ -1,0 +1,1243 @@
+module Tool.Unicode exposing (Model, command, init, menu, menuItem, update, view, windowId)
+
+{-| What a run of bytes says in UTF-8 or UTF-16, one character to a row, with
+the bytes it was made of beside it.
+
+**The point of it is the things that are wrong.** Every decoder on the machine
+will read `C0 80` for you; almost none of them will say that it is an overlong
+encoding of `U+0000` rather than a null, or that `ED A0 80` is a surrogate
+that has no business being in UTF-8 at all, or which of two bytes was the one
+that ran out. `TextDecoder` in the browser and in node answers all of those
+with `U+FFFD` and moves on, which is right for a program and useless for a
+person trying to find out why a file will not load. So the decoders here are
+written out by hand, and what they hand back is either a code point or a
+sentence.
+
+They are also written against `Array Int` rather than against a `String`,
+which is not only because the input is bytes. `String.Parser.Advanced` hands
+its predicate the *leading surrogate* of a non-BMP character instead of the
+character ([gren-lang/core#138][138]), so a parser written the obvious way is
+wrong about exactly the characters this tool exists to show. The other one to
+know about is [gren-lang/compiler#384][384]: the literal `\u{FFFF}` compiles to
+two units. Only that one code point is affected -- `U+FFFD`, which a decoder
+does want, is fine -- but there is no `\u{FFFF}` anywhere in here, and that is
+deliberate rather than lucky.
+
+[138]: https://github.com/gren-lang/core/issues/138
+[384]: https://github.com/gren-lang/compiler/issues/384
+
+**Its input is a paste and never a file.** Deciding what a run of bytes says is
+a question about a snippet -- the three bytes in the middle of a hex dump that
+are not rendering -- and the tool for a whole file is the hex viewer, one menu
+away, which already has the file dialog and the chunked reading. Duplicating
+those here would have been the largest half of this module and would have
+bought a case nobody described.
+
+-}
+
+import Array exposing (Array)
+import Array.Builder as Builder
+import Ascii
+import Bytes
+import Bytes.Decode as Decode
+import Char
+import Math
+import String
+import Theme exposing (Inks)
+import Tui exposing (Hue(..), MenuItem(..), Span, View(..))
+
+
+-- NAMES
+
+
+command : String
+command =
+    "tool.unicode"
+
+
+windowId : String
+windowId =
+    "unicode"
+
+
+canvasId : String
+canvasId =
+    "unicode.rows"
+
+
+scrollId : String
+scrollId =
+    "unicode.scroll"
+
+
+menuItem : MenuItem
+menuItem =
+    Item { title = "~U~nicode decoder", cmd = command, key = "Alt-U", shortcut = "Alt-U" }
+
+
+-- SHAPE
+
+
+{-| How many rows the window shows when it opens. Like the hex viewer's, this
+is a starting height and not a maximum: the canvas is wrapped in `Grows`, so
+dragging the frame taller shows more, and `rows` is what the model is told
+about that.
+-}
+openRows : Int
+openRows =
+    14
+
+
+{-| Where the columns start, in the canvas's own coordinates. Each is used
+twice -- once to draw the header and once to draw a row -- which is why they
+are named rather than written into both.
+
+    00000003  F0 9F 98 80  U+1F600   😀   not in the basic plane
+
+-}
+offsetAt : Int
+offsetAt =
+    0
+
+
+bytesAt : Int
+bytesAt =
+    10
+
+
+pointAt : Int
+pointAt =
+    24
+
+
+charAt : Int
+charAt =
+    33
+
+
+noteAt : Int
+noteAt =
+    38
+
+
+lineWidth : Int
+lineWidth =
+    76
+
+
+-- MODEL
+
+
+type alias Model =
+    { bytes : Array Int
+    -- What the last paste was, for the title. Empty until something has been
+    -- pasted, which is also what `bytes` being empty means -- but a name is
+    -- what the window says and a length is not.
+    , name : String
+    , encoding : Encoding
+    -- The first decoded row on screen, and how many rows the window is
+    -- showing. Rows and not bytes: what scrolls here is the list of
+    -- characters, whose lengths vary, so a byte offset would not name a row.
+    , top : Int
+    , rows : Int
+    , cursor : Int
+    -- A paste asked for and not yet answered, and how to read the answer.
+    -- Every open tool is handed every event, so without this a paste in the
+    -- hex viewer would land here as well.
+    , awaiting : Maybe Reading
+    , copied : Bool
+    , message : String
+    }
+
+
+{-| The three ways of reading the same bytes.
+
+UTF-16 is two entries rather than one because a byte order mark is a *choice
+somebody made*, not a fact about the bytes: half the UTF-16 in the world has
+none, and guessing from the first two bytes is the sniffing this program does
+not do anywhere else either. `FF FE` is shown as what it is when it turns up,
+which is the honest half of the same thing.
+-}
+type Encoding
+    = Utf8
+    | Utf16LE
+    | Utf16BE
+
+
+type Reading
+    = Characters
+    | HexDigits
+
+
+{-| One row: the bytes it covers, and what they turned out to be.
+-}
+type alias Piece =
+    { offset : Int, size : Int, meaning : Meaning }
+
+
+{-| A code point, or the reason there is not one.
+
+The whole design of this module is in this union being two cases rather than
+one code point with `U+FFFD` standing for the bad news. A replacement character
+is what a decoder produces when it has given up on telling you anything, and
+telling you is the job.
+-}
+type Meaning
+    = Point Int
+    | Broken String
+
+
+init : Model
+init =
+    { bytes = []
+    , name = ""
+    , encoding = Utf8
+    , top = 0
+    , rows = openRows
+    , cursor = 0
+    , awaiting = Nothing
+    , copied = False
+    , message = ""
+    }
+
+
+type alias Step msg =
+    { model : Model, command : Cmd msg }
+
+
+still : Model -> Step msg
+still model =
+    { model = model, command = Cmd.none }
+
+
+-- UPDATE
+
+
+{-| The shell hands over every event it was given; a tool answers for its own
+ids and ignores the rest.
+
+`ports` is polymorphic in the message type, and that is worth a sentence: this
+tool starts no tasks of its own, so every `Cmd` it produces is an outbound port
+send that never answers. The shell can therefore hand it the shell's own port
+record with no mapping on either side -- unlike the hex viewer, whose file
+reads come back as messages and which needs a port pair at its own `Msg`.
+-}
+update : Tui.Ports msg -> Tui.Event -> Model -> Step msg
+update ports event model =
+    when event is
+        Tui.WindowResized it ->
+            if it.id == windowId then
+                scrollTo model.top { model | rows = rowsIn (it.rect.y2 - it.rect.y1) }
+
+            else
+                still model
+
+        Tui.KeyPressed pressed ->
+            if pressed.id == canvasId then
+                pressKey ports pressed.key model
+
+            else
+                still model
+
+        Tui.Clicked spot ->
+            if spot.id == canvasId then
+                still { model | cursor = min (Array.length (pieces model) - 1) (model.top + spot.y) }
+
+            else
+                still model
+
+        Tui.Scrolled bar ->
+            if bar.id == scrollId then
+                scrollTo bar.value model
+
+            else
+                still model
+
+        -- Same guard as the hex viewer's, and it earns itself the same way:
+        -- `awaiting` is what says this tool asked, and it carries what to do
+        -- with the answer, which nothing in the event says.
+        Tui.ClipboardText it ->
+            when model.awaiting is
+                Just reading ->
+                    paste reading it.text { model | awaiting = Nothing }
+
+                Nothing ->
+                    still model
+
+        Tui.Copied it ->
+            if model.copied then
+                still
+                    { model
+                        | copied = False
+                        , message =
+                            "Copied "
+                                ++ String.fromInt (Array.length (pieces model))
+                                ++ " code points"
+                                ++ (if it.toSystem then
+                                        "."
+
+                                    else
+                                        " -- the terminal did not confirm it."
+                                   )
+                    }
+
+            else
+                still model
+
+        Tui.Command "unicode.pasteText" ->
+            askClipboard ports Characters model
+
+        Tui.Command "unicode.pasteHex" ->
+            askClipboard ports HexDigits model
+
+        Tui.Command "unicode.utf8" ->
+            readAs Utf8 model
+
+        Tui.Command "unicode.utf16le" ->
+            readAs Utf16LE model
+
+        Tui.Command "unicode.utf16be" ->
+            readAs Utf16BE model
+
+        Tui.Command "unicode.copy" ->
+            copyPoints ports model
+
+        _ ->
+            still model
+
+
+pressKey : Tui.Ports msg -> String -> Model -> Step msg
+pressKey ports key model =
+    when key is
+        "p" ->
+            askClipboard ports Characters model
+
+        "P" ->
+            askClipboard ports HexDigits model
+
+        "8" ->
+            readAs Utf8 model
+
+        "l" ->
+            readAs Utf16LE model
+
+        "b" ->
+            readAs Utf16BE model
+
+        "y" ->
+            copyPoints ports model
+
+        "Up" ->
+            moveTo (model.cursor - 1) model
+
+        "Down" ->
+            moveTo (model.cursor + 1) model
+
+        "PgUp" ->
+            moveTo (model.cursor - model.rows) model
+
+        "PgDn" ->
+            moveTo (model.cursor + model.rows) model
+
+        "Ctrl-Home" ->
+            moveTo 0 model
+
+        "Ctrl-End" ->
+            moveTo (Array.length (pieces model) - 1) model
+
+        _ ->
+            still model
+
+
+{-| Change the reading, keeping the bytes.
+
+The cursor goes back to the top because it counts *rows*, and a row is a
+character: the same bytes read the other way are a different number of
+characters, so the row somebody was looking at does not survive the change and
+pretending it does would leave the caret on an unrelated line.
+-}
+readAs : Encoding -> Model -> Step msg
+readAs encoding model =
+    still { model | encoding = encoding, top = 0, cursor = 0, message = "" }
+
+
+askClipboard : Tui.Ports msg -> Reading -> Model -> Step msg
+askClipboard ports reading model =
+    { model = { model | awaiting = Just reading, message = "Asking for the clipboard..." }
+    , command = Tui.readClipboard ports
+    }
+
+
+paste : Reading -> String -> Model -> Step msg
+paste reading text model =
+    if text == "" then
+        still { model | message = "There is nothing on the clipboard." }
+
+    else
+        when reading is
+            Characters ->
+                -- The bytes the string is *made of*, which node hands over as
+                -- UTF-8 whatever the clipboard's own encoding was. Reading
+                -- those back as UTF-16 is a perfectly reasonable thing to want
+                -- to look at, and is why this is a paste rather than a
+                -- shortcut to `Utf8`.
+                shown (toByteArray (Bytes.fromString text)) "pasted text" model
+
+            HexDigits ->
+                when hexBytes text is
+                    Err reason ->
+                        still { model | message = reason }
+
+                    Ok codes ->
+                        if Array.isEmpty codes then
+                            still { model | message = "There are no hex digits on the clipboard." }
+
+                        else
+                            shown codes "pasted hex" model
+
+
+shown : Array Int -> String -> Model -> Step msg
+shown codes name model =
+    still
+        { model
+            | bytes = codes
+            , name = name
+            , top = 0
+            , cursor = 0
+            , copied = False
+            , message = ""
+        }
+
+
+{-| Hex digits with whatever the thing that produced them used between the
+pairs, which is the hex viewer's rule and the same function's job here.
+
+It is deliberately a copy rather than a shared module. The two tools agree
+today by coincidence rather than by design -- this one has no printable column
+to be careful about, and the viewer's version has a message that names its own
+third command -- and a shared helper would have to grow an argument the first
+time either of them wanted a different sentence.
+-}
+hexBytes : String -> Result String (Array Int)
+hexBytes text =
+    let
+        stripped =
+            text
+                |> String.replace "0x" ""
+                |> String.replace "0X" ""
+
+        strays =
+            String.keepIf
+                (\char -> not (Char.isHexDigit char || isSeparator char))
+                stripped
+
+        digits =
+            String.keepIf Char.isHexDigit stripped
+    in
+    when String.popFirst strays is
+        Just stray ->
+            Err
+                ("That is not hex: '"
+                    ++ String.fromChar stray.first
+                    ++ "' is not a hex digit."
+                )
+
+        Nothing ->
+            if Math.modBy 2 (String.count digits) /= 0 then
+                Err
+                    ("That is "
+                        ++ String.fromInt (String.count digits)
+                        ++ " hex digits, and a byte takes two."
+                    )
+
+            else
+                Ok
+                    (Array.mapAndKeepJust
+                        (\index -> fromHex (String.slice (index * 2) (index * 2 + 2) digits))
+                        (Array.range 0 (String.count digits // 2 - 1))
+                    )
+
+
+isSeparator : Char -> Bool
+isSeparator char =
+    String.contains (String.fromChar char) " \t\n\r,;:-"
+
+
+toByteArray : Bytes.Bytes -> Array Int
+toByteArray bites =
+    Decode.decode (byteArray (Bytes.length bites)) bites
+        |> Maybe.withDefault []
+
+
+byteArray : Int -> Decode.Decoder (Array Int)
+byteArray count =
+    Decode.loop
+        { left = count, sofar = Builder.empty count }
+        (\state ->
+            if state.left <= 0 then
+                Decode.succeed (Decode.Done (Builder.toArray state.sofar))
+
+            else
+                Decode.map
+                    (\byte ->
+                        Decode.Loop
+                            { left = state.left - 1
+                            , sofar = Builder.pushLast byte state.sofar
+                            }
+                    )
+                    Decode.unsignedInt8
+        )
+
+
+fromHex : String -> Maybe Int
+fromHex text =
+    if String.isEmpty text then
+        Nothing
+
+    else
+        Array.foldl
+            (\char sofar ->
+                when sofar is
+                    Nothing ->
+                        Nothing
+
+                    Just total ->
+                        when String.firstIndexOf (String.toUpper (String.fromChar char)) "0123456789ABCDEF" is
+                            Just digit ->
+                                Just (total * 16 + digit)
+
+                            Nothing ->
+                                Nothing
+            )
+            (Just 0)
+            (String.toArray text)
+
+
+-- DECODING
+
+
+{-| The bytes, read the way the model says, one row per character.
+
+Recomputed on every render rather than stored, which is the same decision the
+hex viewer makes about its dump and for the same reason: what is on the screen
+cannot then disagree with what is in the model. A paste is a clipboard's worth
+of bytes and the decoders below are one pass over them, so there is nothing
+here worth the risk of a cache.
+-}
+pieces : Model -> Array Piece
+pieces model =
+    when model.encoding is
+        Utf8 ->
+            decodeUtf8 model.bytes
+
+        Utf16LE ->
+            decodeUtf16 { big = False } model.bytes
+
+        Utf16BE ->
+            decodeUtf16 { big = True } model.bytes
+
+
+{-| UTF-8, written out rather than delegated.
+
+Every branch that answers `Broken` is a case a library decoder answers with
+`U+FFFD`, and each is a different thing to have gone wrong:
+
+  - a **continuation byte** where a character should start, which is what the
+    middle of a character looks like when something has cut one in half;
+  - a **truncated** character, where the lead byte promised bytes that either
+    are not there or are not continuations;
+  - an **overlong** encoding -- `C0 80` for `U+0000`, the classic way past a
+    filter that is looking for a literal zero byte -- which is why the minimum
+    is checked for every length rather than assumed;
+  - a **surrogate**, `ED A0 80` through `ED BF BF`, which UTF-16 needs and
+    UTF-8 forbids, and which is how a half-converted string gives itself away;
+  - a code point **above U+10FFFF**, which five- and six-byte sequences used to
+    encode before Unicode stopped at seventeen planes;
+  - and `F8`-`FF`, which are **not lead bytes** in any version of UTF-8.
+
+-}
+decodeUtf8 : Array Int -> Array Piece
+decodeUtf8 bytes =
+    walk (utf8At bytes) (Array.length bytes)
+
+
+utf8At : Array Int -> Int -> Piece
+utf8At bytes at =
+    let
+        lead =
+            byteAt bytes at
+    in
+    if lead < 0x80 then
+        { offset = at, size = 1, meaning = Point lead }
+
+    else if lead < 0xC0 then
+        { offset = at
+        , size = 1
+        , meaning = Broken (hexPair lead ++ " continues a character that never began")
+        }
+
+    else if lead < 0xE0 then
+        utf8Tail bytes at 2 (Math.modBy 32 lead) 0x80
+
+    else if lead < 0xF0 then
+        utf8Tail bytes at 3 (Math.modBy 16 lead) 0x800
+
+    else if lead < 0xF8 then
+        utf8Tail bytes at 4 (Math.modBy 8 lead) 0x10000
+
+    else
+        { offset = at
+        , size = 1
+        , meaning = Broken (hexPair lead ++ " never starts a character")
+        }
+
+
+{-| The continuation bytes of a character whose lead byte said how many there
+would be, and the four things that can still be wrong once they are all there.
+
+`least` is the smallest code point this length is allowed to carry, and
+checking it is the whole of the overlong test: there is exactly one shortest
+encoding of any code point, so a longer one that decodes below the threshold
+was written that way on purpose or by a broken encoder, and either way it is
+not the character it appears to be.
+-}
+utf8Tail : Array Int -> Int -> Int -> Int -> Int -> Piece
+utf8Tail bytes at size top least =
+    let
+        continuations =
+            Array.range 1 (size - 1)
+                |> Array.map (\step -> byteAt bytes (at + step))
+
+        good =
+            Array.all (\byte -> byte >= 0x80 && byte < 0xC0) continuations
+                && Array.length continuations == size - 1
+
+        point =
+            Array.foldl (\byte sofar -> sofar * 64 + Math.modBy 64 byte) top continuations
+    in
+    if at + size > Array.length bytes then
+        { offset = at
+        , size = Array.length bytes - at
+        , meaning =
+            Broken
+                (hexPair (byteAt bytes at)
+                    ++ " starts "
+                    ++ String.fromInt size
+                    ++ " bytes and only "
+                    ++ String.fromInt (Array.length bytes - at)
+                    ++ " are left"
+                )
+        }
+
+    else if not good then
+        { offset = at
+        , size = size
+        , meaning =
+            Broken
+                (hexPair (byteAt bytes at)
+                    ++ " starts "
+                    ++ String.fromInt size
+                    ++ " bytes; one is not a continuation"
+                )
+        }
+
+    else if point < least then
+        { offset = at
+        , size = size
+        , meaning =
+            Broken
+                ("overlong: "
+                    ++ String.fromInt size
+                    ++ " bytes for "
+                    ++ codeName point
+                )
+        }
+
+    else if isSurrogate point then
+        { offset = at
+        , size = size
+        , meaning = Broken (codeName point ++ " is a surrogate, not UTF-8")
+        }
+
+    else if point > 0x10FFFF then
+        { offset = at
+        , size = size
+        , meaning = Broken (codeName point ++ " is past the last one there is")
+        }
+
+    else
+        { offset = at, size = size, meaning = Point point }
+
+
+{-| UTF-16, in either order.
+
+The surrogate arithmetic is the reason this tool draws the characters it
+decodes rather than only naming them: a pair like `D83D DE00` is one character
+and two units, and "one character" is a claim you want to see kept.
+-}
+decodeUtf16 : { big : Bool } -> Array Int -> Array Piece
+decodeUtf16 order bytes =
+    walk (utf16At order bytes) (Array.length bytes)
+
+
+utf16At : { big : Bool } -> Array Int -> Int -> Piece
+utf16At order bytes at =
+    if at + 2 > Array.length bytes then
+        { offset = at
+        , size = 1
+        , meaning = Broken "one byte left over; a unit takes two"
+        }
+
+    else
+        let
+            unit =
+                unitAt order bytes at
+        in
+        if unit >= 0xD800 && unit < 0xDC00 then
+            if at + 4 > Array.length bytes then
+                { offset = at
+                , size = Array.length bytes - at
+                , meaning = Broken ("high surrogate " ++ unitName unit ++ ", bytes run out")
+                }
+
+            else
+                let
+                    low =
+                        unitAt order bytes (at + 2)
+                in
+                if low >= 0xDC00 && low < 0xE000 then
+                    { offset = at
+                    , size = 4
+                    , meaning = Point (0x10000 + (unit - 0xD800) * 0x400 + (low - 0xDC00))
+                    }
+
+                else
+                    { offset = at
+                    , size = 2
+                    , meaning = Broken ("high surrogate " ++ unitName unit ++ ", then " ++ unitName low)
+                    }
+
+        else if unit >= 0xDC00 && unit < 0xE000 then
+            { offset = at
+            , size = 2
+            , meaning = Broken ("low surrogate " ++ unitName unit ++ " with no high one")
+            }
+
+        else
+            { offset = at, size = 2, meaning = Point unit }
+
+
+unitAt : { big : Bool } -> Array Int -> Int -> Int
+unitAt order bytes at =
+    if order.big then
+        byteAt bytes at * 256 + byteAt bytes (at + 1)
+
+    else
+        byteAt bytes (at + 1) * 256 + byteAt bytes at
+
+
+{-| Step through the bytes, taking whatever the decoder says is one character.
+
+The guard on `size` is not defensive tidiness: a decoder that answered zero
+would loop here forever with the terminal in its alternate screen, and the
+cheapest place to make that impossible is the one loop rather than every branch
+of two decoders.
+-}
+walk : (Int -> Piece) -> Int -> Array Piece
+walk decoder length =
+    let
+        step state =
+            if state.at >= length then
+                Builder.toArray state.sofar
+
+            else
+                let
+                    piece =
+                        decoder state.at
+                in
+                step
+                    { at = state.at + max 1 piece.size
+                    , sofar = Builder.pushLast piece state.sofar
+                    }
+    in
+    step { at = 0, sofar = Builder.empty 16 }
+
+
+byteAt : Array Int -> Int -> Int
+byteAt bytes at =
+    -- `Array.get` counts from the *end* for a negative index, so an
+    -- out-of-range read here would quietly answer the last byte of the buffer.
+    -- Nothing in this module passes one, and that is exactly why the guard is
+    -- worth the line.
+    if at < 0 then
+        0
+
+    else
+        Maybe.withDefault 0 (Array.get at bytes)
+
+
+isSurrogate : Int -> Bool
+isSurrogate point =
+    point >= 0xD800 && point < 0xE000
+
+
+-- NAMING
+
+
+{-| `U+0048`, and never fewer than four digits, because that is how a code
+point is written everywhere it is written at all.
+-}
+codeName : Int -> String
+codeName point =
+    "U+" ++ String.padLeft 4 '0' (hexOf point)
+
+
+{-| A UTF-16 unit, which is written the same way and is not the same thing --
+so it is named separately, and every message that mentions one says "unit" or
+"surrogate" beside it.
+-}
+unitName : Int -> String
+unitName unit =
+    "0x" ++ String.padLeft 4 '0' (hexOf unit)
+
+
+hexOf : Int -> String
+hexOf value =
+    if value < 16 then
+        Ascii.hexDigit value
+
+    else
+        hexOf (value // 16) ++ Ascii.hexDigit (Math.modBy 16 value)
+
+
+hexPair : Int -> String
+hexPair code =
+    Ascii.hexDigit (code // 16) ++ Ascii.hexDigit (Math.modBy 16 code)
+
+
+{-| What to draw in the `char` column.
+
+A control character has no glyph and a middle dot is the truthful thing to
+show, which is the hex viewer's rule as well. The rest is handed to the
+terminal, and to Turbo Vision, which know about width -- and so, since
+2026-09-02, does the test harness.
+-}
+glyphOf : Int -> String
+glyphOf point =
+    if point < 128 then
+        Ascii.glyph point
+
+    else if isSurrogate point || point == 0xFEFF then
+        "·"
+
+    else
+        String.fromChar (Char.fromCode point)
+
+
+{-| The sentence beside a character: what it is, when that is worth saying.
+
+Deliberately short of a Unicode character database. Shipping one is megabytes
+for the pleasure of writing LATIN SMALL LETTER E WITH ACUTE next to `é`, which
+is already on the screen. What is *not* on the screen is which plane it is in,
+whether it is a control code, and whether it is one of the two or three code
+points that mean something to a program rather than to a reader -- so those are
+what this says.
+-}
+noteOn : Int -> String
+noteOn point =
+    if point == 0xFEFF then
+        "byte order mark"
+
+    else if point == 0xFFFD then
+        "replacement character -- something else had already given up"
+
+    else if point < 128 then
+        when Ascii.named point is
+            Just it ->
+                it.name ++ " -- " ++ it.meaning
+
+            Nothing ->
+                "ASCII"
+
+    else if point < 0x100 then
+        "Latin-1 supplement"
+
+    else if point < 0x10000 then
+        "basic multilingual plane"
+
+    else
+        "plane " ++ String.fromInt (point // 0x10000) ++ ", outside the BMP"
+
+
+-- MOVING AROUND
+
+
+rowsIn : Int -> Int
+rowsIn height =
+    max 1 (height - 5)
+
+
+moveTo : Int -> Model -> Step msg
+moveTo row model =
+    let
+        last =
+            Array.length (pieces model) - 1
+
+        landed =
+            clamp 0 (max 0 last) row
+    in
+    scrollTo (keepInView model landed) { model | cursor = landed, message = "" }
+
+
+{-| The smallest scroll that puts the cursor back on screen, which is what
+makes an arrow key at the bottom row move the view by one instead of jumping.
+-}
+keepInView : Model -> Int -> Int
+keepInView model row =
+    if row < model.top then
+        row
+
+    else if row >= model.top + model.rows then
+        row - model.rows + 1
+
+    else
+        model.top
+
+
+scrollTo : Int -> Model -> Step msg
+scrollTo row model =
+    still { model | top = clamp 0 (max 0 (Array.length (pieces model) - model.rows)) row }
+
+
+-- COPYING
+
+
+{-| Every code point on the clipboard, in the form they are written in.
+
+`U+0048 U+00E9 U+1F600` is what goes into a bug report or a test, and it is the
+one thing this tool produces that nothing else on the machine will. A broken
+piece is written as `--` rather than skipped: a list with a silent hole in it
+is the same failure as a dump with one.
+-}
+copyPoints : Tui.Ports msg -> Model -> Step msg
+copyPoints ports model =
+    let
+        found =
+            pieces model
+    in
+    if Array.isEmpty found then
+        still { model | message = "There is nothing to copy." }
+
+    else
+        { model = { model | copied = True, message = "" }
+        , command =
+            Tui.copyToClipboard ports
+                (String.join " "
+                    (Array.map
+                        (\piece ->
+                            when piece.meaning is
+                                Point point ->
+                                    codeName point
+
+                                Broken _ ->
+                                    "--"
+                        )
+                        found
+                    )
+                )
+        }
+
+
+-- VIEW
+
+
+view : Inks -> Model -> Tui.Window
+view inks model =
+    { id = windowId
+    , title = title model
+    -- Full width, like the hex viewer, and for the same reason: the last
+    -- column of a row is a sentence about what went wrong, and a window two
+    -- columns off the right of an eighty-column terminal ends every one of
+    -- them early.
+    , rect = { x1 = 0, y1 = 1, x2 = 79, y2 = 2 + openRows + 3 }
+    , resize = Tui.resizeHeight
+    , palette = Tui.BlueWindow
+    , canClose = True
+    , canMove = True
+    , views =
+        [ Canvas
+            { id = "unicode.header"
+            , rect = { x1 = 1, y1 = 1, x2 = 1 + lineWidth, y2 = 2 }
+            , lines = [ header inks ]
+            , cursor = Nothing
+            , takesFocus = False
+            }
+        , Grows
+            { grow = Tui.stretchHeight
+            , view =
+                Canvas
+                    { id = canvasId
+                    , rect = { x1 = 1, y1 = 2, x2 = 1 + lineWidth, y2 = 2 + openRows }
+                    , lines = body inks model
+                    , cursor = Nothing
+                    , takesFocus = True
+                    }
+            }
+        , Grows
+            { grow = Tui.stretchHeight
+            , view =
+                ScrollBar
+                    { id = scrollId
+                    , rect = { x1 = 2 + lineWidth, y1 = 2, x2 = 3 + lineWidth, y2 = 2 + openRows }
+                    , value = model.top
+                    , min = 0
+                    , max = max 0 (Array.length (pieces model) - model.rows)
+                    , pageStep = model.rows
+                    , arrowStep = 1
+                    , for = ""
+                    }
+            }
+        , Grows
+            { grow = Tui.pinBottom
+            , view =
+                Canvas
+                    { id = "unicode.status"
+                    , rect = { x1 = 1, y1 = 3 + openRows, x2 = 1 + lineWidth, y2 = 4 + openRows }
+                    , lines = [ status inks model ]
+                    , cursor = Nothing
+                    , takesFocus = False
+                    }
+            }
+        ]
+    }
+
+
+title : Model -> String
+title model =
+    "Unicode - "
+        ++ encodingName model.encoding
+        ++ (if model.name == "" then
+                ""
+
+            else
+                " - "
+                    ++ model.name
+                    ++ " ("
+                    ++ String.fromInt (Array.length model.bytes)
+                    ++ " bytes)"
+           )
+
+
+encodingName : Encoding -> String
+encodingName encoding =
+    when encoding is
+        Utf8 ->
+            "UTF-8"
+
+        Utf16LE ->
+            "UTF-16 LE"
+
+        Utf16BE ->
+            "UTF-16 BE"
+
+
+header : Inks -> Array Span
+header inks =
+    [ Tui.ink inks.ruler
+        (String.padRight bytesAt ' ' "offset"
+            ++ String.padRight (pointAt - bytesAt) ' ' "bytes"
+            ++ String.padRight (charAt - pointAt) ' ' "code"
+            ++ String.padRight (noteAt - charAt) ' ' "char"
+            ++ "what it is"
+        )
+    ]
+
+
+{-| The rows, one character each, from `top`.
+
+The cursor's row is painted rather than pointed at, for the reason the hex
+viewer paints its byte: whether a terminal shows a hardware cursor at all is
+the terminal's business, and a row that says which one you are on has to say it
+in the picture.
+-}
+body : Inks -> Model -> Array (Array Span)
+body inks model =
+    let
+        found =
+            pieces model
+    in
+    if Array.isEmpty found then
+        [ [ Tui.ink inks.dim "Nothing to read. Paste text with p, or hex bytes with P." ] ]
+
+    else
+        Array.map (rowAt inks model found)
+            (Array.range model.top (model.top + model.rows - 1))
+
+
+rowAt : Inks -> Model -> Array Piece -> Int -> Array Span
+rowAt inks model found index =
+    when Array.get index found is
+        Nothing ->
+            []
+
+        Just piece ->
+            let
+                text =
+                    lineFor model piece
+            in
+            if index == model.cursor then
+                [ Tui.ink inks.selected.fg (String.padRight lineWidth ' ' text)
+                    |> Tui.on inks.selected.bg
+                ]
+
+            else
+                when piece.meaning is
+                    Broken _ ->
+                        [ Tui.ink inks.alert text ]
+
+                    Point _ ->
+                        [ Tui.plain text ]
+
+
+lineFor : Model -> Piece -> String
+lineFor model piece =
+    String.padRight bytesAt ' ' (String.padLeft 8 '0' (hexOf piece.offset))
+        ++ String.padRight (pointAt - bytesAt) ' ' (bytesOf model piece)
+        ++ (when piece.meaning is
+                Point point ->
+                    String.padRight (charAt - pointAt) ' ' (codeName point)
+                        -- Five columns for something that may be one cell wide
+                        -- or two: the padding is done on what is left rather
+                        -- than on the glyph, because `String.padRight` counts
+                        -- characters and a terminal counts columns, and for a
+                        -- CJK character or an emoji those are different
+                        -- numbers.
+                        ++ glyphOf point
+                        ++ String.repeat (noteAt - charAt - widthOf point) " "
+                        ++ noteOn point
+
+                Broken why ->
+                    String.padRight (noteAt - pointAt) ' ' "--"
+                        ++ why
+           )
+
+
+{-| One column or two, and the same answer Turbo Vision and the terminal will
+give. Only the ranges that matter here: a decoder's output is mostly ASCII,
+CJK and emoji, and everything in between is one column wide.
+-}
+widthOf : Int -> Int
+widthOf point =
+    if
+        (point >= 0x1100 && point <= 0x115F)
+            || (point >= 0x2E80 && point <= 0xA4CF)
+            || (point >= 0xAC00 && point <= 0xD7A3)
+            || (point >= 0xF900 && point <= 0xFAFF)
+            || (point >= 0xFE30 && point <= 0xFE6F)
+            || (point >= 0xFF00 && point <= 0xFF60)
+            || (point >= 0xFFE0 && point <= 0xFFE6)
+            || (point >= 0x1F300 && point <= 0x1F9FF)
+            || (point >= 0x20000 && point <= 0x3FFFD)
+    then
+        2
+
+    else
+        1
+
+
+bytesOf : Model -> Piece -> String
+bytesOf model piece =
+    String.join " "
+        (Array.map (\at -> hexPair (byteAt model.bytes at))
+            (Array.range piece.offset (piece.offset + piece.size - 1))
+        )
+
+
+{-| The line under the rows: what the message is, or the count.
+
+The count is two numbers because one of them is the reason to have opened this:
+"nineteen characters" is arithmetic and "nineteen characters, three of them
+broken" is an answer.
+-}
+status : Inks -> Model -> Array Span
+status inks model =
+    if model.message /= "" then
+        [ Tui.ink inks.alert model.message ]
+
+    else
+        let
+            found =
+                pieces model
+
+            bad =
+                Array.length (Array.keepIf (\piece -> isBroken piece.meaning) found)
+        in
+        if Array.isEmpty found then
+            [ Tui.ink inks.dim "8 reads UTF-8, l and b the two UTF-16 orders; y copies the code points." ]
+
+        else
+            [ Tui.ink inks.ruler
+                (String.fromInt (Array.length found)
+                    ++ (if Array.length found == 1 then
+                            " character"
+
+                        else
+                            " characters"
+                       )
+                    ++ ", "
+                )
+            , if bad == 0 then
+                Tui.plain "none of them broken"
+
+              else
+                Tui.ink inks.alert
+                    (String.fromInt bad
+                        ++ (if bad == 1 then
+                                " of them broken"
+
+                            else
+                                " of them broken"
+                           )
+                    )
+            ]
+
+
+isBroken : Meaning -> Bool
+isBroken meaning =
+    when meaning is
+        Broken _ ->
+            True
+
+        Point _ ->
+            False
+
+
+-- MENU
+
+
+menu : MenuItem
+menu =
+    SubMenu
+        -- `~E~ncoding` rather than the obvious `~U~nicode` or `~T~ext`, and
+        -- the reason is a rule this program learned the hard way: a status
+        -- line entry beats a menu bar title for the same Alt key, silently.
+        -- `Alt-T` is `~T~ools`, `Alt-U` is this tool's own accelerator, and
+        -- `Alt-R`, `Alt-D`, `Alt-C`, `Alt-A` and `Alt-X` are the status line's.
+        -- `E` is free, and it is also what the three entries under it are for.
+        { title = "~E~ncoding"
+        , key = ""
+        , items =
+            [ Item { title = "~P~aste as text", cmd = "unicode.pasteText", key = "", shortcut = "p" }
+            , Item { title = "Paste he~x~ bytes", cmd = "unicode.pasteHex", key = "", shortcut = "P" }
+            , Separator
+            -- Every entry here names a key and binds none, which is the rule
+            -- the hex viewer's menu is written under: a `key` is an Alt-
+            -- accelerator, the canvas has focus and eats plain letters, so
+            -- binding `8` here would take it away from the thing it is for.
+            , Item { title = "Read as UTF-~8~", cmd = "unicode.utf8", key = "", shortcut = "8" }
+            , Item { title = "Read as UTF-16 ~L~E", cmd = "unicode.utf16le", key = "", shortcut = "l" }
+            , Item { title = "Read as UTF-16 ~B~E", cmd = "unicode.utf16be", key = "", shortcut = "b" }
+            , Separator
+            , Item { title = "Cop~y~ the code points", cmd = "unicode.copy", key = "", shortcut = "y" }
+            ]
+        }

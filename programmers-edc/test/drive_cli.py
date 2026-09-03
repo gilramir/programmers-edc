@@ -89,6 +89,12 @@ def main():
           screen.split("\n")[0])
     leave(check, app, "predc calc")
 
+    app = start(env, work, "unicode")
+    screen = app.render()
+    check("predc unicode opens the decoder", "Unicode" in screen, screen)
+    check("reading UTF-8 until told otherwise", "UTF-8" in screen, screen)
+    leave(check, app, "predc unicode")
+
     app = start(env, work, "hex")
     screen = app.render()
     check("predc hex opens the viewer", "Hex Dump" in screen, screen)

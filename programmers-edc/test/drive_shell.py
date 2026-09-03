@@ -112,6 +112,25 @@ def main():
     check("and Alt-F3 still closes it, off the status line and onto the menu's",
           "0_" not in app.render(), app.render())
 
+    # The fifth tool is the case that comment anticipated. There is no room for
+    # it on the status line, so its `Alt-U` is the accelerator on its *menu*
+    # entry -- and the test that matters is with another tool's canvas holding
+    # the focus, because a focused canvas eats plain letters and would eat this
+    # one too if the menu bar were not `ofPreProcess`.
+    app.send(b"\x1bd", settle=1.4)
+    check("the hex viewer takes the focus", "Hex Dump" in app.render(), app.render())
+    # The last row, not row 24: the terminal was made 70x20 a few lines up and
+    # never put back, which is exactly the kind of thing a hard-coded row
+    # number does not survive.
+    check("and the status line has no room for a fifth tool on it",
+          "Unicode" not in app.render().split("\n")[-1], app.render().split("\n")[-1])
+    app.send(b"\x1bu", settle=1.4)
+    check("Alt-U opens the decoder anyway, from the menu entry's own key, "
+          "past a canvas that has the focus",
+          "Unicode" in app.render(), app.render())
+    app.send(b"\x1b\x1b[13~", settle=1.0)
+    app.send(b"\x1b\x1b[13~", settle=1.0)
+
     app.send(b"\x1bx", settle=1.0)
     code = app.wait(timeout=6)
     check("Alt-X exits, and cleanly", code == 0, f"exit={code}")
