@@ -81,9 +81,18 @@ menuItem =
 -- SHAPE
 
 
-openRows : Int
-openRows =
-    17
+{-| The fewest text rows to ask for.
+
+One, and not a friendlier-looking three, because the floor and the ceiling here
+are the same arithmetic: the window is `textRows + 3` tall and sits one row
+down, so anything above `desktop.rows - 4` hangs off the bottom of the desktop.
+A floor of three did exactly that on an eight-row terminal. Turbo Vision will
+not draw a window under six rows anyway, which is a five-row desktop, and below
+that there is nothing to get right.
+-}
+leastRows : Int
+leastRows =
+    1
 
 
 {-| The text column. Sixty-nine because the widest line is sixty-eight and
@@ -173,15 +182,45 @@ type Probe
 
 type alias Model =
     { session : Session
+    -- The desktop, because this window opens as tall as the desktop will let
+    -- it. Handed over at `init` and kept up to date by `Resized`, and it needs
+    -- both: `Resized` fires when the size *changes*, so a window opened after
+    -- somebody stretched their terminal would otherwise never hear about it.
+    , desktop : { cols : Int, rows : Int }
     , probe : Probe
     , top : Int
     , rows : Int
     }
 
 
-init : Session -> Model
-init session =
-    { session = session, probe = Asking, top = 0, rows = openRows }
+init : { cols : Int, rows : Int } -> Session -> Model
+init desktop session =
+    { session = session
+    , desktop = desktop
+    , probe = Asking
+    , top = 0
+    , rows = textRows desktop
+    }
+
+
+{-| How many rows of text to open with: as many as the desktop has room for.
+
+This is prose and the whole of it is a hundred-odd lines, so on any terminal
+anybody has it is the desktop that decides -- which is the point. A pane
+forty rows tall should show forty rows of it, not the seventeen that fit an
+eighty-by-twenty-four terminal.
+
+Four rows are not text whatever the height: the two frame rows, the blank one
+under the text, and the row of desktop the window is inset from the top by.
+
+The cap is `wholeThing` rather than the current line count, and that is not
+the same number: the probe's answer is two lines longer than the question, so
+sizing to what is on screen *now* would make the window jump a moment after it
+opened. Sizing to the longest it can ever be does not.
+-}
+textRows : { cols : Int, rows : Int } -> Int
+textRows desktop =
+    clamp leastRows wholeThing (desktop.rows - 4)
 
 
 type alias Step msg =
@@ -203,9 +242,9 @@ A terminal's answer can change under a running program -- tmux's
 a window somebody opened *because* they just changed one should not be
 answering out of a cache.
 -}
-opened : Tui.Ports msg -> Session -> Step msg
-opened ports session =
-    { model = init session, command = Tui.readClipboard ports }
+opened : Tui.Ports msg -> { cols : Int, rows : Int } -> Session -> Step msg
+opened ports desktop session =
+    { model = init desktop session, command = Tui.readClipboard ports }
 
 
 -- UPDATE
@@ -214,6 +253,13 @@ opened ports session =
 update : Tui.Event -> Model -> Step msg
 update event model =
     when event is
+        -- The terminal changed size, so the window should. Its rectangle is
+        -- computed from this on every render, so the differ writes the new
+        -- bounds by itself -- and writes nothing while the size is unchanged,
+        -- which is what leaves a window the user dragged where they put it.
+        Tui.Resized size ->
+            still (at model.top { model | desktop = size, rows = textRows size })
+
         Tui.WindowResized it ->
             if it.id == windowId then
                 still (at model.top { model | rows = rowsIn (it.rect.y2 - it.rect.y1) })
@@ -322,6 +368,33 @@ paint inks line =
 
         Gap ->
             []
+
+
+{-| The most lines this can ever be, which is what the window sizes itself
+against.
+
+Measured off a model with the probe *answered* and both conditional sections
+in, because those are the longest cases -- and taken once rather than
+recomputed, since it is a fact about the text rather than about a session.
+-}
+wholeThing : Int
+wholeThing =
+    Array.length
+        (rows
+            { session =
+                { display = False
+                , wayland = False
+                , ssh = True
+                , tmux = True
+                , screen = False
+                , term = ""
+                }
+            , desktop = { cols = 80, rows = 24 }
+            , probe = Answered False
+            , top = 0
+            , rows = 1
+            }
+        )
 
 
 {-| Every line of it. The visible ones are taken from here, and the scroll bar
@@ -552,7 +625,19 @@ view inks model =
     -- eighty columns of it is a wall. It is also why the window is offset
     -- rather than at the left edge: it is meant to be read in front of the
     -- window that raised the question, not to replace it.
-    , rect = { x1 = 4, y1 = 1, x2 = 4 + lineWidth + 3, y2 = 1 + openRows + 3 }
+    -- Narrower than the hex viewer and the decoder, because this is prose and
+    -- eighty columns of it is a wall -- and offset from the left edge for the
+    -- same reason it is not full width: it is meant to be read in front of the
+    -- window that raised the question, not instead of it.
+    --
+    -- The *height* is the desktop's, though, because the thing somebody
+    -- actually wants from this window is more of it at once.
+    , rect =
+        { x1 = 4
+        , y1 = 1
+        , x2 = 4 + lineWidth + 3
+        , y2 = 1 + textRows model.desktop + 3
+        }
     , resize = Tui.resizeHeight
     , palette = Tui.BlueWindow
     , canClose = True
@@ -563,7 +648,12 @@ view inks model =
             , view =
                 Canvas
                     { id = canvasId
-                    , rect = { x1 = 1, y1 = 1, x2 = 1 + lineWidth, y2 = 1 + openRows }
+                    , rect =
+                        { x1 = 1
+                        , y1 = 1
+                        , x2 = 1 + lineWidth
+                        , y2 = 1 + textRows model.desktop
+                        }
                     , lines = shown inks model
                     , cursor = Nothing
                     , takesFocus = True
@@ -577,7 +667,12 @@ view inks model =
                     -- On the frame, which is where Turbo Vision puts a scroll
                     -- bar: the window is `lineWidth + 3` wide, so the last
                     -- column is the border and this is it.
-                    , rect = { x1 = 1 + lineWidth, y1 = 1, x2 = 2 + lineWidth, y2 = 1 + openRows }
+                    , rect =
+                        { x1 = 1 + lineWidth
+                        , y1 = 1
+                        , x2 = 2 + lineWidth
+                        , y2 = 1 + textRows model.desktop
+                        }
                     , value = model.top
                     , min = 0
                     , max = max 0 (Array.length (rows model) - model.rows)

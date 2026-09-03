@@ -299,14 +299,14 @@ open command shell =
 
         Cli.Hex Nothing ->
             Node.startProgram
-                { model = Tui.Start { shell | hex = Just (Tool.Hex.init shell.permission) }
+                { model = Tui.Start { shell | hex = Just (Tool.Hex.init shell.permission shell.desktop) }
                 , command = Cmd.none
                 }
 
         Cli.Hex (Just file) ->
             let
                 step =
-                    Tool.Hex.openFile shell.permission file
+                    Tool.Hex.openFile shell.permission shell.desktop file
             in
             Node.startProgram
                 { model = Tui.Start { shell | hex = Just step.model }
@@ -421,8 +421,18 @@ update msg model =
 handleEvent : Event -> Model -> { model : Model, command : Cmd Msg }
 handleEvent event model =
     when event is
+        -- The shell's own copy first, and then **on to the tools**, which is
+        -- the branch that used to stop here.
+        --
+        -- Three of them keep a desktop of their own and centre dialogs on it:
+        -- `Tool.Hex` and `Help` have a `Tui.Resized` branch each and neither
+        -- was ever reached, so both sat on the 80x23 they were seeded with. On
+        -- a 120-column terminal the hex viewer's **Go to offset** and **Type
+        -- bytes** opened nine columns from the left edge, centred for a
+        -- desktop that was not there. Nothing reported it: a dialog in the
+        -- wrong place is a dialog, and the seed is a plausible size.
         Resized size ->
-            { model = { model | desktop = size }, command = Cmd.none }
+            toTools event { model | desktop = size }
 
         Command "about" ->
             { model = model, command = Tui.dialog tui (aboutDialog model) }
@@ -473,7 +483,7 @@ handleEvent event model =
             else if cmd == Tool.Hex.command then
                 when model.hex is
                     Nothing ->
-                        { model = { model | hex = Just (Tool.Hex.init model.permission) }
+                        { model = { model | hex = Just (Tool.Hex.init model.permission model.desktop) }
                         , command = Cmd.none
                         }
 
@@ -514,7 +524,7 @@ handleEvent event model =
             then
                 let
                     step =
-                        Help.opened tui model.session
+                        Help.opened tui model.desktop model.session
                 in
                 { model = { model | help = Just step.model }
                 , command =

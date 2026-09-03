@@ -453,10 +453,14 @@ type alias Step =
     { model : Model, command : Cmd Msg }
 
 
-init : FileSystem.Permission -> Model
-init permission =
+init : FileSystem.Permission -> { cols : Int, rows : Int } -> Model
+init permission desktop =
     { permission = permission
-    , desktop = { cols = 80, rows = 23 }
+    -- Handed over rather than seeded, because a tool opened *after* the
+    -- terminal was resized would otherwise never hear about it: `Resized`
+    -- fires when the size changes, and a window that was not open at the time
+    -- missed it. The shell holds the current one for exactly this.
+    , desktop = desktop
     , open = Nothing
     , top = 0
     , cursor = 0
@@ -483,11 +487,11 @@ listing it. A name that is neither answers `Failed`, so the window opens with
 the reason on its message line rather than the program refusing to start over
 it. The dump is the place a person is looking; the complaint belongs there.
 -}
-openFile : FileSystem.Permission -> Path -> Step
-openFile permission path =
+openFile : FileSystem.Permission -> { cols : Int, rows : Int } -> Path -> Step
+openFile permission desktop path =
     let
         model =
-            init permission
+            init permission desktop
     in
     { model = model, command = statFile model path }
 

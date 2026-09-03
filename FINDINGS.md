@@ -5298,6 +5298,48 @@ with four lines.
 `Alt-`key by coming to the front. This one measures again, so the command
 branch is a `Help.opened` plus a `Tui.focus` rather than one or the other.
 
+### As tall as the desktop, and the `Resized` nobody was getting
+
+Reported from the application: a tall tmux pane and a seventeen-row window in
+the middle of it. The window's rectangle was a constant, which every other
+window here can afford -- a chart is sixteen rows of eight columns and there is
+no more of it -- and prose cannot: the text is a hundred-odd lines, so the
+screen is what decides how much is visible.
+
+So the rectangle is computed from `model.desktop` on every render. The differ
+does the rest for free, and both halves of that matter: it writes `setBounds`
+when the desktop changes, and writes nothing when it has not, which is what
+leaves a window the user dragged where they put it.
+
+**Which turned up a bug in the shell.** `Help` needs `Resized`, so it grew a
+branch for it -- and the branch never fired, because `handleEvent`'s `Resized`
+case updated the shell's own `desktop` and returned without calling `toTools`.
+`Tool.Hex` had had a `Tui.Resized` branch for months under the same roof, and
+it had never run either: the viewer's `desktop` sat at the `80x23` it was
+seeded with for the life of the process. On a 120-column terminal **Go to
+offset** and **Type bytes** opened nine columns from the left edge, centred for
+a desktop that was not there.
+
+Nothing reported it, and nothing could: a dialog in the wrong place is still a
+dialog, and `80x23` is a plausible enough size that it looks deliberate.
+
+**Forwarding the event is only half the fix.** `Resized` fires when the size
+*changes*, so a tool opened after somebody stretched their terminal never hears
+it at all -- it has to be handed the current desktop when it opens, the way it
+is handed the file system permission. Both halves, or the bug survives in
+whichever case is not tested.
+
+### The floor that hung off the bottom
+
+`textRows` is capped at `desktop.rows - 4`, because the window is `textRows + 3`
+tall and sits one row down. It also had a *floor* of three, which looked like
+politeness and was arithmetic: on an eight-row terminal the desktop is six rows
+and the floor asked for a window that ended one row past the bottom of it,
+drawing a frame with no lower border. The floor is one now, which is the only
+value that cannot fight the ceiling -- and Turbo Vision refuses to draw a window
+under six rows anyway, so below a five-row desktop there is nothing to get
+right.
+
 ### The menu entry that broke four checks in two other suites
 
 Adding one entry to the Help menu moved **About** down two rows, and three

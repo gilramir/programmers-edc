@@ -341,6 +341,13 @@ opening rather than caching, because `set-clipboard` and kitty's
 `clipboard_control` are live settings and a window somebody opened *because*
 they just changed one should not be answering out of a cache.
 
+**It is as tall as the desktop will let it be.** The text is a hundred-odd
+lines, so on any terminal anybody has it is the screen that decides how much of
+it is visible at once -- a forty-row pane shows thirty-nine rows of it, not the
+seventeen that fit an eighty-by-twenty-four terminal. It follows the terminal
+as that changes, and it is still `Tui.resizeHeight`, so dragging it stays
+possible and stays put.
+
 What to press comes first and why comes second, which is the opposite of how
 this subject is usually written down. Underneath that are the two mechanisms
 both called pasting, what the tmux line does and does not fix, a row per

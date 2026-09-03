@@ -36,10 +36,6 @@ PGDN = b"\x1b[6~"
 END = b"\x1b[F"
 ALT_F3 = b"\x1b\x1bOR"
 
-TOP = 3            # the window's first text row, on screen
-ROWS = 17
-
-
 def base_env():
     env = dict(os.environ, TERM="xterm-256color",
                HOME=tempfile.mkdtemp(prefix="predc-home-"))
@@ -51,10 +47,30 @@ def base_env():
     return env
 
 
+def frame(app):
+    """(first row, last row) of the window's own border, on screen.
+
+    Found rather than assumed, because the whole point of the window is that
+    its height is the desktop's: a driver with `ROWS = 17` in it would be
+    testing the terminal this file was written on.
+    """
+    rows = app.render().split("\n")
+    top = next((i for i, r in enumerate(rows) if "Copying and pasting" in r), None)
+    if top is None:
+        return None
+    bottom = next((i for i in range(top + 1, len(rows)) if "\u2514" in rows[i]), None)
+    return None if bottom is None else (top, bottom)
+
+
 def text(app):
     """The window's visible text, one string per row, frame trimmed."""
+    edges = frame(app)
+    if edges is None:
+        return []
     screen = app.render().split("\n")
-    return [screen[TOP + i][5:74].rstrip() for i in range(ROWS)]
+    # One row in from the top border, and one short of the blank row above the
+    # bottom one.
+    return [screen[i][5:74].rstrip() for i in range(edges[0] + 1, edges[1] - 1)]
 
 
 def page(app):
@@ -112,9 +128,17 @@ def main():
     # 2. It scrolls, and the whole of it is reachable.
     check("the top of the window is not the end of it",
           "WHAT TO PRESS" in page(app), page(app))
+    #    A screenful is however many rows the window turned out to have, so the
+    #    check is against that rather than against a number: page down once,
+    #    then start again and press Down as many times as there are rows, and
+    #    the two have to land on the same lines.
+    on_screen = len(text(app))
     app.send(PGDN, settle=0.7)
-    check("PgDn moves by exactly a screenful",
-          text(app)[0] == "", repr(text(app)[0]))
+    paged = text(app)
+    app.send(b"\x1b[H", settle=0.6)
+    app.send(b"\x1b[B" * on_screen, settle=1.0)
+    check("PgDn moves by exactly what is on the screen, whatever that is",
+          paged == text(app), f"{on_screen} rows: {paged[0]!r} vs {text(app)[0]!r}")
     app.send(END, settle=0.7)
     check("End reaches the last line, which points at the long version",
           "doc/clipboard.md" in page(app), page(app))
@@ -133,6 +157,42 @@ def main():
     #    somebody inside tmux and noise for everybody else.
     check("inside tmux it gets a row of its own for prefix ]",
           "From tmux" in page(app), page(app))
+
+    # 3b. And the height is the desktop's, which is the whole reason `frame`
+    #     above goes looking rather than assuming. A tall pane should show more
+    #     of a long document, not the same seventeen rows with empty desktop
+    #     under them.
+    def height():
+        edges = frame(app)
+        return None if edges is None else edges[1] - edges[0] + 1
+
+    app.resize(100, 45)
+    app.pump(1.2)
+    tall = height()
+    check("a taller terminal makes a taller window", tall == 42, str(tall))
+    check("and more of the document is on it at once", len(text(app)) == 39,
+          str(len(text(app))))
+    app.resize(80, 24)
+    app.pump(1.2)
+    check("and shrinking it back shrinks the window", height() == 21, str(height()))
+    check("which is still more than the twenty-four-row terminal had before",
+          len(text(app)) == 18, str(len(text(app))))
+
+    #     And it has to *fit*. The window is `textRows + 3` tall and sits one
+    #     row down, so a floor on the row count is a floor that hangs off the
+    #     bottom of a short desktop -- which a friendlier-looking three did, on
+    #     an eight-row terminal, drawing a window with no bottom border.
+    app.resize(80, 8)
+    app.pump(1.2)
+    edges = frame(app)
+    rows = app.render().split("\n")
+    check("on an eight-row terminal the window still has a bottom border",
+          edges is not None, "no frame found")
+    check("and it is above the status line rather than under it",
+          edges is not None and edges[1] <= len(rows) - 2,
+          f"{edges} of {len(rows)} rows")
+    app.resize(80, 24)
+    app.pump(1.2)
 
     app.send(ALT_F3, settle=1.0)
     check("Alt-F3 closes it", "Copying and pasting" not in app.render(),
