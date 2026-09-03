@@ -42,17 +42,69 @@ one and nothing complains — the widget silently does not appear, or silently
 stops updating. `tools/check_consistency.py` (run by `check`) walks all four and
 compares them, and it is the only thing that can.
 
+## Before adding an API, check what Turbo Vision already has
+
+`tools/audit_api.py` (run by `check`) walks every public member of every wrapped
+Turbo Vision class, **and the flag bits by name**, against
+`tools/decisions.tsv` — one line per member saying what was decided about it.
+A member with no line fails the check. `--todo` prints the open gaps and
+nothing else.
+
+It exists because coverage used to be decided by porting examples, which finds
+only what an example happened to need. Every gap after the coverage list
+"emptied" was a *member* of a class that was already wrapped — `maxLen` off by
+one, a scroll bar with no `ofFirstClick`, no motion event to hear a drag with —
+and each was found by writing an application, which is the most expensive place
+to find anything.
+
+Two things about the file are the point rather than bookkeeping:
+
+  - **`used` is not `bound`.** "The binding calls it" is not "a Gren program can
+    ask for it", and conflating the two is what produced the claim that the
+    widget set was complete while four capabilities were missing.
+  - **The flag bits are audited separately**, because a member-level walk sees
+    one member called `options` and calls it covered. `ofFirstClick` is a bit.
+
+**When adding a capability, the question that decides its shape is who moves
+the state.** Turbo Vision, if it belongs to `TView` and is therefore true of
+every widget → a wrapper, like `Grows`/`Enabled`/`Visible`. The model → a field
+on the view. The user → an *event*, never a field, because a field the user can
+move is one the model writes back over them. Nobody — a fact that changes under
+both → also an event, because asking for it would be the synchronous query this
+port has never had.
+
 ## The porting workflow
 
-The API grows by porting one `tvision/examples/` program at a time, because each
-port has forced an improvement that staring at the binding did not. After a
+Every C++ example is ported, so this is history rather than a to-do — but it is
+how the API got its shape and the discipline still applies to anything new.
+Each port forced an improvement that staring at the binding did not. After a
 port, write up what it forced in **both** `examples/README.md` and `FINDINGS.md`
 before moving on: the reason a design is the way it is stops being recoverable
-within a day.
+within a day. Same for anything the audit above turns up.
+
+An example is also where a new capability gets *used* rather than merely
+demonstrated — with a rule that means something in that program, since a field
+nothing exercises is a field that quietly stops working.
 
 Every example is also a pty test (`gren-tvision/test/drive_<name>.py`). There is
 no list to add it to: `tools/run_tests.py` treats every `test/drive*.py` under
 `tvision-node` and `gren-tvision` as a suite, so writing the file is enough.
+
+**A pty driver tests the build, not the source.** Rebuild the example after
+editing it, or the driver runs the old `main.js` and fails in a way that looks
+exactly like the feature not working.
+
+Two rules for checking that something is unavailable, which are opposites for a
+reason. A disabled **view** is checked by what it *refuses* — type at it and
+find the characters absent — because the colour it draws in belongs to the
+palette and reads the same either way. A disabled **menu entry** is checked by
+its colour, compared against an enabled entry's, because an entry is only ever
+looked at, so how it looks is what it does.
+
+The fastest layer is `gren-tvision-runtime/test/diff.test.js`: pure-logic tests
+of the patch paths against a fake binding, in milliseconds and with no terminal.
+Anything about *what the differ decides to call* belongs there rather than in a
+driver.
 
 ## Git
 
