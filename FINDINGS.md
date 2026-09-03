@@ -5107,3 +5107,137 @@ And one about the window: the field is the first selectable view, so it has
 the caret when the tool opens -- which is the point of it, and which means the
 single-letter commands do not reach the canvas until `Tab` gets there. They are
 all on the menu, which is what makes that survivable.
+
+## Two clipboards, and the class that could not be wrapped
+
+The field added the day before made a paste possible over ssh. It did not make
+`Shift-Ins` work in one, and finding out why turned up a second clipboard
+nobody had noticed.
+
+The trail started at [magiblot/tvision#178][178], which is about something else
+and points at the thing that matters. Somebody reported that copy and paste do
+not work in an `inputBox`; the maintainer's answer is that they do, but only
+once the program binds keys to `cmCut`, `cmCopy` and `cmPaste` itself:
+
+> I agree that it is annoying not to have this working out-of-the-box [...]
+> However, an out-of-the-box solution would require hardcoding specific
+> keyboard shortcuts for these commands, which I don't think is a good idea
+> either.
+
+Which is correct, and which meant `TInputLine` had been answering those three
+commands all along (`tinputli.cpp:470`, and `setCmdState` on all three at
+`:557`). This binding exposed them under the names `"editor.cut"`,
+`"editor.copy"` and `"editor.paste"`, and the docs said outright that they
+"reach whichever `Editor` has the caret". **The one name that made a field copy
+and paste announced that it was for something else**, so nobody would ever try
+it, and nothing anywhere could report that. `audit_api.py` could not: it walks
+class *members*, and a command is not a member of anything.
+
+[178]: https://github.com/magiblot/tvision/issues/178
+
+### The two stores
+
+Binding `Shift-Ins` to `"editor.paste"` and pressing it after a `y` pasted
+nothing at all, which is the interesting part. There were two fallback
+clipboards:
+
+  - `TClipboard::localText`, which `cmCut`/`cmCopy`/`cmPaste` fill and read;
+  - `g_clipboardLocal` in `app.cc`, which `Tui.copyToClipboard` and
+    `Tui.readClipboard` fill and read.
+
+Two closed loops. Each round-trips perfectly with itself and neither can see the
+other, so a copy made by the model and a paste made in a field were different
+text.
+
+**It stayed invisible because both are only fallbacks.** With a real system
+clipboard -- a local display, or a terminal that answers an `OSC 52` read --
+`THardwareInfo` succeeds on both sides, both classes return early, and the two
+private copies are never touched at all. The seam exists exactly where there is
+nothing to meet in, which is every ssh session: invisible on the machine you
+develop on and visible on the machine you use.
+
+### Why the obvious fix is impossible
+
+The instinct is right -- one store, and ours a wrapper over Turbo Vision's
+rather than a duplicate of it. It cannot be built:
+
+```cpp
+class TClipboard {
+public:
+    static void setText(TStringView text) noexcept;
+    static void requestText() noexcept;
+private:
+    static char *localText;
+    static size_t localTextLength;
+};
+```
+
+`localText` is a private static with no accessor and no `friend`, and the only
+reader is `requestText()`, which is `void` and hands what it finds to
+`TEventQueue::setPasteText` -- which does not return a string, it queues a
+buffer that `getPasteEvent` drains one character at a time as `evKeyDown` events
+with `kbPaste` set. There is no expression that gets text out of that class.
+That is precisely why `app.cc` reimplemented it in the first place, and the
+comment there has said so all along.
+
+There is also a bug in it worth not inheriting. `setText` stores locally *only
+when the platform refuses*, so on a machine where copying works `localText`
+keeps a stale copy -- and a later paste that falls back to it pastes something
+from two copies ago rather than nothing. Ours stores first, unconditionally.
+
+### So it was inverted
+
+Ours became the single store, and the rule became **no view may reach
+`TClipboard` either**. `JsInputLine` and `JsEditor` answer `cmCut`, `cmCopy` and
+`cmPaste` themselves and never delegate them, which finally makes true a
+sentence `doc/clipboard.md` had been asserting for months.
+
+The delete inside `cmCut` was the only awkward part: `TInputLine::deleteSelect`,
+`saveState` and `checkValid` are all private. It is asked for in the vocabulary
+the class does expose -- a synthetic `kbDel`, which with a selection out runs
+exactly those three in that order (`tinputli.cpp:399`) and, as a bonus, also
+pulls `firstPos` back afterwards, which the real `cmCut` branch forgets to do.
+
+### The queue that was worse than the problem
+
+`THardwareInfo::requestClipboardText` keeps **one** callback slot, and an
+`OSC 52` reply carries nothing saying which question it answers. With two
+things able to ask, the first attempt was a FIFO of askers: replies arrive in
+order, so match them in order.
+
+It broke `drive_hex.py` immediately, and the failure is the argument against
+it. A driver pressed `Shift-Ins`, which wrote a query the driver never answered
+-- leaving an entry in the queue for ever, so every reply *afterwards* went to
+the wrong asker, and a check three hundred lines later failed for a reason
+nothing near it could explain.
+
+The answer is two accept functions and no bookkeeping at all. TVision's own
+single slot then does the routing, and the degenerate case degrades to "the last
+thing that asked is what the answer goes to" -- which is the only correlation
+this protocol can support, and the semantics TVision already had.
+
+### And two names split into two
+
+`"clipboard.cut"`, `"clipboard.copy"` and `"clipboard.paste"` act on whichever
+of the two views holds the caret. `"editor.clear"`, `"editor.undo"` and
+`"editor.selectAll"` stay as they were, because `TInputLine` has no branch for
+any of the three. Nothing is published, so this was a rename rather than an
+alias.
+
+`audit_api.py` grew a `commands` pseudo-class, the same carve-out the flag bits
+have and for the same reason -- a member-level walk cannot see a command, and
+85 of Turbo Vision's now have a line in `decisions.tsv` saying what was decided
+about each.
+
+### The thing that hid it for a decade
+
+`TEditor` has its own keymap: `Ctrl-Ins`, `Shift-Ins` and `Shift-Del` become the
+three commands inside `convertEvent` (`teditor1.cpp:84`). `TInputLine` has no
+such thing. So in any program that never binds those keys -- which is every
+program, because Turbo Vision deliberately binds none -- **the editor works and
+every input line in the same program silently does not**, and it looks like a
+fact about editors rather than a missing three lines of status line.
+
+`examples/edit` and `predc` both name them now, as invisible status entries. In
+`edit` that means the Find dialog's field takes a paste, which is a real thing
+to want there: what you search for is usually something you are looking at.

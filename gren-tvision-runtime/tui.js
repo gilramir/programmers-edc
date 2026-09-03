@@ -133,6 +133,12 @@ function run(grenModule, options = {}) {
             // what a machine with no clipboard falls back to.
             onClipboard: (text, fromSystem) =>
               send({ type: 'clipboardText', text, fromSystem: !!fromSystem }),
+            // A *view* copied -- a selection cut or copied out of an input line
+            // or an editor with `clipboard.copy`. The same event as the one
+            // `setClipboard` below answers with, because it is the same claim:
+            // the text is on this program's clipboard, and `toSystem` says
+            // whether anything outside confirmed taking it.
+            onCopied: (toSystem) => send({ type: 'copied', toSystem: !!toSystem }),
             onChange: (id, value) => {
               differ.valueChanged(id, value);
               send({ type: 'changed', id, value });

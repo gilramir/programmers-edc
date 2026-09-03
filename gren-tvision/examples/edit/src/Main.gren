@@ -208,8 +208,8 @@ handleEvent event model =
                 -- facts there was no way to ask.
                 Cmd.batch
                     [ Tui.setEnabled tui "editor.undo" it.canUndo
-                    , Tui.setEnabled tui "editor.cut" it.hasSelection
-                    , Tui.setEnabled tui "editor.copy" it.hasSelection
+                    , Tui.setEnabled tui "clipboard.cut" it.hasSelection
+                    , Tui.setEnabled tui "clipboard.copy" it.hasSelection
                     ]
             }
 
@@ -473,9 +473,9 @@ view model =
             , items =
                 [ Item { title = "~U~ndo", cmd = "editor.undo", key = "", shortcut = "Ctrl-U" }
                 , Tui.Separator
-                , Item { title = "Cu~t~", cmd = "editor.cut", key = "", shortcut = "Shift-Del" }
-                , Item { title = "~C~opy", cmd = "editor.copy", key = "", shortcut = "Ctrl-Ins" }
-                , Item { title = "~P~aste", cmd = "editor.paste", key = "", shortcut = "Shift-Ins" }
+                , Item { title = "Cu~t~", cmd = "clipboard.cut", key = "", shortcut = "Shift-Del" }
+                , Item { title = "~C~opy", cmd = "clipboard.copy", key = "", shortcut = "Ctrl-Ins" }
+                , Item { title = "~P~aste", cmd = "clipboard.paste", key = "", shortcut = "Shift-Ins" }
                 , Item { title = "C~l~ear", cmd = "editor.clear", key = "", shortcut = "Ctrl-Del" }
                 , Tui.Separator
                 , Item { title = "Select ~a~ll", cmd = "editor.selectAll", key = "", shortcut = "Ctrl-A" }
@@ -511,6 +511,27 @@ view model =
           , cmd = ""
           }
         , { text = "", key = "F10", cmd = "menu" }
+        -- Three keys with nothing beside them, which is what makes the
+        -- shortcuts the Edit menu advertises true everywhere rather than only
+        -- in the editor.
+        --
+        -- Turbo Vision binds *no* keys to `cmCut`, `cmCopy` and `cmPaste`, on
+        -- purpose -- picking Ctrl-C for somebody is picking wrong for somebody
+        -- else -- so a program that names none has fields that cannot copy or
+        -- paste, and nothing says so (magiblot/tvision#178 is somebody finding
+        -- that out). `TEditor` is the exception and it hid this for a while:
+        -- its own `convertEvent` turns Ctrl-Ins and Shift-Ins into the
+        -- commands, so the editor worked and every input line in the program
+        -- did not.
+        --
+        -- With these three, **Find**'s field takes a paste -- which is a real
+        -- thing to want here, because what you search for is usually something
+        -- you are looking at. A status entry is `ofPreProcess` and so is
+        -- offered every keystroke before an open modal dialog sees it, which
+        -- is what carries them into the dialog.
+        , { text = "", key = "Shift-Del", cmd = "clipboard.cut" }
+        , { text = "", key = "Ctrl-Ins", cmd = "clipboard.copy" }
+        , { text = "", key = "Shift-Ins", cmd = "clipboard.paste" }
         ]
     , windows = [ editorWindow model ]
     , overlays = []

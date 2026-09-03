@@ -347,13 +347,35 @@ pastes your own code points back for ever after. It is not reaching your
 desktop and never will.
 
 **What always works is typing, and a terminal paste is typing.** `Ctrl-Shift-V`,
-a middle click and tmux's `prefix ]` all send keystrokes down the pty, so both
+`Shift-Insert` and tmux's `prefix ]` all send keystrokes down the pty, so both
 tools that take bytes have somewhere for them to land: the field along the top
 of the Unicode window, and **Bytes | Type bytes...** in the hex viewer. Two
 different shapes because the two tools differ in where their bytes normally
 come from -- the decoder has no source but a paste, while the viewer has files,
 and a live field there would let one stray keystroke take away the open file
 and every highlight on it.
+
+A middle click is the exception and it will surprise you: predc turns on mouse
+reporting, so the terminal hands the click to the program rather than pasting,
+and on a window frame it *moves the window*. `Shift`+middle-click goes round
+that and pastes.
+
+### And predc's own clipboard, between its own windows
+
+`Shift-Del`, `Ctrl-Ins` and `Shift-Ins` cut, copy and paste in every field here
+-- the Unicode decoder's, **Type bytes**, **Go to offset**, the file dialog's
+name box. They are on the status line with no text beside them, which costs no
+columns and is the only way they can exist: Turbo Vision binds no keys to cut,
+copy and paste itself, so a program that names none has fields that cannot do
+either and nothing says so.
+
+What that buys is a round trip with no terminal in it at all. `y` in the
+Unicode decoder puts `U+0048 U+00E9` on predc's clipboard; `Shift-Ins` in the
+hex viewer's **Type bytes** field takes them straight back out. That works on a
+machine with no clipboard of any kind, which is what a remote host is, and it
+did not work until the binding stopped letting Turbo Vision's own views keep a
+second clipboard nobody could see -- `gren-tvision/doc/clipboard.md` has the
+whole of that, and it is the best explanation of this subject in the repo.
 
 and, on the terminal at the other end, whatever it calls permission to write
 the clipboard (kitty, foot, WezTerm, iTerm2 and Windows Terminal allow it;

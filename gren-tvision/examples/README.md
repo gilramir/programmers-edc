@@ -443,10 +443,17 @@ no handler behind any of it. The first version of that list interned
 bare `"cut"`, `"copy"`, `"clear"` and the rest — and broke `demo` and
 `entries`, both of which have had a Clear of their own for months. Nothing
 reported it: the button drew, the hotkey worked, and the event simply stopped
-arriving. So they are `"editor.cut"`, `"editor.copy"` and so on, the only
-prefixed names on the list, because everything else on it is a word a program
-is unlikely to want and an editor's vocabulary is made of the most ordinary
-words a menu can contain.
+arriving. So they are prefixed, the only prefixed names on the list, because
+everything else on it is a word a program is unlikely to want and this
+vocabulary is made of the most ordinary words a menu can contain.
+
+**Two prefixes, and the second one arrived late.** Cut, copy and paste are
+`"clipboard.*"` rather than `"editor.*"`, because `TInputLine` reacts to all
+three exactly as `TEditor` does -- so they act on whichever view holds the
+caret, and calling them the editor's said the opposite of what was true. They
+were `"editor.*"` for months, which meant the one name that made a *field* copy
+and paste was a name that announced it was for something else. Clear, undo and
+select-all stayed where they were: an input line has no answer to any of them.
 
 Two are absent for one reason: each needs something only the model has. There
 is no `"editor.save"` because writing a file is a `Task`, and no
@@ -1158,6 +1165,42 @@ so over ssh that half never runs -- `OSC 52` is the only route that can work,
 and tmux's default `set-clipboard external` swallows it (measured; `on`
 forwards). `copyToClipboard`'s doc comment now carries all of it, because the
 program that has to explain this to a user is the one built on this package.
+
+## The other half of the clipboard, which was two clipboards
+
+The section above is about copying *out*. Reading *in* turned out to be a
+harder problem with no setting behind it -- over ssh Turbo Vision does not even
+write the `OSC 52` read query unless the terminal has already proved it answers
+one, which tmux never does -- and chasing that turned up something worse in
+this binding.
+
+`TInputLine` answers `cmCut`, `cmCopy` and `cmPaste` exactly as `TEditor` does.
+The binding exposed them as `"editor.cut"`, `"editor.copy"` and
+`"editor.paste"`, and said in the docs that they reached the editor, so the one
+name that made a *field* copy and paste announced it was for something else.
+Worse, the views were still routing them through `TClipboard`, whose fallback
+store this binding cannot read -- `localText` is a private static and
+`requestText` is `void`. Two clipboards, each round-tripping with itself,
+neither able to see the other, and invisible wherever a real system clipboard
+existed for both to meet in.
+
+So `JsInputLine` and `JsEditor` answer the three commands themselves out of the
+binding's one store, and the names split by who answers them:
+`"clipboard.cut"`, `"clipboard.copy"` and `"clipboard.paste"` for the three
+both views take, `"editor.clear"`, `"editor.undo"` and `"editor.selectAll"` for
+the three only an editor has. `doc/clipboard.md` is where the whole subject is
+written down.
+
+**What `examples/edit` forced, and it is three lines.** Turbo Vision binds no
+keys to cut, copy and paste on purpose, and `TEditor` hides that by having a
+keymap of its own -- so the editor worked and every input line in the same
+program did not, which reads as a fact about editors rather than a gap. `edit`
+now names `Shift-Del`, `Ctrl-Ins` and `Shift-Ins` on its status line with no
+text beside them, and the payoff is in its **Find** dialog: the field takes a
+paste, which is a real thing to want, because what you search for is usually
+something you are looking at. A status entry is `ofPreProcess`, so it is
+offered before the open modal dialog -- which is what carries the keys in
+there.
 
 ## `maxLen` was one short, and a four-digit year proved it
 

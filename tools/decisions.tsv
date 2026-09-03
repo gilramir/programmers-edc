@@ -695,3 +695,95 @@ flags	wfMove	bound	Window's `canMove`
 flags	wfGrow	used	Resize
 flags	wfClose	bound	Window's `canClose`
 flags	wfZoom	used	Resize
+
+# Turbo Vision's standard commands. Not members of anything, so the walk
+# over class members never sees one -- and a view answers commands its
+# member list never mentions. TInputLine answering cmCut, cmCopy and
+# cmPaste is the one that cost something: the binding named them
+# "editor.*" for months, so the only name that made a *field* copy and
+# paste said it was for something else. See doc/clipboard.md.
+commands	cmQuit	bound	the built-in command name "quit"
+commands	cmClose	bound	"close"
+commands	cmZoom	bound	"zoom"
+commands	cmResize	bound	"resize"
+commands	cmNext	bound	"next"
+commands	cmPrev	bound	"prev"
+commands	cmMenu	bound	"menu"
+commands	cmHelp	bound	"help"
+commands	cmOK	bound	"ok", and what a dialog closes with
+commands	cmCancel	bound	"cancel"; Esc and a dialog frame both produce it
+commands	cmYes	bound	"yes"
+commands	cmNo	bound	"no"
+commands	cmTile	bound	"tile" -- TApplication handles it, not TProgram, which is why it is easy to leave out
+commands	cmCascade	bound	"cascade", same
+commands	cmCut	bound	"clipboard.cut" -- and it is an InputLine's as much as an Editor's, which is what the name says now and did not before
+commands	cmCopy	bound	"clipboard.copy", both views
+commands	cmPaste	bound	"clipboard.paste", both views; answered by the binding rather than by TClipboard -- see doc/clipboard.md
+commands	cmClear	bound	"editor.clear" -- TEditor only, TInputLine has no branch for it
+commands	cmUndo	bound	"editor.undo", TEditor only
+commands	cmSelectAll	bound	"editor.selectAll", TEditor only
+commands	cmValid	internal	asked of a view by TProgram before it is destroyed; TInputLine answers it for its validator
+commands	cmDefault	internal	what a default button turns Enter into, inside TDialog
+commands	cmError	internal	declared and never sent anywhere in the library
+commands	cmCommandSetChanged	internal	the broadcast that follows enableCommands; Tui.setEnabled is the Gren end
+commands	cmScreenChanged	internal	a terminal resize, which reaches Gren as the Resized event
+commands	cmReceivedFocus	internal	broadcast between views; Focused is the Gren end
+commands	cmReleasedFocus	internal	the other half of the same broadcast
+commands	cmScrollBarChanged	internal	a scroll bar telling its owner; Scrolled is the Gren end
+commands	cmScrollBarClicked	internal	the same bar saying the click was its own, so the pane can take focus
+commands	cmListItemSelected	internal	TListViewer's own double-click broadcast; ListBox's `chooses` is the Gren end
+commands	cmOutlineItemSelected	internal	TOutline's, and TOutline is not wrapped
+commands	cmRecordHistory	internal	THistory asking a field to remember; overridden to do nothing -- the model owns the list
+commands	cmTimerExpired	internal	TButton's shadow animation and TProgram's idle timer
+commands	cmUpdateTitle	internal	TFileEditor telling its window the filename changed; the model owns a window's title here
+commands	cmSelectWindowNum	internal	Alt-1..9, which TProgram turns into a select on the numbered window
+commands	cmFileFocused	internal	TFileDialog telling its own name field which row is highlighted
+commands	cmFileInit	internal	TFileDialog's own start-up broadcast
+commands	cmFileOpen	internal	the Open button inside TFileDialog; fileDialog reports the answer instead
+commands	cmFileReplace	internal	the Replace button inside TFileDialog
+commands	cmFileClear	internal	the Clear button inside TFileDialog
+commands	cmChangeDir	internal	TChDirDialog's own Change button
+commands	cmRevert	internal	TChDirDialog's own Revert button
+commands	cmColorForegroundChanged	internal	inside TColorDialog
+commands	cmColorBackgroundChanged	internal	inside TColorDialog
+commands	cmColorSet	internal	inside TColorDialog
+commands	cmNewColorItem	internal	inside TColorDialog
+commands	cmNewColorIndex	internal	inside TColorDialog
+commands	cmSaveColorIndex	internal	inside TColorDialog
+commands	cmEncoding	internal	TEditor asking itself to redraw after a charset change
+commands	cmNew	skipped	a File menu's, and what New means belongs to the program, not to the library
+commands	cmOpen	skipped	same -- opening a file is a Task, so the model answers it
+commands	cmSave	skipped	writing a file is a Task; the model handles its own command and answers with readEditor
+commands	cmSaveAs	skipped	same, and it needs a file dialog the model puts up
+commands	cmSaveAll	skipped	same, over documents only the model knows about
+commands	cmCloseAll	skipped	declared and unused in the library; a program that wants it closes its own windows
+commands	cmChDir	skipped	declared and unused; Tui has no chDirDialog and the model owns the cwd
+commands	cmDosShell	skipped	suspends the application and runs a shell -- the one thing a Node event loop cannot survive
+commands	cmFind	skipped	does nothing without a search string: TEditor asks through editorDialog, which is an execView and is disabled here. findInEditor is the Gren end
+commands	cmReplace	skipped	same, and replaceInEditor is the Gren end
+commands	cmSearchAgain	skipped	same; the model already holds the string and calls findInEditor again
+commands	cmRedo	skipped	declared and never implemented -- TEditor has one level of undo and no redo at all
+commands	cmCharLeft	skipped	TEditor's keymap: Turbo Vision binds a key to it and a menu entry for it would be a second name for that key
+commands	cmCharRight	skipped	TEditor's keymap: Turbo Vision binds a key to it and a menu entry for it would be a second name for that key
+commands	cmWordLeft	skipped	TEditor's keymap: Turbo Vision binds a key to it and a menu entry for it would be a second name for that key
+commands	cmWordRight	skipped	TEditor's keymap: Turbo Vision binds a key to it and a menu entry for it would be a second name for that key
+commands	cmLineStart	skipped	TEditor's keymap: Turbo Vision binds a key to it and a menu entry for it would be a second name for that key
+commands	cmLineEnd	skipped	TEditor's keymap: Turbo Vision binds a key to it and a menu entry for it would be a second name for that key
+commands	cmLineUp	skipped	TEditor's keymap: Turbo Vision binds a key to it and a menu entry for it would be a second name for that key
+commands	cmLineDown	skipped	TEditor's keymap: Turbo Vision binds a key to it and a menu entry for it would be a second name for that key
+commands	cmPageUp	skipped	TEditor's keymap: Turbo Vision binds a key to it and a menu entry for it would be a second name for that key
+commands	cmPageDown	skipped	TEditor's keymap: Turbo Vision binds a key to it and a menu entry for it would be a second name for that key
+commands	cmTextStart	skipped	TEditor's keymap: Turbo Vision binds a key to it and a menu entry for it would be a second name for that key
+commands	cmTextEnd	skipped	TEditor's keymap: Turbo Vision binds a key to it and a menu entry for it would be a second name for that key
+commands	cmNewLine	skipped	TEditor's keymap: Turbo Vision binds a key to it and a menu entry for it would be a second name for that key
+commands	cmBackSpace	skipped	TEditor's keymap: Turbo Vision binds a key to it and a menu entry for it would be a second name for that key
+commands	cmDelChar	skipped	TEditor's keymap: Turbo Vision binds a key to it and a menu entry for it would be a second name for that key
+commands	cmDelWord	skipped	TEditor's keymap: Turbo Vision binds a key to it and a menu entry for it would be a second name for that key
+commands	cmDelWordLeft	skipped	TEditor's keymap: Turbo Vision binds a key to it and a menu entry for it would be a second name for that key
+commands	cmDelStart	skipped	TEditor's keymap: Turbo Vision binds a key to it and a menu entry for it would be a second name for that key
+commands	cmDelEnd	skipped	TEditor's keymap: Turbo Vision binds a key to it and a menu entry for it would be a second name for that key
+commands	cmDelLine	skipped	TEditor's keymap: Turbo Vision binds a key to it and a menu entry for it would be a second name for that key
+commands	cmInsMode	skipped	TEditor's keymap: Turbo Vision binds a key to it and a menu entry for it would be a second name for that key
+commands	cmStartSelect	skipped	TEditor's keymap: Turbo Vision binds a key to it and a menu entry for it would be a second name for that key
+commands	cmHideSelect	skipped	TEditor's keymap: Turbo Vision binds a key to it and a menu entry for it would be a second name for that key
+commands	cmIndentMode	skipped	TEditor's keymap: Turbo Vision binds a key to it and a menu entry for it would be a second name for that key

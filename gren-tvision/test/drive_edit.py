@@ -39,6 +39,20 @@ SHIFT_INS = b"\x1b[2;2~"
 CTRL_END = b"\x1b[1;5F"
 
 
+def field_row(app):
+    """The Find dialog's `Text` row, which is the one with the input line on it.
+
+    Read by its label rather than by counting rows, and asserted on *by itself*
+    rather than by looking for the text anywhere on the screen -- the document
+    behind the dialog says `alpha` too, so a check that searched the whole
+    render would pass with an empty field.
+    """
+    for row in app.render().split("\n"):
+        if "Text" in row and "to find" not in row:
+            return row
+    return None
+
+
 def body(app, rows=6):
     """The editor's visible lines, trimmed of the frame and the scroll bar."""
     screen = app.render().split("\n")
@@ -133,6 +147,30 @@ def main():
         check("copy and paste work on the editor's own clipboard",
               body(app, 5) == ["alpha", "XYZbeta", "gamma", "alpha", "alpha"],
               str(body(app, 5)))
+
+        #    And into an *input line*, which is the same three commands and was
+        #    not always the same clipboard. `TInputLine` reacts to cmCut, cmCopy
+        #    and cmPaste exactly as `TEditor` does, so **Edit | Paste** with the
+        #    Find dialog up puts what the editor copied into the field -- which
+        #    is a real thing to want here, since what you search for is usually
+        #    something you are looking at.
+        #
+        #    It went nowhere until the binding stopped letting views reach
+        #    `TClipboard`: that class keeps a fallback store of its own, so a
+        #    field and the model filled and read different clipboards on any
+        #    machine without a system one. `doc/clipboard.md` has the whole of
+        #    it. The Alt keys work from inside a modal dialog because a menu
+        #    bar is `ofPreProcess` and is offered every keystroke first.
+        app.send(b"\x1bs", settle=0.7)          # Search menu
+        app.send(b"f", settle=0.9)              # Find...
+        check("the Find dialog is up with an empty field",
+              field_row(app) is not None and "alpha" not in field_row(app),
+              repr(field_row(app)))
+        app.send(SHIFT_INS, settle=1.0)
+        check("Shift-Ins fills the dialog's input line from the same clipboard "
+              "the editor copied to",
+              "alpha" in field_row(app), repr(field_row(app)))
+        app.send(b"\x1b", settle=0.7)           # cancel the dialog
 
         # The Edit menu is told the truth on every keystroke now, out of the
         # three facts `Edited` carries beside the caret. Nothing had a way to

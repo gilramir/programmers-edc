@@ -109,18 +109,53 @@ Napi::FunctionReference g_onWindowResize;
 Napi::FunctionReference g_onChange;
 Napi::FunctionReference g_onEdit;
 Napi::FunctionReference g_onClipboard;
+Napi::FunctionReference g_onCopied;
 
 // What this process last copied, and where the last paste came from.
 //
-// TVision keeps the same fallback in `TClipboard::localText` and we cannot use
-// it: `TClipboard::requestText` hands what it finds to
+// **This is the only clipboard in the binding, and that is the point.** TVision
+// keeps an identical fallback in `TClipboard::localText`, and we cannot use it:
+// `localText` is a private static with no accessor, and the one reader --
+// `TClipboard::requestText` -- is `void` and hands what it finds to
 // `TEventQueue::setPasteText`, which turns it into *keystrokes* aimed at
-// whatever has focus. That is the right answer for an input line -- and it is
-// already what happens when the user hits their terminal's own paste key -- and
-// the wrong one for a program that wants the text. So the twenty lines of
-// tclipbrd.cpp are reimplemented here around an accept function of our own.
+// whatever has focus rather than returning a string. There is no expression
+// that gets text out of that class. So the twenty lines of `tclipbrd.cpp` are
+// written again here, around an accept function of our own.
+//
+// Which leaves the rule the rest of this file has to keep: **no view may reach
+// `TClipboard` either.** `TInputLine` and `TEditor` both route `cmCut`,
+// `cmCopy` and `cmPaste` through it by default, and a program that bound those
+// commands used to get a second clipboard nobody could see from Gren -- a `y`
+// in one window and a `Shift-Ins` in a field filled and read different stores.
+// `JsInputLine` and `JsEditor` answer the three commands themselves, out of
+// this, through `clipboardSetFromView` and `clipboardRequestForView` below.
+//
+// The seam was invisible for as long as it was, incidentally, because both
+// stores are *fallbacks*: with a real system clipboard -- a local display, or a
+// terminal that answers an `OSC 52` read -- neither is ever touched and the two
+// paths meet in the one place that matters. It shows up exactly where there is
+// no system clipboard to meet in, which is every ssh session.
 static std::string g_clipboardLocal;
 static bool g_clipboardFromSystem = false;
+
+// Who asked for the clipboard is carried by *which accept function was handed
+// over*, and there is deliberately no bookkeeping beside it.
+//
+// `THardwareInfo::requestClipboardText` keeps **one** callback slot
+// (`InputState::putPaste`) and a later request overwrites it. Before the views
+// were wired up only one thing ever asked and that did not matter; now a
+// `cmPaste` and a `Tui.readClipboard` can be in flight together, and an
+// `OSC 52` reply carries nothing saying which question it answers.
+//
+// A queue of askers was the first attempt and it was worse than the problem.
+// A terminal that claims `OSC 52` support and then does not answer one
+// particular query leaves an entry in it for ever, and every reply afterwards
+// is matched to the wrong asker -- which is not a hypothetical: it broke
+// `drive_hex.py` the first time a driver pressed `Shift-Ins` without answering
+// the query it provoked. Two accept functions and TVision's own single slot
+// degrade instead to "the last thing that asked is what the answer goes to",
+// which is the only reading this protocol can support and the one TVision
+// already has.
 
 // Windows are destroyed wholesale when the application goes away; that is not
 // news anyone needs, and calling into JS from inside the teardown would be a
@@ -1385,7 +1420,8 @@ static void prepare(const Napi::Env &env, const Napi::Value &value)
                           std::make_pair("onWindowResize", &g_onWindowResize),
                           std::make_pair("onChange", &g_onChange),
                           std::make_pair("onEdit", &g_onEdit),
-                          std::make_pair("onClipboard", &g_onClipboard)})
+                          std::make_pair("onClipboard", &g_onClipboard),
+                          std::make_pair("onCopied", &g_onCopied)})
         {
         if (!config.Has(binding.first))
             continue;
@@ -1434,6 +1470,7 @@ static void teardown(const Napi::Env &env)
     g_onChange.Reset();
     g_onEdit.Reset();
     g_onClipboard.Reset();
+    g_onCopied.Reset();
     g_clipboardLocal.clear();
     g_clipboardFromSystem = false;
     g_editNotes.clear();
@@ -2019,6 +2056,9 @@ static Napi::Value DoubleClickDelay(const Napi::CallbackInfo &info)
 // a moment later when the *terminal* answered an OSC 52 query, or out of
 // `requestClipboard` again with this process's own last copy when there is no
 // system clipboard at all.
+//
+// This is the one a *model* asked for, so it hands over a string.
+// `acceptClipboardTextForView` below is the other half.
 static void acceptClipboardText(TStringView text)
 {
     if (g_onClipboard.IsEmpty() || g_hasPendingError)
@@ -2032,6 +2072,65 @@ static void acceptClipboardText(TStringView text)
                               Napi::String::New(env, body),
                               Napi::Boolean::New(env, g_clipboardFromSystem),
                           });
+}
+
+// Put text on the clipboard: this one first, the system's if it will take it.
+//
+// The order is deliberate and differs from `TClipboard::setText`, which stores
+// locally *only when the system refuses*. That leaves a stale local copy behind
+// on a machine where copying works -- and a later paste that falls back to it
+// pastes something from two copies ago rather than nothing. Storing first costs
+// a string assignment and cannot do that.
+static bool putOnClipboard(const std::string &text)
+{
+    g_clipboardLocal = text;
+    return THardwareInfo::setClipboardText(text);
+}
+
+// The other accept function: what a *view* asked for goes back as keystrokes
+// at whatever holds the caret, which is what an input line takes and what a
+// terminal's own paste key already does. This is the one place in the binding
+// where that shape is the right one -- and, read backwards, the whole reason
+// `TClipboard` could not be used for the other.
+static void acceptClipboardTextForView(TStringView text)
+{
+    TEventQueue::setPasteText(text);
+}
+
+// Ask for the clipboard. True if somebody was asked and the answer may still be
+// coming; on false `accept` has already run with this process's own last copy.
+static bool askForClipboard(void (&accept)(TStringView))
+{
+    g_clipboardFromSystem = true;
+    if (THardwareInfo::requestClipboardText(accept))
+        return true;
+
+    g_clipboardFromSystem = false;
+    accept(g_clipboardLocal);
+    return false;
+}
+
+// What a view copied. Reaches the model as an ordinary `Copied` event, for the
+// reason `Tui.copyToClipboard` does: "the terminal did not confirm it" is as
+// true of a copy made in an input line as of one the model asked for, and a
+// program that cannot hear this one cannot say so.
+void clipboardSetFromView(TStringView text)
+{
+    bool toSystem = putOnClipboard(
+        text.data() ? std::string(text.data(), text.size()) : std::string());
+
+    if (g_onCopied.IsEmpty() || g_hasPendingError)
+        return;
+    Napi::Env env = g_onCopied.Env();
+    Napi::HandleScope scope(env);
+    callJs(g_onCopied, {Napi::Boolean::New(env, toSystem)});
+}
+
+// A view wants to paste. The answer arrives at `acceptClipboardText`, which
+// turns it into keystrokes because this is who asked.
+void clipboardRequestForView()
+{
+    askForClipboard(acceptClipboardTextForView);
 }
 
 // tv.setClipboard(text) -- true if the *system* clipboard took it.
@@ -2048,8 +2147,7 @@ static Napi::Value SetClipboard(const Napi::CallbackInfo &info)
     std::string text = info.Length() > 0 && !info[0].IsUndefined()
                            ? info[0].ToString().Utf8Value()
                            : std::string();
-    g_clipboardLocal = text;
-    return Napi::Boolean::New(env, THardwareInfo::setClipboardText(text));
+    return Napi::Boolean::New(env, putOnClipboard(text));
 }
 
 // tv.requestClipboard() -- ask for the clipboard's text; the answer arrives at
@@ -2066,13 +2164,7 @@ static Napi::Value RequestClipboard(const Napi::CallbackInfo &info)
     Napi::Env env = info.Env();
     requireRunning(env, "requestClipboard");
 
-    g_clipboardFromSystem = true;
-    if (THardwareInfo::requestClipboardText(acceptClipboardText))
-        return Napi::Boolean::New(env, true);
-
-    g_clipboardFromSystem = false;
-    acceptClipboardText(g_clipboardLocal);
-    return Napi::Boolean::New(env, false);
+    return Napi::Boolean::New(env, askForClipboard(acceptClipboardText));
 }
 
 static Napi::Object Init(Napi::Env env, Napi::Object exports)

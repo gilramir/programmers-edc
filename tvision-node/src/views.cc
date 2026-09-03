@@ -82,8 +82,57 @@ void JsListBox::setItems(std::vector<std::string> newItems)
 // The sandwich: what it was, let TInputLine do whatever it does, what it is
 // now. Nothing else can tell a keystroke that inserted a character from one
 // that moved the cursor, and nothing else has to.
+// Cut, copy and paste, answered here rather than by TInputLine.
+//
+// The base class routes all three through `TClipboard`, whose fallback store
+// this binding cannot read -- so a program that bound the three commands got a
+// *second* clipboard invisible from Gren, and a copy made by the model and a
+// paste made in a field filled and read different places. app.cc has the whole
+// argument. What matters here is that the commands never reach the base class.
+//
+// `updateCommands` disables cmCut and cmCopy while nothing is selected, so the
+// empty case should not arrive; it is answered anyway, by doing nothing rather
+// than by putting an empty string on the clipboard, which is what the base
+// class would do with it.
 void JsInputLine::handleEvent(TEvent &event)
 {
+    if (event.what == evCommand)
+        {
+        ushort cmd = event.message.command;
+        if (cmd == cmPaste)
+            {
+            clipboardRequestForView();
+            clearEvent(event);
+            return;
+            }
+        if (cmd == cmCut || cmd == cmCopy)
+            {
+            std::string before(data);
+            if (selStart < selEnd)
+                {
+                clipboardSetFromView(
+                    TStringView(data + selStart, selEnd - selStart));
+                if (cmd == cmCut)
+                    {
+                    // The delete, asked for in the only vocabulary TInputLine
+                    // exposes: `deleteSelect`, `saveState` and `checkValid` are
+                    // all private, and `Del` with a selection out is exactly
+                    // those three in that order (tinputli.cpp:399). It is also
+                    // a shade better than the base class's own cmCut, which
+                    // does not pull `firstPos` back after the text shrinks.
+                    TEvent del = {};
+                    del.what = evKeyDown;
+                    del.keyDown.keyCode = kbDel;
+                    TInputLine::handleEvent(del);
+                    }
+                }
+            clearEvent(event);
+            if (!viewId.empty() && before != data)
+                noteChangedText(viewId, data);
+            return;
+            }
+        }
+
     std::string before(data);
     TInputLine::handleEvent(event);
     if (!viewId.empty() && before != data)
@@ -634,8 +683,40 @@ void JsEditor::noteEditIfChanged()
 // every edit goes through -- typing, Backspace, a click, Ctrl-Y, a paste and
 // an undo all land in handleEvent -- and the state afterwards is the only
 // thing they have in common.
+// The same three commands, taken for the same reason as JsInputLine's -- and
+// answered with TEditor's own public verbs rather than by rewriting them, since
+// here `deleteSelect`, `buffer` and `bufPtr` are all reachable. What is
+// replaced is only the two lines inside `clipCopy` and `clipPaste` that name
+// `TClipboard` (teditor1.cpp:306 and :329).
 void JsEditor::handleEvent(TEvent &event)
 {
+    if (event.what == evCommand)
+        {
+        ushort cmd = event.message.command;
+        if (cmd == cmPaste)
+            {
+            clipboardRequestForView();
+            clearEvent(event);
+            return;
+            }
+        if (cmd == cmCut || cmd == cmCopy)
+            {
+            if (selStart < selEnd)
+                {
+                clipboardSetFromView(TStringView(buffer + bufPtr(selStart),
+                                                 selEnd - selStart));
+                selecting = False;
+                if (cmd == cmCut)
+                    deleteSelect();
+                else
+                    update(ufUpdate);
+                }
+            clearEvent(event);
+            noteEditIfChanged();
+            return;
+            }
+        }
+
     TEditor::handleEvent(event);
     noteEditIfChanged();
 }

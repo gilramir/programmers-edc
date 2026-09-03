@@ -96,15 +96,24 @@ public:
             // as an ordinary user command, and "tile" arrives in the model as
             // an event instead of tiling the desktop.
             {"tile", cmTile},     {"cascade", cmCascade},
-            // The editor's own, and the reason they are the only prefixed
-            // names on this list. Everything above is a word a program is
-            // unlikely to want -- "cascade", "prev", "yes" -- but an editor's
-            // vocabulary is nine everyday ones, and a built-in name silently
-            // eats the event a program was expecting. The first version of
-            // this list interned bare "clear" and broke two examples that
-            // already had a Clear of their own; nothing reported it, which is
-            // exactly the failure mode the docs warn about.
+            // The prefixed names, and the reason they are prefixed. Everything
+            // above is a word a program is unlikely to want -- "cascade",
+            // "prev", "yes" -- but these are everyday ones, and a built-in name
+            // silently eats the event a program was expecting. The first
+            // version of this list interned bare "clear" and broke two examples
+            // that already had a Clear of their own; nothing reported it, which
+            // is exactly the failure mode the docs warn about.
             //
+            // **Two prefixes, because these are two different sets.** The three
+            // clipboard commands are handled by `TInputLine` *and* `TEditor`
+            // (tinputli.cpp:470 and teditor1.cpp:639), so they belong to any
+            // focused field and calling them "editor.*" said the opposite --
+            // which meant nobody would ever try the one name that worked. The
+            // other three really are the editor's: `TInputLine` has no branch
+            // for cmClear, cmUndo or cmSelectAll at all.
+            {"clipboard.cut", cmCut},
+            {"clipboard.copy", cmCopy},
+            {"clipboard.paste", cmPaste},
             // Two absences, both deliberate. "editor.save", because writing a
             // file is a Task and so saving is the model's job -- its command
             // has to arrive as an event. And find/replace, because cmFind and
@@ -113,9 +122,6 @@ public:
             // messageBox, which is execView, which is the nested loop the
             // menu bar already has too much of). A search needs the model to
             // ask a question, so it is not a name that works on its own.
-            {"editor.cut", cmCut},
-            {"editor.copy", cmCopy},
-            {"editor.paste", cmPaste},
             {"editor.clear", cmClear},
             {"editor.undo", cmUndo},
             {"editor.selectAll", cmSelectAll},
@@ -385,6 +391,13 @@ public:
 
     virtual Boolean isValid(const char *) override { return True; }
 };
+
+// The binding's clipboard, as far as a view is concerned. Both are defined in
+// app.cc, next to the store they act on, and both exist so that no view has to
+// reach `TClipboard` -- see the long note there for what a second clipboard
+// cost and why it could not simply be wrapped.
+void clipboardSetFromView(TStringView text);
+void clipboardRequestForView();
 
 class JsInputLine : public TInputLine {
 public:

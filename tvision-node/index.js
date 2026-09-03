@@ -57,6 +57,7 @@ function start(config) {
     onChange: guard(config.onChange),
     onEdit: guard(config.onEdit),
     onClipboard: guard(config.onClipboard),
+    onCopied: guard(config.onCopied),
   });
 
   const report = (err) => {

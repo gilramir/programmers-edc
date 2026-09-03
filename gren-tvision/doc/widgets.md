@@ -495,12 +495,18 @@ Three numbers per keystroke instead of a file. A status line saying `12:4` and a
 Save that lights up when there is something to save are what a program wants on
 every edit; the document crosses twice per file.
 
-The commands `"editor.cut"`, `"editor.copy"`, `"editor.paste"`,
+The commands `"clipboard.cut"`, `"clipboard.copy"`, `"clipboard.paste"`,
 `"editor.clear"`, `"editor.undo"` and `"editor.selectAll"` are built in -- put
-one on a menu and it reaches whichever editor has the caret without passing
+one on a menu and it reaches whichever view has the caret without passing
 through `update` at all. There is deliberately no `"editor.save"` and no
 `"editor.find"`: writing a file is a `Task` and searching needs a string, and
 both are things only the model can produce.
+
+**The first three are not the editor's.** `TInputLine` reacts to `cmCut`,
+`cmCopy` and `cmPaste` exactly as `TEditor` does, so those three names act on
+whichever of the two holds the caret -- which is why they carry a different
+prefix. `doc/clipboard.md` has what they share underneath and why it took a
+while to notice.
 
 **One sharp edge, and it is the price of a view whose contents are not in the
 view: give it a fixed rectangle and let `Grows` resize it.** A rectangle is
@@ -747,7 +753,8 @@ some are handled by Turbo Vision itself and never reach you at all:
 | `quit`, `close`, `zoom`, `resize`, `next`, `prev`, `menu`, `help` | window and application management |
 | `ok`, `cancel`, `yes`, `no` | close a modal dialog |
 | `tile`, `cascade` | arrange the desktop |
-| `editor.cut`, `editor.copy`, `editor.paste`, `editor.clear`, `editor.undo`, `editor.selectAll` | reach whichever `Editor` has the caret |
+| `clipboard.cut`, `clipboard.copy`, `clipboard.paste` | reach whichever `Editor` **or `InputLine`** has the caret |
+| `editor.clear`, `editor.undo`, `editor.selectAll` | reach whichever `Editor` has the caret |
 
 **That list is also a set of names your program may not use for anything
 else.** Calling a command `"cancel"` because there is a Cancel entry on your

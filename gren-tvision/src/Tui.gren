@@ -989,10 +989,13 @@ first for a week, because `Array.append fst second` makes `fst` the *postfix*.
     indent, word-left and word-right, and the block and line commands from
     Borland's keymap.
 
-    The command names `"editor.cut"`, `"editor.copy"`, `"editor.paste"`,
-    `"editor.clear"`, `"editor.undo"` and `"editor.selectAll"` are built in —
-    put one on a menu and it reaches whichever editor has the caret without
-    passing through `update` at all.
+    The command names `"clipboard.cut"`, `"clipboard.copy"`,
+    `"clipboard.paste"`, `"editor.clear"`, `"editor.undo"` and
+    `"editor.selectAll"` are built in — put one on a menu and it reaches
+    whichever view has the caret without passing through `update` at all. The
+    first three are `clipboard.` and not `editor.` because an
+    [`InputLine`](#View) answers them too; the last three an editor answers
+    alone.
 
     Two things a menu entry cannot do on its own, both for the same reason:
     they need something only the model has. Saving needs a file, and writing
@@ -1190,16 +1193,40 @@ A `~` in a title marks the highlighted letter: `"~F~ile"` draws as *F*ile.
 
 Built-in command names work here too: `"quit"`, `"close"`, `"zoom"`,
 `"resize"`, `"next"`, `"prev"`, `"menu"`, `"help"`, `"ok"`, `"cancel"`,
-`"yes"`, `"no"`, `"cascade"`, `"tile"` — and the editor's own, which reach
-whichever [`Editor`](#View) has the caret: `"editor.cut"`, `"editor.copy"`,
-`"editor.paste"`, `"editor.clear"`, `"editor.undo"` and `"editor.selectAll"`.
-Turbo Vision handles those itself and they do not arrive as events.
+`"yes"`, `"no"`, `"cascade"` and `"tile"`. Turbo Vision handles those itself
+and they do not arrive as events.
 
-The editor's six are the only prefixed names here, and the prefix is the
-point: everything else on this list is a word a program is unlikely to want
-for itself, and an editor's vocabulary is made of everyday ones. A built-in
-name takes the event silently, so a program's own Clear and the editor's
-cannot both own the bare name -- and the program should have it.
+Then two prefixed sets, and the prefixes say who answers them.
+
+`"clipboard.cut"`, `"clipboard.copy"` and `"clipboard.paste"` act on whatever
+holds the caret, and **that is an [`InputLine`](#View) as much as an
+[`Editor`](#View)** -- both react to these, both light and grey them by
+themselves as a selection comes and goes. Bind them to keys your users expect
+and cut, copy and paste work in every field in the program:
+
+    , { text = "", key = "Ctrl-Ins", cmd = "clipboard.copy" }
+    , { text = "", key = "Shift-Ins", cmd = "clipboard.paste" }
+    , { text = "", key = "Shift-Del", cmd = "clipboard.cut" }
+
+Turbo Vision binds no keys to them itself, deliberately -- picking `Ctrl-C` for
+somebody would be picking wrong for somebody else -- so until a program names
+some, its fields cannot copy or paste. Nothing reports that either.
+
+They share the clipboard [`copyToClipboard`](#copyToClipboard) writes and
+[`readClipboard`](#readClipboard) reads, so a copy made in a field and a paste
+made by the model are the same text. A copy made *by a field* arrives as an
+ordinary [`Copied`](#Event) event, for the same reason the model's does: whether
+anything outside confirmed taking it is a thing worth saying, and it is equally
+unknown either way.
+
+`"editor.clear"`, `"editor.undo"` and `"editor.selectAll"` are the editor's
+alone -- an input line has no answer to any of the three.
+
+These six are the only prefixed names here, and the prefix is the point:
+everything else on this list is a word a program is unlikely to want for
+itself, and these are everyday ones. A built-in name takes the event silently,
+so a program's own Clear and the editor's cannot both own the bare name -- and
+the program should have it.
 
 Which makes the same list a set of names your program may not use for anything
 else. Calling a command `"cancel"` because there is a Cancel entry on the menu

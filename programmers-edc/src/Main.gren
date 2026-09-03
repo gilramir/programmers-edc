@@ -699,6 +699,25 @@ view model =
         , { text = "~Alt-D~ Hex", key = "Alt-D", cmd = Tool.Hex.command }
         , { text = "~Alt-C~ Time", key = "Alt-C", cmd = Tool.Time.command }
         , { text = "~Alt-F3~ Close", key = "Alt-F3", cmd = "close" }
+        -- Three keys with nothing beside them, and they are the reason the
+        -- fields in this program can be filled from the rest of it.
+        --
+        -- Turbo Vision binds no keys to cut, copy and paste itself -- it will
+        -- not choose `Ctrl-C` for somebody -- so a program that names none has
+        -- input lines that cannot do either, and nothing reports it. Naming
+        -- them here costs no columns, because a status entry with no text
+        -- draws nothing and is still offered every keystroke.
+        --
+        -- What it buys over ssh is the whole of it. `y` in the Unicode decoder
+        -- puts code points on a clipboard no remote terminal will ever hand
+        -- back, and `Shift-Ins` in the hex viewer's **Type bytes** field takes
+        -- them straight out of it again -- one program, one clipboard, no
+        -- terminal involved. That is a round trip predc could not make until
+        -- the binding stopped letting views keep a second clipboard of their
+        -- own; `gren-tvision/doc/clipboard.md` has the story.
+        , { text = "", key = "Shift-Del", cmd = "clipboard.cut" }
+        , { text = "", key = "Ctrl-Ins", cmd = "clipboard.copy" }
+        , { text = "", key = "Shift-Ins", cmd = "clipboard.paste" }
         ]
     , windows =
         (when model.ascii is

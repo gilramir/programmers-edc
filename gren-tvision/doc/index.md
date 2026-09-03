@@ -17,11 +17,15 @@ answer different questions.
     this if you are changing the binding, or if you want to know why the API
     looks the way it does.
 
-  - **[The clipboard, from a terminal program](clipboard.md)** -- why a copy
-    reaches the rest of the machine sometimes and not others, what
-    `Copied.toSystem = False` actually claims, and the one line of `.tmux.conf`
-    that is usually the answer. Read this the first time somebody says the copy
-    only works inside your program.
+  - **[The clipboard, from a terminal program](clipboard.md)** -- the five
+    stores unix calls "the clipboard" and which one Turbo Vision touches (only
+    ever `CLIPBOARD`, never the mouse selection), why a *paste* over ssh is a
+    harder problem than a copy and has no setting behind it, the two completely
+    different mechanisms both called pasting, what `Copied.toSystem = False`
+    actually claims, the one line of `.tmux.conf` that is usually the answer to
+    the copy, and the field that is the only answer to the paste. Read it the
+    first time somebody says the copy only works inside your program, and again
+    the first time they say a paste does nothing at all.
 
 Alongside these, in the repository:
 
