@@ -4981,3 +4981,129 @@ an entry is only ever looked at, so how it looks is what it does. The check
 compares Undo's ink against Cut's rather than against a number -- the claim is
 that the two are in different states -- and only then names the colour of the
 one that is greyed.
+
+## The clipboard you cannot read, and the field that replaced it
+
+`predc unicode` over ssh, inside tmux, with a selection sitting on the machine
+the human is actually at: `p` answers **There is nothing on the clipboard.**
+The obvious diagnosis is the right one about unix and the wrong one about this
+program. `PRIMARY` and `CLIPBOARD` really are different stores, and a mouse
+drag really does fill only the first -- but neither of them is what fails here,
+because both of them are on the *other machine*.
+
+Reading is not writing, and the asymmetry is total. Follow
+`Tui.readClipboard` down and it gets two chances:
+
+  - `UnixClipboard::requestClipboardText` spawns `wl-paste`, `xsel` or
+    `xclip`, and checks `WAYLAND_DISPLAY` / `DISPLAY` **before** checking the
+    executable exists. Over ssh neither is set, so the whole half is skipped
+    however many of those are installed -- and rightly, since the display it
+    would talk to is the far end's.
+  - `TermIO::requestClipboardText` falls through to `requestOsc52Clipboard`,
+    which is four lines and the whole story
+    (`source/platform/termio.cpp:913`):
+
+        static bool requestOsc52Clipboard(ConsoleCtl &con, InputState &state)
+        {
+            if (state.hasFullOsc52)
+                { con.write("\x1B]52;;?\x07", 8); return true; }
+            return false;
+        }
+
+    **The query is not written unless the terminal has already proved it will
+    answer one.** `hasFullOsc52` is set by exactly three things -- a kitty
+    capability reply naming `read-clipboard`, an unsolicited `OSC 52` answer,
+    or xterm reporting `allowWindowOps` in an `OSC 60`. tmux sends none of
+    them and forwards none of them.
+
+So `requestClipboardText` returns false without asking anybody, the binding
+falls back to this process's own last copy (`app.cc:2069`), and that is empty
+because nothing has been copied here yet. Every layer did what it should and
+the sentence at the end of it was still wrong.
+
+The one line of `~/.tmux.conf` this repo has recommended for months --
+`set -g set-clipboard on` -- is about **writing** and does nothing here.
+Reading is the direction with a security question attached: a program that can
+read your clipboard can read the password you put there a minute ago, and
+terminals that cheerfully accept a write refuse a read on purpose. There is no
+configuration that makes `p` work over ssh, and looking for one is the trap.
+
+### The half that looks like it works
+
+There is a fallback under all of this and it is deliberate: when nothing
+outside answers, the binding hands back **this process's own last copy**
+(`app.cc:2069`), so a copy in one window and a paste in another work on a
+machine with no clipboard at all. The consequence over ssh is a shape worth
+recognising -- `p` does nothing until something has been copied, and pastes
+that same thing back for ever afterwards. Nothing is wrong and nothing is
+reaching the desktop.
+
+It also cost a check. A `p`-says-so assertion added halfway down `drive_hex.py`
+failed, and then took four unrelated checks with it, because by then the driver
+had copied a dump: `p` succeeded, replaced the open file with it, and every
+check about that file was suddenly about a paste. The assertion has to run
+before anything is copied, which is a fact about the fallback and not about the
+driver.
+
+### What does get through, and it was there all along
+
+A terminal paste -- `Ctrl-Shift-V`, middle click, tmux's `prefix ]` -- is not
+an escape sequence asking a question. It is *keystrokes*, sent down the pty in
+the direction that has never had a problem, and Turbo Vision even brackets them
+(`\x1B[?2004h` at startup, `kbPaste` on each key). They were arriving the whole
+time. What was missing was somewhere for them to land.
+
+Two facts followed from that, and one of them was a bug already:
+
+  - **A canvas is the wrong place for them to land.** Pasting into the Unicode
+    window before this ran the pasted text through `pressKey`, so any `p`, `P`,
+    `8`, `l`, `b` or `y` in it fired a command. Nobody had reported it because
+    nobody could paste.
+  - **A field is not one shape.** Both tools got one and they are not the same
+    widget, and the rule that decided it is this repo's own: *who moves the
+    state.* The Unicode decoder's input is a paste and nothing else, so the
+    field is the source and belongs in the window, where it is read live on
+    every keystroke. The hex viewer's input is a **file**; a live field there
+    would be a second source competing with the model's, and one stray
+    keystroke would take away the open file and every highlight on it. So its
+    field is a dialog on **Bytes | Type bytes...**, and costs the dump no rows.
+
+### Half a byte is not an error
+
+A field read on every keystroke is read halfway through every byte, so the
+paste-time rule -- *an odd number of hex digits is a refusal, with the count* --
+becomes an error message flashing on and off under somebody's hands. The
+field's version drops a trailing lone digit and says so on the line below:
+`one hex digit is waiting for its pair`. A stray *character* is still refused
+at once, because `z` is not halfway through anything.
+
+That is one sentence of policy and it needed a second function rather than an
+argument on the first, because the two callers are asking different questions.
+A paste arrived whole and is either right or wrong. A field is a thing being
+typed.
+
+### And the thing that is still silent
+
+`TInputLine` refuses a keystroke past `maxLen` and says nothing at all, which
+for a paste means bytes that quietly did not arrive -- the one failure this
+program refuses to have about bytes. So the status line says **the field is
+full** when it is, and `maxLen` is 512 rather than unbounded for a reason that
+is also about pastes: they arrive one keystroke at a time, one `Changed` each,
+and the whole field is decoded again on every one of them. That is quadratic.
+Five hundred squared is nothing; five thousand squared is a pause.
+
+### Two notes for a driver
+
+Both cost a check that silently does nothing, and both are `TInputLine`
+(`tinputli.cpp:380`):
+
+  - A field selects its whole value when it **gains** the caret, not while it
+    has it. `Alt-`its-label is a no-op when it is already focused, so a driver
+    that wants a fresh selection has to leave and come back.
+  - `Del` honours a selection; `Backspace` with no selection deletes one
+    character. To empty a field: leave, return, `Del`.
+
+And one about the window: the field is the first selectable view, so it has
+the caret when the tool opens -- which is the point of it, and which means the
+single-letter commands do not reach the canvas until `Tab` gets there. They are
+all on the menu, which is what makes that survivable.

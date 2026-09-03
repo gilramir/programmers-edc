@@ -70,6 +70,16 @@ scrollId =
     "unicode.scroll"
 
 
+fieldId : String
+fieldId =
+    "unicode.field"
+
+
+readingId : String
+readingId =
+    "unicode.reading"
+
+
 menuItem : MenuItem
 menuItem =
     Item { title = "~U~nicode decoder", cmd = command, key = "Alt-U", shortcut = "Alt-U" }
@@ -125,6 +135,27 @@ lineWidth =
     76
 
 
+{-| How much the entry field will hold.
+
+Five hundred and twelve characters is about a hundred and seventy bytes of hex,
+which is more than the thing this tool is for -- "the three bytes in the middle
+of a dump that will not render" -- and a long way short of a file, which is
+what the hex viewer one menu away is for.
+
+It is a number rather than no limit for a reason a terminal makes unavoidable:
+a paste arrives as keystrokes, one `Changed` event each, and the whole field is
+decoded again on every one of them. That is quadratic, and five hundred squared
+is nothing while five thousand squared is a pause under somebody's hands.
+
+Turbo Vision simply refuses the keystroke past the limit, silently, which is
+the one thing this program will not do about bytes -- so [`status`](#status)
+says the field is full when it is.
+-}
+fieldMax : Int
+fieldMax =
+    512
+
+
 -- MODEL
 
 
@@ -134,6 +165,15 @@ type alias Model =
     -- pasted, which is also what `bytes` being empty means -- but a name is
     -- what the window says and a length is not.
     , name : String
+    -- What is in the entry field, exactly as it was typed. Nothing normalises
+    -- it and nothing writes it back, so the caret never moves under somebody's
+    -- fingers -- the model's copy and the field's contents are the same string
+    -- and the differ writes nothing.
+    , typed : String
+    -- How the field is read. It governs the field and nothing else: `p` and
+    -- `P` are still two commands that each say which of these they mean, and
+    -- they say it by *being* two commands.
+    , reading : Reading
     , encoding : Encoding
     -- The first decoded row on screen, and how many rows the window is
     -- showing. Rows and not bytes: what scrolls here is the list of
@@ -191,6 +231,8 @@ init : Model
 init =
     { bytes = []
     , name = ""
+    , typed = ""
+    , reading = Characters
     , encoding = Utf8
     , top = 0
     , rows = openRows
@@ -253,13 +295,46 @@ update ports event model =
             else
                 still model
 
+        -- The entry field and the radio beside it, which are the only two
+        -- things in this program the *user* moves and the model has no other
+        -- way of hearing about. A `Changed` is not sent for a value the model
+        -- set itself, so the round trip that would fight the caret does not
+        -- happen: what comes back is what somebody typed.
+        Tui.Changed it ->
+            if it.id == fieldId then
+                when it.value is
+                    Tui.Text text ->
+                        readField { model | typed = text }
+
+                    _ ->
+                        still model
+
+            else if it.id == readingId then
+                when it.value is
+                    Tui.Choice index ->
+                        readField
+                            { model
+                                | reading =
+                                    if index == 0 then
+                                        Characters
+
+                                    else
+                                        HexDigits
+                            }
+
+                    _ ->
+                        still model
+
+            else
+                still model
+
         -- Same guard as the hex viewer's, and it earns itself the same way:
         -- `awaiting` is what says this tool asked, and it carries what to do
         -- with the answer, which nothing in the event says.
         Tui.ClipboardText it ->
             when model.awaiting is
                 Just reading ->
-                    paste reading it.text { model | awaiting = Nothing }
+                    paste reading it { model | awaiting = Nothing }
 
                 Nothing ->
                     still model
@@ -368,10 +443,29 @@ askClipboard ports reading model =
     }
 
 
-paste : Reading -> String -> Model -> Step msg
-paste reading text model =
-    if text == "" then
-        still { model | message = "There is nothing on the clipboard." }
+{-| The clipboard answered.
+
+`fromSystem` is why the empty case is two sentences rather than one. Nothing
+outside answered *and* this program has copied nothing is the state every
+remote session is permanently in -- over ssh the helper programs are skipped
+for want of a `DISPLAY`, and the `OSC 52` read query is not even written unless
+the terminal has already proved it will answer one, which tmux never does. So
+"there is nothing on the clipboard" would be a claim about a clipboard nobody
+asked. What is true is that the terminal will not hand one over, and what to do
+about it is the field two rows up.
+-}
+paste : Reading -> { text : String, fromSystem : Bool } -> Model -> Step msg
+paste reading answer model =
+    if answer.text == "" then
+        still
+            { model
+                | message =
+                    if answer.fromSystem then
+                        "There is nothing on the clipboard."
+
+                    else
+                        "The terminal will not hand the clipboard over; type into the field instead."
+            }
 
     else
         when reading is
@@ -381,10 +475,10 @@ paste reading text model =
                 -- those back as UTF-16 is a perfectly reasonable thing to want
                 -- to look at, and is why this is a paste rather than a
                 -- shortcut to `Utf8`.
-                shown (toByteArray (Bytes.fromString text)) "pasted text" model
+                shown (toByteArray (Bytes.fromString answer.text)) "pasted text" model
 
             HexDigits ->
-                when hexBytes text is
+                when hexBytes answer.text is
                     Err reason ->
                         still { model | message = reason }
 
@@ -396,17 +490,139 @@ paste reading text model =
                             shown codes "pasted hex" model
 
 
+{-| New bytes from a paste, which is the one place that also empties the field.
+
+There are two sources in this window and exactly one of them is showing at any
+moment: the field is the source while there is anything in it, and a paste
+replaces the source. Leaving the field alone would put a string on the screen
+that is not what the rows below it were made of, which is the one thing a
+decoder must never do.
+-}
 shown : Array Int -> String -> Model -> Step msg
 shown codes name model =
     still
         { model
             | bytes = codes
             , name = name
+            , typed = ""
             , top = 0
             , cursor = 0
             , copied = False
             , message = ""
         }
+
+
+{-| The field moved, or the radio beside it did: decode what is in it.
+
+Emptying the field empties the window, and that is the same rule as the one
+above read backwards -- the field is the source, so nothing in it is nothing to
+show. It cannot uncover an earlier paste, because a paste emptied the field on
+its way in.
+-}
+readField : Model -> Step msg
+readField model =
+    if model.typed == "" then
+        still
+            { model
+                | bytes = []
+                , name = ""
+                , top = 0
+                , cursor = 0
+                , copied = False
+                , message = ""
+            }
+
+    else
+        when model.reading is
+            Characters ->
+                typedInto (toByteArray (Bytes.fromString model.typed)) model
+
+            HexDigits ->
+                when hexSoFar model.typed is
+                    Err reason ->
+                        -- The rows keep whatever the last good field said
+                        -- while a stray character is on the line below. The
+                        -- alternative -- blanking the window on the keystroke
+                        -- that made it wrong -- takes away the thing somebody
+                        -- is comparing the mistake against.
+                        still { model | message = reason }
+
+                    Ok codes ->
+                        typedInto codes model
+
+
+typedInto : Array Int -> Model -> Step msg
+typedInto codes model =
+    still
+        { model
+            | bytes = codes
+            -- A field holding one hex digit decodes to nothing, and a title
+            -- reading `typed (0 bytes)` would be arithmetic about a byte
+            -- nobody has finished typing. The name is what the title says, so
+            -- it says nothing until there is something to name.
+            , name =
+                if Array.isEmpty codes then
+                    ""
+
+                else
+                    "typed"
+            , top = 0
+            , cursor = 0
+            , copied = False
+            , message = ""
+        }
+
+
+{-| The field's hex, read as far as it goes.
+
+The difference from [`hexBytes`](#hexBytes) is one rule and it is the whole
+reason this exists: **a lone digit at the end is a byte somebody is halfway
+through typing, not an error.** `hexBytes` answers a paste, which arrived
+whole and is either right or wrong; a field is read again on every keystroke,
+and half of those keystrokes land on an odd digit. Complaining about them would
+mean an error message flashing on and off under somebody's hands.
+
+A stray *character* is still an error at once, because that is not halfway
+through anything. And the digit that was left out is said on the line below the
+rows, so the rule costs a note rather than a silence.
+-}
+hexSoFar : String -> Result String (Array Int)
+hexSoFar text =
+    hexBytes (dropHalfByte text)
+
+
+{-| Whether the field ends in a digit that has no partner yet.
+-}
+halfByte : Model -> Bool
+halfByte model =
+    model.reading == HexDigits && dropHalfByte model.typed /= model.typed
+
+
+dropHalfByte : String -> String
+dropHalfByte text =
+    let
+        digits =
+            String.count (String.keepIf Char.isHexDigit (String.replace "0x" "" (String.replace "0X" "" text)))
+    in
+    if Math.modBy 2 digits == 0 then
+        text
+
+    else
+        dropLastDigit text
+
+
+dropLastDigit : String -> String
+dropLastDigit text =
+    when String.popLast text is
+        Just it ->
+            if Char.isHexDigit it.last then
+                it.rest
+
+            else
+                dropLastDigit it.rest ++ String.fromChar it.last
+
+        Nothing ->
+            text
 
 
 {-| Hex digits with whatever the thing that produced them used between the
@@ -624,8 +840,13 @@ utf8Tail bytes at size top least =
                     ++ " starts "
                     ++ String.fromInt size
                     ++ " bytes and only "
-                    ++ String.fromInt (Array.length bytes - at)
-                    ++ " are left"
+                    ++ (if Array.length bytes - at == 1 then
+                            "1 is"
+
+                        else
+                            String.fromInt (Array.length bytes - at) ++ " are"
+                       )
+                    ++ " left"
                 )
         }
 
@@ -874,7 +1095,7 @@ noteOn point =
 
 rowsIn : Int -> Int
 rowsIn height =
-    max 1 (height - 5)
+    max 1 (height - 6)
 
 
 moveTo : Int -> Model -> Step msg
@@ -959,15 +1180,59 @@ view inks model =
     -- column of a row is a sentence about what went wrong, and a window two
     -- columns off the right of an eighty-column terminal ends every one of
     -- them early.
-    , rect = { x1 = 0, y1 = 1, x2 = 79, y2 = 2 + openRows + 3 }
+    , rect = { x1 = 0, y1 = 1, x2 = 79, y2 = 2 + openRows + 4 }
     , resize = Tui.resizeHeight
     , palette = Tui.BlueWindow
     , canClose = True
     , canMove = True
     , views =
-        [ Canvas
+        -- The field is first, so it is what has the caret when the window
+        -- opens. That is the whole point of it: this tool starts with nothing
+        -- to look at, and the field is now the shortest route to something.
+        --
+        -- It costs the plain-letter keys until `Tab` reaches the rows -- `8`
+        -- typed into the field is an `8` and not UTF-8 -- which is why the
+        -- three readings are on the menu as well as on the canvas.
+        [ InputLine
+            { id = fieldId
+            , rect = { x1 = 8, y1 = 1, x2 = 58, y2 = 2 }
+            , maxLen = fieldMax
+            , value = model.typed
+            , allowed = Nothing
+            }
+        , Label
+            { id = "unicode.field.label"
+            , rect = { x1 = 1, y1 = 1, x2 = 8, y2 = 2 }
+            , text = "~B~ytes"
+            , for = fieldId
+            }
+        -- One row high, which is what makes a cluster horizontal: Turbo Vision
+        -- flows a cluster's items down its rectangle and then across, so a
+        -- rectangle one row tall is two columns of one item each
+        -- (`tcluster.cpp`'s `column`, which is `item / size.y * columnWidth`).
+        --
+        -- No hotkeys on the items. `~T~ext` and `~H~ex` would be the obvious
+        -- pair and both are already spoken for by the menu bar, which is
+        -- `ofPreProcess` and wins: `Alt-T` opens Tools and `Alt-H` opens Help,
+        -- from anywhere, including from inside this window. `Alt-B` reaches
+        -- the field and `Tab` reaches the radio, which is one key more and
+        -- always true.
+        , RadioButtons
+            { id = readingId
+            , rect = { x1 = 59, y1 = 1, x2 = 1 + lineWidth, y2 = 2 }
+            , items = [ "Text", "Hex" ]
+            , selected =
+                when model.reading is
+                    Characters ->
+                        0
+
+                    HexDigits ->
+                        1
+            , available = []
+            }
+        , Canvas
             { id = "unicode.header"
-            , rect = { x1 = 1, y1 = 1, x2 = 1 + lineWidth, y2 = 2 }
+            , rect = { x1 = 1, y1 = 2, x2 = 1 + lineWidth, y2 = 3 }
             , lines = [ header inks ]
             , cursor = Nothing
             , takesFocus = False
@@ -977,7 +1242,7 @@ view inks model =
             , view =
                 Canvas
                     { id = canvasId
-                    , rect = { x1 = 1, y1 = 2, x2 = 1 + lineWidth, y2 = 2 + openRows }
+                    , rect = { x1 = 1, y1 = 3, x2 = 1 + lineWidth, y2 = 3 + openRows }
                     , lines = body inks model
                     , cursor = Nothing
                     , takesFocus = True
@@ -988,7 +1253,7 @@ view inks model =
             , view =
                 ScrollBar
                     { id = scrollId
-                    , rect = { x1 = 2 + lineWidth, y1 = 2, x2 = 3 + lineWidth, y2 = 2 + openRows }
+                    , rect = { x1 = 2 + lineWidth, y1 = 3, x2 = 3 + lineWidth, y2 = 3 + openRows }
                     , value = model.top
                     , min = 0
                     , max = max 0 (Array.length (pieces model) - model.rows)
@@ -1002,7 +1267,7 @@ view inks model =
             , view =
                 Canvas
                     { id = "unicode.status"
-                    , rect = { x1 = 1, y1 = 3 + openRows, x2 = 1 + lineWidth, y2 = 4 + openRows }
+                    , rect = { x1 = 1, y1 = 4 + openRows, x2 = 1 + lineWidth, y2 = 5 + openRows }
                     , lines = [ status inks model ]
                     , cursor = Nothing
                     , takesFocus = False
@@ -1024,7 +1289,12 @@ title model =
                     ++ model.name
                     ++ " ("
                     ++ String.fromInt (Array.length model.bytes)
-                    ++ " bytes)"
+                    ++ (if Array.length model.bytes == 1 then
+                            " byte)"
+
+                        else
+                            " bytes)"
+                       )
            )
 
 
@@ -1067,7 +1337,11 @@ body inks model =
             pieces model
     in
     if Array.isEmpty found then
-        [ [ Tui.ink inks.dim "Nothing to read. Paste text with p, or hex bytes with P." ] ]
+        if halfByte model then
+            [ [ Tui.ink inks.dim "One hex digit so far, and a byte takes two." ] ]
+
+        else
+            [ [ Tui.ink inks.dim "Nothing to read. Type bytes in the field above, or paste with p or P." ] ]
 
     else
         Array.map (rowAt inks model found)
@@ -1166,40 +1440,87 @@ status inks model =
 
     else
         let
-            found =
-                pieces model
-
-            bad =
-                Array.length (Array.keepIf (\piece -> isBroken piece.meaning) found)
+            counted =
+                counting inks model
         in
-        if Array.isEmpty found then
-            [ Tui.ink inks.dim "8 reads UTF-8, l and b the two UTF-16 orders; y copies the code points." ]
+        counted ++ notes inks (not (Array.isEmpty counted)) model
+
+
+counting : Inks -> Model -> Array Span
+counting inks model =
+    let
+        found =
+            pieces model
+
+        bad =
+            Array.length (Array.keepIf (\piece -> isBroken piece.meaning) found)
+    in
+    if Array.isEmpty found then
+        -- Only when the field is *empty* too. A field holding one hex digit
+        -- also decodes to nothing, and there the note below is the answer and
+        -- this sentence would be seventy-three columns in front of it.
+        if model.typed == "" then
+            [ Tui.ink inks.dim "Type into the field above, or Tab to the rows: 8, l and b read; y copies." ]
 
         else
-            [ Tui.ink inks.ruler
-                (String.fromInt (Array.length found)
-                    ++ (if Array.length found == 1 then
-                            " character"
+            []
 
-                        else
-                            " characters"
-                       )
-                    ++ ", "
-                )
-            , if bad == 0 then
-                Tui.plain "none of them broken"
+    else
+        [ Tui.ink inks.ruler
+            (String.fromInt (Array.length found)
+                ++ (if Array.length found == 1 then
+                        " character"
 
-              else
-                Tui.ink inks.alert
-                    (String.fromInt bad
-                        ++ (if bad == 1 then
-                                " of them broken"
+                    else
+                        " characters"
+                   )
+                ++ ", "
+            )
+        , if bad == 0 then
+            Tui.plain "none of them broken"
 
-                            else
-                                " of them broken"
-                           )
-                    )
-            ]
+          else
+            Tui.ink inks.alert (String.fromInt bad ++ " of them broken")
+        ]
+
+
+{-| The two things about the field that the counting above cannot say.
+
+They are a separate function because of when they matter: the first digit of
+the first byte decodes to *nothing*, so the case the pending-digit note is for
+is exactly the case where there is no count for it to hang off. `after` is
+whether there is one, and it buys the two words that separate them.
+-}
+notes : Inks -> Bool -> Model -> Array Span
+notes inks after model =
+    let
+        joined =
+            if after then
+                " -- "
+
+            else
+                ""
+    in
+    (if halfByte model then
+        -- The digit that was left out of the rows above. A note and not a
+        -- complaint, because being halfway through a byte is what typing one
+        -- looks like -- but it is said, because a digit that is on the screen
+        -- and not in the count is the kind of silence this tool exists to
+        -- break.
+        [ Tui.ink inks.dim (joined ++ "one hex digit is waiting for its pair") ]
+
+     else
+        []
+    )
+        ++ (if String.count model.typed >= fieldMax then
+                -- Turbo Vision refuses the keystroke past `maxLen` and says
+                -- nothing about it, which for a paste means bytes that quietly
+                -- did not arrive. This is the saying.
+                [ Tui.ink inks.alert " -- the field is full" ]
+
+            else
+                []
+           )
 
 
 isBroken : Meaning -> Bool

@@ -1045,12 +1045,14 @@ that *can* take it, so a row of `takesFocus = False` buttons is skipped. Turbo
 Vision itself focuses the *last* one added, which in a list written top to
 bottom is the Cancel button; this diverges from that deliberately.
 
-A check box the user ticks is state the model cannot see until something asks
-for it, and the only thing that asks is a [`dialog`](#dialog) being answered.
-Put clusters in dialogs, read them out of `values`, and keep the answer in the
-model -- that is the shape every Turbo Vision form has, and it is why
 `checked` and `selected` are written to the screen only when the *model*
-changes them.
+changes them, which is what leaves a tick the user made alone. What the user
+did comes back as a [`Changed`](#Event) event instead -- so a cluster works in
+an ordinary window and not only in a [`dialog`](#dialog), which was not true
+before protocol 8 and is the reason `Changed` exists. A dialog still hands its
+whole self over at once through `values`, and that is still the shape a form
+wants; a control sitting in a window is the other shape, and it is now
+answered.
 -}
 type View
     = StaticText { id : String, rect : Rect, text : String }

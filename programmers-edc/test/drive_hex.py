@@ -224,6 +224,20 @@ def go_to(app, text, settle=1.4):
     app.send(b"\r", settle=settle)
 
 
+def type_bytes(app, text, hexdigits=False, settle=1.4):
+    """**Bytes | Type bytes...**, which is the one way in that never touches
+    the clipboard -- and therefore the only one that works over ssh, where no
+    terminal will hand a clipboard back and no setting makes it.
+
+    A terminal paste is keystrokes, so keystrokes are what this sends.
+    """
+    bytes_menu(app, b"b", settle=1.0)
+    app.send(text.encode(), settle=0.6)
+    if hexdigits:
+        app.send(b"\t\x1b[C", settle=0.6)          # Tab to the radio, pick hex
+    app.send(b"\r", settle=settle)
+
+
 def main():
     check = Checks()
     work = tempfile.mkdtemp(prefix="predc-hex-")
@@ -269,6 +283,24 @@ def main():
           "00 01 02 03 04 05 06 07  08 09 0A 0B 0C 0D 0E 0F" in screen, screen)
     check("and the empty dump says what to do about it",
           "Nothing open" in screen, screen)
+
+    #    `p` here, before this driver has claimed a terminal that answers an
+    #    `OSC 52` read query and before anything has been copied -- which
+    #    together are the state a real ssh session is permanently in. Nothing
+    #    was asked: the helper programs are skipped for want of a `DISPLAY`,
+    #    and the query is not written unless the terminal proved it answers
+    #    one, which tmux never does. So the sentence has to name the terminal
+    #    rather than the clipboard, because those two send somebody to
+    #    different places and only one of them helps.
+    #
+    #    It has to be *here* and not later: the fallback is this program's own
+    #    last copy, so after any check that copies something, `p` succeeds.
+    app.send(b"p", settle=1.2)
+    check("with no terminal willing to answer, p blames the terminal and not "
+          "the clipboard",
+          "will not hand the clipboard over" in status(app), status(app))
+    check("and points at the one way in that needs no clipboard at all",
+          "Type bytes" in status(app), status(app))
 
     # 2. The file dialog. Typing into it is the package check described above.
     bytes_menu(app, b"o", settle=1.0)
@@ -915,6 +947,31 @@ def main():
     paste(app, "")
     check("and an empty clipboard says that instead of showing nothing",
           "nothing on the clipboard" in status(app), status(app))
+
+    # 15b. Bytes typed rather than pasted, which is the same two readings
+    #      reached without a clipboard. It matters because over ssh the three
+    #      entries above cannot work: no `DISPLAY` means the helper programs
+    #      are skipped, and Turbo Vision will not even write the `OSC 52` read
+    #      query unless the terminal has proved it answers one, which tmux
+    #      never does. Keystrokes always arrive.
+    type_bytes(app, "Hello")
+    check("Type bytes reads what was typed as text",
+          rows(app)[0].startswith("00000000  48 65 6C 6C 6F") and
+          "typed text" in line_at(app, 1),
+          rows(app)[0] + " / " + line_at(app, 1))
+    type_bytes(app, "de ad be ef", hexdigits=True)
+    check("and as hex digits when the radio says so",
+          rows(app)[0].startswith("00000000  DE AD BE EF") and
+          "typed hex" in line_at(app, 1),
+          rows(app)[0] + " / " + line_at(app, 1))
+    check("which is the difference the radio exists for: those are letters too",
+          "(4 bytes)" in line_at(app, 1), line_at(app, 1))
+    type_bytes(app, "beefz", hexdigits=True)
+    check("and a stray character is refused in the same words P refuses it in",
+          "not a hex digit" in status(app), status(app))
+    type_bytes(app, "")
+    check("an empty field is not a paste of nothing, and says so",
+          "Nothing was typed" in status(app), status(app))
 
     # 16. A file smaller than the window, and one with nothing in it at all.
     #

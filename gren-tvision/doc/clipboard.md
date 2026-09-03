@@ -9,6 +9,14 @@ The short version, for somebody whose copy did not arrive:
 > standing in the way of it is tmux, which by default swallows it.
 > `set -g set-clipboard on` is the fix.
 
+And the shorter version for somebody whose **paste** did not arrive, which is a
+different problem with no fix at all:
+
+> Over ssh a terminal program cannot read the clipboard, and no setting makes
+> it. The line above is about copying out. Give the user a field and let them
+> paste into it with `Ctrl-Shift-V` -- a terminal paste is keystrokes, and
+> keystrokes always arrive. "Reading is a different problem", below.
+
 The rest of this explains why, because the failure is silent at every layer and
 the boolean you get back means less than it looks like.
 
@@ -129,6 +137,51 @@ last copy, because nothing outside answered. Reading fails far more often than
 writing does, and for a good reason: it is the direction with a security
 question attached.
 
+**Over ssh it does not merely fail -- it is never attempted**, and that is the
+part worth knowing before spending an afternoon on tmux settings. The helper
+half is skipped for want of a `DISPLAY`, as above. And the terminal half is
+this, in full (`source/platform/termio.cpp:913`):
+
+```cpp
+static bool requestOsc52Clipboard(ConsoleCtl &con, InputState &state) noexcept
+{
+    if (state.hasFullOsc52)
+    {
+        TStringView seq = "\x1B]52;;?\x07";
+        con.write(seq.data(), seq.size());
+        return true;
+    }
+    return false;
+}
+```
+
+The query is not written unless `hasFullOsc52` is already set, and only three
+things set it: a kitty capability reply naming `read-clipboard`, an unsolicited
+`OSC 52` answer, or xterm reporting `allowWindowOps` in an `OSC 60`. tmux sends
+none of them and forwards none of them, so inside tmux this is always false and
+nothing is ever asked.
+
+**`set -g set-clipboard on` does not help here.** It is about writing. There is
+no tmux or terminal setting that makes a remote program read your clipboard,
+and the honest thing for a program to say is that *the terminal will not hand
+it over* -- not that the clipboard is empty, because those two send a person to
+different places and only one of them helps.
+
+### What to do instead
+
+A terminal *paste* is not an escape sequence asking a question -- it is
+keystrokes, sent down the pty in the direction that always works, and Turbo
+Vision brackets them (`\x1B[?2004h` at startup, `kbPaste` on each key). So a
+program that wants bytes over ssh gives the user an
+[`InputLine`](../src/Tui.gren) to paste into, and `Ctrl-Shift-V` fills it.
+
+`programmers-edc` does both shapes of that and the two are not the same widget,
+which is the design note worth carrying: a field belongs *in the window*, read
+live, when a paste is the tool's only source; it belongs in a *dialog* when the
+tool already has a source of its own -- because there a live field is a second
+source competing with the model's, and one stray keystroke takes away what was
+open.
+
 `TClipboard`, Turbo Vision's own class, is deliberately not used by this
 binding -- its `requestText` feeds the answer to `TEventQueue::setPasteText`,
 i.e. as *keystrokes at the focused view*, which is useless to a model that
@@ -142,6 +195,7 @@ wants the bytes.
 | Local Wayland session | works (`wl-copy`) | not needed | nothing |
 | ssh, no tmux | skipped: no `DISPLAY` | the only route | allow `OSC 52` in your terminal |
 | ssh, inside tmux | skipped | swallowed by default | `set -g set-clipboard on` |
+| ...and *reading*, either of the above | skipped | never even asked | there is no setting; give the user a field to paste into |
 | Local, inside tmux, no display vars | skipped | swallowed by default | as above |
 | Linux virtual console | skipped | nothing to receive it | there is no clipboard to reach |
 

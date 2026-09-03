@@ -147,6 +147,31 @@ gotoFieldId =
     "hex.goto.offset"
 
 
+{-| The one that takes bytes from the keyboard rather than from the clipboard.
+
+It exists because `p` and `P` cannot work over ssh and no setting makes them:
+the helper programs are skipped for want of a `DISPLAY` -- the far machine's
+clipboard being the wrong one anyway -- and Turbo Vision does not even write
+the `OSC 52` read query unless the terminal has already proved it will answer
+one, which tmux never does. A terminal *paste*, on the other hand, arrives as
+keystrokes down the pty, and keystrokes are the one thing that always gets
+through. So this is a field for them to land in.
+-}
+typeDialogId : String
+typeDialogId =
+    "hex.type.dialog"
+
+
+typeFieldId : String
+typeFieldId =
+    "hex.type.bytes"
+
+
+typeReadingId : String
+typeReadingId =
+    "hex.type.reading"
+
+
 {-| The one that asks whether a copy this large is really wanted. It is a
 [`messageBox`](Tui#messageBox) rather than anything of its own, so all it
 needs is a name nothing else answers to.
@@ -557,6 +582,9 @@ update ports event model =
         Tui.Command "hex.open" ->
             { model = { model | message = "" }, command = browseFrom model }
 
+        Tui.Command "hex.type" ->
+            { model = { model | message = "" }, command = Tui.dialog ports (typeDialog model) }
+
         Tui.Command "hex.goto" ->
             when model.open is
                 Nothing ->
@@ -599,7 +627,7 @@ update ports event model =
         Tui.ClipboardText it ->
             when model.awaiting is
                 Just reading ->
-                    paste reading it.text { model | awaiting = Nothing }
+                    paste reading it { model | awaiting = Nothing }
 
                 Nothing ->
                     still model
@@ -649,6 +677,9 @@ update ports event model =
         Tui.DialogClosed closed ->
             if closed.id == fileDialogId then
                 answerFile closed model
+
+            else if closed.id == typeDialogId then
+                answerTyped closed model
 
             else if closed.id == gotoDialogId then
                 answerGoto closed model
@@ -1041,10 +1072,31 @@ askClipboard ports reading model =
     }
 
 
-paste : Reading -> String -> Model -> Step
-paste reading text model =
+{-| The clipboard answered.
+
+`fromSystem` is why the empty case is two sentences rather than one. Nothing
+outside answered *and* this program has copied nothing is the state every
+remote session is permanently in, and there it is not a fact about a clipboard
+-- it is a fact about the terminal, which will not hand one over. Saying the
+clipboard is empty would send somebody back to copy the thing again, which is
+the one thing that cannot help. **Bytes | Type bytes...** can.
+-}
+paste : Reading -> { text : String, fromSystem : Bool } -> Model -> Step
+paste reading answer model =
+    let
+        text =
+            answer.text
+    in
     if text == "" then
-        still { model | message = "There is nothing on the clipboard." }
+        still
+            { model
+                | message =
+                    if answer.fromSystem then
+                        "There is nothing on the clipboard."
+
+                    else
+                        "The terminal will not hand the clipboard over -- try Bytes | Type bytes."
+            }
 
     else
         when reading is
@@ -2478,6 +2530,132 @@ gotoDialog model =
     }
 
 
+{-| The dialog that takes bytes from the keyboard.
+
+Two readings and not three, and the missing one is the point: **Paste a dump**
+takes several lines and an input line is one, so offering it here would be a
+field that could not hold what its own label named. A dump still arrives
+through the clipboard, or as a file.
+
+The radio rather than two buttons, and that is the same argument the two paste
+commands make from the other side: `beef`, `cafe` and `0123456789` are all
+words somebody might type and all valid hex, so something has to say which was
+meant, and it should be visible while the typing happens rather than remembered
+at the end of it.
+-}
+typeDialog : Model -> Tui.DialogSpec
+typeDialog model =
+    let
+        width =
+            clamp 40 model.desktop.cols 62
+
+        height =
+            clamp 10 model.desktop.rows 12
+
+        left =
+            max 0 ((model.desktop.cols - width) // 2)
+
+        top =
+            max 0 ((model.desktop.rows - height) // 2)
+    in
+    { id = typeDialogId
+    , title = "Type bytes"
+    , rect = { x1 = left, y1 = top, x2 = left + width, y2 = top + height }
+    , views =
+        -- The field before its label, which is a rule and not a preference: a
+        -- `Label` names a view that has to exist already.
+        [ InputLine
+            { id = typeFieldId
+            , rect = { x1 = 10, y1 = 2, x2 = width - 3, y2 = 3 }
+            , maxLen = 1024
+            , value = ""
+            , allowed = Nothing
+            }
+        , Label
+            { id = "hex.type.label"
+            , rect = { x1 = 3, y1 = 2, x2 = 10, y2 = 3 }
+            , text = "~B~ytes"
+            , for = typeFieldId
+            }
+        -- One row tall, which is what makes a cluster horizontal: Turbo Vision
+        -- flows a cluster's items down its rectangle and then across.
+        --
+        -- No hotkeys on the items, and the reason is worth writing down
+        -- because the obvious pair looks free. A cluster item's hotkey answers
+        -- to `Alt-`letter anywhere, or to the plain letter when the cluster is
+        -- focused or nothing else took it (`tcluster.cpp:260`). `~t~` and
+        -- `~h~` would therefore be `Alt-T` and `Alt-H`, which the menu bar is
+        -- `ofPreProcess` and takes first -- from inside a modal dialog too --
+        -- and plain `t` and `h`, which the field takes because the field is
+        -- where the caret is. Tab and the arrows are what actually works.
+        , RadioButtons
+            { id = typeReadingId
+            , rect = { x1 = 10, y1 = 4, x2 = width - 3, y2 = 5 }
+            , items = [ "as text", "as hex digits" ]
+            , selected = 0
+            , available = []
+            }
+        , StaticText
+            { id = "hex.type.hint"
+            , rect = { x1 = 3, y1 = 6, x2 = width - 3, y2 = 7 }
+            , text = "Ctrl-Shift-V pastes here even when p and P cannot."
+            }
+        , Button
+            { id = "hex.type.ok"
+            , rect = { x1 = width - 28, y1 = height - 4, x2 = width - 16, y2 = height - 2 }
+            , title = "~O~K"
+            , cmd = "ok"
+            , isDefault = True
+            , takesFocus = True
+            }
+        , Button
+            { id = "hex.type.cancel"
+            , rect = { x1 = width - 15, y1 = height - 4, x2 = width - 3, y2 = height - 2 }
+            , title = "Cancel"
+            , cmd = "cancel"
+            , isDefault = False
+            , takesFocus = True
+            }
+        ]
+    }
+
+
+{-| What was typed, read the way the radio said.
+
+It goes through the same two functions a paste does rather than through
+anything of its own, which is what keeps the refusals identical: a stray
+character is named here in exactly the words `P` names it in, because it is the
+same sentence from the same place.
+-}
+answerTyped : { id : String, cmd : String, values : Json.Decode.Value } -> Model -> Step
+answerTyped closed model =
+    if closed.cmd /= "ok" then
+        still model
+
+    else
+        let
+            body =
+                Tui.text typeFieldId closed.values
+        in
+        if String.isEmpty (String.trim body) then
+            still { model | message = "Nothing was typed." }
+
+        else if Tui.number typeReadingId closed.values == 0 then
+            showBytes (toByteArray (Bytes.fromString body)) "typed text" model
+
+        else
+            when hexBytes body is
+                Err reason ->
+                    still { model | message = reason }
+
+                Ok codes ->
+                    if Array.isEmpty codes then
+                        still { model | message = "There are no hex digits in that." }
+
+                    else
+                        showBytes codes "typed hex" model
+
+
 answerGoto : { id : String, cmd : String, values : Json.Decode.Value } -> Model -> Step
 answerGoto closed model =
     if closed.cmd /= "ok" then
@@ -2553,6 +2731,11 @@ menu =
             -- with a bug report, which is a thing to find on a menu rather
             -- than a thing to have in the fingers.
             , Item { title = "Paste a d~u~mp", cmd = "hex.pasteDump", key = "", shortcut = "" }
+            -- The fourth way, and the only one that does not go near the
+            -- clipboard. See `typeDialogId` for why that matters: over ssh the
+            -- three above cannot work and this one always can, because a
+            -- terminal paste is keystrokes and a field is where keystrokes go.
+            , Item { title = "Type ~b~ytes...", cmd = "hex.type", key = "", shortcut = "" }
             , Separator
             , Item { title = "~G~o to offset...", cmd = "hex.goto", key = "", shortcut = "" }
             , Item { title = "~T~op of file", cmd = "hex.top", key = "", shortcut = "Ctrl-Home" }

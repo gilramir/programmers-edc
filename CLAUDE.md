@@ -94,6 +94,15 @@ no list to add it to: `tools/run_tests.py` treats every `test/drive*.py` under
 editing it, or the driver runs the old `main.js` and fails in a way that looks
 exactly like the feature not working.
 
+**Driving an `InputLine` has two traps and both cost a check that silently does
+nothing** (`tvision/source/tvision/tinputli.cpp:380`). A field selects its whole
+value when it *gains* the caret and not while it has it, so `Alt-`its-label is a
+no-op when it is already focused — leave and come back to get a fresh selection.
+And `Del` honours a selection while `Backspace` with none deletes one character,
+so emptying a field is leave, return, `Del`. Also remember that a field which is
+the first selectable view has the caret when the window opens, which takes the
+single-letter commands away from the canvas until `Tab` gets there.
+
 Two rules for checking that something is unavailable, which are opposites for a
 reason. A disabled **view** is checked by what it *refuses* — type at it and
 find the characters absent — because the colour it draws in belongs to the

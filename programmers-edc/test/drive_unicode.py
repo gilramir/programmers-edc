@@ -35,9 +35,9 @@ sys.path.insert(0, os.path.join(ROOT, "..", "tvision-node", "test"))
 
 from harness import Pty, Checks, node_argv
 
-# The window sits at desktop (0, 1), so its frame is screen row 2, the column
-# header is row 3 and the first decoded row is row 4.
-FIRST_ROW = 4
+# The window sits at desktop (0, 1), so its frame is screen row 2, the entry
+# field is row 3, the column header is row 4 and the first decoded row is row 5.
+FIRST_ROW = 5
 ROWS = 14
 LEFT = 1
 NOTE_AT = LEFT + 38          # where "what it is" begins, on every row
@@ -100,6 +100,56 @@ def note_on(row):
     return row[38:].strip()
 
 
+def field(app):
+    """The entry row: the field's text and which of the two readings is on."""
+    return line_at(app, FIRST_ROW - 2)
+
+
+def to_rows(app):
+    """Put the caret on the decoded rows.
+
+    The field is the first selectable view, so it has the caret when the window
+    opens -- which is the point of it, and which means the single-letter
+    commands do not reach the canvas until something moves the caret off it.
+
+    It goes by way of the field rather than tabbing from wherever it was: two
+    tabs is field, radio, rows, and starting from a known place is what makes
+    that a fact rather than an assumption about where the last check left it.
+    """
+    app.send(b"\x1bb", settle=0.4)
+    app.send(b"\t\t", settle=0.6)
+
+
+def _typed_one_digit(app):
+    """One hex digit into an empty field decodes to nothing at all, which is
+    the case the pending-digit note is really for: there is no count for it to
+    hang off, so the rows have to carry it."""
+    app.send(b"E", settle=0.8)
+    return "One hex digit so far" in rows(app)[0]
+
+
+def to_field(app):
+    """...and back. `Alt-B` is the field's label, which works from anywhere in
+    the window rather than depending on how many views are between -- and is a
+    no-op when the field already has the caret, which matters just below."""
+    app.send(b"\x1bb", settle=0.6)
+
+
+def clear_field(app):
+    """Empty the field.
+
+    Two facts about `TInputLine`, and a driver that knows neither writes a
+    check that silently does nothing. Turbo Vision selects the whole value when
+    the field *gains* the caret and not while it has it, so this leaves and
+    comes back to make a selection. And `Del` is what honours one:
+    `Backspace` with no selection deletes the character before the caret, while
+    `Del` with a selection deletes all of it (`tinputli.cpp:380`).
+    """
+    app.send(b"\t", settle=0.4)
+    to_field(app)
+    app.send(b"\x1b[3~", settle=0.8)
+
+
 def main():
     check = Checks()
 
@@ -121,9 +171,83 @@ def main():
     check("and it brought its own menu with it",
           "Encoding" in app.render().split("\n")[0], app.render().split("\n")[0])
     check("the empty window says how to give it something",
-          "Paste text with p" in rows(app)[0], rows(app)[0])
+          "Type bytes in the field above" in rows(app)[0], rows(app)[0])
+    check("and the field is what has the caret, which is why it says that",
+          "( ) Hex" in field(app) and "(\u2022) Text" in field(app), field(app))
+
+    #    And `p`, before this driver has claimed a terminal that will answer an
+    #    `OSC 52` read query -- which is the state a real ssh session is
+    #    permanently in, since tmux answers none and forwards none. Nothing was
+    #    asked and nothing came back, and the sentence has to say which of the
+    #    two that was: the clipboard is not empty, the terminal will not open
+    #    it. Reached by the menu, because the caret is in the field.
+    encoding_menu(app, b"p", settle=1.0)
+    check("with no terminal willing to answer, p says so rather than blaming "
+          "the clipboard",
+          "will not hand the clipboard over" in status(app), status(app))
+    check("and the whole sentence fits the line it is written on",
+          "instead" in status(app), status(app))
 
     app.send(b"\x1b]60;allowWindowOps\x07", settle=0.5)
+
+    # 1b. The field, which is the only way into this tool that does not go near
+    #     the clipboard -- and therefore the only one that works over ssh, where
+    #     no terminal will hand a clipboard back. A terminal paste arrives as
+    #     keystrokes, and this is what they land in.
+    app.send(b"Hi", settle=0.8)
+    check("what is typed is decoded as the bytes the string is made of",
+          rows(app)[0].startswith("00000000  48") and "U+0048" in rows(app)[0],
+          rows(app)[0])
+    check("and the title says the bytes were typed rather than pasted",
+          "typed (2 bytes)" in title(app), title(app))
+
+    #     The radio, which is the other half: `beef` and `cafe` are words and
+    #     are also hex, so something has to say which was meant.
+    app.send(b"\t\x1b[C", settle=0.8)               # Tab to the radio, pick Hex
+    check("choosing Hex re-reads the same field as hex digits",
+          "(\u2022) Hex" in field(app) and "typed (0 bytes)" not in title(app),
+          field(app) + " | " + title(app))
+    to_field(app)
+    app.send(b"C0 80 ED A0 80", settle=1.0)
+    check("and the two things this tool exists for come out of typed hex",
+          "overlong" in rows(app)[0] and "surrogate" in rows(app)[1],
+          rows(app)[0] + " / " + rows(app)[1])
+    check("with the count saying how many are broken",
+          "2 characters, 2 of them broken" in status(app), status(app))
+
+    #     Half a byte is not an error. A field is read again on every keystroke
+    #     and half of those land on an odd digit, so complaining about them
+    #     would be a message flashing under somebody's hands -- but the digit
+    #     that was left out is said, because a digit on the screen and not in
+    #     the count is exactly the silence this tool exists to break.
+    app.send(b" E", settle=0.8)
+    check("a lone hex digit at the end is a byte half typed, not a refusal",
+          "not hex" not in status(app) and "waiting for its pair" in status(app),
+          status(app))
+    check("and the bytes before it are still decoded rather than blanked",
+          "overlong" in rows(app)[0], rows(app)[0])
+    app.send(b"2", settle=0.8)
+    check("finishing the byte decodes it",
+          "3 characters" in status(app) and "E2" in rows(app)[2], status(app))
+    app.send(b"z", settle=0.8)
+    check("but a stray character is refused at once, since it is not half of "
+          "anything",
+          "'z' is not a hex digit" in status(app), status(app))
+    check("and the rows keep what they had, which is what the mistake is being "
+          "compared against",
+          "E2" in rows(app)[2], rows(app)[2])
+
+    #     Back to where the rest of this file expects to be: an empty field,
+    #     text again, and the caret on the rows so the letter commands reach
+    #     them.
+    clear_field(app)
+    check("emptying the field empties the window",
+          "Nothing to read" in rows(app)[0], rows(app)[0])
+    check("and the very first digit of a byte says so on its own",
+          _typed_one_digit(app), rows(app)[0])
+    clear_field(app)
+    app.send(b"\t\x1b[D", settle=0.8)               # radio, back to Text
+    to_rows(app)
 
     # 2. Text, which arrives as the UTF-8 the string is made of. The fixture is
     #    chosen for its widths: ASCII, a two-byte Latin-1 character, two Hangul
@@ -251,7 +375,9 @@ def main():
           app.render().split("\n")[0])
     app.send(b"\x1bu", settle=1.0)
     check("reopening starts empty, the way closing a tool here means it does",
-          "Paste text with p" in rows(app)[0], rows(app)[0])
+          "Nothing to read" in rows(app)[0], rows(app)[0])
+    check("and the field it reopens with is empty too",
+          field(app).split("Bytes")[1].strip().startswith("("), field(app))
 
     app.send(b"\x1bx", settle=1.0)
     check("Alt-X exits, and cleanly", app.wait() == 0)

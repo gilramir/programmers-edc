@@ -209,6 +209,21 @@ It is the only entry on that menu with no key beside it, deliberately. `p` and
 something done once, with a bug report, which is a thing to find on a menu
 rather than to have in the fingers.
 
+### Typing them instead
+
+**Bytes | Type bytes...** is the fourth way, and the only one that never goes
+near the clipboard: a field, a radio saying whether it holds text or hex
+digits, and the same two readings `p` and `P` use -- the same refusals too, in
+the same words, because it is the same two functions.
+
+It has no key beside it and it is not a convenience. Over ssh the three above
+cannot work at all, and "Pasting over ssh" below is the whole of why. A
+terminal paste lands in that field, which is the point of it.
+
+There are two readings and not three: a dump is several lines and an input line
+is one, so **Paste a dump** is not offered here. A dump still arrives through
+the clipboard, or as a file.
+
 **A dump says how wide it is, and it says it in the offset column.** The gap
 between one line's offset and the next is exactly how many bytes that line
 carried, so nothing has to work out where the hex stops and the printable
@@ -298,6 +313,47 @@ nothing. Measured on a tmux 3.4 with an `xterm*` terminal outside it:
 So one line in `~/.tmux.conf`:
 
     set -g set-clipboard on
+
+### Pasting over ssh
+
+That line is about **copying out**. Reading the clipboard *in* is a different
+problem with no configuration behind it, and on a remote machine `p` and `P`
+cannot work at all:
+
+  - `wl-paste`, `xsel` and `xclip` are skipped before they are looked for,
+    because Turbo Vision checks `WAYLAND_DISPLAY` and `DISPLAY` first and over
+    ssh neither is set. That is right rather than unfortunate -- the clipboard
+    they would read is the far machine's.
+  - The `OSC 52` read query **is not even written** unless the terminal has
+    already proved it will answer one, which it does by a kitty capability
+    reply, an unsolicited `OSC 52`, or xterm's `allowWindowOps`. tmux sends
+    none of those and forwards none of them.
+
+So the request comes back with predc's own last copy -- nothing, usually --
+and there is no setting that changes it. Reading is the direction with a
+security question attached: a program that can read your clipboard can read
+the password you put there a minute ago, and terminals that accept a write
+refuse a read on purpose.
+
+When that happens predc says **the terminal will not hand the clipboard over**
+rather than that the clipboard is empty, because those send you to different
+places and only one of them helps.
+
+One thing about it will look like it is working and is not: what comes back
+when nothing outside answered is *this program's own last copy*, which is what
+makes a copy in one predc window and a paste in another work on a machine with
+no clipboard at all. So over ssh `p` does nothing until you press `y`, and
+pastes your own code points back for ever after. It is not reaching your
+desktop and never will.
+
+**What always works is typing, and a terminal paste is typing.** `Ctrl-Shift-V`,
+a middle click and tmux's `prefix ]` all send keystrokes down the pty, so both
+tools that take bytes have somewhere for them to land: the field along the top
+of the Unicode window, and **Bytes | Type bytes...** in the hex viewer. Two
+different shapes because the two tools differ in where their bytes normally
+come from -- the decoder has no source but a paste, while the viewer has files,
+and a live field there would let one stray keystroke take away the open file
+and every highlight on it.
 
 and, on the terminal at the other end, whatever it calls permission to write
 the clipboard (kitty, foot, WezTerm, iTerm2 and Windows Terminal allow it;
@@ -468,12 +524,35 @@ mentioning how to close a window. Its `Alt-U` is on its menu entry instead,
 which works from anywhere for the same reason `Alt-F3` does: a menu bar is
 offered every key before the window under it gets one.
 
-Paste bytes into it -- `p` for text, `P` for hex digits, the hex viewer's two
-commands -- and it shows one character to a row: where it starts, the bytes it
-was made of, its code point, the character itself, and a word about what it is.
-`8` reads them as UTF-8, `l` and `b` as UTF-16 in either order, and `y` puts
-the code points on the clipboard as `U+0048 U+00E9 U+1F600`, which is the one
-thing here that nothing else on the machine will give you.
+Give it bytes and it shows one character to a row: where it starts, the bytes
+it was made of, its code point, the character itself, and a word about what it
+is. `8` reads them as UTF-8, `l` and `b` as UTF-16 in either order, and `y`
+puts the code points on the clipboard as `U+0048 U+00E9 U+1F600`, which is the
+one thing here that nothing else on the machine will give you.
+
+**The field along the top is where the bytes come from**, and it has the caret
+when the window opens because this tool starts with nothing to look at. Type
+into it and the rows follow every keystroke; the radio beside it says whether
+what is in there is text or hex digits, and changing it re-reads the same
+field the other way. `C0 80` typed as hex is the overlong; the same six
+characters as text are six ASCII letters. Nothing sniffs.
+
+    Bytes  C0 80 ED A0 80                          ( ) Text  (*) Hex
+
+    offset    bytes         code     char what it is
+    00000000  C0 80         --            overlong: 2 bytes for U+0000
+    00000002  ED A0 80      --            U+D800 is a surrogate, not UTF-8
+
+A lone digit at the end is a byte you are halfway through typing rather than a
+mistake: it is left out of the rows and said on the line below. A stray
+character is refused at once, because `z` is not halfway through anything.
+
+`p` and `P` still paste text and hex from the clipboard, and the hex viewer's
+two commands still reach here -- but the field is the one route that works
+everywhere, and "Pasting over ssh" below is why that sentence had to be
+written. The single-letter commands go to the field until `Tab` reaches the
+rows; every one of them is on the **Encoding** menu, which is what makes that
+survivable. `Alt-B` goes back to the field from anywhere in the window.
 
 Nothing is guessed. UTF-16 is two commands rather than one that looks at the
 first two bytes, because a byte order mark is a choice somebody made and not a
