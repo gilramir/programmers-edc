@@ -59,6 +59,16 @@ void JsListBox::focusItem(short item)
         noteFocused(viewId, item, items[item]);
 }
 
+void JsListBox::setFocused(short item)
+{
+    quiet = true;
+    focusItemNum(item);
+    quiet = false;
+    if (focused != item && !items.empty() && focused >= 0 &&
+        (size_t) focused < items.size())
+        noteFocused(viewId, focused, items[focused]);
+}
+
 void JsListBox::setItems(std::vector<std::string> newItems)
 {
     items = std::move(newItems);
@@ -1194,8 +1204,8 @@ TView *buildItems(const Napi::Env &env, TGroup *win, const Napi::Value &value,
             if (it.Has("items"))
                 list->setItems(getStringArray(it.Get("items")));
             if (it.Has("focused"))
-                list->focusItemNum((short) getInt(it, "focused", 0));
-            // After `focusItemNum`, which scrolls the list to keep the
+                list->setFocused((short) getInt(it, "focused", 0));
+            // After `setFocused`, which scrolls the list to keep the
             // highlight visible and would otherwise undo this. Saying where
             // the window starts *and* where the highlight is are two different
             // sentences, and a model gets to say both -- including the pair
@@ -1802,7 +1812,12 @@ static Napi::Value SetValue(const Napi::CallbackInfo &info)
         // The other half of onFocus: the highlight is something the model can
         // read *and* set, which is what makes a re-sorted list able to keep
         // the record the user was looking at.
-        ((JsListBox *) ref->view)->focusItemNum((short) info[1].ToNumber().Int32Value());
+        //
+        // `setFocused` and not `focusItemNum`, so that the move is not
+        // reported back to the model that asked for it -- see its comment in
+        // tvnode.h, and `drive_time.py`'s wheel checks for what happens when
+        // it is.
+        ((JsListBox *) ref->view)->setFocused((short) info[1].ToNumber().Int32Value());
         return Napi::Boolean::New(env, true);
         }
     if (ref->kind == "checkBoxes")

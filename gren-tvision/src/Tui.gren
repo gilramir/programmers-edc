@@ -841,7 +841,9 @@ first for a week, because `Array.append fst second` makes `fst` the *postfix*.
     [`Focused`](#Event) event; committing an entry (`Space`, or a double
     click) sends a [`Selected`](#Event) one. `focused` is that highlight seen
     from the other side: it is written to the list only when the model changes
-    it, so it steers without fighting the arrow keys.
+    it, so it steers without fighting the arrow keys. Writing it sends no
+    `Focused` event back, unless the list had to clamp it -- see
+    [`Event`](#Event), where the loop that rule exists to break is described.
 
     `chooses` is a command name, and it says that committing an entry is the
     same act as pressing the button that carries that command -- which inside
@@ -1270,11 +1272,22 @@ type alias StatusItem =
 
   - `Command` -- a menu entry, status line entry or button, by its `cmd` name.
   - `Selected` -- an entry in a list box was chosen (`Space` or double click).
-  - `Focused` -- the highlight in a list box moved, by arrow key, mouse or a
-    render that replaced the list. This is how the model learns which entry an
-    "Edit" or "Delete" button should act on; Turbo Vision's own examples read
-    the list's `focused` member at the moment they need it, which a program
-    that cannot call into C++ has no way to do.
+  - `Focused` -- the highlight in a list box moved, **because the user moved
+    it** -- an arrow key, a click, the mouse wheel. This is how the model
+    learns which entry an "Edit" or "Delete" button should act on; Turbo
+    Vision's own examples read the list's `focused` member at the moment they
+    need it, which a program that cannot call into C++ has no way to do.
+
+    A highlight the *model* moved, by rendering a different `focused`, does not
+    come back as an event -- with one exception that says why the rule is
+    there. It does come back when the list could not do what was asked, which
+    is a `focused` past the end of a list that just got shorter, because a
+    model left believing a highlight the list does not have is worse than an
+    extra event. Reporting the rest was a feedback loop -- the model writes the
+    highlight, hears that it moved, stores what it hears, and writes it again
+    -- and the mouse wheel is where that showed, since a wheel arrives as a
+    burst of events the model is several renders behind and every echo of a
+    stale index dragged the list back to it.
   - `KeyPressed` -- a key reached a focused canvas. Names look like `"Left"`,
     `"F5"`, `"Alt-X"`, `"Ctrl-A"` or `"a"`.
   - `Clicked` -- a canvas was clicked, in the canvas's own coordinates.

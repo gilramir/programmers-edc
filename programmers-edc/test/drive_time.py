@@ -248,6 +248,17 @@ def click_in(app, head, entry, settle=1.0):
     return False
 
 
+def burst_wheel(app, col, row, turns):
+    """Every turn in one write, which is how a real wheel arrives.
+
+    `app.wheel` settles between turns and a hand does not: the whole point of
+    the check below is a queue of events the model is several renders behind,
+    and one event at a time never builds one.
+    """
+    os.write(app.fd, (f"\x1b[<65;{col};{row}M" * turns).encode())
+    app.pump(1.5)
+
+
 def find_text(app):
     """What is in the Find box, without the count that shares its line."""
     for line in app.render().split("\n"):
@@ -493,6 +504,47 @@ def main():
     click_in(app, "Displaying", wanted)
     click_button(app, "<< Remove")
     check("and the borrowed zone comes off the same way",
+          (config_of(home) or {}).get("timezones")
+          == ["America/Chicago", "Asia/Katmandu", "Asia/Seoul"],
+          str(config_of(home)))
+
+    # ---- the wheel, and the echo that used to drag the list back ----
+    #
+    # A list box's highlight is moved by two parties. The user moves it and is
+    # reported; the model moves it by rendering a `focused`. Reporting the
+    # second as well as the first was a loop -- the model writes the highlight,
+    # hears that it moved, stores what it hears, writes it again -- and it was
+    # invisible until the mouse wheel, which arrives as a burst of events the
+    # model is several renders behind. Every echo of a stale index dragged the
+    # list back to where it had been, so a click landed on a row that was no
+    # longer under the pointer, and the zone that got added was one the user
+    # had never seen.
+    #
+    # The check is a burst, then a click on a row read off the screen, and the
+    # question is whether what was committed is the row that was clicked.
+    type_in_find(app, "America/", clear=True)
+    r, heading = picker_heading(app)
+    zone_col = heading.index("Zone")
+    before_wheel = pane(app, "Zone")
+    burst_wheel(app, zone_col + 3, r + 3, 10)
+    scrolled = pane(app, "Zone")
+    check("a burst on the wheel scrolls the list under the pointer",
+          scrolled != before_wheel, f"{scrolled} == {before_wheel}")
+
+    aimed = scrolled[3]
+    app.click(zone_col + 2, r + 2 + 3, settle=1.5)
+    check("and the list stays where the wheel left it when a row is clicked",
+          pane(app, "Zone") == scrolled, f"{pane(app, 'Zone')} != {scrolled}")
+
+    app.send(b" ", settle=1.4)
+    check("so the zone that arrives is the one that was under the pointer",
+          (config_of(home) or {}).get("timezones", [])[-1] == aimed,
+          f"{(config_of(home) or {}).get('timezones')} does not end in {aimed}")
+
+    # Put the list back to the three the checks below read.
+    click_in(app, "Displaying", aimed)
+    click_button(app, "<< Remove")
+    check("and the borrowed zone comes off again",
           (config_of(home) or {}).get("timezones")
           == ["America/Chicago", "Asia/Katmandu", "Asia/Seoul"],
           str(config_of(home)))

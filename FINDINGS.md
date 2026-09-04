@@ -5531,3 +5531,83 @@ The general version, since this is the second time this repo has arrived at it:
 private helper in that program is usually the library's missing function.**
 `tools/audit_api.py` exists for the same reason on the Turbo Vision side, and
 says so at more length.
+
+## The wheel, and the echo that dragged the list back to where it had been
+
+Reported from a real terminal rather than found by a driver, which is the part
+worth noticing: pick an area in the zone picker, turn the mouse wheel over the
+Zone column, click a zone -- and the list jumps and the wrong zone is added.
+Every pty check in the suite passed throughout.
+
+### Two parties move one highlight
+
+A `ListBox`'s highlight is moved by the user, with an arrow key or a click or
+the wheel, and by the model, by rendering a different `focused`. Both are
+wanted: the first is how the model learns which row a Delete button should act
+on, and the second is how a re-sorted list keeps the record the user was
+looking at.
+
+The binding reported *both*. `JsListBox::focusItem` is the override that calls
+`noteFocused`, and every path goes through it -- including `tv.setValue`, which
+is the model writing the highlight. So:
+
+    model writes focused = 3
+      -> C++ moves the highlight to 3
+      -> Focused { index = 3 } is sent to the model
+      -> the model stores 3
+      -> the next render writes focused = 3
+
+A loop, and one that terminates only because the values happen to agree. They
+agree for an arrow key, because a person cannot press one faster than the
+model renders. **They do not agree for a wheel**, which arrives as a burst: ten
+turns is ten events in a few milliseconds, and the model is several renders
+behind the whole way through. Each render writes an index the list left behind
+long ago; `focusItemNum` scrolls the list to make that index visible; and the
+list ends up wherever the last echo of a stale value put it. Click on a row and
+the click is right about where the pointer is -- it is the list that is in the
+wrong place, and it got there between the eye and the finger.
+
+`setItems` already knew about this. It has a `quiet` flag with a comment saying
+that its trip through row zero "is not news", and that announcing it "tells the
+model its highlight moved somewhere it was never going to stay". The same
+sentence is true of every model-driven move and only one of them had the flag.
+
+### The rule this is an instance of
+
+CLAUDE.md has it already, in the paragraph about who moves a piece of state:
+**the user's moves are an event, the model's are a field.** What was missing is
+the corollary, which is that the two directions have to stay separate at the
+seam. A field the model writes must not come back as the event that means the
+user did something, because the model cannot tell them apart -- and a model
+that stores what it hears will write back what it stored.
+
+`Focused` is now the user's move only. `JsListBox::setFocused` sets `quiet`
+around `focusItemNum`, and the builder and `tv.setValue` both go through it.
+
+### The exception, which is the interesting half
+
+Staying silent about every model-driven move loses something real: the list
+*clamps*. Ask for row ten of a list that now has three and the highlight lands
+on row two, and a model that hears nothing goes on believing it has row ten --
+which is the tree that collapses itself when a branch is expanded, the failure
+`gren-tvision-runtime/diff.js` already has a comment about.
+
+So the rule is not "the model's writes are silent". It is **"the model is told
+when the list could not do what it asked"**, which is a different sentence and
+a better one: it reports a disagreement rather than an action. It cannot loop,
+because the model stores the row it was given, asks for that row next time, and
+gets it -- one echo, then agreement.
+
+### What the driver has to do that the old checks did not
+
+`app.wheel` settles between turns, and the bug needs a queue. Three checks in
+`drive_time.py` write every turn in one `os.write`, which is what a hand does,
+and then ask the question the eye asks: **is the zone that got added the one
+that was under the pointer?** Reading the row off the screen first and
+comparing afterwards is what makes it a test of the seam rather than of an
+index.
+
+A wheel check already existed, and passed, and was about routing -- that a turn
+over one list scrolls that list and not the one beside it. It turned one notch
+at a time, so it never built a queue. A test that is slower than a person is a
+test of something a person will not do.

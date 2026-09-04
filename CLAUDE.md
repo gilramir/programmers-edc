@@ -73,6 +73,17 @@ move is one the model writes back over them. Nobody — a fact that changes unde
 both → also an event, because asking for it would be the synchronous query this
 port has never had.
 
+**A field the model writes must not come back as the user's event**, which is
+the corollary and the one that has actually bitten. A list's `focused` is a
+field *and* an event, because both parties move it, and the binding reported
+the model's own writes as `Focused` — so the model stored what it heard and
+wrote it back, and only the values agreeing kept it from looping. A mouse wheel
+is a burst the model is several renders behind, the values stopped agreeing,
+and the list snapped back to a stale index between the eye and the finger. The
+exception is worth keeping too: a write the widget could not honour — a
+`focused` past the end of a shortened list — *is* reported, because that is a
+disagreement rather than an action, and it settles in one round.
+
 ## The porting workflow
 
 Every C++ example is ported, so this is history rather than a to-do — but it is

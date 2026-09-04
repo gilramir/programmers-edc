@@ -257,6 +257,29 @@ public:
         drawView();
     }
 
+    // Move the highlight because the *model* said so, rather than because
+    // the user did.
+    //
+    // The difference is the whole of it. `focusItem` reports every move, which
+    // is right for a move the user made and is a feedback loop for one the
+    // model made: the model writes the highlight, the write is reported back
+    // as a `Focused` event, the model stores what it is told, and its next
+    // render writes it again. Nothing stops that but the values happening to
+    // agree -- and under a mouse wheel, which arrives as a burst of events the
+    // model is several renders behind, they do not agree for a long time. The
+    // list ends up wherever an echo of a stale index left it.
+    //
+    // So a model-driven move says nothing, the same way `setItems`' trip
+    // through row zero says nothing, and for the same reason: it is not news
+    // to the only party that could be told.
+    //
+    // Except when it is. `focusItemNum` clamps, so a model that asks for row
+    // ten of a list that now has three does not get row ten -- and *that* the
+    // model has to hear, or it goes on believing a highlight the list does not
+    // have. It cannot loop: the model stores the row it was given, asks for
+    // that row next time, and gets it.
+    void setFocused(short item);
+
     virtual void getText(char *dest, short item, short maxLen) override;
     virtual void selectItem(short item) override;
     virtual void focusItem(short item) override;
@@ -277,8 +300,9 @@ private:
     std::vector<std::string> items;
     std::string viewId;
 
-    // setItems() has to move the highlight to row zero before it can be put
-    // where the caller wants it. That intermediate position is not news.
+    // Set while a move is the model's own doing rather than the user's --
+    // `setItems`' trip through row zero, and every `setFocused`. Neither is
+    // news to the model, which is where the news would go.
     bool quiet = false;
 };
 
