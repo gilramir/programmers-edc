@@ -240,7 +240,7 @@ apply config document =
         |> Edit.introduce
             [ "theme" ]
             { blankBefore = True
-            , leading = [ " Which colour scheme predc opens in: borland, dark, or gren." ]
+            , leading = [ " Which colour scheme predc opens in: borland, midnight, or gren." ]
             , trailing = Nothing
             }
             (Edit.string (Theme.toKey config.theme))

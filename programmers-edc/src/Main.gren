@@ -445,8 +445,8 @@ handleEvent event model =
         Command "theme.borland" ->
             chooseTheme Theme.Borland model
 
-        Command "theme.dark" ->
-            chooseTheme Theme.Dark model
+        Command "theme.midnight" ->
+            chooseTheme Theme.Midnight model
 
         Command "theme.gren" ->
             chooseTheme Theme.Gren model

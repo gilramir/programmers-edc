@@ -667,7 +667,7 @@ i18n is one step less expensive than it was.
 
 ## Colors
 
-Three schemes, on **Tools | Colors**: Borland, Dark and Gren. The choice is
+Three schemes, on **Tools | Colors**: Borland, Midnight and Gren. The choice is
 written to `$XDG_CONFIG_HOME/predc/config.toml` (or `~/.config/predc/`) the
 moment it is made, and read back before the first frame of the next run.
 
@@ -676,7 +676,7 @@ A scheme is two things, and `src/Theme.gren` is where the split is explained.
 frames, the dialogs -- and can be 24-bit. `Theme.Inks` is what the tools' own
 canvases paint with, which a theme cannot reach and which is one of the sixteen
 colours a terminal has always had. Borland's is built out of those sixteen, so
-it follows whatever the terminal is set to; Dark and Gren name their colours
+it follows whatever the terminal is set to; Midnight and Gren name their colours
 exactly, because "whatever this terminal calls black" is not a foundation for a
 dark scheme.
 
@@ -688,13 +688,18 @@ at exit -- a setting that survives only a tidy close is a setting that gets
 lost, and predc is a program people close with Alt-X.
 
 ```toml
-# Which colour scheme predc opens in: borland, dark, or gren.
-theme = "dark"
+# Which colour scheme predc opens in: borland, midnight, or gren.
+theme = "midnight"
+
 # The time zones the time converter shows, in the order it
 # shows them. Delete the key to go back to this machine's own
 # zone; an empty list shows UTC and POSIX alone.
 timezones = ["America/Chicago", "Asia/Seoul"]
 ```
+
+A `theme = "dark"` written before the scheme was renamed still opens Midnight,
+and stays spelled that way until the next time you pick a theme. Reading both
+names and writing one is what a rename in a config file costs.
 
 It was JSON and is now TOML, for the comments -- both the ones above, which
 predc writes when it invents a key, and the ones you write yourself. Which

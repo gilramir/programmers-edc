@@ -32,7 +32,7 @@ writes, so renaming one of these renames what is on disk.
 -}
 type Name
     = Borland
-    | Dark
+    | Midnight
     | Gren
 
 
@@ -41,7 +41,7 @@ type Name
 -}
 all : Array Name
 all =
-    [ Borland, Dark, Gren ]
+    [ Borland, Midnight, Gren ]
 
 
 title : Name -> String
@@ -50,8 +50,8 @@ title name =
         Borland ->
             "Borland"
 
-        Dark ->
-            "Dark"
+        Midnight ->
+            "Midnight"
 
         Gren ->
             "Gren"
@@ -61,9 +61,9 @@ next : Name -> Name
 next name =
     when name is
         Borland ->
-            Dark
+            Midnight
 
-        Dark ->
+        Midnight ->
             Gren
 
         Gren ->
@@ -138,7 +138,7 @@ inks name =
             , highlights = darkGrounds
             }
 
-        Dark ->
+        Midnight ->
             -- On a near-black ground. `Cyan` rather than `DarkGray` for the
             -- placeholders: bright black on a dark ground is the one pair the
             -- sixteen colours cannot make legible.
@@ -198,8 +198,8 @@ palette name =
         Borland ->
             Tui.borland
 
-        Dark ->
-            dark
+        Midnight ->
+            midnight
 
         Gren ->
             gren
@@ -224,22 +224,22 @@ The window ground is lifted off the desktop rather than equal to it, which is
 the whole trick: the frame is then a change of colour rather than a line drawn
 around nothing.
 -}
-dark : Tui.Theme
-dark =
+midnight : Tui.Theme
+midnight =
     { desktop = { fg = Tui.Rgb 0x2A2A33, bg = Tui.Rgb 0x121218 }
     , bar = { fg = Tui.Rgb 0xC8C8D2, bg = Tui.Rgb 0x24242E }
     , barAccent = orange
     , barDisabled = Tui.Rgb 0x62626E
     , barSelected = { fg = Tui.Rgb 0x121218, bg = Tui.Rgb 0x8AA9C8 }
     , barSelectedAccent = Tui.Rgb 0x3A1A00
-    , window = darkPanel (Tui.Rgb 0x1E1E26)
-    , alternate = darkPanel (Tui.Rgb 0x1A2430)
-    , dialog = darkPanel (Tui.Rgb 0x282833)
+    , window = midnightPanel (Tui.Rgb 0x1E1E26)
+    , alternate = midnightPanel (Tui.Rgb 0x1A2430)
+    , dialog = midnightPanel (Tui.Rgb 0x282833)
     }
 
 
-darkPanel : Tui.Tint -> Tui.ThemePanel
-darkPanel ground =
+midnightPanel : Tui.Tint -> Tui.ThemePanel
+midnightPanel ground =
     { frame = { fg = Tui.Rgb 0x5A5A6A, bg = ground }
     , frameActive = Tui.Rgb 0xE8E8F0
     , text = { fg = Tui.Rgb 0xC8C8D2, bg = ground }
@@ -360,8 +360,8 @@ toKey name =
         Borland ->
             "borland"
 
-        Dark ->
-            "dark"
+        Midnight ->
+            "midnight"
 
         Gren ->
             "gren"
@@ -372,12 +372,22 @@ config file written by a later predc should start, in the scheme predc started
 in before there was a config file at all. Which is why this is total rather
 than a `Maybe` -- there is no caller who would do anything else with the
 `Nothing`.
+
+`"dark"` is what [`Midnight`](#Name) used to be called on disk, and it is read
+here so that renaming the scheme does not put somebody back in Borland for
+having chosen it yesterday. It is only ever read: `toKey` writes the new name,
+so a config file mentions the old one exactly until the next time the theme is
+changed. That is the shape every rename in a config file wants -- read both,
+write one -- and it is why this function is not simply `toKey` inverted.
 -}
 fromKey : String -> Name
 fromKey text =
     when text is
+        "midnight" ->
+            Midnight
+
         "dark" ->
-            Dark
+            Midnight
 
         "gren" ->
             Gren

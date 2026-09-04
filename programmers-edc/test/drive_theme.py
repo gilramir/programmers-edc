@@ -131,19 +131,19 @@ def main():
           any("√" in line and "Borland" in line for line in box.split("\n")),
           [line for line in box.split("\n") if "Borland" in line])
     check("and not the others",
-          not any("√" in line and "Dark" in line for line in box.split("\n")),
-          [line for line in box.split("\n") if "Dark" in line])
+          not any("√" in line and "Midnight" in line for line in box.split("\n")),
+          [line for line in box.split("\n") if "Midnight" in line])
     app.send(b"\x1b", settle=0.5)
     app.send(b"\x1b", settle=0.5)
 
-    # 3. Dark. Every surface moves, and moves to a 24-bit colour -- which is
-    #    the whole reason the theme is Rgb rather than Ansi: Black and DarkGray
-    #    is the only dark pair the sixteen offer and it is at once too far
-    #    apart to read as one surface and too close to be a border.
-    check("Tools | Colors | Dark is reachable", choose(app, "Dark"))
+    # 3. Midnight. Every surface moves, and moves to a 24-bit colour -- which
+    #    is the whole reason the theme is Rgb rather than Ansi: Black and
+    #    DarkGray is the only dark pair the sixteen offer and it is at once too
+    #    far apart to read as one surface and too close to be a border.
+    check("Tools | Colors | Midnight is reachable", choose(app, "Midnight"))
     dark = surfaces(app)
     for what in ("desktop", "bar", "frame"):
-        check(f"Dark repaints the {what}, which no ink can reach",
+        check(f"Midnight repaints the {what}, which no ink can reach",
               dark[what] != borland[what], f"{dark[what]} == {borland[what]}")
     check("and does it in 24-bit colour, not the nearest of sixteen",
           isinstance(dark["frame"][1], tuple), str(dark["frame"]))
@@ -155,7 +155,7 @@ def main():
           os.path.exists(config_file(home)), config_file(home))
     with open(config_file(home), "rb") as f:
         saved = tomllib.load(f)
-    check("and says which one", saved == {"theme": "dark"}, str(saved))
+    check("and says which one", saved == {"theme": "midnight"}, str(saved))
     # The reason the file is TOML rather than JSON: a key predc wrote for the
     # first time arrives with a sentence saying what it is for. A config file
     # whose fields are undocumented is one nobody opens.
@@ -224,7 +224,8 @@ def main():
         f.write(hand_written)
 
     app = start(home)
-    check("Tools | Colors | Dark is reachable a second time", choose(app, "Dark"))
+    check("Tools | Colors | Midnight is reachable a second time",
+          choose(app, "Midnight"))
     check("Tools | Colors | Borland is reachable", choose(app, "Borland"))
     app.send(b"\x1bx", settle=1.0)
     app.wait(timeout=6)
@@ -255,12 +256,36 @@ def main():
     check("a file with a syntax error starts in Borland",
           surfaces(app)["desktop"] == borland["desktop"],
           str(surfaces(app)["desktop"]))
-    check("Tools | Colors | Dark is reachable a third time", choose(app, "Dark"))
+    check("Tools | Colors | Midnight is reachable a third time",
+          choose(app, "Midnight"))
     app.send(b"\x1bx", settle=1.0)
     app.wait(timeout=6)
     check("and predc leaves it exactly alone rather than overwriting it",
           open(config_file(home)).read() == broken,
           repr(open(config_file(home)).read()))
+
+    # 6d. Midnight was called Dark, and a config file written before the
+    #     rename says `theme = "dark"`. Reading it as Borland would have been
+    #     the letter of "a name this version does not know", and would have
+    #     taken somebody's colour scheme away for a word predc changed its own
+    #     mind about. So the old name is read and never written: the file goes
+    #     on saying `dark` until the next time the theme is picked.
+    with open(config_file(home), "w") as f:
+        f.write('theme = "dark"\n')
+    app = start(home)
+    check("the name Midnight used to have still opens Midnight",
+          surfaces(app)["desktop"] == dark["desktop"],
+          f'{surfaces(app)["desktop"]} != {dark["desktop"]}')
+    check("and nothing rewrites the file for saying it",
+          open(config_file(home)).read() == 'theme = "dark"\n',
+          repr(open(config_file(home)).read()))
+    check("until the theme is chosen again", choose(app, "Borland"))
+    app.send(b"\x1bx", settle=1.0)
+    app.wait(timeout=6)
+    with open(config_file(home), "rb") as f:
+        check("and then it is written under the new one",
+              tomllib.load(f) == {"theme": "borland"},
+              open(config_file(home)).read())
 
     # 7. And a file this version cannot make sense of is not worth a dialog in
     #    front of somebody who opened predc to look at a hex dump.
