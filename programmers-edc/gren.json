@@ -9,11 +9,13 @@
         "direct": {
             "gilramir/gren-argparse": "2.0.0",
             "gilramir/gren-bignum": "1.0.0",
+            "gilramir/gren-toml": "local:../../gren-toml",
             "gilramir/gren-tvision": "local:../gren-tvision",
             "gren-lang/core": "7.4.2",
             "gren-lang/node": "6.1.0"
         },
         "indirect": {
+            "gilramir/gren-civil-time": "1.0.0",
             "gren-lang/url": "6.0.0"
         }
     }

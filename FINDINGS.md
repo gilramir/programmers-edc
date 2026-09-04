@@ -5359,3 +5359,147 @@ The first version was written by hand and the columns did not line up, because
 `works` is five characters and `needs tmux line` is fifteen. It is generated
 with `ljust` now and pasted in. A table nobody can read is worse than a
 paragraph, and in a terminal there is no layout engine to hide behind.
+
+## A config file with comments in it is a config file you cannot serialise
+
+predc's settings were JSON. They are TOML now, and the reason given for the
+change was one word -- comments -- but the interesting part is what having
+comments does to the *write*, which was not the part anyone was thinking about.
+
+`gilramir/gren-toml` is a TOML parser that keeps the whitespace and the
+comments in its AST as text rather than throwing them away, so a document that
+was parsed and then edited comes back byte for byte apart from the edit. The
+package is not published yet; predc depends on it as `local:../../gren-toml`,
+and this is its first use by a program rather than by its own test suite.
+
+### The finding: the format changed what `save` is allowed to be
+
+The old `Config.save` was the obvious shape and every program has one -- take
+the model, encode it, write it out. That is *correct* for JSON, because nothing
+in a JSON file is worth preserving that is not in the model. It is destructive
+for TOML, and the reason is not the format, it is the user: a file with
+comments in it is a file somebody opens in an editor, and predc rewrites that
+file every time somebody picks a colour. Serialising the model over it deletes
+everything the user wrote, silently, on an action that looks unrelated.
+
+So `save` **reads the file back off the disk** and edits the document it
+parsed:
+
+    FileSystem.readFile
+        |> Task.map (Toml.parseBytes >> Result.toMaybe)
+        |> Task.onError (\_ -> Task.succeed (Just (Encode.toDocument [])))
+        |> Task.andThen (write << apply config)
+
+Reading at the moment of writing rather than keeping the document parsed during
+`init` is not caution about staleness in the abstract. predc is a TUI somebody
+leaves open, and `$EDITOR` on the config file is a thing that happens while it
+is open. A document held since start-up is a snapshot of the file before that
+edit, and writing it back is the same data loss by a slower route.
+
+`Toml.Encode.toDocument []` is the empty document, which is how "create the
+file" and "change two values in the file" became one code path instead of two.
+There is no separate serialiser to keep in step with the editor.
+
+### Four outcomes, and only two of them write
+
+The `Maybe` in that pipeline is doing real work, because `readFile` failing and
+`parseBytes` failing want opposite answers:
+
+  - **No file** -- create one.
+  - **A file that parses** -- edit it.
+  - **A file that does not parse** -- *leave it completely alone*.
+  - **No path at all** -- nothing to write to.
+
+The third is the one worth arguing about. A syntax error in a config file is
+almost always a half-finished hand edit, and the rest of that page is worth
+more than the setting predc wanted to record. `load` has already fallen back to
+the defaults, so predc runs; the user fixes the typo and picks the theme again.
+Overwriting would have been the tidier-looking behaviour and would have thrown
+away the file it was tidying.
+
+### The key nobody touched is the one that gets destroyed
+
+The first version of `apply` wrote both keys on every save, which is what any
+encoder does and is wrong here for a reason that took a hand-written file to
+see. `Toml.Edit.set` replaces a *value*, and the whitespace inside it is part of
+the value:
+
+    timezones = [
+      "Asia/Seoul",     # them
+      "America/Chicago" # me
+    ]
+
+comes back as `timezones = ["Asia/Seoul", "America/Chicago"]`. That is correct
+for a list that changed -- there is no old formatting to keep for a new value --
+and it is destructive for one that did not, which is the case that actually
+happens: the user arranged that list once, and then picked a colour. The key
+they never touched is the key that got flattened, by an action about something
+else.
+
+So `apply` reads the document it is about to edit -- `Toml.Decode.fromDocument`,
+which is exactly the "you are already holding it" entry point -- and writes only
+what differs. The rule generalises past this program: **an editing API turns
+"write the model out" into a destructive operation, and the fix is to make the
+write conditional on the value having moved.** A serialiser never had to know
+which fields changed. An editor does.
+
+`fromDocument` returning `Err` means the file parsed but does not lower -- two
+`[a]` headers, a key defined twice -- and then both keys are written, since
+nothing reliable is known about either.
+
+There is one trap inside the fix, and it is the reason the check asks
+`Toml.Edit.get` as well as the decoder. "What does the file say" and "is the
+key there" are not the same question: an empty file *says* the defaults,
+because every field in that decoder is optional. So on a first run with the
+theme at its default, comparing meanings alone finds both keys already correct
+and writes an empty file. A key that is not in the document is never unchanged.
+
+
+### Comments predc writes, and comments predc must not touch
+
+A key predc invents arrives with a sentence saying what it is for, since a
+config file whose fields are undocumented is one nobody opens. But it is
+written **only when the key is new** -- `Toml.Edit.get` says whether it is
+there -- because a user who deleted the sentence, or rewrote it in Korean, has
+not made a mistake for the next theme change to correct.
+
+That rule is only coherent because `Toml.Edit.remove` takes a key's leading
+comments with it. `timezones` comes and goes as the user configures zones and
+clears them; the explanation leaves with the key and returns with it, rather
+than being lost the first time the list is emptied.
+
+### `Theme.encode` was the wrong type all along
+
+`Theme` exported `encode : Name -> Json.Encode.Value` and a matching
+`Decode.Decoder Name`. Porting them to TOML would have been two lines. They are
+`toKey : Name -> String` and `fromKey : String -> Name` instead, and `Theme`
+does not import any codec at all now.
+
+Which format the config file is in has never been a fact about a colour scheme.
+The old signature made `Theme` depend on the answer, so a decision taken in
+`Config.gren` reached two modules; the string is the one thing only `Theme`
+knows, and handing that over is the whole of its business here. The file has
+now been JSON and TOML and `Theme` has an opinion about neither.
+
+### What the driver checks, which is not what it used to
+
+`drive_theme.py` compared `json.load(f)` against a dict. The dict comparison is
+still there, in `tomllib`, and it is now the *weaker* half: the thing worth
+asserting about a format with comments is what survives, not what parses.
+
+So the driver writes a file by hand -- a comment above the key, a comment on
+the line, blank lines, a `timezones` list spread over four lines with a comment
+against each zone, and `language = "ko"`, which no version of predc has ever
+heard of -- then makes predc write that file twice, and compares the result to
+the original string character for character. Two more checks say predc leaves a
+file with a syntax error exactly as it found it.
+
+### One thing the API cannot do yet
+
+Neither `Toml.Encode` nor `Toml.Edit` can produce a **blank line**, so a key
+added to a document arrives with its comment block against the previous key's
+value. Encoding cannot attach comments at all -- the first-run file gets them
+by an `Encode.toDocument` followed by `Edit.setComments`, which works and is
+two APIs where one would do. Both are cosmetic and both are the library's to
+fix rather than the program's; predc does not reach into `Toml.Ast` to work
+around them.

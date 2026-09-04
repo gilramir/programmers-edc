@@ -1,4 +1,4 @@
-module Theme exposing (Inks, Name(..), all, decode, encode, highlightNames, inks, next, palette, title)
+module Theme exposing (Inks, Name(..), all, fromKey, highlightNames, inks, next, palette, title, toKey)
 
 {-| predc's colour schemes, and the two halves every one of them has.
 
@@ -24,12 +24,10 @@ that read on Borland's blue are the hues that disappear on a light ground.
 
 -}
 
-import Json.Decode as Decode
-import Json.Encode as Encode
 import Tui exposing (Hue(..))
 
 
-{-| Which scheme. Stored in the config file as the strings [`encode`](#encode)
+{-| Which scheme. Stored in the config file as the strings [`toKey`](#toKey)
 writes, so renaming one of these renames what is on disk.
 -}
 type Name
@@ -351,36 +349,38 @@ grenPanel ground =
 -- ON DISK
 
 
-encode : Name -> Encode.Value
-encode name =
-    Encode.string <|
-        when name is
-            Borland ->
-                "borland"
+{-| The name this scheme is written down as, which is a `String` and not a
+`Json.Encode.Value` or a `Toml.Edit.Value`. The config file has been both, and
+which one it is has never been a fact about a colour scheme -- so the encoding
+lives with the file and this hands over the one thing only `Theme` knows.
+-}
+toKey : Name -> String
+toKey name =
+    when name is
+        Borland ->
+            "borland"
 
-            Dark ->
-                "dark"
+        Dark ->
+            "dark"
 
-            Gren ->
-                "gren"
+        Gren ->
+            "gren"
 
 
 {-| A name this version does not know is not an error worth showing anybody: a
 config file written by a later predc should start, in the scheme predc started
-in before there was a config file at all.
+in before there was a config file at all. Which is why this is total rather
+than a `Maybe` -- there is no caller who would do anything else with the
+`Nothing`.
 -}
-decode : Decode.Decoder Name
-decode =
-    Decode.string
-        |> Decode.map
-            (\text ->
-                when text is
-                    "dark" ->
-                        Dark
+fromKey : String -> Name
+fromKey text =
+    when text is
+        "dark" ->
+            Dark
 
-                    "gren" ->
-                        Gren
+        "gren" ->
+            Gren
 
-                    _ ->
-                        Borland
-            )
+        _ ->
+            Borland

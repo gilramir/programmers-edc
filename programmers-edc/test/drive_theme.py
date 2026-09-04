@@ -16,6 +16,13 @@ would show. The check is that the chart's ruler is a *dark* hue under Gren and
 a bright one under Borland, which is a fact about the model rather than about
 any particular colour.
 
+The file predc remembers it in is TOML, and section 6b is here because that is
+a format with comments in it. A config file somebody can annotate is a config
+file somebody annotates, and predc writes to it on every theme change -- so
+what the driver checks is that a hand-written comment, a hand-written blank
+line and a key predc has never heard of are all still there after predc has
+written the file twice.
+
 Two mechanical notes. `HOME` is a fresh temporary directory, so the first run
 has no config file and the checks are not at the mercy of whatever is in the
 real one. And `COLORTERM=truecolor` is set because two of the three themes are
@@ -23,10 +30,10 @@ real one. And `COLORTERM=truecolor` is set because two of the three themes are
 assertions below stop being about what was asked for.
 """
 
-import json
 import os
 import sys
 import tempfile
+import tomllib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -47,7 +54,7 @@ def start(home, argv_env=None):
 
 
 def config_file(home):
-    return os.path.join(home, ".config", "predc", "config.json")
+    return os.path.join(home, ".config", "predc", "config.toml")
 
 
 def open_menu(app, name):
@@ -146,9 +153,17 @@ def main():
     #    that survives only a tidy exit is a setting that gets lost.
     check("choosing a theme writes the config file",
           os.path.exists(config_file(home)), config_file(home))
-    with open(config_file(home)) as f:
-        saved = json.load(f)
+    with open(config_file(home), "rb") as f:
+        saved = tomllib.load(f)
     check("and says which one", saved == {"theme": "dark"}, str(saved))
+    # The reason the file is TOML rather than JSON: a key predc wrote for the
+    # first time arrives with a sentence saying what it is for. A config file
+    # whose fields are undocumented is one nobody opens.
+    text = open(config_file(home)).read()
+    check("and explains the key it just invented",
+          any(line.startswith("#") and "colour scheme" in line
+              for line in text.split("\n")),
+          text)
 
     # 5. Gren is the light one, and the reason Inks is a record per theme
     #    rather than one set shared by all three.
@@ -171,9 +186,9 @@ def main():
     #    left off, and does it before the first frame rather than repainting
     #    into it -- which is why the load is three `Init.await`s and not a
     #    command issued after `startProgram`.
-    with open(config_file(home)) as f:
+    with open(config_file(home), "rb") as f:
         check("the last choice was the one written down",
-              json.load(f) == {"theme": "gren"}, open(config_file(home)).read())
+              tomllib.load(f) == {"theme": "gren"}, open(config_file(home)).read())
 
     app = start(home)
     app.send(b"\x1ba", settle=1.4)
@@ -184,21 +199,84 @@ def main():
     app.send(b"\x1bx", settle=1.0)
     app.wait(timeout=6)
 
+    # 6b. What TOML is for. The user opens the file, writes a note to himself,
+    #     leaves a blank line, and sets something this version has never heard
+    #     of -- and then predc writes the file twice more. Nothing here is
+    #     serialised from the model: `Config.save` re-reads the file and
+    #     changes the two values in the document it parsed, so everything the
+    #     user wrote is still there, in the order and spacing he wrote it.
+    #     The timezone list is the sharpest part of it. `Toml.Edit.set`
+    #     replaces a value and the whitespace inside it, so writing that array
+    #     back would put four hand-arranged lines onto one -- on a key nobody
+    #     touched, because somebody picked a colour. `Config.apply` reads what
+    #     the document already says and does not write what is not changing.
+    hand_written = ('# The other half of the team is in Seoul.\n'
+                    'theme = "gren" # light, for the afternoon\n'
+                    '\n'
+                    'timezones = [\n'
+                    '  "Asia/Seoul",     # them\n'
+                    '  "America/Chicago" # me\n'
+                    ']\n'
+                    '\n'
+                    '# Not this version, but predc must not eat it.\n'
+                    'language = "ko"\n')
+    with open(config_file(home), "w") as f:
+        f.write(hand_written)
+
+    app = start(home)
+    check("Tools | Colors | Dark is reachable a second time", choose(app, "Dark"))
+    check("Tools | Colors | Borland is reachable", choose(app, "Borland"))
+    app.send(b"\x1bx", settle=1.0)
+    app.wait(timeout=6)
+
+    text = open(config_file(home)).read()
+    check("two more writes and the theme is the one last chosen",
+          tomllib.loads(text)["theme"] == "borland", text)
+    check("the comment above the key it rewrote is still there",
+          "# The other half of the team is in Seoul." in text, text)
+    check("so is the one on the line itself",
+          "# light, for the afternoon" in text, text)
+    check("and the key this version does not know survives untouched",
+          tomllib.loads(text).get("language") == "ko", text)
+    check("a list nobody changed is still on the four lines it was written on",
+          '  "Asia/Seoul",     # them\n' in text, repr(text))
+    check("the whole file, byte for byte, apart from the one word that moved",
+          text == hand_written.replace('"gren"', '"borland"'), repr(text))
+
+    # 6c. The other half of that bargain. A file somebody is halfway through
+    #     editing has a typo in it, and the typo is worth less than the rest
+    #     of the file is -- so predc reads the defaults and writes nothing at
+    #     all, rather than replacing a page of somebody's TOML with two keys.
+    broken = ('# Seoul is where the other half of the team is.\n'
+              'theme = gren\n')
+    with open(config_file(home), "w") as f:
+        f.write(broken)
+    app = start(home)
+    check("a file with a syntax error starts in Borland",
+          surfaces(app)["desktop"] == borland["desktop"],
+          str(surfaces(app)["desktop"]))
+    check("Tools | Colors | Dark is reachable a third time", choose(app, "Dark"))
+    app.send(b"\x1bx", settle=1.0)
+    app.wait(timeout=6)
+    check("and predc leaves it exactly alone rather than overwriting it",
+          open(config_file(home)).read() == broken,
+          repr(open(config_file(home)).read()))
+
     # 7. And a file this version cannot make sense of is not worth a dialog in
     #    front of somebody who opened predc to look at a hex dump.
     with open(config_file(home), "w") as f:
-        f.write('{"theme": "chartreuse"}')
+        f.write('theme = "chartreuse"')
     app = start(home)
     check("a theme name this version does not know falls back to Borland",
           surfaces(app)["desktop"] == borland["desktop"],
           str(surfaces(app)["desktop"]))
 
     with open(config_file(home), "w") as f:
-        f.write("not json at all")
+        f.write("not toml at all")
     app.send(b"\x1bx", settle=1.0)
     app.wait(timeout=6)
     app = start(home)
-    check("and neither does a file that is not JSON",
+    check("and neither does a file that is not TOML",
           surfaces(app)["desktop"] == borland["desktop"],
           str(surfaces(app)["desktop"]))
 

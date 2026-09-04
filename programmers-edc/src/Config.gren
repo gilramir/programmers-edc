@@ -2,7 +2,7 @@ module Config exposing (Config, default, load, save, where_)
 
 {-| What predc remembers between runs, which was one field and is now two.
 
-Four decisions, and the first two are about what *not* to do.
+Five decisions, and the first two are about what *not* to do.
 
 **Nothing here reports an error.** A missing config file is the normal case on
 a first run; an unreadable one is a directory somebody made read-only; a
@@ -24,10 +24,18 @@ Borland and repaint into the saved theme a moment later, once, every time.
 
 **Every field decodes on its own, and a missing one is its default rather than
 a failed parse.** That is what [`optional`](#) below is for, and the reason is
-the upgrade: a `config.json` written by the version before this one has a
-`theme` and no `timezones`, and reading it must keep the theme. A decoder built
-out of required fields would have thrown the whole file away and put the user
-back in Borland for having used an older predc yesterday.
+the upgrade: a file written by the version before this one has a `theme` and
+no `timezones`, and reading it must keep the theme. A decoder built out of
+required fields would have thrown the whole file away and put the user back in
+Borland for having used an older predc yesterday.
+
+**And the file is TOML, so that it can be commented -- which is what makes the
+fifth decision necessary.** A format with comments in it is a format somebody
+opens in an editor, and a program that writes such a file by serialising its
+own model deletes every word the user wrote the moment the theme changes. So
+nothing here serialises. `save` re-reads the file, changes whichever of the two
+values has actually moved in the document it parsed, and writes that back: see
+[`save`](#save).
 
 -}
 
@@ -35,10 +43,13 @@ import Bytes exposing (Bytes)
 import Dict exposing (Dict)
 import FileSystem
 import FileSystem.Path as Path exposing (Path)
-import Json.Decode as Decode
-import Json.Encode as Encode
 import Task exposing (Task)
 import Theme
+import Toml
+import Toml.Ast as Ast
+import Toml.Decode as Decode
+import Toml.Edit as Edit
+import Toml.Encode as Encode
 
 
 type alias Config =
@@ -62,7 +73,7 @@ default =
     }
 
 
-{-| `$XDG_CONFIG_HOME/predc/config.json`, or `~/.config/predc/config.json`
+{-| `$XDG_CONFIG_HOME/predc/config.toml`, or `~/.config/predc/config.toml`
 when that is not set, which is what the XDG base directory specification says
 to do and what everything else on a Linux machine already does.
 
@@ -85,7 +96,7 @@ where_ env =
                 Nothing ->
                     Maybe.map (\home -> home ++ "/.config") (Dict.get "HOME" env)
     in
-    Maybe.map (\dir -> Path.fromPosixString (dir ++ "/predc/config.json")) base
+    Maybe.map (\dir -> Path.fromPosixString (dir ++ "/predc/config.toml")) base
 
 
 load : FileSystem.Permission -> Maybe Path -> Task Never Config
@@ -100,26 +111,34 @@ load permission path =
                 |> Task.onError (\_ -> Task.succeed default)
 
 
+{-| `Toml.Decode.fromBytes` and not `Toml.parseBytes` followed by
+`fromDocument`, because reading is all this does: the document the parse built
+is thrown away here, and `save` reads it again from the file rather than being
+handed a copy that went stale while predc was open. Bytes rather than a
+`String` because two of the things that make a TOML file invalid -- a bad
+UTF-8 sequence, and whether there was a byte order mark -- are decided before
+there is a `String` to look at.
+-}
 parse : Bytes -> Config
 parse bytes =
-    Bytes.toString bytes
-        |> Maybe.andThen (\text -> Result.toMaybe (Decode.decodeString decoder text))
-        |> Maybe.withDefault default
+    Decode.fromBytes decoder bytes
+        |> Result.withDefault default
 
 
 decoder : Decode.Decoder Config
 decoder =
     Decode.map2 (\theme timezones -> { theme = theme, timezones = timezones })
-        (optional "theme" Theme.decode default.theme)
+        (optional "theme" (Decode.map Theme.fromKey Decode.string) default.theme)
         (Decode.maybe (Decode.field "timezones" (Decode.array Decode.string)))
 
 
 {-| A field that may not be there, and is its default when it is not.
 
 `Decode.maybe` wrapped around the field rather than around the value, which is
-the distinction its own doc comment warns about: this succeeds with the default
-both when the key is absent and when what is under it is the wrong shape, and
-those are the same thing to a program that never reports a config error.
+the distinction `optionalField`'s own doc comment warns about: this succeeds
+with the default both when the key is absent and when what is under it is the
+wrong shape, and those are the same thing to a program that never reports a
+config error.
 
 `timezones` does not go through this, because for that field "absent" and "an
 empty array" are different answers and `Maybe` is the value rather than the
@@ -131,9 +150,34 @@ optional key decoder_ fallback =
         |> Decode.map (Maybe.withDefault fallback)
 
 
-{-| Make the directory, then write the file, and ignore whichever of the two
-went wrong. `recursive = True` so that a first run creates `~/.config/predc`
-as well as the file in it, and so that an existing directory is not an error.
+{-| Read the file, change the two values in it, write it back.
+
+**The read is the point of the whole module.** The file is TOML because TOML
+carries comments, and a file with comments in it is one somebody edits by hand
+-- so it is read at the moment of writing rather than at start-up. Anything
+the user changed with an editor while predc was open survives, which it would
+not if the document parsed during `init` were kept in the model and written
+out over the top hours later.
+
+Four outcomes, and only two of them write:
+
+  - **No file, or one that cannot be read.** Build the document from nothing
+    and write it. `Toml.Encode.toDocument []` is that nothing.
+  - **A file that parses.** Change whichever of the two values has moved and
+    write it back. Every other byte -- the comments, the blank lines, the
+    alignment, a key some later predc will understand -- comes back out as it
+    went in.
+  - **A file that does not parse.** Leave it alone entirely. It is a file
+    somebody is in the middle of editing, and a typo in it is worth less than
+    the rest of the file is; `load` has already fallen back to the defaults,
+    so predc runs either way. The setting comes back next time, which is the
+    same fire-and-forget the write has always been.
+  - **No path at all.** Nothing to write to.
+
+`makeDirectory` with `recursive = True` so that a first run creates
+`~/.config/predc` as well as the file in it, and so that an existing directory
+is not an error.
+
 -}
 save : FileSystem.Permission -> Maybe Path -> Config -> Task Never {}
 save permission path config =
@@ -142,35 +186,128 @@ save permission path config =
             Task.succeed {}
 
         Just it ->
-            FileSystem.makeDirectory permission { recursive = True } (Path.parentPath it |> Maybe.withDefault it)
+            FileSystem.readFile permission it
+                |> Task.map (\bytes -> Toml.parseBytes bytes |> Result.toMaybe)
+                -- A file that is not there is a file to create, and
+                -- `Toml.Encode.toDocument []` is the empty document `apply`
+                -- adds both keys to. A file that is there and does not parse
+                -- is the one case above that answers `Just Nothing`.
+                |> Task.onError (\_ -> Task.succeed (Just (Encode.toDocument [])))
                 |> Task.andThen
-                    (\_ ->
-                        FileSystem.writeFile permission
-                            (Bytes.fromString (Encode.encode 2 (encode config) ++ "\n"))
-                            it
+                    (\parsed ->
+                        when parsed is
+                            Nothing ->
+                                Task.succeed {}
+
+                            Just document ->
+                                write permission it (apply config document)
                     )
-                |> Task.map (\_ -> {})
-                |> Task.onError (\_ -> Task.succeed {})
 
 
-{-| A `Nothing` writes no `timezones` key at all rather than a `null`, so that
-a config file predc has never been asked about time zones is
-indistinguishable from the one the version before this wrote. It is also the
-only shape that survives a round trip: `null` would have to decode back to
-`Nothing`, and so would a missing key, and then two spellings would mean one
-thing for no reason.
+write : FileSystem.Permission -> Path -> Toml.Document -> Task Never {}
+write permission path document =
+    FileSystem.makeDirectory permission { recursive = True } (Path.parentPath path |> Maybe.withDefault path)
+        |> Task.andThen (\_ -> FileSystem.writeFile permission (Toml.toBytes document) path)
+        |> Task.map (\_ -> {})
+        |> Task.onError (\_ -> Task.succeed {})
+
+
+{-| The config as changes to a document that already exists.
+
+A `Nothing` for `timezones` removes the key rather than writing a `null`, for
+the same reason it wrote no key at all in the JSON this replaced: absent is
+what "never configured" means to the decoder above, and a second spelling of
+one thing is a second thing to keep in step. TOML makes the argument on its
+own as well -- it has no null.
+
+**Neither key is touched when its value is not changing**, and that is not an
+optimisation. `Toml.Edit.set` replaces a *value*, whitespace and all, so
+writing an array back writes it as one line -- which is right for a list that
+changed and is destructive for one that did not. Somebody who spread their
+zones over four lines with a comment against each is somebody who would have
+found them flattened into one the next time they picked a colour, on the key
+they had not touched. So `apply` reads what the document already says and
+skips what already matches.
+
+`Toml.Decode.fromDocument` rather than a second parse, because the document is
+already in hand; `Nothing` from it means the file parsed but does not lower --
+two `[a]` headers, a key defined twice -- and then both keys are written, since
+nothing reliable is known about either.
+
+**A key that is not in the file is never "unchanged"**, which is why `settled`
+asks `Toml.Edit.get` as well as the decoder. The two are not the same question:
+the decoder answers what the file *means*, and an empty file means the defaults
+-- so on a first run, with the theme at its default, comparing meanings alone
+would find both keys already correct and write an empty file. Asking whether
+the key is there as well is what makes a file predc creates say something.
+
 -}
-encode : Config -> Encode.Value
-encode config =
-    Encode.object <|
-        [ { key = "theme", value = Theme.encode config.theme } ]
-        ++ (when config.timezones is
-                Just zones ->
-                    [ { key = "timezones"
-                      , value = Encode.array Encode.string zones
-                      }
-                    ]
+apply : Config -> Toml.Document -> Toml.Document
+apply config document =
+    let
+        current =
+            Decode.fromDocument decoder document
+                |> Result.toMaybe
 
+        settled pick path =
+            when Edit.get path document is
                 Nothing ->
-                    []
+                    False
+
+                Just _ ->
+                    Maybe.map (\it -> pick it == pick config) current
+                        |> Maybe.withDefault False
+    in
+    document
+        |> (if settled .theme [ "theme" ] then
+                identity
+
+            else
+                put [ "theme" ]
+                    [ " Which colour scheme predc opens in: borland, dark, or gren." ]
+                    (Edit.string (Theme.toKey config.theme))
            )
+        |> (if settled .timezones [ "timezones" ] then
+                identity
+
+            else
+                when config.timezones is
+                    Just zones ->
+                        put [ "timezones" ]
+                            [ " The time zones the time converter shows, in the order it"
+                            , " shows them. Delete the key to go back to this machine's own"
+                            , " zone; an empty list shows UTC and POSIX alone."
+                            ]
+                            (Edit.array (Array.map Edit.string zones))
+
+                    Nothing ->
+                        Edit.remove [ "timezones" ]
+           )
+
+
+{-| Set a key, and explain it if predc is the one putting it there.
+
+The comment is written **only when the key is new**, which is the whole of the
+convention and is why this is a function rather than two calls at each site. A
+key predc writes for the first time arrives with a sentence saying what it is
+for, because a config file whose fields are undocumented is one nobody will
+open. A key that is already in the file is left with whatever comment it has,
+including none, because the user deleting a comment or rewriting it in Korean
+is not a mistake for a program to correct on the next theme change.
+
+`Toml.Edit.remove` takes a key's leading comments with it, so the sentence
+goes when the key goes and comes back when the key does -- which is the
+`timezones` case above, and is the behaviour that makes "only when new"
+coherent rather than a way to lose the explanation permanently.
+
+-}
+put : Array String -> Array String -> Ast.Value -> Toml.Document -> Toml.Document
+put path note value document =
+    when Edit.get path document is
+        Nothing ->
+            document
+                |> Edit.set path value
+                |> Edit.setComments path { leading = note, trailing = Nothing }
+
+        Just _ ->
+            Edit.set path value document

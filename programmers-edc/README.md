@@ -546,7 +546,7 @@ before those two buttons it was the order the zones happened to be added in --
 changing it meant removing three zones so as to put them back differently.
 `UTC` is not in the list and is always last.
 
-The list is written to `config.json` the moment it changes, and the converter
+The list is written to `config.toml` the moment it changes, and the converter
 behind the window shows the row as soon as you add it, which is the answer to
 "is that the one I meant". **Cancel** is the price of that: since there is no
 draft to throw away, it is an undo, back to the list the converter was showing
@@ -668,7 +668,7 @@ i18n is one step less expensive than it was.
 ## Colors
 
 Three schemes, on **Tools | Colors**: Borland, Dark and Gren. The choice is
-written to `$XDG_CONFIG_HOME/predc/config.json` (or `~/.config/predc/`) the
+written to `$XDG_CONFIG_HOME/predc/config.toml` (or `~/.config/predc/`) the
 moment it is made, and read back before the first frame of the next run.
 
 A scheme is two things, and `src/Theme.gren` is where the split is explained.
@@ -679,3 +679,53 @@ colours a terminal has always had. Borland's is built out of those sixteen, so
 it follows whatever the terminal is set to; Dark and Gren name their colours
 exactly, because "whatever this terminal calls black" is not a foundation for a
 dark scheme.
+
+## The config file
+
+`$XDG_CONFIG_HOME/predc/config.toml`, or `~/.config/predc/config.toml`. It has
+two keys in it, and predc writes it the moment either one changes rather than
+at exit -- a setting that survives only a tidy close is a setting that gets
+lost, and predc is a program people close with Alt-X.
+
+```toml
+# Which colour scheme predc opens in: borland, dark, or gren.
+theme = "dark"
+# The time zones the time converter shows, in the order it
+# shows them. Delete the key to go back to this machine's own
+# zone; an empty list shows UTC and POSIX alone.
+timezones = ["America/Chicago", "Asia/Seoul"]
+```
+
+It was JSON and is now TOML, for the comments -- both the ones above, which
+predc writes when it invents a key, and the ones you write yourself. Which
+turns out to be a claim about the *writing* rather than the format: a program
+that serialises its model over the file deletes every word you put in it the
+next time you pick a colour.
+
+So predc does not serialise. `Config.save` reads the file back off the disk,
+changes whichever of the two values is actually different, and writes that
+document out -- [gren-toml](https://github.com/gilramir/gren-toml) keeps the
+whitespace and the comments as text in its AST, so everything the edit did not
+touch comes back byte for byte. Your comments stay where you put them, a key
+predc has never heard of survives, and an edit you made in `$EDITOR` while
+predc was running is not written over.
+
+"Actually different" is load-bearing rather than thrifty. Setting a value
+replaces the whitespace inside it too, so a list you spread over four lines
+with a note against each zone:
+
+```toml
+timezones = [
+  "Asia/Seoul",     # them
+  "America/Chicago" # me
+]
+```
+
+would come back as one line -- on the key you had not touched, because you
+picked a colour. predc reads what the file already says and leaves alone
+whatever has not moved.
+
+The one thing it will not do is repair a file. A TOML syntax error means predc
+starts in the defaults and then leaves the file completely alone: a typo is
+worth less than the rest of the page it is on, and the setting you lost comes
+back the next time you choose it.

@@ -43,11 +43,11 @@ characters wide held three and a four-digit year came out as `202`. Every check
 below that reads a year would fail without the fix in `views.cc`.
 """
 
-import json
 import os
 import re
 import sys
 import tempfile
+import tomllib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -257,11 +257,11 @@ def find_text(app):
 
 
 def config_of(home):
-    path = os.path.join(home, ".config", "predc", "config.json")
+    path = os.path.join(home, ".config", "predc", "config.toml")
     if not os.path.exists(path):
         return None
-    with open(path) as f:
-        return json.load(f)
+    with open(path, "rb") as f:
+        return tomllib.load(f)
 
 
 def main():
