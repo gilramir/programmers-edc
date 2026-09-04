@@ -3099,9 +3099,8 @@ schemes cannot be repainted a third time.
 
 ### The seam is that a palette is 24-bit and an ink is not
 
-`Tui.Tint` has `Rgb`; `Tui.Hue` has sixteen names. So predc's Midnight theme
-(called Dark when this was written) is a hand-picked near-black ground with
-`LightCyan` painted on it, and the two have
+`Tui.Tint` has `Rgb`; `Tui.Hue` has sixteen names. So predc's Midnight theme is
+a hand-picked near-black ground with `LightCyan` painted on it, and the two have
 to be chosen to sit together. That asymmetry is deliberate -- a span colour is
 resolved against a view's palette and giving it 24 bits would mean giving up
 `TColorBIOS` in the one place where the point is to agree with whatever the
@@ -5613,31 +5612,3 @@ over one list scrolls that list and not the one beside it. It turned one notch
 at a time, so it never built a queue. A test that is slower than a person is a
 test of something a person will not do.
 
-## Renaming a theme, and the one line that makes it free
-
-Dark became Midnight, which is a rename of a word on a menu and would be
-nothing at all except that the word is also written into somebody's config
-file. `Theme.toKey` puts it there and `Theme.fromKey` reads it back, and
-`fromKey` is total: a name it does not know is Borland, deliberately, so that a
-file written by a later predc still opens.
-
-Which means a rename done in the obvious way -- change both -- would have read
-every existing `theme = "dark"` as a name from the future and started in
-Borland. Not a crash and not a message: just somebody's colour scheme quietly
-gone, for a word predc changed its own mind about.
-
-So `fromKey` reads two names and `toKey` writes one. Three lines, and the shape
-generalises to every rename in a config file: **read every name the key has ever
-had, write only the current one.** The file then goes on saying `dark` until the
-next time the theme is picked, at which point it says `midnight` and the old
-spelling is gone without anything having gone looking for it. Nothing migrates,
-nothing is rewritten on start-up, and a user who never changes their theme again
-never notices either way -- which is the right amount of noise for a rename.
-
-The driver checks all four halves of that: the old name opens Midnight, the file
-is *not* rewritten for having said it, choosing a theme writes the new name, and
-a name from neither era still falls back to Borland.
-
-The internal names moved too -- `dark`/`darkPanel` are `midnight`/`midnightPanel`
--- but `darkGrounds` did not, because it is the set of dark backgrounds every
-theme's inks are checked against and was never about this one.

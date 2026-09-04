@@ -264,29 +264,6 @@ def main():
           open(config_file(home)).read() == broken,
           repr(open(config_file(home)).read()))
 
-    # 6d. Midnight was called Dark, and a config file written before the
-    #     rename says `theme = "dark"`. Reading it as Borland would have been
-    #     the letter of "a name this version does not know", and would have
-    #     taken somebody's colour scheme away for a word predc changed its own
-    #     mind about. So the old name is read and never written: the file goes
-    #     on saying `dark` until the next time the theme is picked.
-    with open(config_file(home), "w") as f:
-        f.write('theme = "dark"\n')
-    app = start(home)
-    check("the name Midnight used to have still opens Midnight",
-          surfaces(app)["desktop"] == dark["desktop"],
-          f'{surfaces(app)["desktop"]} != {dark["desktop"]}')
-    check("and nothing rewrites the file for saying it",
-          open(config_file(home)).read() == 'theme = "dark"\n',
-          repr(open(config_file(home)).read()))
-    check("until the theme is chosen again", choose(app, "Borland"))
-    app.send(b"\x1bx", settle=1.0)
-    app.wait(timeout=6)
-    with open(config_file(home), "rb") as f:
-        check("and then it is written under the new one",
-              tomllib.load(f) == {"theme": "borland"},
-              open(config_file(home)).read())
-
     # 7. And a file this version cannot make sense of is not worth a dialog in
     #    front of somebody who opened predc to look at a hex dump.
     with open(config_file(home), "w") as f:

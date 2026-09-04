@@ -372,21 +372,11 @@ config file written by a later predc should start, in the scheme predc started
 in before there was a config file at all. Which is why this is total rather
 than a `Maybe` -- there is no caller who would do anything else with the
 `Nothing`.
-
-`"dark"` is what [`Midnight`](#Name) used to be called on disk, and it is read
-here so that renaming the scheme does not put somebody back in Borland for
-having chosen it yesterday. It is only ever read: `toKey` writes the new name,
-so a config file mentions the old one exactly until the next time the theme is
-changed. That is the shape every rename in a config file wants -- read both,
-write one -- and it is why this function is not simply `toKey` inverted.
 -}
 fromKey : String -> Name
 fromKey text =
     when text is
         "midnight" ->
-            Midnight
-
-        "dark" ->
             Midnight
 
         "gren" ->

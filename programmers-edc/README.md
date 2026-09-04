@@ -697,10 +697,6 @@ theme = "midnight"
 timezones = ["America/Chicago", "Asia/Seoul"]
 ```
 
-A `theme = "dark"` written before the scheme was renamed still opens Midnight,
-and stays spelled that way until the next time you pick a theme. Reading both
-names and writing one is what a rename in a config file costs.
-
 It was JSON and is now TOML, for the comments -- both the ones above, which
 predc writes when it invents a key, and the ones you write yourself. Which
 turns out to be a claim about the *writing* rather than the format: a program
