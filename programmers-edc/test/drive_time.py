@@ -256,8 +256,12 @@ def find_text(app):
     return None
 
 
+def config_path(home):
+    return os.path.join(home, ".config", "predc", "config.toml")
+
+
 def config_of(home):
-    path = os.path.join(home, ".config", "predc", "config.toml")
+    path = config_path(home)
     if not os.path.exists(path):
         return None
     with open(path, "rb") as f:
@@ -385,6 +389,14 @@ def main():
     check("Space on the zone list adds it, and it is written down at once",
           (config_of(home) or {}).get("timezones") == ["America/Chicago", "Asia/Seoul"],
           str(config_of(home)))
+    # And the key predc has just invented arrives explained, with a blank line
+    # holding its block off the key above it. That is what the config file is
+    # TOML for, and it is a property of what `Config.apply` asks for rather
+    # than of anything the converter did -- so this is the one place in the
+    # suite that reads the file as text.
+    written = open(config_path(home)).read()
+    check("the key it invented arrives with a sentence saying what it is for",
+          "\n\n# The time zones the time converter shows" in written, repr(written))
 
     # A quarter-hour zone, which is the case a whole-hour offset table gets
     # wrong and the reason the offset crosses the port in minutes rather than

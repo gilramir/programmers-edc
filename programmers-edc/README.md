@@ -703,16 +703,16 @@ that serialises its model over the file deletes every word you put in it the
 next time you pick a colour.
 
 So predc does not serialise. `Config.save` reads the file back off the disk,
-changes whichever of the two values is actually different, and writes that
-document out -- [gren-toml](https://github.com/gilramir/gren-toml) keeps the
-whitespace and the comments as text in its AST, so everything the edit did not
-touch comes back byte for byte. Your comments stay where you put them, a key
-predc has never heard of survives, and an edit you made in `$EDITOR` while
-predc was running is not written over.
+edits the document it parsed, and writes that out --
+[gren-toml](https://github.com/gilramir/gren-toml) keeps the whitespace and the
+comments as text in its AST, so everything the edit did not touch comes back
+byte for byte. Your comments stay where you put them, a key predc has never
+heard of survives, and an edit you made in `$EDITOR` while predc was running is
+not written over.
 
-"Actually different" is load-bearing rather than thrifty. Setting a value
-replaces the whitespace inside it too, so a list you spread over four lines
-with a note against each zone:
+Setting a value that has not changed does nothing at all, which matters most
+for the key predc is *not* changing. Setting a value replaces the whitespace
+inside it, so a list you spread over four lines with a note against each zone:
 
 ```toml
 timezones = [
@@ -721,9 +721,8 @@ timezones = [
 ]
 ```
 
-would come back as one line -- on the key you had not touched, because you
-picked a colour. predc reads what the file already says and leaves alone
-whatever has not moved.
+would otherwise come back as one line -- on the key you had not touched,
+because you picked a colour.
 
 The one thing it will not do is repair a file. A TOML syntax error means predc
 starts in the defaults and then leaves the file completely alone: a typo is

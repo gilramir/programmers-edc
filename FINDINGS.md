@@ -5419,40 +5419,42 @@ away the file it was tidying.
 
 ### The key nobody touched is the one that gets destroyed
 
-The first version of `apply` wrote both keys on every save, which is what any
-encoder does and is wrong here for a reason that took a hand-written file to
-see. `Toml.Edit.set` replaces a *value*, and the whitespace inside it is part of
-the value:
+Writing both keys on every save is what any encoder does and is wrong here, for
+a reason that took a hand-written file to see. `Toml.Edit.set` replaces a
+*value*, and the whitespace inside it is part of the value:
 
     timezones = [
       "Asia/Seoul",     # them
       "America/Chicago" # me
     ]
 
-comes back as `timezones = ["Asia/Seoul", "America/Chicago"]`. That is correct
+came back as `timezones = ["Asia/Seoul", "America/Chicago"]`. That is correct
 for a list that changed -- there is no old formatting to keep for a new value --
 and it is destructive for one that did not, which is the case that actually
 happens: the user arranged that list once, and then picked a colour. The key
 they never touched is the key that got flattened, by an action about something
 else.
 
-So `apply` reads the document it is about to edit -- `Toml.Decode.fromDocument`,
-which is exactly the "you are already holding it" entry point -- and writes only
-what differs. The rule generalises past this program: **an editing API turns
-"write the model out" into a destructive operation, and the fix is to make the
-write conditional on the value having moved.** A serialiser never had to know
-which fields changed. An editor does.
+The rule generalises past this program. **An editing API turns "write the model
+out" into a destructive operation, and the fix is to make each write conditional
+on the value having moved.** A serialiser never had to know which fields
+changed. An editor does.
 
-`fromDocument` returning `Err` means the file parsed but does not lower -- two
-`[a]` headers, a key defined twice -- and then both keys are written, since
-nothing reliable is known about either.
+predc did that itself first, by decoding the document it was about to edit and
+comparing, and that version is worth remembering for the trap inside it: "what
+does the file say" and "is the key there" are not the same question, because
+every field in that decoder is optional and so an *empty* file already *says*
+the defaults. Comparing meanings alone found both keys correct on a first run
+and wrote an empty file.
 
-There is one trap inside the fix, and it is the reason the check asks
-`Toml.Edit.get` as well as the decoder. "What does the file say" and "is the
-key there" are not the same question: an empty file *says* the defaults,
-because every field in that decoder is optional. So on a first run with the
-theme at its default, comparing meanings alone finds both keys already correct
-and writes an empty file. A key that is not in the document is never unchanged.
+None of it is here any more, because the comparison went into the library
+instead -- `Toml.Edit.set` now leaves a value alone when the document already
+means it. That is the right home for it: the caller has to hold the old
+document, decode it, and know that `0x1F` and `31` are the same integer and
+`1.50` and `1.5` the same number, and the library knows all three without being
+asked. `apply` is two calls again, and the property is stronger than the one
+predc had, since it holds for every value rather than for the two fields
+somebody remembered to compare.
 
 
 ### Comments predc writes, and comments predc must not touch
@@ -5467,6 +5469,13 @@ That rule is only coherent because `Toml.Edit.remove` takes a key's leading
 comments with it. `timezones` comes and goes as the user configures zones and
 clears them; the explanation leaves with the key and returns with it, rather
 than being lost the first time the list is emptied.
+
+This too started as a private helper here and ended up in the library, as
+`Toml.Edit.introduce` -- `set` and `setComments` in one call, with the comments
+written only for a key that was not already in the document. It is the
+config-file idiom for a library that keeps comments, and a program made to
+assemble it out of `get` will sooner or later assemble it wrong and start
+correcting somebody's Korean.
 
 ### `Theme.encode` was the wrong type all along
 
@@ -5494,12 +5503,31 @@ heard of -- then makes predc write that file twice, and compares the result to
 the original string character for character. Two more checks say predc leaves a
 file with a syntax error exactly as it found it.
 
-### One thing the API cannot do yet
+### What the port put back into the library
 
-Neither `Toml.Encode` nor `Toml.Edit` can produce a **blank line**, so a key
-added to a document arrives with its comment block against the previous key's
-value. Encoding cannot attach comments at all -- the first-run file gets them
-by an `Encode.toDocument` followed by `Edit.setComments`, which works and is
-two APIs where one would do. Both are cosmetic and both are the library's to
-fix rather than the program's; predc does not reach into `Toml.Ast` to work
-around them.
+Five things, and the shape of the list is the finding. One was a bug in the
+API -- `set` reformatting a value that had not changed -- and it is the one that
+would have cost somebody their file. The other four were papercuts, and every
+one of them was predc writing something the library was the right place for:
+
+  - **`Toml.empty`**, so that creating the config file and updating it are one
+    code path. `Toml.Encode.toDocument []` already was that document, and
+    nobody was going to find it there.
+  - **`Toml.Edit.introduce`**, which was `put` in this file.
+  - **`blankBefore`** on the comments record, because a document is a list of
+    expressions and there was no way to ask for a blank line at all. Without it
+    the explanation above `timezones` sat flush against `theme`'s value.
+  - **`Toml.Edit.Value` exposed, and `Toml.Edit.member`.** `set` took a type the
+    module did not export, so `put`'s annotation had to import `Toml.Ast` for a
+    name it had no other use for -- and it called `get` for a `Maybe` whose
+    contents it threw away.
+
+`Toml.Encode.commented` came out of the same pass without predc needing it: the
+module that builds a file from nothing could not write the one thing the package
+exists to keep.
+
+The general version, since this is the second time this repo has arrived at it:
+**the first program to use a library is where its API gets decided, and a
+private helper in that program is usually the library's missing function.**
+`tools/audit_api.py` exists for the same reason on the Turbo Vision side, and
+says so at more length.
