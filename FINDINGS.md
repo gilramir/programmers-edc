@@ -6333,3 +6333,59 @@ the branch — verified by taking the branch back out.
 This is the same shape as the four-place view-type consistency that
 `tools/check_consistency.py` exists for, and the same answer applies: the
 places a compiler cannot join have to be joined by something that runs.
+
+
+### Prev/next year is the wrong answer to "show me March 2019"
+
+The calendar shipped with `PgUp`/`PgDn` stepping a year, which is what these
+things usually have, and Gilbert's reaction on using it was that it is
+counterintuitive. He is right, and the reason is worth keeping: **a stepping
+key answers "what is next to this" and the question people actually have is
+"take me there".** Twenty months away is nine presses of one key and eleven of
+another, counted by re-reading the heading after each, and there is no way to
+tell how far you have got except by reading it. The year keys are gone.
+
+`g` opens a dialog with the month and the year in it, prefilled with what is on
+screen — so *same month, other year*, which is the commonest thing anybody does
+in a calendar, is one edit. Two fields rather than a list of twelve months and
+a field beside it, because the year needs typing anyway and a list plus a field
+is two ways of answering one question.
+
+The month takes a name or a number and three letters is enough, because no two
+month names share a three-letter prefix. Nothing guesses between the two: a
+string of digits is a number and anything else is a name, which is the whole
+rule — the hex viewer's no-sniffing discipline in a much smaller place.
+
+**The two refusals are separate messages.** "Not a month: smarch" and "Not a
+year: 0" are different mistakes, and a single "bad input" would send the reader
+to check the field that was fine.
+
+### And the hint line was the actual complaint
+
+The report opened with *"the calendar shows today's month, but I need to be
+able to change to prev/next month"* — and `Up`/`Down` already did that. They
+were on the Month menu and nowhere else, which is to say they were not
+discoverable, which is to say they did not exist. There is a standing line
+under the grid now:
+
+```
+Up/Down month   g go to   t today
+```
+
+Standing, not shown once, which is the calculator's lesson from an earlier
+session written down again: a hint that `update` clears on the next keystroke
+is a hint nobody has read. And it is thirty-three columns against a
+twenty-five-column grid, so the canvas was widened to thirty-four to hold it —
+measured, because a canvas cuts at its width without a mark and this is the
+third time in one session that has bitten.
+
+### The year bound is where the checking stopped
+
+One to 9999, and the number is not decoration: Zeller's congruence and the ISO
+week formula both divide by 4, 100 and 400, and integer division truncates
+toward zero — so at or below year zero they go quietly wrong rather than
+failing. The bound is exactly the range that was checked against Python's
+`datetime`: five dates in each of 9,999 years, no mismatch in the weekday or
+the week number. Outside it the dialog refuses, rather than clamping, because a
+calendar that answered a different year than the one asked for would be wrong
+in the one way a calendar must never be.

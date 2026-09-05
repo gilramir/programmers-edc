@@ -79,6 +79,14 @@ hexPorts =
     { toJs = tuiOut, fromJs = tuiIn }
 
 
+{-| The calendar's, for the same reason the hex viewer has one: it opens a
+dialog, and a dialog is a command whose answer comes back as an event.
+-}
+calendarPorts : Tui.Ports Tool.Calendar.Msg
+calendarPorts =
+    { toJs = tuiOut, fromJs = tuiIn }
+
+
 {-| predc's *other* port pair, and the only one that is not Turbo Vision's.
 
 `bin/predc.js` subscribes to it, because `run()` in gren-tvision-runtime hands
@@ -598,7 +606,6 @@ handleEvent event model =
             else if id == Tool.Calendar.windowId then
                 { model = { model | calendar = Nothing }, command = Cmd.none }
 
-
             else if id == Tool.Hex.windowId then
                 { model = { model | hex = Nothing }, command = Cmd.none }
 
@@ -720,10 +727,13 @@ toTools event model =
         calc =
             Maybe.map (Tool.Calc.update tui event) model.calc
 
+        calendar =
+            Maybe.map (Tool.Calendar.update calendarPorts event) model.calendar
+
         moved =
             { model
                 | ascii = Maybe.map (Tool.Ascii.update event) model.ascii
-                , calendar = Maybe.map (Tool.Calendar.update event) model.calendar
+                , calendar = Maybe.map .model calendar
                 , calc = Maybe.map .model calc
                 , hex = Maybe.map .model hex
                 , time = Maybe.map .model time
@@ -780,6 +790,12 @@ toTools event model =
             , when calc is
                 Just step ->
                     step.command
+
+                Nothing ->
+                    Cmd.none
+            , when calendar is
+                Just step ->
+                    Cmd.map FromCalendar step.command
 
                 Nothing ->
                     Cmd.none

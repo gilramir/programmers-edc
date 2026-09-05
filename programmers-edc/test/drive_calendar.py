@@ -75,30 +75,28 @@ def columns(app):
     return []
 
 
-def go_to(app, year, month):
-    """Navigate to a month, counting from wherever today put us.
+def go_to(app, year, month, name=None):
+    """Name a month outright, through the Go to dialog.
 
-    Nothing here may assume what month it is, so the driver reads the heading
-    and works it out -- which also exercises the two keys that move by a year.
+    Not by stepping: there is no previous-year key any more, and counting
+    twenty presses of Up while reading the heading is exactly the interaction
+    that got it taken out. The dialog is also what a driver wants -- one
+    question, one answer, and no dependence on what month it is today.
     """
-    at = heading(app)
-    assert at is not None, "the calendar never said which month it was showing"
-    want = year * 12 + (month - 1)
-    have = at[0] * 12 + (at[1] - 1)
-    while have - want >= 12:
-        app.send(b"\x1b[5~", settle=0.2)      # PgUp: a year back
-        have -= 12
-    while want - have >= 12:
-        app.send(b"\x1b[6~", settle=0.2)      # PgDn: a year on
-        have += 12
-    while have > want:
-        app.send(b"\x1b[A", settle=0.2)
-        have -= 1
-    while have < want:
-        app.send(b"\x1b[B", settle=0.2)
-        have += 1
-    app.pump(0.4)
+    app.send(b"g", settle=1.0)
+    app.send(b"\x1b[3~" * 12, settle=0.3)              # Del clears the field
+    app.send((name or str(month)).encode(), settle=0.3)
+    app.send(b"\t", settle=0.3)
+    app.send(b"\x1b[3~" * 6, settle=0.3)
+    app.send(str(year).encode(), settle=0.3)
+    app.send(b"\r", settle=1.2)
     return heading(app)
+
+
+def footer(app):
+    """The standing line of keys under the grid, or whatever went wrong."""
+    lines = rows(app)
+    return lines[-1].strip() if lines else ""
 
 
 def menu(app, name):
@@ -135,6 +133,12 @@ def main():
           opened is not None and 2000 < opened[0] < 2200, str(opened))
     check("with a week column and seven days",
           columns(app) == ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"], str(columns(app)))
+    # The keys are on the screen, not only on a menu. Somebody who opens a
+    # calendar and sees one month has no way to guess that Up and Down move it.
+    check("and a standing line saying which keys move it",
+          footer(app) == "Up/Down month   g go to   t today", repr(footer(app)))
+    check("which fits the canvas it is drawn on", len(footer(app)) <= 34,
+          f"{len(footer(app))}: {footer(app)!r}")
 
     # 2. ISO, at the boundary that is the whole reason the rule is subtle.
     #    1 January 2021 is week 53 -- of 2020 -- and a January that says 1 is
@@ -176,6 +180,42 @@ def main():
     go_to(app, 2021, 1)
     check("and under it January 2021 starts at week 1, not 53",
           weeks(app)[0] == 1, str(weeks(app)))
+
+    # 4b. Naming a month, which is the only way out of this one other than
+    #     walking to the next. There is no previous-year key on purpose:
+    #     stepping a year at a time is nine presses of one key and eleven of
+    #     another, counted by reading the heading each time, which is a poor
+    #     answer to "show me March 2019".
+    check("PgUp does nothing, because a year key is not a way to choose a year",
+          (app.send(b"\x1b[5~", settle=0.5), heading(app))[1] == (2021, 1),
+          str(heading(app)))
+
+    app.send(b"g", settle=1.0)
+    opened_with = app.render()
+    check("g opens the dialog", "Go to month" in opened_with, opened_with)
+    check("prefilled with the month on screen, so one field is often the edit",
+          "January" in opened_with and "2021" in opened_with, opened_with)
+    app.send(b"\x1b", settle=0.9)
+    check("and Escape leaves the calendar where it was",
+          heading(app) == (2021, 1), str(heading(app)))
+
+    check("a month by name is a month", go_to(app, 2019, None, name="march") == (2019, 3),
+          str(heading(app)))
+    check("and 1 March 2019 is week 9", weeks(app)[0] == 9, str(weeks(app)))
+    check("a three-letter prefix is enough, since no two months share one",
+          go_to(app, 2019, None, name="sep") == (2019, 9), str(heading(app)))
+    check("and so is a number", go_to(app, 2019, 11) == (2019, 11), str(heading(app)))
+
+    #     And what it refuses, separately, because "not a month" and "not a
+    #     year" are different mistakes and one message for both would make a
+    #     reader check the field that was fine.
+    go_to(app, 2019, None, name="smarch")
+    check("a month it cannot read is refused by name",
+          "Not a month: smarch" in footer(app), footer(app))
+    check("and the calendar has not moved", heading(app) == (2019, 11), str(heading(app)))
+    go_to(app, 0, 3)
+    check("and a year outside what the arithmetic was checked for is refused",
+          "Not a year" in footer(app), footer(app))
 
     # 4. It is a setting, so it is written down and comes back.
     app.send(b"\x1bx", settle=1.0)

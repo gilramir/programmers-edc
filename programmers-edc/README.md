@@ -218,9 +218,23 @@ one back.
 ## A month, and which week it is
 
 **Tools ▸ Calendar** (`Alt-K`) draws a month with today picked out, and a week
-number against each row. `Up`/`Down` move a month, `PgUp`/`PgDn` a year, `t`
-comes back to today — all of them on the **Month** menu as well, which is where
-the keys are written down.
+number against each row. `Up`/`Down` move a month, `g` names one outright, `t`
+comes back to today — and the line under the grid says so, because somebody who
+opens a calendar and sees one month has no way to guess which keys move it.
+
+**There is no previous-year key**, deliberately. Stepping a year at a time is a
+poor answer to "show me March 2019": nine presses of one key and then eleven of
+another, counting as you go, with the heading to re-read after each. `g` asks
+for a month and a year instead, prefilled with what is on screen — so "same
+month, other year" is one edit. The month takes a name or a number, and three
+letters is enough because no two months share one. A month it cannot read and a
+year it cannot draw are refused separately, since those are different mistakes
+and one message for both would send you to check the field that was fine.
+
+Years run 1 to 9999. That is where the arithmetic was checked — Zeller's
+congruence and the ISO week formula against Python's `datetime`, five dates in
+each of those years — and outside it both go quietly wrong rather than failing,
+because integer division truncates toward zero.
 
 **The week number and the day a week starts on are one setting**, not two, and
 that is the whole of the design. A number without the other half means nothing:

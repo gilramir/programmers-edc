@@ -21,6 +21,7 @@ person rather than about the month they are looking at.
 
 -}
 
+import Json.Decode
 import Math
 import Task
 import Theme exposing (Inks)
@@ -45,6 +46,21 @@ windowId =
 canvasId : String
 canvasId =
     "calendar.grid"
+
+
+gotoDialogId : String
+gotoDialogId =
+    "calendar.goto.dialog"
+
+
+monthFieldId : String
+monthFieldId =
+    "calendar.goto.month"
+
+
+yearFieldId : String
+yearFieldId =
+    "calendar.goto.year"
 
 
 {-| `Alt-K`, which is in no way a mnemonic for "calendar", and the reason is
@@ -79,9 +95,14 @@ menu =
             [ Item { title = "~P~revious", cmd = "calendar.prev", key = "", shortcut = "Up" }
             , Item { title = "~N~ext", cmd = "calendar.next", key = "", shortcut = "Down" }
             , Tui.Separator
-            , Item { title = "Previous ~y~ear", cmd = "calendar.prevYear", key = "", shortcut = "PgUp" }
-            , Item { title = "Next y~e~ar", cmd = "calendar.nextYear", key = "", shortcut = "PgDn" }
-            , Tui.Separator
+            -- No "previous year" / "next year", deliberately. Stepping a year
+            -- at a time is a poor answer to "show me March 2019": it is nine
+            -- presses of one key and then eleven of another, counting as you
+            -- go, and you cannot tell how far you have got without reading the
+            -- heading each time. Naming the month is one keystroke and a
+            -- question, so that is the only way out of this month other than
+            -- walking to the next one.
+            , Item { title = "~G~o to month...", cmd = "calendar.goto", key = "", shortcut = "g" }
             , Item { title = "~T~oday", cmd = "calendar.today", key = "", shortcut = "t" }
             ]
         }
@@ -99,6 +120,13 @@ type alias Model =
       -- the one state this tool can be in that it cannot draw a month for.
       showing : Maybe { year : Int, month : Int }
     , today : Maybe Date
+    -- A dialog centres itself on the desktop, so the tool has to know how big
+    -- it is. Seeded and then kept current by `Resized`, which the shell passes
+    -- on to every open tool.
+    , desktop : { cols : Int, rows : Int }
+    -- Whatever the last **Go to** could not make sense of. There is nowhere
+    -- else to say it: a dialog that has been answered is gone.
+    , message : String
     }
 
 
@@ -119,7 +147,12 @@ converter needs the name and pays a port for it; this does not.
 -}
 init : Step
 init =
-    { model = { showing = Nothing, today = Nothing }
+    { model =
+        { showing = Nothing
+        , today = Nothing
+        , desktop = { cols = 80, rows = 23 }
+        , message = ""
+        }
     , command =
         Task.map2
             (\zone now ->
@@ -229,25 +262,147 @@ answered msg model =
             }
 
 
-update : Tui.Event -> Model -> Model
-update event model =
+update : Tui.Ports Msg -> Tui.Event -> Model -> Step
+update ports event model =
     when event is
+        Tui.Resized size ->
+            still { model | desktop = size }
+
         Tui.KeyPressed pressed ->
             if pressed.id == canvasId then
-                pressKey pressed.key model
+                if pressed.key == "g" || pressed.key == "G" then
+                    ask ports { model | message = "" }
+
+                else
+                    still (pressKey pressed.key { model | message = "" })
 
             else
-                model
+                still model
 
         Tui.Command cmd ->
-            if String.startsWith "calendar." cmd then
-                runCommand (String.dropFirst 9 cmd) model
+            if cmd == "calendar.goto" then
+                ask ports { model | message = "" }
+
+            else if String.startsWith "calendar." cmd then
+                still (runCommand (String.dropFirst 9 cmd) { model | message = "" })
 
             else
-                model
+                still model
+
+        -- Every open tool is handed every event, so the guard on the id is
+        -- what says this dialog was this tool's.
+        Tui.DialogClosed closed ->
+            if closed.id == gotoDialogId then
+                answerGoto closed model
+
+            else
+                still model
 
         _ ->
-            model
+            still model
+
+
+still : Model -> Step
+still model =
+    { model = model, command = Cmd.none }
+
+
+ask : Tui.Ports Msg -> Model -> Step
+ask ports model =
+    { model = model, command = Tui.dialog ports (gotoDialog model) }
+
+
+{-| What the dialog was answered with.
+
+Both fields are read even when one of them is wrong, so the message can name
+the one that is: "not a month" and "not a year" are different mistakes and a
+single "bad input" would make the reader check both.
+-}
+answerGoto : { id : String, cmd : String, values : Json.Decode.Value } -> Model -> Step
+answerGoto closed model =
+    if closed.cmd /= "ok" then
+        still model
+
+    else
+        let
+            month =
+                monthFrom (String.trim (Tui.text monthFieldId closed.values))
+
+            year =
+                yearFrom (String.trim (Tui.text yearFieldId closed.values))
+        in
+        when { month = month, year = year } is
+            { month = Just m, year = Just y } ->
+                still { model | showing = Just { year = y, month = m } }
+
+            { month = Nothing } ->
+                still
+                    { model | message = "Not a month: " ++ Tui.text monthFieldId closed.values }
+
+            _ ->
+                still
+                    { model | message = "Not a year: " ++ Tui.text yearFieldId closed.values }
+
+
+{-| A year predc can actually draw.
+
+One to 9999, which is not arbitrary. `Week.weekdayOf` is Zeller's congruence
+and `Week.numberOf` divides by 4, 100 and 400, and integer division truncates
+toward zero -- so both go quietly wrong for a year at or below zero rather than
+failing. Every date in the allowed range was checked against Python's
+`datetime` before this bound was written down: five dates in each of the 9,999
+years, no mismatches in either the weekday or the ISO week.
+
+Refusing outside it rather than clamping, because a calendar that answered a
+different year than the one asked for would be wrong in the one way a calendar
+must never be.
+-}
+yearFrom : String -> Maybe Int
+yearFrom raw =
+    when String.toInt raw is
+        Just year ->
+            if year >= 1 && year <= 9999 then
+                Just year
+
+            else
+                Nothing
+
+        Nothing ->
+            Nothing
+
+
+{-| A month as a number or by name, because both are what somebody types.
+
+`9`, `sep` and `September` are the same month, and a prefix is enough: no two
+month names share three letters. Nothing here guesses between a number and a
+name -- a string of digits is a number and anything else is a name, which is
+the whole rule.
+-}
+monthFrom : String -> Maybe Int
+monthFrom raw =
+    when String.toInt raw is
+        Just number ->
+            if number >= 1 && number <= 12 then
+                Just number
+
+            else
+                Nothing
+
+        Nothing ->
+            let
+                wanted =
+                    String.toLower raw
+            in
+            if String.count wanted < 3 then
+                Nothing
+
+            else
+                Array.range 1 12
+                    |> Array.keepIf
+                        (\number ->
+                            String.startsWith wanted (String.toLower (monthName number))
+                        )
+                    |> Array.first
 
 
 pressKey : String -> Model -> Model
@@ -258,12 +413,6 @@ pressKey key model =
 
         "Down" ->
             shift 1 model
-
-        "PgUp" ->
-            shift -12 model
-
-        "PgDn" ->
-            shift 12 model
 
         "t" ->
             toToday model
@@ -283,12 +432,6 @@ runCommand name model =
 
         "next" ->
             shift 1 model
-
-        "prevYear" ->
-            shift -12 model
-
-        "nextYear" ->
-            shift 12 model
 
         "today" ->
             toToday model
@@ -333,6 +476,90 @@ toToday model =
             model
 
 
+{-| Name a month outright, rather than walking to it.
+
+Two fields and not a list of twelve, because the year needs typing anyway and
+a dialog with a list in it and a field beside it is two ways of answering one
+question. Both are prefilled with what is on screen, so "same month, other
+year" is one edit -- which is the commonest thing anybody does here.
+
+The field goes in the `views` array *before* the `Label` that names it: a label
+names a view that has to exist already, and listing them the other way round
+throws out of the builder and takes the dialog with it.
+-}
+gotoDialog : Model -> Tui.DialogSpec
+gotoDialog model =
+    let
+        width =
+            clamp 24 model.desktop.cols 42
+
+        height =
+            clamp 8 model.desktop.rows 11
+
+        left =
+            max 0 ((model.desktop.cols - width) // 2)
+
+        top =
+            max 0 ((model.desktop.rows - height) // 2)
+
+        showing =
+            Maybe.withDefault { year = 2000, month = 1 } model.showing
+    in
+    { id = gotoDialogId
+    , title = "Go to month"
+    , rect = { x1 = left, y1 = top, x2 = left + width, y2 = top + height }
+    , views =
+        [ InputLine
+            { id = monthFieldId
+            , rect = { x1 = 11, y1 = 2, x2 = width - 3, y2 = 3 }
+            , maxLen = 12
+            , value = monthName showing.month
+            , allowed = Nothing
+            }
+        , Label
+            { id = "calendar.goto.monthLabel"
+            , rect = { x1 = 3, y1 = 2, x2 = 11, y2 = 3 }
+            , text = "~M~onth"
+            , for = monthFieldId
+            }
+        , InputLine
+            { id = yearFieldId
+            , rect = { x1 = 11, y1 = 4, x2 = 20, y2 = 5 }
+            , maxLen = 6
+            , value = String.fromInt showing.year
+            , allowed = Just "0123456789"
+            }
+        , Label
+            { id = "calendar.goto.yearLabel"
+            , rect = { x1 = 3, y1 = 4, x2 = 11, y2 = 5 }
+            , text = "~Y~ear"
+            , for = yearFieldId
+            }
+        , StaticText
+            { id = "calendar.goto.hint"
+            , rect = { x1 = 3, y1 = 6, x2 = width - 3, y2 = 7 }
+            , text = "a name or 1-12, and 1-9999"
+            }
+        , Button
+            { id = "calendar.goto.ok"
+            , rect = { x1 = width - 28, y1 = height - 4, x2 = width - 16, y2 = height - 2 }
+            , title = "~O~K"
+            , cmd = "ok"
+            , isDefault = True
+            , takesFocus = True
+            }
+        , Button
+            { id = "calendar.goto.cancel"
+            , rect = { x1 = width - 15, y1 = height - 4, x2 = width - 3, y2 = height - 2 }
+            , title = "Cancel"
+            , cmd = "cancel"
+            , isDefault = False
+            , takesFocus = True
+            }
+        ]
+    }
+
+
 -- VIEW
 
 
@@ -341,12 +568,18 @@ rows =
     9
 
 
-{-| Four columns for the week number, three for each of seven days, and the
-gap. Written down so the window and the canvas cannot disagree about it.
+{-| Wide enough for the line of keys under the grid, which is wider than the
+grid: four columns for the week number and three for each of seven days is
+twenty-five, and `Up/Down month   g go to   t today` is thirty-three.
+
+The line is why this is written down rather than left implicit. A canvas cuts
+at its width without a mark, so a hint one column too long arrives looking like
+a shorter hint -- which is how `Copied 130 -- the terminal did not` reached
+somebody's screen, in this same program, a few hours ago.
 -}
 canvasWidth : Int
 canvasWidth =
-    26
+    34
 
 
 view : Inks -> Week.Rule -> Model -> Tui.Window
@@ -378,11 +611,29 @@ display inks rule model =
             , headings inks rule
             ]
                 ++ weeks inks rule showing today
+                ++ [ footer inks model ]
 
         _ ->
             -- One turn of the event loop, and the honest thing to show: a
             -- month drawn before the clock answered could be the wrong one.
             [ [ Tui.ink inks.dim "  asking the clock..." ] ]
+
+
+{-| The keys, or whatever went wrong.
+
+Standing rather than shown once, which is the calculator's lesson: a hint that
+`update` clears on the next keystroke is a hint nobody has read. It is also the
+answer to the question this window otherwise raises -- somebody who opens a
+calendar and sees one month has no way to guess that Up and Down are what move
+it, and a menu they have to go looking for is not an answer.
+-}
+footer : Inks -> Model -> Array Span
+footer inks model =
+    if String.isEmpty model.message then
+        [ Tui.ink inks.dim "Up/Down month   g go to   t today" ]
+
+    else
+        [ Tui.ink inks.alert model.message ]
 
 
 heading : Inks -> { year : Int, month : Int } -> Array Span
