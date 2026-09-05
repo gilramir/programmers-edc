@@ -6414,3 +6414,42 @@ It is worth noticing that `History` had never been used outside
 `Tui.fileDialog`, whose doc names `"fileHistory"` as a reserved id. It is a
 general view type and works in any dialog; the field just has to leave three
 columns for the arrow.
+
+## A search that walks a file it never loads
+
+The hex viewer holds one 16 KB chunk around the cursor and reads the rest
+through `Between {start, end}`, which is what lets it open a file of any size.
+A search therefore cannot be "scan what is in memory": it walks the file a
+window at a time, and both of the interesting things are about that walk.
+
+**A needle straddling a window boundary is in neither window.** So each window
+begins one byte less than the needle before the last one ended. `EDGE` planted
+at offset 16382 of a file whose chunk is 16384 is the check, and nothing
+smaller would catch it — with no overlap that needle is simply never found, in
+a file the reader can see it in.
+
+**The end of the file has to be the stop, not the arithmetic.** The first
+version advanced to `range.end - (length - 1)` unconditionally, which is right
+until the last window is *shorter than the overlap*: then the subtraction lands
+on the start it has just read, and the same three bytes are read for ever. The
+message line said `Searching...` and went on saying it. Asking whether the
+window reached the end of the file is both correct and what was meant all
+along; the arithmetic was answering a different question.
+
+It is worth naming what made that bug easy to miss. Every needle that *is*
+present terminates, because finding it is the exit. Only a needle that is
+absent reaches the last window, and only on a file whose size is not a multiple
+of the window does that window come out shorter than the overlap. The driver
+plants a needle that is not there for exactly this, and it is the check that
+would fail if the loop came back.
+
+**A third message, for the third time.** `ReadBack` fills the window,
+`CopyBack` feeds an oversized copy, and `SearchBack` feeds the scan. They are
+one `fetch` and three messages because what separates them is entirely what
+happens to the bytes afterwards, and sharing a message would mean the scan's
+window becoming what the screen is drawn from — the file appearing to scroll on
+its own while a search ran.
+
+Text or hex digits is a radio rather than a guess, which is `p` and `P`'s
+argument in a third place: `beef` is four characters and two bytes, and a hex
+tool that guessed would be quietly looking for something else.

@@ -172,6 +172,21 @@ typeReadingId =
     "hex.type.reading"
 
 
+findDialogId : String
+findDialogId =
+    "hex.find.dialog"
+
+
+findFieldId : String
+findFieldId =
+    "hex.find.bytes"
+
+
+findReadingId : String
+findReadingId =
+    "hex.find.reading"
+
+
 {-| The one that asks whether a copy this large is really wanted. It is a
 [`messageBox`](Tui#messageBox) rather than anything of its own, so all it
 needs is a name nothing else answers to.
@@ -327,6 +342,14 @@ type alias Model =
     -- asked of the user, and then the read -- because both end in the same
     -- place and neither event carries what the copy was.
     , copying : Maybe Copying
+    -- A search walking the file, and the bytes it is walking it for. It is a
+    -- *scan* rather than a read: the window it asks for must not become the
+    -- chunk, for the same reason a copy past the chunk gets its own message.
+    , searching : Maybe Searching
+    -- What `n` repeats. Kept apart from `searching` because it outlives the
+    -- scan: the point of find-next is that the needle is still there when the
+    -- last one finished.
+    , needle : Array Int
     , message : String
     }
 
@@ -433,6 +456,18 @@ type alias Range =
     { start : Int, end : Int }
 
 
+{-| A search in flight: what is being looked for, and where the next window
+starts.
+
+`at` moves by `chunkSize - (length - 1)` rather than by `chunkSize`, and the
+overlap is the whole of the arithmetic: a needle straddling two windows is in
+neither of them, so each window has to begin inside the one before it by one
+byte less than the needle is long.
+-}
+type alias Searching =
+    { needle : Array Int, at : Int }
+
+
 type alias Entry =
     { name : String, path : Path, isDir : Bool }
 
@@ -441,6 +476,11 @@ type Msg
     = Listed { path : Path, entries : Array { path : Path, entityType : FileSystem.EntityType } }
     | Statted { path : Path, meta : FileSystem.Metadata }
     | ReadBack { range : Range, bytes : Bytes }
+    -- A window read for a search. A third message for the same reason
+    -- `CopyBack` is a second one: these bytes are being scanned, and if they
+    -- became `model.chunk` the window would jump to wherever the search had
+    -- got to rather than staying where the reader is.
+    | SearchBack { range : Range, bytes : Bytes }
     -- The same read as `ReadBack` and deliberately not the same message: this
     -- one's bytes are for the clipboard and must not become the chunk, which
     -- would move the window the user is looking at and be sixteen thousand
@@ -474,6 +514,8 @@ init permission desktop =
     , yanked = Nothing
     , awaiting = Nothing
     , copying = Nothing
+    , searching = Nothing
+    , needle = []
     , message = ""
     }
 
@@ -636,6 +678,12 @@ update ports event model =
                 Nothing ->
                     still model
 
+        Tui.Command "hex.find" ->
+            askFind ports model
+
+        Tui.Command "hex.findNext" ->
+            findNext ports model
+
         Tui.Command "hex.pasteText" ->
             askClipboard ports Characters model
 
@@ -681,6 +729,9 @@ update ports event model =
         Tui.DialogClosed closed ->
             if closed.id == fileDialogId then
                 answerFile closed model
+
+            else if closed.id == findDialogId then
+                answerFind ports closed model
 
             else if closed.id == typeDialogId then
                 answerTyped closed model
@@ -799,8 +850,22 @@ receive ports msg model =
                 Nothing ->
                     still model
 
+        -- Same guard as `CopyBack`: `searching` says which scan this window
+        -- belongs to, so a search abandoned for another one does not land.
+        SearchBack it ->
+            when model.searching is
+                Just searching ->
+                    if searching.at == it.range.start then
+                        scanned ports searching it.range (toByteArray it.bytes) model
+
+                    else
+                        still model
+
+                Nothing ->
+                    still model
+
         Failed reason ->
-            still { model | copying = Nothing, message = reason }
+            still { model | copying = Nothing, searching = Nothing, message = reason }
 
 
 -- KEYS
@@ -874,6 +939,15 @@ whenOpen ports key model =
 
                         Nothing ->
                             still model
+
+                -- `/` and `n`, where a reader's hands already are. Neither was
+                -- taken: this canvas answers to p, P, v, V, d, y and the six
+                -- colour digits, and nothing else.
+                "/" ->
+                    askFind ports model
+
+                "n" ->
+                    findNext ports model
 
                 "d" ->
                     unpaint model
@@ -2206,6 +2280,208 @@ read permission path range =
     fetch (\it -> ReadBack it) permission path range
 
 
+-- FINDING
+
+
+{-| Where `needle` first appears in `haystack` at or after `from`, if it does.
+
+Written out rather than reached for, because Gren has no `Array.indexOfFrom`
+and the `from` is the whole point: find-next has to start after the match it is
+sitting on, or `n` finds the same bytes for ever.
+-}
+indexOfFrom : Array Int -> Array Int -> Int -> Maybe Int
+indexOfFrom haystack needle from =
+    let
+        span =
+            Array.length needle
+
+        last =
+            Array.length haystack - span
+
+        go index =
+            if index > last then
+                Nothing
+
+            else if matchesAt haystack needle index then
+                Just index
+
+            else
+                go (index + 1)
+    in
+    if span == 0 || last < 0 then
+        Nothing
+
+    else
+        go (max 0 from)
+
+
+matchesAt : Array Int -> Array Int -> Int -> Bool
+matchesAt haystack needle index =
+    Array.indexedMap (\offset byte -> Array.get (index + offset) haystack == Just byte) needle
+        |> Array.all identity
+
+
+{-| Begin a search at `from`, or say why it cannot.
+
+**A pasted buffer is its own chunk**, so there is nothing to read and the
+answer is immediate. A file is walked a window at a time, which is the same
+shape the oversized copy uses and for the same reason: the bytes must not
+become what the window is drawn from.
+-}
+startSearch : Tui.Ports Msg -> Array Int -> Int -> Model -> Step
+startSearch ports needle from model =
+    if Array.isEmpty needle then
+        still { model | message = "Nothing to find." }
+
+    else
+        when model.open is
+            Nothing ->
+                still { model | message = "Nothing is open." }
+
+            Just source ->
+                when source.from is
+                    Pasted ->
+                        landOn needle
+                            (indexOfFrom model.chunk.bytes needle from)
+                            { model | needle = needle }
+
+                    OnDisk path ->
+                        scanFrom ports
+                            path
+                            source
+                            needle
+                            from
+                            { model | needle = needle, message = "Searching..." }
+
+
+{-| Ask for the next window, or answer that there is no next window.
+
+The window is `chunkSize` long and the *step* is one byte shorter than the
+needle, which is what stops a match straddling two of them from being in
+neither.
+-}
+scanFrom : Tui.Ports Msg -> Path -> Source -> Array Int -> Int -> Model -> Step
+scanFrom ports path source needle from model =
+    if from >= source.size then
+        still { model | searching = Nothing, message = notFound needle }
+
+    else
+        let
+            range =
+                { start = from, end = min source.size (from + chunkSize) }
+        in
+        { model = { model | searching = Just { needle = needle, at = from } }
+        , command = fetch (\it -> SearchBack it) model.permission path range
+        }
+
+
+{-| A window came back. Scan it, and either land or ask for the next one.
+-}
+scanned : Tui.Ports Msg -> Searching -> Range -> Array Int -> Model -> Step
+scanned ports searching range bytes model =
+    when indexOfFrom bytes searching.needle 0 is
+        Just index ->
+            landOn searching.needle
+                (Just (range.start + index))
+                { model | searching = Nothing }
+
+        Nothing ->
+            when model.open is
+                Just source ->
+                    -- **The end of the file is the stop, not the arithmetic.**
+                    -- The next window begins one byte less than the needle
+                    -- before this one ended, and on a last window shorter than
+                    -- that overlap the subtraction lands on the start it just
+                    -- read -- which reads the same three bytes for ever, says
+                    -- "Searching..." for ever, and looks like a hang. Asking
+                    -- whether this window reached the end is both correct and
+                    -- the thing that was actually meant.
+                    if range.end >= source.size then
+                        still
+                            { model
+                                | searching = Nothing
+                                , message = notFound searching.needle
+                            }
+
+                    else
+                        when source.from is
+                            OnDisk path ->
+                                scanFrom ports
+                                    path
+                                    source
+                                    searching.needle
+                                    (range.end - (Array.length searching.needle - 1))
+                                    model
+
+                            Pasted ->
+                                still { model | searching = Nothing }
+
+                Nothing ->
+                    still { model | searching = Nothing }
+
+
+landOn : Array Int -> Maybe Int -> Model -> Step
+landOn needle found model =
+    when found is
+        Just offset ->
+            goTo offset { model | message = "" }
+
+        Nothing ->
+            still { model | searching = Nothing, message = notFound needle }
+
+
+askFind : Tui.Ports Msg -> Model -> Step
+askFind ports model =
+    { model = model, command = Tui.dialog ports (findDialog model) }
+
+
+{-| `n`. Repeats the last needle from *after* the cursor, which is the whole
+reason `needle` outlives the scan that found it.
+-}
+findNext : Tui.Ports Msg -> Model -> Step
+findNext ports model =
+    if Array.isEmpty model.needle then
+        still { model | message = "Nothing has been searched for yet -- / asks." }
+
+    else
+        startSearch ports model.needle (model.cursor + 1) model
+
+
+{-| What the dialog was answered with, read the way `p` and `P` are two
+commands: the radio says whether the text is characters or hex digits, and
+nothing guesses. `beef` is four letters and two bytes and only the reader knows
+which was meant.
+-}
+answerFind : Tui.Ports Msg -> { id : String, cmd : String, values : Json.Decode.Value } -> Model -> Step
+answerFind ports closed model =
+    if closed.cmd /= "ok" then
+        still model
+
+    else
+        let
+            typed =
+                Tui.text findFieldId closed.values
+        in
+        if Tui.number findReadingId closed.values == 1 then
+            when hexBytes typed is
+                Err reason ->
+                    still { model | message = reason }
+
+                Ok codes ->
+                    startSearch ports codes (model.cursor + 1) model
+
+        else
+            startSearch ports
+                (toByteArray (Bytes.fromString typed))
+                (model.cursor + 1)
+                model
+
+
+notFound : Array Int -> String
+notFound needle =
+    "Not found: " ++ String.fromInt (Array.length needle) ++ " bytes, from here on."
+
+
 {-| The read itself, which two different things want for two different reasons
 -- the chunk the window is drawn from, and a copy too big to come out of it.
 
@@ -2624,6 +2900,82 @@ typeDialog model =
     }
 
 
+{-| Find bytes, in the two readings `p` and `P` already divide the world into.
+
+The radio rather than a guess, and it is the same argument the two paste
+commands make: `beef` is four characters and two bytes, and only the reader
+knows which was meant. A hex tool that guessed would be silently looking for
+something else.
+
+Modelled on `typeDialog` down to the note about hotkeys -- a cluster item's
+`~t~` would be `Alt-T`, which the menu bar takes first even from inside a
+modal, and plain `t`, which the field takes because the caret is there. Tab and
+the arrows are what works.
+-}
+findDialog : Model -> Tui.DialogSpec
+findDialog model =
+    let
+        width =
+            clamp 40 model.desktop.cols 56
+
+        height =
+            clamp 10 model.desktop.rows 12
+
+        left =
+            max 0 ((model.desktop.cols - width) // 2)
+
+        top =
+            max 0 ((model.desktop.rows - height) // 2)
+    in
+    { id = findDialogId
+    , title = "Find bytes"
+    , rect = { x1 = left, y1 = top, x2 = left + width, y2 = top + height }
+    , views =
+        [ InputLine
+            { id = findFieldId
+            , rect = { x1 = 10, y1 = 2, x2 = width - 3, y2 = 3 }
+            , maxLen = 256
+            , value = ""
+            , allowed = Nothing
+            }
+        , Label
+            { id = "hex.find.label"
+            , rect = { x1 = 3, y1 = 2, x2 = 10, y2 = 3 }
+            , text = "~F~ind"
+            , for = findFieldId
+            }
+        , RadioButtons
+            { id = findReadingId
+            , rect = { x1 = 10, y1 = 4, x2 = width - 3, y2 = 5 }
+            , items = [ "as text", "as hex digits" ]
+            , selected = 0
+            , available = []
+            }
+        , StaticText
+            { id = "hex.find.hint"
+            , rect = { x1 = 3, y1 = 6, x2 = width - 3, y2 = 7 }
+            , text = "from the cursor on; n finds the next one."
+            }
+        , Button
+            { id = "hex.find.ok"
+            , rect = { x1 = width - 28, y1 = height - 4, x2 = width - 16, y2 = height - 2 }
+            , title = "~O~K"
+            , cmd = "ok"
+            , isDefault = True
+            , takesFocus = True
+            }
+        , Button
+            { id = "hex.find.cancel"
+            , rect = { x1 = width - 15, y1 = height - 4, x2 = width - 3, y2 = height - 2 }
+            , title = "Cancel"
+            , cmd = "cancel"
+            , isDefault = False
+            , takesFocus = True
+            }
+        ]
+    }
+
+
 {-| What was typed, read the way the radio said.
 
 It goes through the same two functions a paste does rather than through
@@ -2742,6 +3094,8 @@ menu =
             , Item { title = "Type ~b~ytes...", cmd = "hex.type", key = "", shortcut = "" }
             , Separator
             , Item { title = "~G~o to offset...", cmd = "hex.goto", key = "", shortcut = "" }
+            , Item { title = "~F~ind bytes...", cmd = "hex.find", key = "", shortcut = "/" }
+            , Item { title = "Find ~n~ext", cmd = "hex.findNext", key = "", shortcut = "n" }
             , Item { title = "~T~op of file", cmd = "hex.top", key = "", shortcut = "Ctrl-Home" }
             , Item { title = "~E~nd of file", cmd = "hex.end", key = "", shortcut = "Ctrl-End" }
             , Separator

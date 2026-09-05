@@ -312,6 +312,21 @@ with no text costs no columns and is still offered every keystroke.
 
 `F1` opens [Copying and pasting](#pasting), which is the page-long version.
 
+## Finding bytes
+
+`/` asks for a needle and `n` finds the next one, both also on **Bytes**. Text
+or hex digits, chosen with a radio rather than guessed — the same argument `p`
+and `P` make, since `beef` is four characters and two bytes and only you know
+which you meant.
+
+**It searches the file, not the screen.** The viewer holds one 16 KB chunk
+around the cursor, so a search walks the rest a window at a time, and each
+window begins one byte less than the needle before the last one ended — a
+needle lying across a seam is otherwise in neither window. `drive_hex_find.py`
+plants one at offset 16382 of a file whose chunk is 16384 for exactly that
+reason, and another that is not there at all, because the first version of the
+walk answered that one by searching for ever.
+
 ## Pasting
 
 `p` fills the window from the clipboard as text -- the bytes the string is made
