@@ -5787,7 +5787,7 @@ check that it *fits* is not a length assertion on the string -- it is that
 column 78 of that row is still `║`, which is the frame, and which is the
 question a reader actually has.
 
-## One driver was the whole wall clock
+## Two drivers were the whole wall clock, one after the other
 
 `devbox run test` took 229.6s. `drive_hex.py` took 208.7s of it. The other
 thirty-one suites finished inside the first 56s, and the last two and a half
@@ -5822,12 +5822,60 @@ conceptual -- reading a file, marking it, and the clipboard. Four drivers now
 whole design.
 
 The suite went 229.6s to 149.6s rather than to the ~79s that arithmetic
-suggests, and the reason is the lesson repeating itself one driver later:
-**`drive_time.py` is 125.2s and is the wall clock now.** It was always the
-second pole and was invisible behind the first -- a per-suite table read off a
-still-running log had not seen it report yet, which is its own small warning
-about measuring a parallel run before it finishes. Splitting it the same way is
-the next such win, and 125.2s is the number to beat.
+suggests, because the lesson repeated one driver later: `drive_time.py` was
+125.2s and became the wall clock the moment hex stopped being it. It had always
+been the second pole and was invisible behind the first -- a per-suite table
+read off a still-running log had not seen it report yet, which is its own small
+warning about measuring a parallel run before it has finished.
+
+### The second one wanted a different split, and the timings said so
+
+`drive_time.py`'s sections came out **flat** where hex's had been lopsided:
+
+```
+setup + the conversions                     35.9s
+the picker                                  15.9s
+the wheel turns the list it is pointing at   5.9s
+the buttons act on the highlight            16.8s
+the wheel, and the echo                     10.5s
+Move Up and Move Down                       14.9s
+Cancel puts back the list                    7.6s
+the live clock                              17.7s
+```
+
+No phase to lift out. What there was instead was a *seam*: the converter
+window (conversions and the live clock, which is the same window in the mode
+that throws the pinned instant away) against the picker, which is 71.6s spread
+over six sections. Three drivers -- `drive_time.py`, `_picker`, `_moves` --
+over a `time_common.py`: **125.2s to 55.1s** (50.4 / 44.3 / 55.1).
+
+Three and not four, and the reason is the floor rather than the file:
+`drive_unicode.py` is 55.5s, so nothing cut below that changes the suite at
+all. **Know what the next pole is before deciding how many pieces to make.**
+
+The suite is **93.9s** now, from 229.6s. Not the ~57s the slowest driver
+suggests, and this is where the arithmetic changes character: there are 37
+suites on 16 cores, so the run has stopped being "the slowest member" and gone
+back to being partly the sum. 972.8s over 16 cores is a 60.8s floor, and 93.9s
+against a 71.9s slowest driver is most of the distance to it. Splitting
+further would move the first number and not the second.
+
+The next win is therefore a driver that *costs* less rather than one cut into
+more pieces, and there is an obvious candidate: `Pty.pump()` loops to its
+deadline whether or not the app went quiet after 40ms, so every settle is paid
+in full. Making it a ceiling with a quiescence window is the change -- with the
+caveat that a quiescence window is a race by construction, since TVision can go
+quiet mid-repaint, which is why the ceiling has to stay.
+
+The picker's six sections are far more coupled than hex's phases were -- it is
+one workspace with running state, and each section restores the list for the
+next. That is what `time_common.picker_with_three` is: the seam between
+`_picker` and `_moves` written down as a function, built from nothing rather
+than inherited. The one real trap was at the end. The last checks relaunch
+predc on the config the first run wrote and assert *an emptied list stays
+empty across a restart* -- and the list is emptied by **Cancel**, three
+sections earlier. That tail had to travel with `_moves`, not stay with the
+converter, or it would have asserted about a list that was never emptied.
 
 ### A driver's cost is not linear in its length
 

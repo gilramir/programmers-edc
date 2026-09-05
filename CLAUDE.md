@@ -22,13 +22,24 @@ almost entirely asleep -- typing at a pty and waiting for a repaint -- so
 running them in parallel took the suite from three and a half minutes to the
 length of its slowest single driver, which is the number that matters and the
 only one worth watching. **A driver that grows past the rest of them stops
-being a suite and becomes the wall clock**: `drive_hex.py` reached 208s of a
-229s run with fifteen of sixteen cores idle behind it, and was split into four
-(208.7s to 71.9s; the suite is 149.6s). Measure before splitting -- its phases
-were 45s, 31s and 61s against a dozen that were seconds -- and see
-`hex_common.py` for the shape a split takes. **`drive_time.py` at 125.2s is
-the wall clock now**, and is the next one. That script can also be run
-directly, which is what to do while working on one:
+being a suite and becomes the wall clock**. It has happened twice:
+`drive_hex.py` reached 208.9s of a 229.6s run with fifteen of sixteen cores
+idle behind it, and `drive_time.py` was 125.2s and became the wall clock the
+moment hex stopped being it. Both are split now -- four drivers over
+`hex_common.py`, three over `time_common.py` -- and the suite went 229.6s to
+93.9s.
+
+**Time the sections before splitting one.** hex was lopsided (45s, 31s and 61s
+in three of seventeen phases) and wanted four files; time was flat (36s, then
+72s spread over six picker sections, then 18s) and wanted three.
+
+**And know when to stop.** At 37 suites on 16 cores the run is no longer just
+its slowest member: the sum matters again, and 972.8s over 16 cores puts a
+60.8s floor under it that no further splitting goes below. 93.9s against a
+71.9s slowest driver is most of the way there, so the next win is a *cheaper*
+driver rather than a smaller one -- and `pump()` sleeping its whole duration
+whether or not the app has gone quiet is where that would come from. That
+script can also be run directly, which is what to do while working on one:
 
 ```sh
 devbox run -- python3 tools/run_tests.py entries   # just this one
