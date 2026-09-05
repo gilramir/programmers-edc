@@ -1086,6 +1086,17 @@ pump feeds — one override for all five routes — and a drag is now a thing th
 program keeps running through rather than a thing it stops for. FINDINGS has
 it; `tvision-node/test/drive_drag.py` is the test.
 
+**A window that opens maximized can be un-maximized now**, which is not free:
+Turbo Vision remembers where to un-zoom *to* by storing the rectangle the
+window had before it was maximized, and a window that was never maximized by
+the user has only the rectangle it was built at. Build one filling the desktop
+— which is what any window sized from [`Resized`](#Event) does — and restoring
+it puts it exactly where it already is, while `TFrame` goes on drawing `[↕]`
+to say that it will. `JsWindow::zoom` computes a rectangle when the stored one
+would do nothing: three-quarters of the desktop, centred, in whichever
+dimensions [`Resize`](#Resize) left free. Nothing in the API changed, because
+the answer turned out to be a default rather than a field.
+
 **And the loops that remain no longer spin.** `eventTimeoutMs` is 0 so the pump
 never blocks, which meant every nested loop in the library polled without
 sleeping and burned a whole core: the menu bar, the close box, and the mouse

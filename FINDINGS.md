@@ -6901,3 +6901,105 @@ sitting on top of it, and only one of the two was ever written down.**
 **A global that is correct for the caller can be wrong for everything the
 caller calls**, and the cheapest place to say so is the one call that reaches
 all of them.
+
+## The one window that could not be un-maximized
+
+`predc env` opens filling the terminal, which is what the environment list
+wants: it is a list of everything and the only question it asks of a layout is
+how much fits. Clicking the `[↕]` at the top right of its frame did nothing.
+Neither did F5. It was reported as "it doesn't resize", with the right guess
+attached — *I bet it thinks the previous size was also the maximum size*.
+
+That is exactly it, and the interesting part is that the frame said otherwise.
+
+### A window is its own memory of where it was
+
+`TWindow::zoom` (`twindow.cpp:218`) is two branches and one variable:
+
+```cpp
+    if( size != maxSize ) { zoomRect = getBounds(); locate(maximized); }
+    else                    locate( zoomRect );
+```
+
+`zoomRect` is where the window goes back to, and the only thing that ever
+writes it is the act of maximizing — so it means "where I was before". A window
+that has never been maximized has never written it, and `TWindow`'s constructor
+seeds it with the rectangle the window was *built* at. For a window built
+smaller than the desktop that is a perfectly good answer. For one built to fill
+the desktop it is the desktop, so restoring locates the window exactly where it
+already is, `locate` sees `bounds == getBounds()` and returns without doing
+anything at all.
+
+**Nothing about a window says whether it is maximized. Only its size does.**
+`TFrame::draw` (`tframe.cpp:100`) asks `sizeLimits` and draws `unZoomIcon` --
+`[↕]` -- whenever the window is at its maximum, so the one window in the
+program that could not un-zoom was the one drawing the un-zoom box. That is the
+same defect as the lit F5 on the status line that `JsWindow::setState` already
+exists to prevent, one level down and worse: there the promise was a menu entry
+somebody might read, here it was a control somebody was clicking.
+
+### The rule is the failure condition
+
+`zoom` is virtual, so `JsWindow` overrides it. The first version seeded a
+sensible `zoomRect` when the window was built, and it was wrong within an hour
+of being written: `drive_env.py` resizes the terminal from a hundred columns to
+seventy, and the rectangle seeded against the hundred was still sitting there
+when the un-zoom happened. `TView::locate` (`tview.cpp:585`) clamps the *size*
+against `sizeLimits` and leaves the origin alone, so the window came back the
+right size and hanging twelve columns off the right-hand edge. **A rectangle
+computed once against a desktop is stale the moment the desktop changes**, and
+the desktop is a terminal somebody can drag.
+
+So it is computed at zoom time instead, and the rule is the failure condition
+itself: **if restoring would leave the window exactly where it is, there is
+nowhere to go — so invent somewhere; otherwise honour what is stored.**
+
+```cpp
+    if (size == maxSize)
+        {
+        TRect back = fittedToDesktop(zoomRect, minSize, maxSize);
+        zoomRect = back == getBounds() ? threeQuarters(minSize, maxSize) : back;
+        }
+    TWindow::zoom();
+```
+
+An earlier attempt carried a `bool` saying whether `zoomRect` had ever been
+written by a real zoom, and comparing the two is the whole finding. The flag is
+wrong in both directions. A window built small that became maximal because the
+*terminal* shrank has never been zoomed, and its built rectangle is exactly
+what it should go back to — the flag would have thrown that away and invented.
+A window the user zoomed from full-width-and-five-rows has a stored rectangle
+that *is* the full width, and a rule about "the stored rect fills the desktop"
+would have shrunk it — the flag gets that one right, and the comparison gets
+both. **The question was never "is this rectangle real"; it was "would using it
+do anything".**
+
+`fittedToDesktop` is the other half, and it fixes an upstream wart on the way:
+a stored rectangle is clamped to the desktop it is being restored onto, size
+first and then origin, keeping the origin where it still fits and pushing in
+only what does not. Turbo Vision lets the window hang off the edge. It is one
+line to not.
+
+### Three-quarters, and why a number had to be picked
+
+The invented rectangle is three-quarters of the desktop in each dimension the
+model left free, centred, floored at `minWinSize` — sixteen by six
+(`twindow.cpp:30`), which `TWindow::sizeLimits` already reports, so the floor
+costs nothing.
+
+A fraction rather than a fixed size, because the only thing the rectangle has
+to be is **visibly not maximized**: a border of desktop on all four sides is
+what tells the user the click did something, and it is also the frame they need
+in order to drag the window somewhere else. A constant leaves that border at
+one terminal size and not at the others. A pinned dimension is left at its
+maximum rather than shrunk, which is the rule the zoom already follows — a hex
+window that is seventy-six columns and always will be un-zooms to seventy-six
+columns and fewer rows.
+
+The fraction is a choice. That there has to be one is not, and the alternative
+— a `zoomRect` the model names — was considered and dropped: `decisions.tsv`
+has said since the audit that `zoomRect` is "not itself a thing a Gren program
+names", and after this it still is not. Nothing in the API changed, thirty
+`Tui.Window` literals did not have to grow a field, and predc's environment
+list gets a working zoom box for free, as does every other window anybody
+builds. **The cheapest capability is the one that turns out to be a default.**

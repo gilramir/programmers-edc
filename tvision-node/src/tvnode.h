@@ -993,6 +993,44 @@ public:
         lastReported = getBounds();
     }
 
+    // Somewhere for a window born at its maximum size to un-zoom to.
+    //
+    // `TWindow::zoom` (twindow.cpp:218) is two branches: at less than the
+    // maximum it stores the rectangle it has and maximizes, and at the maximum
+    // it locates back to the stored one. `TWindow`'s constructor seeds that
+    // store with the rectangle the window was *built* at -- which is right
+    // until a window is built filling the desktop, as predc's environment list
+    // and anything else that sizes itself from the terminal is. Then the
+    // stored rectangle is the desktop, restoring puts the window exactly where
+    // it already is, and the zoom box and F5 are both dead.
+    //
+    // And the frame is advertising otherwise. `TFrame::draw` (tframe.cpp:100)
+    // asks `sizeLimits` and draws `unZoomIcon` -- `[↕]` rather than `[↑]` --
+    // whenever the window is at its maximum, so the one window that cannot
+    // un-zoom is the one drawing the un-zoom box. Same defect as the lit F5
+    // that `setState` above exists to prevent, one level down, and worse:
+    // there the promise was a menu entry, here it is a control being clicked.
+    //
+    // The rule is the failure condition itself -- **if restoring would leave
+    // the window exactly where it is, there is nowhere to go**, so invent
+    // somewhere; otherwise honour what is stored. No flag and no state, and it
+    // is right in the cases a flag got wrong: a window built small that became
+    // maximal because the *terminal* shrank still restores to the size it was
+    // built at, and a window the user zoomed from full-width-and-five-rows
+    // still comes back full-width and five rows.
+    virtual void zoom() override;
+
+    // The invented one: three-quarters of the desktop, centred, in whichever
+    // dimensions the model left free.
+    TRect threeQuarters(TPoint minSize, TPoint maxSize) const;
+
+    // A stored rectangle made to fit the desktop it is being restored onto.
+    // `TView::locate` (tview.cpp:585) clamps the *size* against sizeLimits and
+    // leaves the origin alone, so a window zoomed on a wide terminal and
+    // un-zoomed on a narrow one comes back the right size and hanging off the
+    // right-hand edge. Upstream does that too; it is one line to not.
+    TRect fittedToDesktop(TRect r, TPoint minSize, TPoint maxSize) const;
+
     // A window the model says cannot be resized in either direction has no
     // resize handle and no zoom box, because both would be corners the user
     // can grab and nothing would move. One dimension pinned keeps them: a

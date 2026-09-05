@@ -651,6 +651,14 @@ not write the model's rectangle back over that -- it compares against what the
 model last rendered, so a rectangle that has not changed is a window left
 alone. [`WindowResized`](#Event) is how a model that wants to know finds out.
 
+**A window whose `rect` fills the desktop still un-zooms.** Turbo Vision
+restores a zoomed window to the rectangle it had before it was zoomed, and a
+window built at the full size of the desktop has none -- so its zoom box would
+do nothing, while its frame drew `[↕]` to say that it would. The runtime
+notices that and restores to three-quarters of the desktop instead, centred, in
+whichever dimensions [`Resize`](#Resize) left free. Nothing has to be said for
+this to happen.
+
 `canClose` and `canMove` are the other two of Turbo Vision's four window flags;
 [`Resize`](#Resize) already speaks for the two that grow and zoom it. `False`
 takes the close box off the frame and pins the window where it is, and both are

@@ -19,7 +19,23 @@ const tv = require('..');
 const WIN = 'dragWin';
 const TICKS = 'dragTicks';
 
+// `node regress_drag.js maxed` opens the window filling the desktop instead of
+// at a fixed rectangle, which is the other half of what this fixture is for.
+//
+// A window built at its maximum size has `zoomRect` equal to its own bounds,
+// so `TWindow::zoom` restores it to where it already is and the zoom box does
+// nothing -- while `TFrame::draw` goes on drawing `[↕]`, the un-zoom box,
+// because the only thing that decides which icon it draws is whether the
+// window is at its maximum. `JsWindow::zoom` is what gives it somewhere to go,
+// by noticing that restoring would not move it.
+//
+// Opened from `onResize` rather than from a constant, because that is the only
+// honest way to fill a desktop whose size the program does not know yet -- and
+// it is how predc's environment list, where this was reported, does it.
+const MAXED = process.argv[2] === 'maxed';
+
 let ticks = 0;
+let opened = false;
 
 setInterval(() => {
   ticks += 1;
@@ -49,19 +65,30 @@ tv.start({
     if (cmd === 'quit') tv.quit();
   },
 
+  onResize(cols, rows) {
+    if (!MAXED || opened) return;
+    opened = true;
+    openWindow([0, 0, cols, rows]);
+  },
+
   onExit() {
     console.log('drag regress exited cleanly; ticks while it ran:', ticks);
     process.exit(0);
   },
 });
 
+function openWindow(rect) {
+  tv.window({
+    id: WIN,
+    title: 'Ticker',
+    rect,
+    items: [
+      { id: TICKS, type: 'staticText', rect: [2, 1, 20, 2], text: 'ticks: 0' },
+    ],
+  });
+}
+
 // Small, and away from every edge, so that all four arrow keys have somewhere
-// to go and both grow corners are reachable without leaving the desktop.
-tv.window({
-  id: WIN,
-  title: 'Ticker',
-  rect: [20, 4, 60, 14],
-  items: [
-    { id: TICKS, type: 'staticText', rect: [2, 1, 20, 2], text: 'ticks: 0' },
-  ],
-});
+// to go and both grow corners are reachable without leaving the desktop. The
+// maximized one waits for onResize instead.
+if (!MAXED) openWindow([20, 4, 60, 14]);

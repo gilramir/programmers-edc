@@ -788,6 +788,70 @@ JsWindow::~JsWindow()
         noteWindowClosed(windowId);
 }
 
+// The invented rectangle. See the note in tvnode.h for why a window needs one
+// at all; what is decided here is only the number.
+//
+// A fraction and not a fixed size, because the only thing it has to be is
+// *visibly not maximized* -- a border of desktop on all four sides is what
+// tells the user the click did something, and it is also the frame they need
+// in order to drag the window somewhere else. Three quarters leaves that
+// border at every terminal size instead of at one.
+//
+// The floor is free: `TWindow::sizeLimits` reports `minWinSize`, sixteen by
+// six (twindow.cpp:30), so a small terminal shrinks to that and stops.
+//
+// A dimension the model pinned is left at its maximum rather than shrunk,
+// which is the rule the zoom itself already follows -- a hex window that is
+// seventy-six columns and always will be un-zooms to seventy-six columns and
+// fewer rows.
+TRect JsWindow::threeQuarters(TPoint minSize, TPoint maxSize) const
+{
+    TPoint want = maxSize;
+    if (canResizeWidth)
+        want.x = std::max(minSize.x, maxSize.x * 3 / 4);
+    if (canResizeHeight)
+        want.y = std::max(minSize.y, maxSize.y * 3 / 4);
+
+    TRect desk = owner == nullptr ? getBounds() : owner->getExtent();
+    TRect r(0, 0, want.x, want.y);
+    r.move(desk.a.x + (desk.b.x - desk.a.x - want.x) / 2,
+           desk.a.y + (desk.b.y - desk.a.y - want.y) / 2);
+    return r;
+}
+
+TRect JsWindow::fittedToDesktop(TRect r, TPoint minSize, TPoint maxSize) const
+{
+    TPoint want = {r.b.x - r.a.x, r.b.y - r.a.y};
+    want.x = std::min(std::max(want.x, minSize.x), maxSize.x);
+    want.y = std::min(std::max(want.y, minSize.y), maxSize.y);
+
+    // The origin is kept where it still fits and pushed in where it does not,
+    // rather than re-centred: a window the user put somewhere should come back
+    // there, and only the part that cannot be honoured is changed.
+    TRect desk = owner == nullptr ? getBounds() : owner->getExtent();
+    TRect out(0, 0, want.x, want.y);
+    out.move(std::min(std::max(r.a.x, desk.a.x), desk.b.x - want.x),
+             std::min(std::max(r.a.y, desk.a.y), desk.b.y - want.y));
+    return out;
+}
+
+void JsWindow::zoom()
+{
+    TPoint minSize, maxSize;
+    sizeLimits(minSize, maxSize);
+
+    // Only the restoring branch needs anything. Maximizing stores the
+    // rectangle the window actually has, which is always a rectangle it
+    // actually had.
+    if (size == maxSize)
+        {
+        TRect back = fittedToDesktop(zoomRect, minSize, maxSize);
+        zoomRect = back == getBounds() ? threeQuarters(minSize, maxSize) : back;
+        }
+
+    TWindow::zoom();
+}
+
 /* ------------------------------------------------------------------ */
 /*  Dragging a window                                                 */
 /* ------------------------------------------------------------------ */

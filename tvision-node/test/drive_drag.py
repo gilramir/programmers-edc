@@ -40,6 +40,7 @@ from harness import Pty, Checks, node_argv
 # Ctrl-F5 and F5 in xterm's encoding. The modifier is the `;5`, which is what
 # `TERM=xterm-256color` sends and what termio.cpp reads back out.
 CTRL_F5 = b"\x1b[15;5~"
+F5 = b"\x1b[15~"
 UP, DOWN, RIGHT = b"\x1b[A", b"\x1b[B", b"\x1b[C"
 # Shift-arrow is what turns a move into a grow: TView::change consults kbShift.
 SHIFT_RIGHT = b"\x1b[1;2C"
@@ -252,7 +253,72 @@ def main():
     code = app.wait(timeout=6)
     check("exit code 0", code == 0, f"exit={code}")
 
+    zoom_checks(check, env)
+
     return check.report(app)
+
+
+def zoom_checks(check, env):
+    """A window born filling the desktop, and the un-zoom box it draws.
+
+    Separate program rather than a second window in the same one, so that
+    `frame()` above stays the simple thing it is: there is one window on screen
+    either way.
+
+    The icon is the assertion as much as the rectangle is. `TFrame::draw` picks
+    between `[↑]` and `[↕]` on nothing but whether the window is at its maximum
+    size, so a window that cannot un-zoom still draws the un-zoom box -- which
+    is what made this reachable at all. Checking the geometry without the icon
+    would miss the half of the bug that is a lie rather than a no-op.
+    """
+    app = Pty(node_argv(os.path.join(HERE, "regress_drag.js"), "maxed"), env,
+              cwd=ROOT)
+    try:
+        app.pump(2.0)
+        row, col, _ = frame(app)
+        cols, rows = _window_width(app), _window_height(app)
+        check("a window sized from onResize fills the desktop",
+              (row, col) == (1, 0) and cols == 80 and rows == 23,
+              f"at {row},{col} sized {cols}x{rows}")
+        check("and draws the un-zoom box, not the zoom box",
+              "[↕]" in app.render(), app.render().split("\n")[1])
+
+        # The zoom box is five columns in from the right-hand end of the frame.
+        app.click(col + cols - 4, row + 1, settle=0.8)
+        small_row, small_col, _ = frame(app)
+        small_cols, small_rows = _window_width(app), _window_height(app)
+        check("clicking it makes the window smaller than the desktop",
+              small_cols < cols and small_rows < rows,
+              f"{cols}x{rows} -> {small_cols}x{small_rows}")
+        check("three-quarters of it, in fact",
+              (small_cols, small_rows) == (60, 17),
+              f"{small_cols}x{small_rows}")
+        check("centred, so there is desktop on all four sides",
+              small_row > row and small_col > col
+              and small_col + small_cols < cols,
+              f"at {small_row},{small_col}")
+        check("and the box becomes the zoom box again",
+              "[↑]" in app.render(), app.render().split("\n")[small_row])
+
+        # Back, and back again: the second zoom stores the rectangle the first
+        # one restored to, so the pair has to be stable rather than only right
+        # the first time.
+        app.send(F5, settle=0.8)
+        check("F5 maximizes it again",
+              (_window_width(app), _window_height(app)) == (cols, rows)
+              and "[↕]" in app.render(),
+              f"{_window_width(app)}x{_window_height(app)}")
+        app.send(F5, settle=0.8)
+        check("and F5 again comes back to the same smaller rectangle",
+              (frame(app)[0], frame(app)[1]) == (small_row, small_col)
+              and (_window_width(app), _window_height(app))
+                  == (small_cols, small_rows),
+              f"{frame(app)[:2]} {_window_width(app)}x{_window_height(app)}")
+
+        app.send(b"\x1bx", settle=1.0)
+        check("the maximized one exits cleanly too", app.wait(timeout=6) == 0)
+    finally:
+        app.kill()
 
 
 def _window_width(app):

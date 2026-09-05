@@ -159,10 +159,10 @@ TWindow	initFrame	internal	a virtual the binding overrides or inherits, not a ca
 TWindow	setState	internal	a virtual the binding overrides or inherits, not a call a model makes
 TWindow	sizeLimits	internal	a virtual the binding overrides or inherits, not a call a model makes
 TWindow	standardScrollBar	used	the binding calls it; not itself a thing a Gren program names
-TWindow	zoom	used	the binding calls it; not itself a thing a Gren program names
+TWindow	zoom	used	the binding calls it, and JsWindow::zoom overrides it so a window born maximized has somewhere to un-zoom to
 TWindow	shutDown	internal	a virtual the binding overrides or inherits, not a call a model makes
 TWindow	flags	used	the binding calls it; not itself a thing a Gren program names
-TWindow	zoomRect	used	the binding calls it; not itself a thing a Gren program names
+TWindow	zoomRect	used	still not a thing a Gren program names: JsWindow::zoom computes it when restoring would do nothing
 TWindow	number	used	the binding calls it; not itself a thing a Gren program names
 TWindow	palette	used	the binding calls it; not itself a thing a Gren program names
 TWindow	frame	used	the binding calls it; not itself a thing a Gren program names

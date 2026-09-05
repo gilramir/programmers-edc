@@ -318,6 +318,28 @@ def main():
     check("the window came with the terminal rather than staying put",
           frame(big)[1] == 69, frame(big))
 
+    # And it can be un-maximized, which for a window that fills the terminal
+    # from birth is not free: Turbo Vision remembers where to un-zoom *to* by
+    # storing the bounds it had before it was zoomed, and a window that was
+    # never zoomed by the user has only the bounds it was built at -- the whole
+    # terminal. So `zoom()` restored it to exactly where it was and the box did
+    # nothing, while the frame went on drawing `[↕]` to say it would. The
+    # binding computes one at zoom time now; see `JsWindow::zoom`.
+    #
+    # Checked here and not only in `tvision-node/test/drive_drag.py` because
+    # this window is where it was reported, and because `Tool.Env` is the one
+    # tool that sizes itself from the desktop and so the only one that could
+    # have hit it.
+    check("a window that opens maximized draws the un-zoom box",
+          "[↕]" in big.render(), big.render().split("\n")[1])
+    big.send(b"\x1b[15~", settle=1.2)      # F5
+    check("and F5 really un-maximizes it",
+          frame(big)[0] > 0 and frame(big)[1] < 69, frame(big))
+    left, right, _ = frame(big)
+    check("and the value re-wraps to the un-maximized width, as on a resize",
+          run_of_x(big) == (right - left + 1) - 3 - len("ZZ_LONG") - 2,
+          f"{run_of_x(big)} in a window {right - left + 1} wide")
+
     big.send(b"\x1bx", settle=1.0)
     code = big.wait(timeout=6)
     check("and that one exits cleanly too", code == 0, f"exit={code}")
