@@ -33,6 +33,8 @@ type Command
     = Ascii
     | Calc
     | Calendar
+    | Encode
+    | Random
     | Time
     | Unicode
     -- `Nothing` is `predc hex`, which opens the viewer with no file in it --
@@ -90,6 +92,24 @@ parser =
                 , summary = "The `cal` command opens the calendar, on this month:"
                 , example = PP.words "predc cal"
                 , builder = \_args _flags -> Calendar
+                }
+            |> Parser.withCommand
+                { word = "encode"
+                , arguments = Parser.noArgs
+                , flags = Parser.noFlags
+                , commonDescription = Just "Open the encoder and decoder."
+                , summary = "The `encode` command opens the encoder, with nothing in it and nothing chosen for you:"
+                , example = PP.words "predc encode"
+                , builder = \_args _flags -> Encode
+                }
+            |> Parser.withCommand
+                { word = "random"
+                , arguments = Parser.noArgs
+                , flags = Parser.noFlags
+                , commonDescription = Just "Open the random values tool."
+                , summary = "The `random` command opens the random values tool, with five UUIDs already made:"
+                , example = PP.words "predc random"
+                , builder = \_args _flags -> Random
                 }
             |> Parser.withCommand
                 { word = "time"

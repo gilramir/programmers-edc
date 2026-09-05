@@ -67,6 +67,33 @@ It should also show the work week number for that month/year.
 
 
 
+# v3
+
+Three small things, none of them a tool's worth on its own and all of them
+things a person reaches for weekly.
+
+## Finding bytes in a dump
+
+Search the dump for text or for hex digits, and again for the next one.
+
+**Done** -- see "Finding bytes" below.
+
+## Encoding and decoding
+
+base64, percent-encoding, C string escapes, HTML entities, both directions.
+
+**Done** -- see "Encoding and decoding" below.
+
+## Random values
+
+A v4 UUID, or N random bytes as hex or base64.
+
+**Done** -- see "Random values" below.
+
+**Not wanted:** hashes (md5/sha) and a `chmod` bit calculator, both suggested
+and both declined.
+
+
 # Building and running
 
     devbox run predc                    # build and run
@@ -95,6 +122,8 @@ Two things about it are temporary, and both are temporary for the same reason
     predc cal             ... with the calendar open, on this month
     predc time            ... with the time zone converter open, at this moment
     predc unicode         ... with the Unicode decoder open
+    predc encode          ... with the encoder open, with nothing chosen for you
+    predc random          ... with the random values tool open, five UUIDs made
     predc hex [FILE]      ... with the hex viewer open, on FILE if you name one
     predc --help          what the commands are
     predc --version
@@ -330,6 +359,43 @@ control character means pasting one; unescaping, which is the direction you
 usually want at a keyboard, types fine. And a decoded control character is
 drawn as a CP437 glyph, because a canvas has no tab stops; the count line under
 the answer is how you tell one character from two.
+
+## Random values
+
+**Tools ▸ Random values** (`Alt-V`) makes v4 UUIDs, or runs of random bytes
+spelled as hex or as base64. *Again* rolls, *Copy* takes them all, and `Enter`
+presses *Again* from wherever the caret is. The bytes come from
+`Crypto.getRandomUInt8Values`, which is `crypto.getRandomValues` underneath:
+the platform's CSPRNG, not `Math.random`.
+
+**This is the one tool whose window is not a function of its model.** Every
+other one renders what it was handed -- ask the ASCII chart the same question
+twice and it answers the same twice, which is why they are all pure
+`Model -> Window`. Randomness cannot be, so the bytes are *stored*: `draw` is
+the model's memory of something that already happened, and putting them there
+costs a `Task`, a `Cmd`, a `Msg` and a `Step`.
+
+**Re-spelling is not re-rolling.** Switching between UUID, Hex and Base64 shows
+the draw that is already there written another way; it does not ask for new
+bytes. Only a change in *how many bytes are wanted* rolls again -- a different
+count, a different width, or a switch to or from UUID when the width is not
+already sixteen.
+
+Which makes one thing visible that is usually only read about. Set the width to
+sixteen, look at the hex, and switch to UUID: it is the same sixteen bytes,
+except for two nibbles. A v4 UUID is not sixteen random bytes; it is sixteen
+random bytes with six of their bits spent saying which kind of UUID it is, and
+this is somewhere you can watch that happen. `drive_random.py` checks it as an
+equation rather than by eye.
+
+The width field is *disabled* rather than ignored while UUID is picked, because
+sixteen is not a default there but a definition -- and a disabled view is
+skipped by `Tab`, which is the half of it a test can see.
+
+Ask for more values than the window has rows and the footer says how many are
+below rather than quietly drawing fewer. That is the fifth fixed space in this
+program that holds less than it was handed, and the first one that admits it;
+FINDINGS has the other four.
 
 ## Finding bytes
 

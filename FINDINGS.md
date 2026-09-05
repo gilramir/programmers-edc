@@ -6499,3 +6499,108 @@ they paste into, and the count line under the answer is what distinguishes one
 character from two when the screen cannot. `drive_encode.py` reads that line
 rather than comparing against a literal tab, which is a test that would
 otherwise be asserting on how Turbo Vision draws control characters.
+
+## The one window that is not a function of its model
+
+Every tool in predc but one is a pure `Model -> Window`. Ask the ASCII chart
+the same question twice and it answers the same twice; that is what makes the
+differ's job possible and what makes a pty driver's assertions mean anything.
+
+`Tool.Random` cannot be. The values it shows have to change when nothing about
+the model did — press **Again** with every control untouched and all of them
+must be different, which is the exact negation of what the other twenty-odd
+drivers in this repo assert. So the bytes are *stored*: `draw` is the model's
+memory of something that already happened, and the only way to put them there
+is a `Task`, which means a `Cmd`, a `Msg` and the `Step` shape the calendar
+already needed for a clock. `Crypto.getRandomUInt8Values` is
+`crypto.getRandomValues` underneath — the platform's CSPRNG, not
+`Math.random`, and not something a pure function was ever going to reach.
+
+**The reply carries the shape it was asked with.** `Rolled { wide, bytes }`,
+and not just the bytes: by the time an answer arrives the model may have moved
+on — somebody typed another digit into the count — and chunking a reply by the
+*current* width would cut it into rows nobody asked for. A reply that describes
+itself cannot be misread. The alternative is a sequence number and a reason to
+have one.
+
+### Re-spelling is not re-rolling, and that is where the design is
+
+Switching between UUID, Hex and Base64 shows the draw that is already there,
+written another way. It asks for no new bytes. Only a change in *how many bytes
+are wanted* rolls again.
+
+That rule is one line in `update` and it is the whole reason `draw` holds bytes
+rather than the strings on the screen. Storing the rendered text would have
+been simpler and would have made a change of spelling into a new draw, which
+nobody would have noticed and everybody would have been mildly lied to by: what
+is on the screen would no longer be what you were looking at a moment ago, for
+no reason a user could name.
+
+It also makes something visible that is otherwise only read about. Set the
+width to sixteen, look at the hex, then switch to UUID: the same sixteen bytes,
+except for two nibbles. A v4 UUID is not sixteen random bytes — it is sixteen
+random bytes with six of their bits spent saying which kind of UUID it is
+(RFC 9562: the high nibble of byte 6, the top two bits of byte 8). The driver
+checks it as an equation rather than by eye — stamp those six bits into the hex
+row and you get the UUID character for character — which is a stronger test
+than any assertion about random output has a right to be, and it only exists
+because the two spellings share a draw.
+
+### A focused canvas eats Tab, so a window of controls needs buttons
+
+The first version put the canvas first and gave it `r` for another draw and `y`
+to copy, which is the hex viewer's shape. It made the two number fields and the
+radio cluster reachable **by mouse and by nothing else**.
+
+`JsCanvas::handleEvent` says why, and says it in a comment written long before
+this: *a focused canvas consumes its keys, the way tvdemo's TTable does.* `Tab`
+is a key. So a focused canvas is the end of the tab ring, not a station on it,
+and every other tool that has one either puts a field first (the encoder) or
+gives its labels `Alt` letters (the hex viewer) to get back out.
+
+predc has no `Alt` letters left — `Tool.Calendar` counted them when it took
+`Alt-K`, and `Tool.Random` spent the last usable one on `Alt-V`. What was left
+was buttons, which turned out to be the right answer rather than the remaining
+one: **a caption with no `~` in it claims no `Alt` letter at all**, so *Again*
+and *Copy* cost nothing from a resource that is exhausted, they sit on the tab
+ring with the fields and the cluster, and making *Again* the default button
+gives `Enter` a meaning from anywhere in the window — including the count
+field, which is where the caret is when it opens.
+
+The canvas is `takesFocus = False` and last in the list. It has no cursor, no
+selection and no keys; there was never anything to focus it *for*, and the cost
+of doing it anyway was every other control in the window.
+
+### The fifth fixed space, and the first one that says so
+
+Ask for forty values in a window with eight rows of canvas and the footer reads
+`40 x 8 random bytes -- 33 more below; make the window taller`.
+
+That sentence is the fifth time this program has met a fixed space that holds
+less than it was handed. The others: `TStatusLine` drops an entry that does not
+fit, whole and in silence; a canvas cuts a message off mid-clause into
+something that reads as a finished sentence saying the opposite; `messageBox`
+draws its OK button *through* its own text rather than losing the bottom of it;
+and `RadioButtons` draws two buttons where four were asked for. Every one of
+them was found by looking at the screen, and none of them by a test failing.
+
+So this one counts what it left out. And then did it to itself: the first
+version of that footer was `64 version-4 UUIDs, 6 bits of each spoken for --
+58 more below; make the win` — a sentence about text that did not fit, cut off
+because it did not fit. The fix is that the footer and the message now go
+through the same wrapping the values do, so neither *can* be the thing that
+gets cut; the wording got shorter as well, but the wrapping is what makes it
+true rather than merely likely.
+
+### Clamping and complaining, rather than either alone
+
+The count field takes three digits and the tool makes at most sixty-four
+values. Typing `999` clamps to sixty-four **and** says `64 at a time is the
+most.`
+
+Silently clamping is the bug above, one more time, with the program on the
+wrong side of it. Refusing outright is worse in a different way: a field with
+`maxLen 3` is `999` for a moment on the way to being `99`, and a window that
+emptied itself while somebody was mid-edit would be unusable. Clamp so there is
+always something to look at, complain so the number on the screen is never
+unexplained.

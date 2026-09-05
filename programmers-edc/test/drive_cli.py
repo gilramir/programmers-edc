@@ -15,6 +15,7 @@ desktop it always was.
 """
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -29,6 +30,8 @@ from harness import Pty, Checks, node_argv
 # What Turbo Vision writes on its way in. Any of them in the byte stream means
 # the program took the terminal, which is the thing a `--help` must not do.
 PAINTED = (b"\x1b[?1049h", b"\x1b[?1000h", b"\x1b[2J")
+
+UUID4 = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
 
 
 def scratch():
@@ -98,6 +101,22 @@ def main():
     check("on this month, with its week numbers", "Wk" in screen, screen)
     check("and it is not the calculator", "RPN" not in screen, screen)
     leave(check, app, "predc cal")
+
+    app = start(env, work, "encode")
+    screen = app.render()
+    check("predc encode opens the encoder", "Encode / decode" in screen, screen)
+    check("with nothing chosen for it", "Type or paste" in screen, screen)
+    leave(check, app, "predc encode")
+
+    # The one subcommand whose window is not empty when it arrives: the tool's
+    # `init` starts a task, and the values are on the screen before anybody has
+    # pressed anything.
+    app = start(env, work, "random")
+    screen = app.render()
+    check("predc random opens the random values tool", "Random values" in screen, screen)
+    check("with five UUIDs already made",
+          len([r for r in screen.split("\n") if UUID4.search(r)]) == 5, screen)
+    leave(check, app, "predc random")
 
     app = start(env, work, "unicode")
     screen = app.render()

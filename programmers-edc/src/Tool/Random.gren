@@ -1,0 +1,821 @@
+module Tool.Random exposing (Model, Msg, Step, answered, command, init, menu, menuItem, update, view, windowId)
+
+{-| Random values: a v4 UUID, or a run of random bytes spelled as hex or as
+base64.
+
+The three things a programmer asks a shell for when they need a name nothing
+else has: `uuidgen`, `head -c 16 /dev/urandom | xxd -p`, and the same thing
+through `base64`. All three are one pipeline too long to remember correctly at
+the moment you want them, and two of them have a trailing newline waiting to
+ruin the paste.
+
+**This is the one tool whose window is not a function of its model**, and that
+is the whole of its design. Every other tool in predc renders what it was
+given: ask the ASCII chart the same question twice and you get the same answer,
+which is why they are all pure `Model -> Window`. Randomness cannot be, so the
+bytes are *stored* -- `draw` is the model's own memory of a thing that already
+happened -- and putting them there costs a `Task`, a `Cmd`, a `Msg` and this
+module's `Step`. `Crypto.getRandomUInt8Values` is the source, which is
+`crypto.getRandomValues` underneath: the platform's CSPRNG and not `Math.random`.
+
+**Re-spelling is not re-rolling.** Switching between Hex and Base64 shows the
+same bytes written two ways, and the display changes without a single new byte
+being asked for -- because the two are the same draw and saying otherwise would
+be a lie about what you are looking at. Only a change in *how many bytes are
+wanted* rolls again: a different count, a different width, or a switch to or
+from UUID when the width is not already sixteen. That rule is one line in
+`update` and it is the reason `draw` holds bytes rather than the strings on the
+screen.
+
+The corollary is visible on purpose: set the width to sixteen, look at the hex,
+then switch to UUID. It is the same sixteen bytes -- except for two nibbles.
+A v4 UUID is not sixteen random bytes; it is sixteen random bytes with six of
+their bits spent saying which kind of UUID this is, and this is the one place
+you can watch that happen.
+
+-}
+
+import Bitwise
+import Bytes exposing (Bytes)
+import Bytes.Decode as Decode
+import Crypto
+import Math
+import Task
+import Theme exposing (Inks)
+import Tool.Encode
+import Tui exposing (MenuItem(..), Span, View(..))
+
+
+-- NAMES
+
+
+command : String
+command =
+    "tool.random"
+
+
+windowId : String
+windowId =
+    "random"
+
+
+kindId : String
+kindId =
+    "random.kind"
+
+
+countId : String
+countId =
+    "random.count"
+
+
+sizeId : String
+sizeId =
+    "random.size"
+
+
+canvasId : String
+canvasId =
+    "random.out"
+
+
+{-| `Alt-V`, and there was no choice about it.
+
+A button's caption claims an Alt key for as long as its window is open, so the
+letters are a shared and nearly exhausted resource -- `Tool.Calendar` counts
+what was left when it took `Alt-K`, and that list was `J`, `K`, `Q` and `V`.
+`J` is the encoder and `K` is the calendar, `Q` in a program with an `Alt-X`
+would be read as a second way to quit, and so `V` for *values* is what remains.
+Whether the letter is a good mnemonic stopped being the question two tools ago;
+that it is unambiguous is the question, and this one is.
+-}
+menuItem : MenuItem
+menuItem =
+    Item { title = "Random ~v~alues", cmd = command, key = "Alt-V", shortcut = "Alt-V" }
+
+
+menu : MenuItem
+menu =
+    SubMenu
+        { title = "~G~enerate"
+        , key = ""
+        , items =
+            [ Item { title = "~A~gain", cmd = "random.again", key = "", shortcut = "r" }
+            , Tui.Separator
+            , Item { title = "~U~UID v4", cmd = "random.kind.uuid", key = "", shortcut = "" }
+            , Item { title = "~H~ex", cmd = "random.kind.hex", key = "", shortcut = "" }
+            , Item { title = "~B~ase64", cmd = "random.kind.base64", key = "", shortcut = "" }
+            , Tui.Separator
+            , Item { title = "Cop~y~ them all", cmd = "random.copy", key = "", shortcut = "y" }
+            ]
+        }
+
+
+-- MODEL
+
+
+type Kind
+    = Uuid
+    | Hex
+    | Base64
+
+
+type alias Model =
+    { kind : Kind
+    -- What was typed, not what it means. An `InputLine` restricted to digits
+    -- can still hold `""` mid-edit and `999` on purpose, and both of those are
+    -- states the field is allowed to be in while the tool refuses to be.
+    -- `asked` is the one place that turns text into a number and a complaint.
+    , countText : String
+    , sizeText : String
+    -- The bytes, one array per value. The only field here that could not be
+    -- worked out again from the others, which is exactly what makes this tool
+    -- different from the rest of them.
+    , draw : Array (Array Int)
+    -- How many rows the canvas has now, from `WindowResized`. The hex viewer's
+    -- `rowsIn` for the same reason and with a different six.
+    , rows : Int
+    -- Whether the last copy was this tool's. `Copied` reaches every open tool
+    -- and says only whether something outside confirmed taking the text.
+    , copied : Bool
+    , message : String
+    }
+
+
+type Msg
+    = Rolled { wide : Int, bytes : Bytes }
+
+
+type alias Step =
+    { model : Model, command : Cmd Msg }
+
+
+{-| The most values at once, and the most bytes in one.
+
+Sixty-four each, which is past anything anybody types on purpose and short of
+anything that would take a moment. The cap exists so that the numbers are
+bounded rather than because either number is expensive: `getRandomUInt8Values`
+clamps at 65536 itself, and a tool that quietly asked for fewer bytes than it
+was told to would be the fixed-space bug again in a place where the answer
+matters more than usual.
+-}
+maxRows : Int
+maxRows =
+    64
+
+
+maxWide : Int
+maxWide =
+    64
+
+
+{-| Sixteen bytes, because that is what a UUID is. Not a default -- a fact, and
+therefore the reason the width field is disabled when the kind is UUID rather
+than merely ignored.
+-}
+uuidWidth : Int
+uuidWidth =
+    16
+
+
+{-| How tall the canvas is when the window opens: six rows for the five values
+`init` makes plus the footer, and two spare. Not a limit -- `maxRows` is
+sixty-four and the window stretches -- but the height at which asking for more
+than fits is the *normal* thing to do rather than an edge case, which is how
+the footer's count of what is hidden got written in the first place.
+-}
+openRows : Int
+openRows =
+    8
+
+
+lineWidth : Int
+lineWidth =
+    76
+
+
+{-| The window opens with something in it, which costs the one `Cmd` an
+`init` here can afford and buys the thing the tool is for: `predc random` and
+the UUID is already on the screen. A tool whose first frame said "press r"
+would be asking you to do the only thing you came to do.
+-}
+init : Step
+init =
+    let
+        model =
+            { kind = Uuid
+            , countText = "5"
+            , sizeText = "16"
+            , draw = []
+            , rows = openRows
+            , copied = False
+            , message = ""
+            }
+    in
+    { model = model, command = roll model }
+
+
+-- WHAT WAS ASKED FOR
+
+
+type alias Wanted =
+    { rows : Int, wide : Int, complaint : String }
+
+
+{-| The two numbers the fields mean, and what to say when they do not mean
+what was typed.
+
+Clamping *and* complaining, rather than either alone. Silently clamping is the
+bug this repo keeps finding -- a fixed space that quietly holds less than it
+was given -- and refusing outright would leave the window empty because
+somebody typed a third digit on the way to deleting one.
+-}
+asked : Model -> Wanted
+asked model =
+    let
+        wantedRows =
+            Maybe.withDefault 1 (numberFrom model.countText)
+
+        wantedWide =
+            when model.kind is
+                Uuid ->
+                    uuidWidth
+
+                _ ->
+                    Maybe.withDefault 1 (numberFrom model.sizeText)
+    in
+    { rows = clamp 1 maxRows wantedRows
+    , wide = clamp 1 maxWide wantedWide
+    , complaint =
+        if wantedRows > maxRows then
+            String.fromInt maxRows ++ " at a time is the most."
+
+        else if wantedWide > maxWide then
+            String.fromInt maxWide ++ " bytes each is the most."
+
+        else
+            ""
+    }
+
+
+numberFrom : String -> Maybe Int
+numberFrom text =
+    if String.isEmpty text then
+        Nothing
+
+    else
+        String.toInt text
+
+
+{-| Ask the platform for bytes.
+
+The request carries the width it was made with, because by the time the answer
+arrives the model may have moved on -- somebody typed another digit -- and
+chunking a reply by the *current* width would cut it into rows that were never
+asked for. A reply that describes itself cannot be misread; the alternative is
+a sequence number and a reason to have one.
+-}
+roll : Model -> Cmd Msg
+roll model =
+    let
+        want =
+            asked model
+    in
+    Crypto.getRandomUInt8Values (want.rows * want.wide)
+        |> Task.map (\bytes -> { wide = want.wide, bytes = bytes })
+        |> Task.perform Rolled
+
+
+answered : Msg -> Model -> Model
+answered msg model =
+    when msg is
+        Rolled it ->
+            { model | draw = chunk it.wide (byteArrayOf it.bytes) }
+
+
+-- UPDATE
+
+
+update : Tui.Ports Msg -> Tui.Event -> Model -> Step
+update ports event model =
+    when event is
+        Tui.WindowResized it ->
+            if it.id == windowId then
+                still { model | rows = rowsIn (it.rect.y2 - it.rect.y1) }
+
+            else
+                still model
+
+        Tui.Changed it ->
+            if it.id == kindId then
+                when it.value is
+                    Tui.Choice index ->
+                        -- The rule the whole tool turns on: a new spelling of
+                        -- the same bytes is not a new draw. Only a change in
+                        -- how many bytes are wanted rolls again.
+                        respell { model | kind = kindAt index } model
+
+                    _ ->
+                        still model
+
+            else if it.id == countId then
+                when it.value is
+                    Tui.Text text ->
+                        again { model | countText = text }
+
+                    _ ->
+                        still model
+
+            else if it.id == sizeId then
+                when it.value is
+                    Tui.Text text ->
+                        again { model | sizeText = text }
+
+                    _ ->
+                        still model
+
+            else
+                still model
+
+        Tui.Copied it ->
+            if model.copied then
+                still
+                    { model
+                        | copied = False
+                        , message =
+                            if it.toSystem then
+                                "Copied to the clipboard."
+
+                            else
+                                -- The same conditional the calculator writes,
+                                -- and for the same reason: the `OSC 52` went
+                                -- out, and tmux's default swallows it without
+                                -- saying so.
+                                "Copied; F1 if it does not paste."
+                    }
+
+            else
+                still model
+
+        Tui.Command cmd ->
+            if cmd == "random.again" then
+                again model
+
+            else if cmd == "random.copy" then
+                copyAll ports model
+
+            else if cmd == "random.kind.uuid" then
+                respell { model | kind = Uuid } model
+
+            else if cmd == "random.kind.hex" then
+                respell { model | kind = Hex } model
+
+            else if cmd == "random.kind.base64" then
+                respell { model | kind = Base64 } model
+
+            else
+                still model
+
+        _ ->
+            still model
+
+
+still : Model -> Step
+still model =
+    { model = model, command = Cmd.none }
+
+
+{-| A new draw, always. What **Again** means, and what a change to either
+number means -- you asked for different values, so these are different values.
+-}
+again : Model -> Step
+again model =
+    let
+        want =
+            asked model
+    in
+    { model = { model | message = want.complaint }, command = roll model }
+
+
+{-| A change of kind. Rolls only if the new kind wants a different number of
+bytes than the draw already on the screen was made with.
+
+So Hex to Base64 never rolls; UUID to Hex rolls unless the width happens to be
+sixteen, in which case the same bytes are simply written the other way and two
+of their nibbles stop being forced.
+-}
+respell : Model -> Model -> Step
+respell moved was =
+    let
+        before =
+            asked was
+
+        after =
+            asked moved
+
+        quiet =
+            { moved | message = after.complaint }
+    in
+    if before.rows * before.wide == after.rows * after.wide then
+        still quiet
+
+    else
+        { model = quiet, command = roll quiet }
+
+
+copyAll : Tui.Ports Msg -> Model -> Step
+copyAll ports model =
+    if Array.isEmpty model.draw then
+        still { model | message = "Nothing to copy yet." }
+
+    else
+        { model = { model | copied = True, message = "" }
+        , command =
+            Tui.copyToClipboard ports
+                (String.join "\n" (Array.map (spell model.kind) model.draw))
+        }
+
+
+kindAt : Int -> Kind
+kindAt index =
+    when index is
+        1 ->
+            Hex
+
+        2 ->
+            Base64
+
+        _ ->
+            Uuid
+
+
+kindIndex : Kind -> Int
+kindIndex kind =
+    when kind is
+        Uuid ->
+            0
+
+        Hex ->
+            1
+
+        Base64 ->
+            2
+
+
+{-| How many rows of a window this tall are the canvas.
+
+Six are spoken for: two frame rows, the row of controls, the blank under it,
+and the two rows the canvas keeps for its own footer and message. Written once
+and used twice -- to lay the window out and to read a `WindowResized` -- which
+is the hex viewer's arithmetic and the same reason for it.
+-}
+rowsIn : Int -> Int
+rowsIn height =
+    max 1 (height - 6)
+
+
+-- BYTES
+
+
+byteArrayOf : Bytes -> Array Int
+byteArrayOf bites =
+    Decode.decode (byteDecoder (Bytes.length bites)) bites
+        |> Maybe.withDefault []
+
+
+byteDecoder : Int -> Decode.Decoder (Array Int)
+byteDecoder count =
+    Decode.loop
+        { left = count, sofar = [] }
+        (\state ->
+            if state.left <= 0 then
+                Decode.succeed (Decode.Done state.sofar)
+
+            else
+                Decode.map
+                    (\byte ->
+                        Decode.Loop
+                            { left = state.left - 1
+                            , sofar = Array.pushLast byte state.sofar
+                            }
+                    )
+                    Decode.unsignedInt8
+        )
+
+
+chunk : Int -> Array Int -> Array (Array Int)
+chunk wide bytes =
+    let
+        go from acc =
+            if from >= Array.length bytes then
+                acc
+
+            else
+                go (from + wide)
+                    (Array.pushLast (Array.takeFirst wide (Array.dropFirst from bytes)) acc)
+    in
+    if wide <= 0 then
+        []
+
+    else
+        go 0 []
+
+
+-- SPELLING
+
+
+spell : Kind -> Array Int -> String
+spell kind bytes =
+    when kind is
+        Uuid ->
+            uuidOf bytes
+
+        Hex ->
+            String.join "" (Array.map hex2 bytes)
+
+        Base64 ->
+            -- The encoder already knows how to spell bytes in base64, and a
+            -- second copy of the alphabet and the three-into-four arithmetic
+            -- would be a second thing to get wrong in a tool whose output
+            -- nobody can check by eye.
+            Tool.Encode.base64Encode bytes
+
+
+{-| Sixteen bytes as a UUID, version 4, in the shape RFC 9562 asks for.
+
+Six of the bits are not random and cannot be: the high nibble of byte 6 is the
+version and the top two bits of byte 8 are the variant. Everything else is the
+draw exactly as it arrived -- which is why the hex of the same sixteen bytes
+matches this string everywhere but those two positions, and why switching
+between the two is worth doing once.
+-}
+uuidOf : Array Int -> String
+uuidOf bytes =
+    bytes
+        |> Array.indexedMap
+            (\index byte ->
+                (if index == 4 || index == 6 || index == 8 || index == 10 then
+                    "-"
+
+                 else
+                    ""
+                )
+                    ++ hex2 (stamped index byte)
+            )
+        |> String.join ""
+
+
+stamped : Int -> Int -> Int
+stamped index byte =
+    if index == 6 then
+        Bitwise.or 0x40 (Bitwise.and 0xF byte)
+
+    else if index == 8 then
+        Bitwise.or 0x80 (Bitwise.and 0x3F byte)
+
+    else
+        byte
+
+
+hex2 : Int -> String
+hex2 byte =
+    String.fromChar (nibble (byte // 16))
+        ++ String.fromChar (nibble (Math.modBy 16 byte))
+
+
+nibble : Int -> Char
+nibble value =
+    Maybe.withDefault '0' (Array.get value (String.toArray "0123456789abcdef"))
+
+
+-- VIEW
+
+
+view : Inks -> Model -> Tui.Window
+view inks model =
+    { id = windowId
+    , title = "Random values"
+    , rect = { x1 = 0, y1 = 1, x2 = 79, y2 = 7 + openRows }
+    , resize = Tui.resizeHeight
+    , palette = Tui.BlueWindow
+    , canClose = True
+    , canMove = True
+    , views =
+        -- The count field first, so it holds the caret when the window opens
+        -- and `Tab` starts somewhere a person would guess.
+        [ InputLine
+            { id = countId
+            , rect = { x1 = 29, y1 = 1, x2 = 34, y2 = 2 }
+            , maxLen = 3
+            , value = model.countText
+            -- Digits only, which takes the whole class of "not a number" out
+            -- of `asked` and leaves it the two cases that are really about
+            -- this tool: empty, and too many.
+            , allowed = Just "0123456789"
+            }
+        -- After the field it names, and not for tidiness: a `Label` is
+        -- attached to a view that has to exist already, and the differ says so
+        -- -- `label for unknown id 'random.count'` is what the window refuses
+        -- to be built with. The rectangles are absolute, so the order here is
+        -- nothing but that rule and the tab order.
+        , Label
+            { id = "random.count.label"
+            , rect = { x1 = 20, y1 = 1, x2 = 29, y2 = 2 }
+            , text = "How many"
+            , for = countId
+            }
+        , Enabled
+            { -- Disabled rather than ignored when the kind is UUID. A UUID is
+              -- sixteen bytes by definition, so a width field that still took
+              -- typing would be offering a choice that does not exist. A
+              -- disabled view is also skipped by `Tab`, which is the half of
+              -- it a driver can see: with UUID picked, one `Tab` out of the
+              -- count field lands on the radio cluster and not here.
+              enabled =
+                when model.kind is
+                    Uuid ->
+                        False
+
+                    _ ->
+                        True
+            , view =
+                InputLine
+                    { id = sizeId
+                    , rect = { x1 = 49, y1 = 1, x2 = 54, y2 = 2 }
+                    , maxLen = 3
+                    , value =
+                        when model.kind is
+                            Uuid ->
+                                String.fromInt uuidWidth
+
+                            _ ->
+                                model.sizeText
+                    , allowed = Just "0123456789"
+                    }
+            }
+        , Label
+            { id = "random.size.label"
+            , rect = { x1 = 38, y1 = 1, x2 = 49, y2 = 2 }
+            , text = "Bytes each"
+            , for = sizeId
+            }
+        , RadioButtons
+            { id = kindId
+            -- Four rows tall for three items, because a cluster flows its
+            -- items down the rectangle before it goes across: three rows would
+            -- also do, and a fourth costs nothing and leaves room to add a
+            -- kind without discovering the column rule again.
+            , rect = { x1 = 2, y1 = 1, x2 = 17, y2 = 4 }
+            , items = [ "UUID v4", "Hex", "Base64" ]
+            , selected = kindIndex model.kind
+            , available = []
+            }
+        -- Two buttons, and their captions have no `~` in them on purpose.
+        --
+        -- The first draft gave the canvas the focus and put `r` and `y` on it,
+        -- which is the hex viewer's shape and was wrong here: **a focused
+        -- canvas consumes every key**, `views.cc` says so in as many words,
+        -- and `Tab` is a key -- so the two fields and the cluster could be
+        -- reached with the mouse and by nothing else. Buttons are what a
+        -- window full of controls wants, they are on the `Tab` ring with
+        -- everything else, and a caption with no tilde claims no `Alt` letter,
+        -- which matters in a program that has run out of them.
+        --
+        -- `Again` is the default button, so `Enter` rolls from wherever the
+        -- caret happens to be -- including from the count field, which is
+        -- where it is when the window opens.
+        , Button
+            { id = "random.again.button"
+            , rect = { x1 = 57, y1 = 1, x2 = 68, y2 = 3 }
+            , title = "Again"
+            , cmd = "random.again"
+            , isDefault = True
+            , takesFocus = True
+            }
+        , Button
+            { id = "random.copy.button"
+            , rect = { x1 = 68, y1 = 1, x2 = 77, y2 = 3 }
+            , title = "Copy"
+            , cmd = "random.copy"
+            , isDefault = False
+            , takesFocus = True
+            }
+        -- Last, and not selectable. There is nothing to do to it: it has no
+        -- cursor, no selection and no keys of its own, and making it focusable
+        -- would cost `Tab` for everything above.
+        , Grows
+            { grow = Tui.stretchHeight
+            , view =
+                Canvas
+                    { id = canvasId
+                    , rect = { x1 = 1, y1 = 5, x2 = 1 + lineWidth, y2 = 5 + openRows }
+                    , lines = display inks model
+                    , cursor = Nothing
+                    , takesFocus = False
+                    }
+            }
+        ]
+    }
+
+
+{-| The values, then a footer that says what they are, then whatever went
+wrong.
+
+The footer is the fifth time this repo has met a fixed space that holds less
+than it was handed -- the status line drops an entry whole, a canvas cuts a
+sentence into grammar, `messageBox` draws its button through its own text, and
+a radio cluster draws fewer buttons than it was given, all of them in silence.
+This one is the first that says so: sixty-four values will not fit in eight
+rows, so the ones that do not are counted and named. The fix for a fixed space
+is not always a bigger space; sometimes it is a space that admits what it left
+out.
+-}
+display : Inks -> Model -> Array (Array Span)
+display inks model =
+    if Array.isEmpty model.draw then
+        [ [ Tui.ink inks.dim "Rolling..." ] ]
+
+    else
+        let
+            -- The footer and the complaint go through the same wrapping the
+            -- values do, so that neither can be the thing that gets cut. A
+            -- sentence about text that did not fit, cut off because it did not
+            -- fit, is not a hypothetical: `-- 58 more below; make the win` is
+            -- what the first version of this line drew.
+            tail =
+                (if String.isEmpty model.message then
+                    []
+
+                 else
+                    wrappedIn inks.alert model.message
+                )
+
+            room =
+                max 1 (model.rows - (Array.length tail + 1))
+
+            values =
+                model.draw
+                    |> Array.map (spell model.kind)
+                    |> Array.mapAndFlatten wrapped
+
+            hidden =
+                Array.length values - room
+        in
+        Array.takeFirst room values
+            ++ wrappedIn inks.ruler (summary model hidden)
+            ++ tail
+
+
+summary : Model -> Int -> String
+summary model hidden =
+    let
+        want =
+            asked model
+
+        made =
+            String.fromInt (Array.length model.draw)
+
+        what =
+            when model.kind is
+                Uuid ->
+                    made ++ " UUIDs, version 4"
+
+                _ ->
+                    made ++ " x " ++ String.fromInt want.wide ++ " random bytes"
+    in
+    if hidden > 0 then
+        what ++ " -- " ++ String.fromInt hidden ++ " more below; make the window taller"
+
+    else
+        what
+
+
+{-| One value across as many rows as it needs, in one ink. A canvas does not
+wrap, and sixty-four bytes of hex is a hundred and twenty-eight characters.
+-}
+wrappedIn : Tui.Hue -> String -> Array (Array Span)
+wrappedIn hue text =
+    Array.map (\row -> [ Tui.ink hue row ]) (folded text)
+
+
+wrapped : String -> Array (Array Span)
+wrapped text =
+    Array.map (\row -> [ Tui.plain row ]) (folded text)
+
+
+folded : String -> Array String
+folded text =
+    let
+        go rest acc =
+            if String.count rest <= lineWidth then
+                Array.pushLast rest acc
+
+            else
+                go (String.dropFirst lineWidth rest)
+                    (Array.pushLast (String.takeFirst lineWidth rest) acc)
+    in
+    if String.isEmpty text then
+        [ "" ]
+
+    else
+        go text []

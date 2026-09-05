@@ -175,7 +175,8 @@ def main():
     # somebody to click the dot.
     for key, name in [(b"\x1ba", "ASCII"), (b"\x1br", "RPN Calculator"),
                       (b"\x1bd", "Hex Dump"), (b"\x1bc", "Time converter"),
-                      (b"\x1bu", "Unicode"), (b"\x1bk", "Calendar")]:
+                      (b"\x1bu", "Unicode"), (b"\x1bk", "Calendar"),
+                      (b"\x1bj", "Encode / decode"), (b"\x1bv", "Random values")]:
         app.send(key, settle=1.4)
         check(f"{name} opens", name in app.render(), app.render())
         closed = False

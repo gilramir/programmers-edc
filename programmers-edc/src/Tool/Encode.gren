@@ -1,4 +1,4 @@
-module Tool.Encode exposing (Model, command, init, menu, menuItem, update, view, windowId)
+module Tool.Encode exposing (Model, base64Encode, command, init, menu, menuItem, update, view, windowId)
 
 {-| The four transforms a programmer does by hand a dozen times a week, in
 both directions.
@@ -359,6 +359,10 @@ alphabet =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
 
+{-| Bytes to base64. Exposed because `Tool.Random` needs it and a second copy
+of the alphabet and the three-into-four arithmetic would be a second thing to
+get wrong -- in a tool whose output, being random, nobody can check by eye.
+-}
 base64Encode : Array Int -> String
 base64Encode bytes =
     let

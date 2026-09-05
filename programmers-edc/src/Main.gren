@@ -46,6 +46,7 @@ import Tool.Calc
 import Tool.Calendar
 import Tool.Encode
 import Tool.Hex
+import Tool.Random
 import Tool.Time
 import Tool.Unicode
 import Tui exposing (Event(..), MenuItem(..), View(..))
@@ -85,6 +86,14 @@ dialog, and a dialog is a command whose answer comes back as an event.
 -}
 calendarPorts : Tui.Ports Tool.Calendar.Msg
 calendarPorts =
+    { toJs = tuiOut, fromJs = tuiIn }
+
+
+{-| The random tool's, which it needs for exactly one thing that is not its
+own randomness: putting what it made on the clipboard.
+-}
+randomPorts : Tui.Ports Tool.Random.Msg
+randomPorts =
     { toJs = tuiOut, fromJs = tuiIn }
 
 
@@ -134,6 +143,7 @@ type alias Model =
     , calc : Maybe Tool.Calc.Model
     , calendar : Maybe Tool.Calendar.Model
     , encode : Maybe Tool.Encode.Model
+    , random : Maybe Tool.Random.Model
     , hex : Maybe Tool.Hex.Model
     , time : Maybe Tool.Time.Model
     , unicode : Maybe Tool.Unicode.Model
@@ -175,6 +185,7 @@ type Msg
     -- first tool that needed either.
     | FromCalendar Tool.Calendar.Msg
     | FromHex Tool.Hex.Msg
+    | FromRandom Tool.Random.Msg
     | FromTime Tool.Time.Msg
     -- The config file was written, or was not. Either way there is nothing to
     -- do about it -- see `Config` for why -- and this exists only because a
@@ -226,6 +237,7 @@ init env =
                     , calc = Nothing
                     , calendar = Nothing
                     , encode = Nothing
+                    , random = Nothing
                     , hex = Nothing
                     , time = Nothing
                     , unicode = Nothing
@@ -310,6 +322,25 @@ open command shell =
             Node.startProgram
                 { model = Tui.Start { shell | calendar = Just step.model }
                 , command = Cmd.map FromCalendar step.command
+                }
+
+        Cli.Encode ->
+            Node.startProgram
+                { model = Tui.Start { shell | encode = Just Tool.Encode.init }
+                , command = Cmd.none
+                }
+
+        -- The one command that starts a task, other than the hex viewer with
+        -- a path: the window is not worth opening empty, so the first draw is
+        -- already on its way before the first frame is.
+        Cli.Random ->
+            let
+                step =
+                    Tool.Random.init
+            in
+            Node.startProgram
+                { model = Tui.Start { shell | random = Just step.model }
+                , command = Cmd.map FromRandom step.command
                 }
 
         Cli.Time ->
@@ -422,6 +453,11 @@ update msg model =
 
         FromCalendar sub ->
             { model = { model | calendar = Maybe.map (Tool.Calendar.answered sub) model.calendar }
+            , command = Cmd.none
+            }
+
+        FromRandom sub ->
+            { model = { model | random = Maybe.map (Tool.Random.answered sub) model.random }
             , command = Cmd.none
             }
 
@@ -550,6 +586,22 @@ handleEvent event model =
                         , command = Tui.focus tui Tool.Encode.windowId
                         }
 
+            else if cmd == Tool.Random.command then
+                when model.random is
+                    Nothing ->
+                        let
+                            step =
+                                Tool.Random.init
+                        in
+                        { model = { model | random = Just step.model }
+                        , command = Cmd.map FromRandom step.command
+                        }
+
+                    Just _ ->
+                        { model = model
+                        , command = Tui.focus tui Tool.Random.windowId
+                        }
+
             else if cmd == Tool.Hex.command then
                 when model.hex is
                     Nothing ->
@@ -633,6 +685,9 @@ handleEvent event model =
 
             else if id == Tool.Encode.windowId then
                 { model = { model | encode = Nothing }, command = Cmd.none }
+
+            else if id == Tool.Random.windowId then
+                { model = { model | random = Nothing }, command = Cmd.none }
 
             else if id == Tool.Hex.windowId then
                 { model = { model | hex = Nothing }, command = Cmd.none }
@@ -758,6 +813,9 @@ toTools event model =
         calendar =
             Maybe.map (Tool.Calendar.update calendarPorts event) model.calendar
 
+        random =
+            Maybe.map (Tool.Random.update randomPorts event) model.random
+
         moved =
             { model
                 | ascii = Maybe.map (Tool.Ascii.update event) model.ascii
@@ -765,6 +823,7 @@ toTools event model =
                 , encode = Maybe.map (Tool.Encode.update event) model.encode
                 , calc = Maybe.map .model calc
                 , hex = Maybe.map .model hex
+                , random = Maybe.map .model random
                 , time = Maybe.map .model time
                 , unicode = Maybe.map .model unicode
                 -- Like the chart and the calculator, it starts nothing and so
@@ -825,6 +884,12 @@ toTools event model =
             , when calendar is
                 Just step ->
                     Cmd.map FromCalendar step.command
+
+                Nothing ->
+                    Cmd.none
+            , when random is
+                Just step ->
+                    Cmd.map FromRandom step.command
 
                 Nothing ->
                     Cmd.none
@@ -954,6 +1019,13 @@ view model =
                     Nothing ->
                         []
                )
+            ++ (when model.random is
+                    Just random ->
+                        [ Tool.Random.view (Theme.inks model.theme) random ]
+
+                    Nothing ->
+                        []
+               )
             ++ (when model.hex is
                     Just hex ->
                         [ Tool.Hex.view (Theme.inks model.theme) hex ]
@@ -1017,6 +1089,7 @@ menuBar model =
             , Tool.Unicode.menuItem
             , Tool.Calendar.menuItem
             , Tool.Encode.menuItem
+            , Tool.Random.menuItem
             ]
         }
     ]
@@ -1145,6 +1218,13 @@ toolMenus model =
         ++ (when model.encode is
                 Just _ ->
                     [ Tool.Encode.menu ]
+
+                Nothing ->
+                    []
+           )
+        ++ (when model.random is
+                Just _ ->
+                    [ Tool.Random.menu ]
 
                 Nothing ->
                     []
