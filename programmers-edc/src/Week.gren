@@ -1,0 +1,244 @@
+module Week exposing
+    ( Rule(..)
+    , all
+    , dayNames
+    , daysIn
+    , fromKey
+    , numberOf
+    , ordinal
+    , startsOn
+    , title
+    , toKey
+    , weekdayOf
+    )
+
+{-| Which week is this, and which day does a week start on.
+
+Two questions with two answers, and they are the same answer: a week number
+means nothing without saying where the week begins, so the rule below decides
+both. That is why this is one type rather than a numbering setting and a
+first-day setting that could be set to disagree.
+
+**ISO 8601** starts the week on Monday, and week 1 is the one holding the first
+Thursday -- equivalently, the one holding 4 January. It is what "work week"
+means almost everywhere outside the United States, what a European build system
+prints, and it has the property that every week belongs to exactly one year,
+which is what makes "week 40" a date you can act on. The cost is that the first
+days of January can belong to the previous year's week 52 or 53, and the last
+days of December to next year's week 1.
+
+**The US convention** starts the week on Sunday, and week 1 is whichever week
+holds 1 January. Every year has a week 1 beginning on 1 January's Sunday, so
+January is never week 52 -- and in exchange the first week can be one day long,
+and a week number does not identify a week across a year boundary.
+
+They disagree by a week for a few days around most New Years, and agree for the
+rest of the year, which is exactly the sort of difference that is invisible
+until it is expensive.
+
+-}
+
+import Math
+
+
+{-| Stored in the config file as the strings [`toKey`](#toKey) writes, so
+renaming one of these renames what is on disk.
+-}
+type Rule
+    = Iso
+    | Us
+
+
+{-| In the order they appear on the menu.
+-}
+all : Array Rule
+all =
+    [ Iso, Us ]
+
+
+title : Rule -> String
+title rule =
+    when rule is
+        Iso ->
+            "ISO 8601 (Mon, week of 4 Jan)"
+
+        Us ->
+            "US (Sun, week of 1 Jan)"
+
+
+toKey : Rule -> String
+toKey rule =
+    when rule is
+        Iso ->
+            "iso"
+
+        Us ->
+            "us"
+
+
+fromKey : String -> Rule
+fromKey key =
+    if key == "us" then
+        Us
+
+    else
+        Iso
+
+
+{-| Which weekday a week begins on, as Zeller's numbering: 0 is Sunday.
+-}
+startsOn : Rule -> Int
+startsOn rule =
+    when rule is
+        Iso ->
+            1
+
+        Us ->
+            0
+
+
+{-| The seven column headings, in the order the rule puts them.
+-}
+dayNames : Rule -> Array String
+dayNames rule =
+    when rule is
+        Iso ->
+            [ "Mo", "Tu", "We", "Th", "Fr", "Sa", "Su" ]
+
+        Us ->
+            [ "Su", "Mo", "Tu", "We", "Th", "Fr", "Sa" ]
+
+
+{-| How many days in a month, by the rule that is actually true.
+
+Borland's original had a table with 2000 hard-wired as a leap year, which is
+right for the only century it was going to run in and wrong for 1900 and 2100.
+`gren-tvision`'s calendar example carries the same note; this is the same
+arithmetic, because a calendar that can be pointed at any year has to use the
+real rule.
+-}
+daysIn : Int -> Int -> Int
+daysIn year month =
+    when month is
+        2 ->
+            if Math.modBy 4 year == 0 && (Math.modBy 100 year /= 0 || Math.modBy 400 year == 0) then
+                29
+
+            else
+                28
+
+        4 ->
+            30
+
+        6 ->
+            30
+
+        9 ->
+            30
+
+        11 ->
+            30
+
+        _ ->
+            31
+
+
+{-| Zeller's congruence, exactly as `calendar.cpp` spells it: 0 is Sunday.
+-}
+weekdayOf : Int -> Int -> Int -> Int
+weekdayOf year month day =
+    let
+        shifted =
+            if month < 3 then
+                { month = month + 10, year = year - 1 }
+
+            else
+                { month = month - 2, year = year }
+
+        century =
+            shifted.year // 100
+
+        yr =
+            Math.modBy 100 shifted.year
+
+        dw =
+            Math.modBy 7
+                (((26 * shifted.month - 2) // 10)
+                    + day
+                    + yr
+                    + (yr // 4)
+                    + (century // 4)
+                    - (2 * century)
+                )
+    in
+    if dw < 0 then
+        dw + 7
+
+    else
+        dw
+
+
+{-| The day of the year, 1 for 1 January.
+-}
+ordinal : Int -> Int -> Int -> Int
+ordinal year month day =
+    Array.foldl (\each total -> total + daysIn year each) day (Array.range 1 (month - 1))
+
+
+{-| The week number this date falls in, under this rule.
+
+**ISO**, from the standard's own formula: `(ordinal - weekday + 10) / 7` with
+Monday as 1. Below 1 the date belongs to the last week of the year before,
+which is 52 or 53 and has to be asked for rather than assumed; above the year's
+own count it is week 1 of the year after. Both edges are real -- 1 January 2021
+is week 53 of 2020, and 31 December 2019 is week 1 of 2020 -- and getting them
+wrong is invisible for eleven months of the year.
+
+**US**, which needs no edges: 1 January is always in week 1, so the number is
+how many Sunday boundaries have been crossed since it.
+-}
+numberOf : Rule -> Int -> Int -> Int -> Int
+numberOf rule year month day =
+    when rule is
+        Iso ->
+            let
+                -- Monday 1 .. Sunday 7, from Zeller's Sunday 0.
+                weekday =
+                    when weekdayOf year month day is
+                        0 ->
+                            7
+
+                        other ->
+                            other
+
+                week =
+                    (ordinal year month day - weekday + 10) // 7
+            in
+            if week < 1 then
+                isoWeeksIn (year - 1)
+
+            else if week > isoWeeksIn year then
+                1
+
+            else
+                week
+
+        Us ->
+            ((ordinal year month day - 1 + weekdayOf year 1 1) // 7) + 1
+
+
+{-| 52 or 53. A year has 53 ISO weeks when it starts on a Thursday, or when it
+is a leap year starting on a Wednesday -- which is the same thing said about
+the day 31 December falls on.
+-}
+isoWeeksIn : Int -> Int
+isoWeeksIn year =
+    let
+        p y =
+            Math.modBy 7 (y + (y // 4) - (y // 100) + (y // 400))
+    in
+    if p year == 4 || p (year - 1) == 3 then
+        53
+
+    else
+        52

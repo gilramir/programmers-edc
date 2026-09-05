@@ -175,7 +175,11 @@ def main():
           os.path.exists(config_file(home)), config_file(home))
     with open(config_file(home), "rb") as f:
         saved = tomllib.load(f)
-    check("and says which one", saved == {"theme": "midnight"}, str(saved))
+    # The theme by name, not the whole document: predc writes every setting it
+    # has, so a check spelling out the file breaks the day a fourth one is
+    # added -- which is what it did when the calendar's `weeks` arrived. What
+    # this is about is the theme, and the other keys are somebody else's test.
+    check("and says which one", saved.get("theme") == "midnight", str(saved))
     # The reason the file is TOML rather than JSON: a key predc wrote for the
     # first time arrives with a sentence saying what it is for. A config file
     # whose fields are undocumented is one nobody opens.
@@ -208,7 +212,7 @@ def main():
     #    command issued after `startProgram`.
     with open(config_file(home), "rb") as f:
         check("the last choice was the one written down",
-              tomllib.load(f) == {"theme": "gren"}, open(config_file(home)).read())
+              tomllib.load(f).get("theme") == "gren", open(config_file(home)).read())
 
     app = start(home)
     app.send(b"\x1ba", settle=1.4)

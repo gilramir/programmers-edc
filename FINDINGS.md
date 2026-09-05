@@ -6210,3 +6210,94 @@ draws its button through its own text. None of them says "this does not fit",
 and all three were found by looking rather than by anything failing — which is
 the argument for measuring at the point of render, and for a driver that reads
 the screen at more than one size.
+
+## A week number and the day a week starts on are one setting
+
+predc's calendar draws a month with a week number against each row, and the
+number needed an option: ISO 8601 or the US convention. The thing worth writing
+down is that it is **one** setting rather than two.
+
+ISO starts weeks on Monday and gives week 1 to the one holding the first
+Thursday. The US convention starts them on Sunday and gives week 1 to the one
+holding 1 January. A program that let those be chosen separately could be put
+into a state — Monday columns, US numbering — that is wrong in a way nobody
+could see, because every row would still hold seven days and every number would
+still increase by one. So `Week.Rule` decides the numbering *and* the column
+order, and choosing it moves both.
+
+### The year boundary is the whole of the difficulty
+
+For eleven months of the year the two rules differ by a day's shuffling. Then:
+
+```
+ 1 January 2021    ISO week 53   -- of 2020
+31 December 2019   ISO week 1    -- of 2020
+```
+
+Every ISO week belongs to exactly one year, which is what makes "week 40"
+something you can act on, and the price is a January that can begin in the year
+before. An implementation that returns 1 for the first days of January is wrong
+only there, and looks right for the rest of the year — so those two dates are
+the checks in `drive_calendar.py`, rather than a month picked because it was
+convenient.
+
+`Week.numberOf` was checked against Python's `datetime.isocalendar()` for
+**every day from 1900 to 2100** — 73,365 of them, no mismatches — before any of
+it was drawn. Zeller's congruence was checked against `date.weekday()` over the
+same range. That is a minute's work and it is the difference between a
+calendar and a plausible calendar; the pty driver then pins the two dates that
+matter, which is what a driver is for.
+
+### Every letter of "Calendar" was already taken
+
+`Alt-L` seemed free. It was not, and nothing static said so: **a button's
+caption claims an Alt key for as long as its window is open** — `~L~ive clock`
+in the converter and `C~l~ear` in the decoder — and a menu accelerator beats a
+button silently, because the menu bar is `ofPreProcess`. Three pty drivers
+failed and between them said exactly what had happened.
+
+`Unicode.gren` carried a comment reading *"where `Alt-C` is Time and `Alt-L` is
+free"*. It had been true when it was written. A comment asserting that a shared
+resource is unclaimed is a comment that goes stale silently, and the tally is
+now worth having in one place: **`J`, `K`, `Q` and `V` are what is left**, and
+no letter of *Calendar* is among them. So the tool is `Alt-K`, which is not a
+mnemonic for anything, and the underlined letter in the menu title stays on the
+`l` because that one only applies while the Tools menu is open — the two are
+different questions and only the accelerator is global.
+
+### What the third setting found
+
+Adding `weeks` broke both `Config.save` call sites, because each spelled out
+`{ theme = ..., timezones = ... }` by hand. The compiler caught them, which is
+the system working — but two hand-built copies of one record drift the moment
+something saves from a third place. There is a `saveSettings` now, and a fourth
+setting means adding it once.
+
+It also **wrote the key into files nobody asked it to**, which was the
+interesting failure. `drive_theme.py` has a check named *"the whole file, byte
+for byte, apart from the one word that moved"*, against a hand-written config
+with comments in it, and appending `weeks = "iso"` on a colour-scheme save
+broke it. The test's name is the promise: predc changes what it was asked to
+change. So `weeks` follows `timezones`'s rule rather than `theme`'s — written
+only when it is *not* the default, removed when it goes back — and a file
+belonging to somebody who never opened the calendar is untouched.
+
+That is the general shape: a setting whose absence and whose default are the
+same thing should be absent, and only a setting where they differ has to be
+written down. `timezones` had already made the argument for a different reason
+(`Nothing` and `Just []` are different lists) and the rule generalises.
+
+And it gave the **Options** menu its second entry, which is what that menu was
+created for two commits earlier: Colors alone did not need a menu, and the next
+setting had nowhere to go that would not make Tools wrong again.
+
+### And the watcher is gone
+
+The other unbuilt v2 tool — run a command every N seconds, run another when it
+exits with some value — is dropped rather than deferred, by Gilbert on
+2026-09-05. Worth recording *why* rather than just striking it out: `cron`,
+`systemd` timers and `watch(1)` all do it, and none of the reasons the other
+tools exist — one window, nothing shelled out, a thing you look at while you
+work — were true of it. The spec keeps the entry with the reason, because a
+requirement that was considered and declined is worth more than one that
+silently disappeared.

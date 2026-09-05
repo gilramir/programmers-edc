@@ -1,0 +1,461 @@
+module Tool.Calendar exposing (Model, Msg(..), Step, answered, command, init, menu, menuItem, update, view, windowId)
+
+{-| A month, with the day of the week each date falls on and the number of the
+week it is in.
+
+The month grid is `gren-tvision`'s calendar example, which is tvdemo's
+`calendar.cpp` in Gren, and the two findings that port made are the reason this
+one is straightforward. **"What day is it" is a field rather than something the
+view reads**, so the calendar renders any month it is handed and today is only
+the one that gets picked out; `TCalendarView`'s constructor calls `localtime()`
+and therefore *is* today, which is why the C++ cannot be tested and this can.
+And **waiting for the clock is visible**: `Time.here` and `Time.now` are tasks,
+so the first render happens before either has answered and the window says so
+rather than drawing a month that might be the wrong one.
+
+What is new here is the left-hand column, and the thing it forced. A week
+number means nothing without saying which day a week starts on, so the two are
+one setting -- see [`Week`](Week) -- and choosing it moves the columns as well
+as the numbers. It lives in the config file because it is a fact about the
+person rather than about the month they are looking at.
+
+-}
+
+import Math
+import Task
+import Theme exposing (Inks)
+import Time
+import Tui exposing (MenuItem(..), Span, View(..))
+import Week
+
+
+-- NAMES
+
+
+command : String
+command =
+    "tool.calendar"
+
+
+windowId : String
+windowId =
+    "calendar"
+
+
+canvasId : String
+canvasId =
+    "calendar.grid"
+
+
+{-| `Alt-K`, which is in no way a mnemonic for "calendar", and the reason is
+worth writing down because the next tool will hit it too.
+
+**A button's caption claims an Alt key for as long as its window is open**, and
+the menu bar is `ofPreProcess`, so a menu accelerator beats it silently. Every
+letter of *Calendar* was already spoken for -- `C` is the time converter, `A`
+the ASCII chart, `D` the hex viewer, `R` the calculator, `E` the decoder's
+Encoding menu, `N` and `L` two buttons (`~L~ive clock` in the converter,
+`C~l~ear` in the decoder). Taking `Alt-L` for this took it away from both of
+those, which is exactly what three pty drivers said when they failed.
+
+`J`, `K`, `Q` and `V` were what was left. The underlined letter in the title is
+a different question -- it only applies while the Tools menu is open -- so that
+stays on the `l` where a reader will look for it.
+-}
+menuItem : Tui.MenuItem
+menuItem =
+    Item { title = "Ca~l~endar", cmd = command, key = "Alt-K", shortcut = "Alt-K" }
+
+
+{-| The tool's own menu, which exists so that the keys have somewhere to be
+written down. Every entry is a key the canvas already answers.
+-}
+menu : MenuItem
+menu =
+    SubMenu
+        { title = "~M~onth"
+        , key = ""
+        , items =
+            [ Item { title = "~P~revious", cmd = "calendar.prev", key = "", shortcut = "Up" }
+            , Item { title = "~N~ext", cmd = "calendar.next", key = "", shortcut = "Down" }
+            , Tui.Separator
+            , Item { title = "Previous ~y~ear", cmd = "calendar.prevYear", key = "", shortcut = "PgUp" }
+            , Item { title = "Next y~e~ar", cmd = "calendar.nextYear", key = "", shortcut = "PgDn" }
+            , Tui.Separator
+            , Item { title = "~T~oday", cmd = "calendar.today", key = "", shortcut = "t" }
+            ]
+        }
+
+
+-- MODEL
+
+
+type alias Date =
+    { year : Int, month : Int, day : Int }
+
+
+type alias Model =
+    { -- Which month is on screen. `Nothing` until the clock answers, which is
+      -- the one state this tool can be in that it cannot draw a month for.
+      showing : Maybe { year : Int, month : Int }
+    , today : Maybe Date
+    }
+
+
+type Msg
+    = GotToday Date
+
+
+type alias Step =
+    { model : Model, command : Cmd Msg }
+
+
+{-| The zone and the instant are two tasks and both are needed before the word
+"today" means anything: `Time.now` is UTC and a calendar is a local thing.
+
+`Time.here` answers an offset rather than a zone name -- its own doc comment
+says it hands back `Etc/GMT-5` -- and an offset is all a calendar wants. The
+converter needs the name and pays a port for it; this does not.
+-}
+init : Step
+init =
+    { model = { showing = Nothing, today = Nothing }
+    , command =
+        Task.map2
+            (\zone now ->
+                { year = Time.toYear zone now
+                , month = monthNumber (Time.toMonth zone now)
+                , day = Time.toDay zone now
+                }
+            )
+            Time.here
+            Time.now
+            |> Task.perform GotToday
+    }
+
+
+monthNumber : Time.Month -> Int
+monthNumber month =
+    when month is
+        Time.Jan ->
+            1
+
+        Time.Feb ->
+            2
+
+        Time.Mar ->
+            3
+
+        Time.Apr ->
+            4
+
+        Time.May ->
+            5
+
+        Time.Jun ->
+            6
+
+        Time.Jul ->
+            7
+
+        Time.Aug ->
+            8
+
+        Time.Sep ->
+            9
+
+        Time.Oct ->
+            10
+
+        Time.Nov ->
+            11
+
+        Time.Dec ->
+            12
+
+
+monthName : Int -> String
+monthName month =
+    when month is
+        1 ->
+            "January"
+
+        2 ->
+            "February"
+
+        3 ->
+            "March"
+
+        4 ->
+            "April"
+
+        5 ->
+            "May"
+
+        6 ->
+            "June"
+
+        7 ->
+            "July"
+
+        8 ->
+            "August"
+
+        9 ->
+            "September"
+
+        10 ->
+            "October"
+
+        11 ->
+            "November"
+
+        _ ->
+            "December"
+
+
+-- UPDATE
+
+
+{-| The clock's answer, which is also the first month shown.
+-}
+answered : Msg -> Model -> Model
+answered msg model =
+    when msg is
+        GotToday date ->
+            { model
+                | today = Just date
+                , showing = Just { year = date.year, month = date.month }
+            }
+
+
+update : Tui.Event -> Model -> Model
+update event model =
+    when event is
+        Tui.KeyPressed pressed ->
+            if pressed.id == canvasId then
+                pressKey pressed.key model
+
+            else
+                model
+
+        Tui.Command cmd ->
+            if String.startsWith "calendar." cmd then
+                runCommand (String.dropFirst 9 cmd) model
+
+            else
+                model
+
+        _ ->
+            model
+
+
+pressKey : String -> Model -> Model
+pressKey key model =
+    when key is
+        "Up" ->
+            shift -1 model
+
+        "Down" ->
+            shift 1 model
+
+        "PgUp" ->
+            shift -12 model
+
+        "PgDn" ->
+            shift 12 model
+
+        "t" ->
+            toToday model
+
+        "T" ->
+            toToday model
+
+        _ ->
+            model
+
+
+runCommand : String -> Model -> Model
+runCommand name model =
+    when name is
+        "prev" ->
+            shift -1 model
+
+        "next" ->
+            shift 1 model
+
+        "prevYear" ->
+            shift -12 model
+
+        "nextYear" ->
+            shift 12 model
+
+        "today" ->
+            toToday model
+
+        _ ->
+            model
+
+
+{-| Move by whole months, carrying into the year.
+
+Written as an absolute month count rather than as a conditional, because "one
+before January" and "twelve before anything" are the same arithmetic and a
+branch for each is a branch to get wrong.
+-}
+shift : Int -> Model -> Model
+shift months model =
+    when model.showing is
+        Just showing ->
+            let
+                count =
+                    (showing.year * 12) + (showing.month - 1) + months
+            in
+            { model
+                | showing =
+                    Just
+                        { year = count // 12
+                        , month = Math.modBy 12 count + 1
+                        }
+            }
+
+        Nothing ->
+            model
+
+
+toToday : Model -> Model
+toToday model =
+    when model.today is
+        Just date ->
+            { model | showing = Just { year = date.year, month = date.month } }
+
+        Nothing ->
+            model
+
+
+-- VIEW
+
+
+rows : Int
+rows =
+    9
+
+
+{-| Four columns for the week number, three for each of seven days, and the
+gap. Written down so the window and the canvas cannot disagree about it.
+-}
+canvasWidth : Int
+canvasWidth =
+    26
+
+
+view : Inks -> Week.Rule -> Model -> Tui.Window
+view inks rule model =
+    { id = windowId
+    , title = "Calendar"
+    , rect = { x1 = 24, y1 = 4, x2 = 24 + canvasWidth + 4, y2 = 4 + rows + 4 }
+    , resize = Tui.fixedSize
+    , palette = Tui.BlueWindow
+    , canClose = True
+    , canMove = True
+    , views =
+        [ Canvas
+            { id = canvasId
+            , rect = { x1 = 2, y1 = 1, x2 = 2 + canvasWidth, y2 = 1 + rows }
+            , lines = display inks rule model
+            , cursor = Nothing
+            , takesFocus = True
+            }
+        ]
+    }
+
+
+display : Inks -> Week.Rule -> Model -> Array (Array Span)
+display inks rule model =
+    when { showing = model.showing, today = model.today } is
+        { showing = Just showing, today = Just today } ->
+            [ heading inks showing
+            , headings inks rule
+            ]
+                ++ weeks inks rule showing today
+
+        _ ->
+            -- One turn of the event loop, and the honest thing to show: a
+            -- month drawn before the clock answered could be the wrong one.
+            [ [ Tui.ink inks.dim "  asking the clock..." ] ]
+
+
+heading : Inks -> { year : Int, month : Int } -> Array Span
+heading inks showing =
+    let
+        text =
+            monthName showing.month ++ " " ++ String.fromInt showing.year
+    in
+    [ Tui.ink inks.ruler
+        (String.repeat (max 0 ((canvasWidth - String.count text) // 2)) " " ++ text)
+    ]
+
+
+headings : Inks -> Week.Rule -> Array Span
+headings inks rule =
+    [ Tui.ink inks.ruler ("Wk  " ++ String.join " " (Week.dayNames rule)) ]
+
+
+{-| Six rows of seven, which is every month there is: the longest a month can
+be laid out in is six weeks, and drawing a fixed six keeps the window one size.
+-}
+weeks : Inks -> Week.Rule -> { year : Int, month : Int } -> Date -> Array (Array Span)
+weeks inks rule showing today =
+    let
+        first =
+            Week.weekdayOf showing.year showing.month 1
+
+        -- How many blank cells before the 1st, given where this rule starts
+        -- its weeks. `+ 7` because the difference can be negative.
+        lead =
+            Math.modBy 7 (first - Week.startsOn rule + 7)
+
+        length =
+            Week.daysIn showing.year showing.month
+    in
+    Array.range 0 5
+        |> Array.map
+            (\row ->
+                let
+                    days =
+                        Array.range 0 6
+                            |> Array.map (\column -> (row * 7) + column - lead + 1)
+
+                    inMonth =
+                        Array.keepIf (\day -> day >= 1 && day <= length) days
+                in
+                when Array.first inMonth is
+                    Nothing ->
+                        -- A row with nothing in it is still drawn, so the
+                        -- window does not change height between months.
+                        [ Tui.plain "" ]
+
+                    Just anchor ->
+                        [ Tui.ink inks.ruler
+                            (String.padLeft 2
+                                ' '
+                                (String.fromInt
+                                    (Week.numberOf rule showing.year showing.month anchor)
+                                )
+                                ++ "  "
+                            )
+                        ]
+                            ++ Array.map (cell inks showing today length) days
+            )
+
+
+cell : Inks -> { year : Int, month : Int } -> Date -> Int -> Int -> Span
+cell inks showing today length day =
+    if day < 1 || day > length then
+        Tui.plain "   "
+
+    else if day == today.day && showing.month == today.month && showing.year == today.year then
+        Tui.ink inks.alert (String.padLeft 2 ' ' (String.fromInt day) ++ " ")
+
+    else
+        Tui.plain (String.padLeft 2 ' ' (String.fromInt day) ++ " ")

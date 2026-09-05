@@ -42,10 +42,12 @@ Korean too.
 # v2
 
 ## Watcher/Alarm/Timer
-Run some command every N seconds, and with it exits with some value, run
-another command. (like, email me)
-Or do that command at time T, or after T seconds.
 
+**Dropped, 2026-09-05.** Run a command every N seconds, or at time T, and run
+another when it exits with some value. Not wanted after all; `cron`, `systemd`
+timers and `watch` all do it, and none of the reasons the other tools exist --
+one window, no shelling out, a thing you can look at while you work -- were
+true of this one.
 
 ## Unicode encodings
 
@@ -60,6 +62,8 @@ as utf-8 or utf-16
 I want to be able to see a small monthly calendar, so I can see
 what days of the week each date falls on.
 It should also show the work week number for that month/year.
+
+**Done** -- see "A month, and which week it is" below.
 
 
 
@@ -210,6 +214,35 @@ Ranges are offsets into the file that is open, so opening another one drops
 them, and closing the window drops the whole tool the way it drops every other
 one here. Where two overlap the newer one shows; taking it off puts the older
 one back.
+
+## A month, and which week it is
+
+**Tools ▸ Calendar** (`Alt-K`) draws a month with today picked out, and a week
+number against each row. `Up`/`Down` move a month, `PgUp`/`PgDn` a year, `t`
+comes back to today — all of them on the **Month** menu as well, which is where
+the keys are written down.
+
+**The week number and the day a week starts on are one setting**, not two, and
+that is the whole of the design. A number without the other half means nothing:
+
+| | |
+|---|---|
+| **ISO 8601** | weeks start Monday; week 1 holds the first Thursday, i.e. 4 January |
+| **US** | weeks start Sunday; week 1 holds 1 January |
+
+So choosing between them moves the columns as well as the numbers. It is on
+**Options ▸ Week numbers** and is written to the config file, because it is a
+fact about you rather than about the month you are looking at — and only when
+it is not the default, so a file belonging to somebody who never opened the
+calendar stays as they wrote it.
+
+They agree for most of the year and part company at the ends of it, which is
+what makes ISO worth having and worth getting right: **1 January 2021 is week
+53 — of 2020 — and 31 December 2019 is week 1 of 2020.** Every week belongs to
+exactly one year under ISO, which is what makes "week 40" something you can act
+on; the price is a January that can start in the year before. The US rule has
+no such edge and, in exchange, no week number that means anything across a year
+boundary. `drive_calendar.py` pins both dates.
 
 ## What it is standing on
 

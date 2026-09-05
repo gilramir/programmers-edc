@@ -43,10 +43,12 @@ import Theme
 import Time
 import Tool.Ascii
 import Tool.Calc
+import Tool.Calendar
 import Tool.Hex
 import Tool.Time
 import Tool.Unicode
 import Tui exposing (Event(..), MenuItem(..), View(..))
+import Week
 
 
 -- PORTS
@@ -121,6 +123,7 @@ type alias Model =
     -- functions the shell calls.
     , ascii : Maybe Tool.Ascii.Model
     , calc : Maybe Tool.Calc.Model
+    , calendar : Maybe Tool.Calendar.Model
     , hex : Maybe Tool.Hex.Model
     , time : Maybe Tool.Time.Model
     , unicode : Maybe Tool.Unicode.Model
@@ -136,6 +139,10 @@ type alias Model =
     -- concern in the same way the menu bar is: it belongs to the program
     -- rather than to any tool, and every tool has to be told.
     , theme : Theme.Name
+    -- Which week numbering the calendar shows, which is a setting rather than
+    -- the calendar's own state: it is remembered when the window is not open,
+    -- and it is on the Options menu with the colour scheme.
+    , weeks : Week.Rule
     -- The other half of the config file, held here for the same reason the
     -- theme is: it belongs to the program rather than to a tool, and it has to
     -- outlive a tool that is closed and reopened.
@@ -156,6 +163,7 @@ type Msg
     -- A tool with tasks of its own has messages of its own, and they come
     -- back through the shell because `update` is the shell's. This is the
     -- first tool that needed either.
+    | FromCalendar Tool.Calendar.Msg
     | FromHex Tool.Hex.Msg
     | FromTime Tool.Time.Msg
     -- The config file was written, or was not. Either way there is nothing to
@@ -206,6 +214,7 @@ init env =
                     , permission = permission
                     , ascii = Nothing
                     , calc = Nothing
+                    , calendar = Nothing
                     , hex = Nothing
                     , time = Nothing
                     , unicode = Nothing
@@ -213,6 +222,7 @@ init env =
                     , session = Help.detect vars
                     , theme = config.theme
                     , timezones = config.timezones
+                    , weeks = config.weeks
                     , here =
                         when zoneName is
                             Time.Name name ->
@@ -389,6 +399,11 @@ update msg model =
         Saved ->
             { model = model, command = Cmd.none }
 
+        FromCalendar sub ->
+            { model = { model | calendar = Maybe.map (Tool.Calendar.answered sub) model.calendar }
+            , command = Cmd.none
+            }
+
         FromTime sub ->
             when model.time is
                 Just time ->
@@ -451,6 +466,12 @@ handleEvent event model =
         Command "theme.gren" ->
             chooseTheme Theme.Gren model
 
+        Command "weeks.iso" ->
+            chooseWeeks Week.Iso model
+
+        Command "weeks.us" ->
+            chooseWeeks Week.Us model
+
         -- Opening a tool that is already open raises its window instead of
         -- doing nothing, which is what the user meant by asking for it twice.
         -- `Tui.focus` is the only way to say it: which windows exist is the
@@ -478,6 +499,22 @@ handleEvent event model =
                     Just _ ->
                         { model = model
                         , command = Tui.focus tui Tool.Calc.windowId
+                        }
+
+            else if cmd == Tool.Calendar.command then
+                when model.calendar is
+                    Nothing ->
+                        let
+                            step =
+                                Tool.Calendar.init
+                        in
+                        { model = { model | calendar = Just step.model }
+                        , command = Cmd.map FromCalendar step.command
+                        }
+
+                    Just _ ->
+                        { model = model
+                        , command = Tui.focus tui Tool.Calendar.windowId
                         }
 
             else if cmd == Tool.Hex.command then
@@ -598,19 +635,53 @@ openTime model =
     }
 
 
+{-| Write the settings down, taking every one of them off the model.
+
+A helper rather than a record built at each call site, and the reason is that
+the compiler found both of the old ones the moment a third setting existed:
+each was spelling out `{ theme = ..., timezones = ... }` by hand, so adding a
+field meant remembering every place that saves. Now adding one means adding it
+here.
+-}
+saveSettings : Model -> Cmd Msg
+saveSettings model =
+    Config.save model.permission
+        model.configPath
+        { theme = model.theme
+        , timezones = model.timezones
+        , weeks = model.weeks
+        }
+        |> Task.perform (\_ -> Saved)
+
+
 chooseTheme : Theme.Name -> Model -> { model : Model, command : Cmd Msg }
 chooseTheme name model =
     if name == model.theme then
         { model = model, command = Cmd.none }
 
     else
-        { model = { model | theme = name }
-        , command =
-            Config.save model.permission
-                model.configPath
-                { theme = name, timezones = model.timezones }
-                |> Task.perform (\_ -> Saved)
-        }
+        let
+            chosen =
+                { model | theme = name }
+        in
+        { model = chosen, command = saveSettings chosen }
+
+
+{-| The same shape as `chooseTheme`, and for the same reason: a setting the
+user picked is written down as it is picked, because predc is a program people
+leave open and close with the window.
+-}
+chooseWeeks : Week.Rule -> Model -> { model : Model, command : Cmd Msg }
+chooseWeeks rule model =
+    if rule == model.weeks then
+        { model = model, command = Cmd.none }
+
+    else
+        let
+            chosen =
+                { model | weeks = rule }
+        in
+        { model = chosen, command = saveSettings chosen }
 
 
 {-| Every open tool is handed the event and answers for its own view ids; a
@@ -648,6 +719,7 @@ toTools event model =
         moved =
             { model
                 | ascii = Maybe.map (Tool.Ascii.update event) model.ascii
+                , calendar = Maybe.map (Tool.Calendar.update event) model.calendar
                 , calc = Maybe.map .model calc
                 , hex = Maybe.map .model hex
                 , time = Maybe.map .model time
@@ -708,10 +780,7 @@ toTools event model =
                 Nothing ->
                     Cmd.none
             , if wrote then
-                Config.save model.permission
-                    model.configPath
-                    { theme = model.theme, timezones = chosen }
-                    |> Task.perform (\_ -> Saved)
+                saveSettings { model | timezones = chosen }
 
               else
                 Cmd.none
@@ -822,6 +891,13 @@ view model =
                     Nothing ->
                         []
                )
+            ++ (when model.calendar is
+                    Just calendar ->
+                        [ Tool.Calendar.view (Theme.inks model.theme) model.weeks calendar ]
+
+                    Nothing ->
+                        []
+               )
             ++ (when model.hex is
                     Just hex ->
                         [ Tool.Hex.view (Theme.inks model.theme) hex ]
@@ -883,6 +959,7 @@ menuBar model =
             , Tool.Hex.menuItem
             , Tool.Time.menuItem
             , Tool.Unicode.menuItem
+            , Tool.Calendar.menuItem
             ]
         }
     ]
@@ -909,6 +986,11 @@ menuBar model =
                         { title = "~C~olors"
                         , key = ""
                         , items = Array.map (themeItem model.theme) Theme.all
+                        }
+                    , SubMenu
+                        { title = "~W~eek numbers"
+                        , key = ""
+                        , items = Array.map (weekItem model.weeks) Week.all
                         }
                     ]
                 }
@@ -963,6 +1045,30 @@ themeItem current name =
         }
 
 
+{-| The same tick as the themes, and the same reason: Turbo Vision has no
+checkable menu item, so the mark is a character in the title.
+
+The titles say what each rule *is* rather than only naming it, because "ISO" and
+"US" are not what somebody is choosing between -- which day the week starts on
+and which week gets number 1 are.
+-}
+weekItem : Week.Rule -> Week.Rule -> MenuItem
+weekItem current rule =
+    Item
+        { title =
+            (if rule == current then
+                "√ "
+
+             else
+                "  "
+            )
+                ++ Week.title rule
+        , cmd = "weeks." ++ Week.toKey rule
+        , key = ""
+        , shortcut = ""
+        }
+
+
 toolMenus : Model -> Array MenuItem
 toolMenus model =
     (when model.calc is
@@ -975,6 +1081,13 @@ toolMenus model =
         ++ (when model.hex is
                 Just _ ->
                     [ Tool.Hex.menu ]
+
+                Nothing ->
+                    []
+           )
+        ++ (when model.calendar is
+                Just _ ->
+                    [ Tool.Calendar.menu ]
 
                 Nothing ->
                     []

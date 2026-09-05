@@ -47,6 +47,7 @@ import Theme
 import Toml
 import Toml.Decode as Decode
 import Toml.Edit as Edit
+import Week
 
 
 type alias Config =
@@ -60,6 +61,12 @@ type alias Config =
     -- list would put the local zone straight back the next time predc started
     -- and there would be no way to say what the user plainly said.
     , timezones : Maybe (Array String)
+    -- Which week numbering the calendar uses, which also decides the day a
+    -- week starts on -- one setting, because a week number means nothing
+    -- without the other half. Not a `Maybe`: unlike the zone list, "never
+    -- configured" and "ISO" are the same calendar, so there is nothing for the
+    -- absence to mean.
+    , weeks : Week.Rule
     }
 
 
@@ -67,6 +74,7 @@ default : Config
 default =
     { theme = Theme.Borland
     , timezones = Nothing
+    , weeks = Week.Iso
     }
 
 
@@ -124,9 +132,13 @@ parse bytes =
 
 decoder : Decode.Decoder Config
 decoder =
-    Decode.map2 (\theme timezones -> { theme = theme, timezones = timezones })
+    Decode.map3
+        (\theme timezones weeks ->
+            { theme = theme, timezones = timezones, weeks = weeks }
+        )
         (optional "theme" (Decode.map Theme.fromKey Decode.string) default.theme)
         (Decode.maybe (Decode.field "timezones" (Decode.array Decode.string)))
+        (optional "weeks" (Decode.map Week.fromKey Decode.string) default.weeks)
 
 
 {-| A field that may not be there, and is its default when it is not.
@@ -259,4 +271,28 @@ apply config document =
 
                 Nothing ->
                     Edit.remove [ "timezones" ]
+           )
+        -- Written only when it is not the default, which is `timezones`'s rule
+        -- rather than `theme`'s and is the right one here. predc's bargain with
+        -- a hand-written file is that it changes the one thing it was asked to
+        -- change -- `drive_theme.py` asserts that byte for byte -- and adding a
+        -- key somebody never asked about, because they picked a colour scheme,
+        -- is not that. Choosing US writes it, with the sentence that says what
+        -- it is; choosing ISO back takes both away again, and the file is as it
+        -- was.
+        |> (when config.weeks is
+                Week.Iso ->
+                    Edit.remove [ "weeks" ]
+
+                other ->
+                    Edit.introduce [ "weeks" ]
+                        { blankBefore = True
+                        , leading =
+                            [ " How the calendar numbers weeks, and therefore which day a"
+                            , " week starts on: iso (Monday, the week holding 4 January)"
+                            , " or us (Sunday, the week holding 1 January). Absent is iso."
+                            ]
+                        , trailing = Nothing
+                        }
+                        (Edit.string (Week.toKey other))
            )
