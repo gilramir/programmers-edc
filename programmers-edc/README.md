@@ -168,6 +168,14 @@ menu you choose from -- and **All of it** takes the lot, one to a line, deepest
 first. The keys are on the display's bottom line, which now reads
 `Tab base, w width, y copy, v paste` and spends all thirty-four columns of it.
 
+**What it says after a copy is deliberately conditional.** With a terminal that
+confirms taking the text you get `Copied to the clipboard.`; with one that does
+not you get `Copied; F1 if it does not paste.` — because the `OSC 52` goes out
+either way and predc cannot know whether anything downstream took it. Inside
+tmux the default `set-clipboard external` swallows it and answers nothing, so
+the second sentence is the *normal* one there even when the copy worked. It is
+not a failure, and it does not say it is.
+
 `v` rather than `p`, which is the hex viewer's paste key: `p` here has been
 Drop since the day the calculator was written, and a key that throws away the
 top of your stack when you meant to paste is the worst possible place to be

@@ -6122,3 +6122,50 @@ The other three readers of the same 0 are left alone deliberately.
 none of them fires on the common path, and fixing them properly means deciding
 whether the constructor should reject such an item at all, which is a question
 for magiblot rather than a null check.
+
+
+### A canvas cuts a line off without a mark, which is the status line again
+
+`Copied 130 -- the terminal did not confirm it.` is forty-five characters. The
+calculator's canvas is thirty-four. It arrived on screen as
+
+    Copied 130 -- the terminal did not
+
+which is not a fragment: it is a finished English sentence that says the
+opposite of what the program meant, and the person reading it reasonably asked
+what it meant. The wording had been lifted from the hex viewer, whose window is
+half again as wide.
+
+This is the status line's failure in another costume — `TStatusLine` drops an
+entry that will not fit *whole and in silence*, and a canvas cuts a line at its
+width with no ellipsis — and it is the same lesson twice in one session:
+**anything that renders into a fixed width has to be measured, not eyeballed,
+and the failure will look plausible rather than broken.**
+
+Four of the calculator's messages were over the width, three badly:
+
+```
+Copied ... -- the terminal did not confirm it.   45+   unbounded
+The terminal will not hand the clipboard over -- type it instead.   65
+Not a dec number: <whatever was pasted>          unbounded
+There is nothing on the clipboard.               34   exactly at it
+```
+
+They are rewritten to fit, the pasted text in the refusal is elided at fifteen
+characters because it is somebody else's string and has no length, and
+`canvasWidth` is a named constant that the canvas rectangle is now derived from
+rather than repeating. `messageLine` also truncates with an ellipsis, so a
+future overlong message *looks* wrong instead of looking finished — the mark is
+the whole point of it.
+
+The copy result is two fixed sentences now rather than one built around the
+value: `Copied to the clipboard.` and `Copied; F1 if it does not paste.`. The
+value was never worth the columns — it is on the screen a row above — and the
+caveat is the half that needed room. It is also worded as a condition rather
+than a failure, which is what `toSystem = False` actually means: the `OSC 52`
+went out, and inside tmux's default `set-clipboard external` nothing will ever
+answer for it even when the copy worked.
+
+`drive_calc.py` checks the sentences arrive entire, and exercises the
+unconfirmed path by copying *before* the driver claims OSC 52 — which it had
+not been doing, and is exactly the case that was broken.

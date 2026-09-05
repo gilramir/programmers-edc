@@ -129,10 +129,11 @@ type alias Model =
     -- event, so without this a paste made in the hex viewer would land in the
     -- calculator's entry as well.
     , awaiting : Bool
-    -- What the last copy sent, worded for the message line. `Copied` says
-    -- whether anything outside took the text and nothing about what the text
-    -- was, so the sentence has to wait here for it.
-    , copied : Maybe String
+    -- Whether the last copy was this tool's. `Copied` reaches every open tool
+    -- and says only whether anything outside took the text, so the answer has
+    -- to be waited for -- but not the text itself: the value is on the screen
+    -- already, and a message naming it could not fit beside the caveat.
+    , copied : Bool
     , message : String
     }
 
@@ -144,7 +145,7 @@ init =
     , base = Dec
     , width = Nothing
     , awaiting = False
-    , copied = Nothing
+    , copied = False
     , message = ""
     }
 
@@ -152,6 +153,19 @@ init =
 rows : Int
 rows =
     5
+
+
+{-| How wide the canvas is, and therefore how long a message may be.
+
+Written down because it was not, and a line that does not fit is cut off
+without a mark: `Copied 130 -- the terminal did not confirm it.` arrived on
+screen as `Copied 130 -- the terminal did not`, which reads like a finished
+sentence and says the opposite of the truth. Every message below is written to
+fit this, and `messageLine` marks anything that still does not.
+-}
+canvasWidth : Int
+canvasWidth =
+    34
 
 
 -- UPDATE
@@ -215,28 +229,31 @@ update ports event model =
                 still model
 
         Tui.Copied it ->
-            when model.copied is
-                Just what ->
-                    still
-                        { model
-                            | copied = Nothing
-                            , message =
-                                "Copied "
-                                    ++ what
-                                    ++ (if it.toSystem then
-                                            "."
+            if model.copied then
+                still
+                    { model
+                        | copied = False
+                        , message =
+                            if it.toSystem then
+                                "Copied to the clipboard."
 
-                                        else
-                                            -- Not "nothing took it": the
-                                            -- `OSC 52` goes out every time and
-                                            -- the terminal simply never
-                                            -- answers for it. See `Tui.Copied`.
-                                            " -- the terminal did not confirm it."
-                                       )
-                        }
+                            else
+                                -- Not "nothing took it", and not the hex
+                                -- viewer's longer sentence either, which does
+                                -- not fit here and arrived cut off mid-clause.
+                                -- The `OSC 52` goes out every time; what is
+                                -- unknown is whether anything downstream took
+                                -- it -- tmux's default `set-clipboard
+                                -- external` swallows it and answers nothing,
+                                -- so this is the *normal* reading inside tmux
+                                -- even when the copy worked. Hence a
+                                -- conditional rather than a failure, and a key
+                                -- to press if it turns out to matter.
+                                "Copied; F1 if it does not paste."
+                    }
 
-                Nothing ->
-                    still model
+            else
+                still model
 
         Tui.Command cmd ->
             if String.startsWith "calc." cmd then
@@ -588,13 +605,15 @@ pasted answer model =
         { model
             | message =
                 if answer.fromSystem then
-                    "There is nothing on the clipboard."
+                    "The clipboard is empty."
 
                 else
                     -- Nothing outside answered *and* nothing here has copied:
                     -- the state every ssh session is permanently in, where it
                     -- is a fact about the terminal and not about a clipboard.
-                    "The terminal will not hand the clipboard over -- type it instead."
+                    -- Thirty-four columns will not hold that, so it is a
+                    -- pointer at the window that explains it instead.
+                    "No clipboard here -- F1 says why."
         }
 
     else
@@ -611,7 +630,20 @@ pasted answer model =
                 { model | entry = candidate, message = "" }
 
             Nothing ->
-                { model | message = "Not a " ++ baseName model.base ++ " number: " ++ cleaned }
+                { model
+                    | message =
+                        -- Bounded, because what was pasted is somebody else's
+                        -- text and can be any length at all.
+                        "Not a "
+                            ++ baseName model.base
+                            ++ " number: "
+                            ++ (if String.count cleaned > 15 then
+                                    String.takeFirst 14 cleaned ++ "…"
+
+                                else
+                                    cleaned
+                               )
+                }
 
 
 {-| Drop the prefix `show` writes for this base, and no other. In decimal the
@@ -672,7 +704,7 @@ copyAll ports model =
 
 sending : Tui.Ports msg -> String -> Model -> Step msg
 sending ports text model =
-    { model = { model | copied = Just text, message = "" }
+    { model = { model | copied = True, message = "" }
     , command = Tui.copyToClipboard ports text
     }
 
@@ -1323,7 +1355,7 @@ view inks model =
     , views =
         [ Canvas
             { id = canvasId
-            , rect = { x1 = 2, y1 = 1, x2 = 36, y2 = 9 }
+            , rect = { x1 = 2, y1 = 1, x2 = 2 + canvasWidth, y2 = 9 }
             , lines = display inks model
             , cursor = Just { x = 2 + String.count model.entry, y = rows + 1 }
             , takesFocus = True
@@ -1442,4 +1474,17 @@ messageLine inks model =
         [ Tui.ink inks.dim "Tab base, w width, y copy, v paste" ]
 
     else
-        [ Tui.ink inks.alert model.message ]
+        -- The ellipsis is the point. A canvas cuts a line off at its width
+        -- without a mark, so an overlong message arrives looking like a
+        -- finished sentence -- `Copied 130 -- the terminal did not` was one,
+        -- and it said the opposite of what it meant. Every message here is
+        -- written to fit `canvasWidth`; this is what makes a future one that
+        -- does not fit look wrong instead of look fine.
+        [ Tui.ink inks.alert
+            (if String.count model.message > canvasWidth then
+                String.takeFirst (canvasWidth - 1) model.message ++ "…"
+
+             else
+                model.message
+            )
+        ]

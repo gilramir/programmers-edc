@@ -335,10 +335,25 @@ def main():
     # using for the numbers that matter, which are the long ones: the whole
     # point of exact 64-bit arithmetic is numbers nobody wants to retype.
     #
-    # The terminal has to claim OSC 52 before any of this can be answered --
-    # `ESC]60;allowWindowOps` is what TVision reads as that claim -- and this
-    # driver is the terminal, so it can put what it likes on the clipboard and
-    # read back what predc puts there.
+    # First, a copy through a terminal that has claimed *nothing*, which is
+    # what a plain ssh session is and what tmux's default `set-clipboard
+    # external` amounts to: the `OSC 52` goes out and nothing answers for it.
+    # predc cannot know whether it landed, so it must not claim it failed --
+    # and it must say so in a sentence that fits, which this one did not until
+    # it arrived on somebody's screen as `Copied 130 -- the terminal did not`.
+    app.send(b"z", settle=0.5)
+    app.send(b"130", settle=0.4)
+    app.send(b"\r", settle=0.6)
+    mark = len(app.buf)
+    app.send(b"y", settle=1.0)
+    check("a copy goes out even when nothing will confirm it",
+          copied(app, mark) == "130", repr(copied(app, mark)))
+    check("and the unconfirmed answer is a whole sentence, not a cut one",
+          message(app) == "Copied; F1 if it does not paste.", repr(message(app)))
+
+    # Now the terminal claims OSC 52 -- `ESC]60;allowWindowOps` is what TVision
+    # reads as that claim -- and this driver is the terminal, so it can put what
+    # it likes on the clipboard and read back what predc puts there.
     app.send(b"\x1b]60;allowWindowOps\x07", settle=0.5)
     app.send(b"z", settle=0.6)
 
@@ -346,7 +361,7 @@ def main():
     check("and what comes back is in the entry, not on the stack",
           entry(app) == "1234567890" and top(app) == "", entry(app))
     check("and the asking line goes with the answer",
-          "clipboard" not in message(app), message(app))
+          "Asking" not in message(app), message(app))
     app.send(b"\r", settle=0.7)
     check("so Enter is still what pushes it", top(app) == "1234567890", str(stack(app)))
 
@@ -361,8 +376,7 @@ def main():
     app.send(b"y", settle=0.9)
     check("y copies the top of the stack", copied(app, mark) == "1234567890",
           repr(copied(app, mark)))
-    check("and says so, naming what it sent",
-          "Copied 1234567890" in message(app), message(app))
+    check("and says so", message(app).startswith("Copied"), message(app))
 
     # The round trip, which is the check the rest are for. `show` writes hex
     # with an `0x` and underscores every four digits; the underscores were
@@ -423,6 +437,33 @@ def main():
     check("and with nothing on it, y says so rather than copying nothing",
           (app.send(b"y", settle=0.7), "nothing on level 1" in message(app))[1],
           message(app))
+
+    # Nothing the calculator says may outrun its canvas. A canvas cuts a line
+    # off at its width without a mark, so an overlong message arrives looking
+    # like a finished sentence -- `Copied 130 -- the terminal did not` was one,
+    # and it said the opposite of what it meant.
+    #
+    # Two checks, because "fits" is not the same as "whole". `messageLine`
+    # guarantees the first by truncating, so the one worth making is that the
+    # sentences arrive entire: the two copy results are spelled out here in
+    # full, and they are the pair that overflowed.
+    said = []
+    app.send(b"z", settle=0.4)
+    app.send(b"y", settle=0.8)
+    said.append(message(app))
+    paste(app, "z" * 40)
+    said.append(message(app))
+    paste(app, "")
+    said.append(message(app))
+    for text in said:
+        check(f"the message fits the canvas: {text[:26]}",
+              len(text) <= 34, f"{len(text)}: {text!r}")
+
+    app.send(b"7", settle=0.3)
+    app.send(b"\r", settle=0.5)
+    app.send(b"y", settle=0.9)
+    check("a confirmed copy says so, whole",
+          message(app) == "Copied to the clipboard.", repr(message(app)))
 
     app.send(b"\x1bx", settle=1.0)
     code = app.wait(timeout=6)
