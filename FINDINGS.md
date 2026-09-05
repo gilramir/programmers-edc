@@ -6169,3 +6169,44 @@ answer for it even when the copy worked.
 `drive_calc.py` checks the sentences arrive entire, and exercises the
 unconfirmed path by copying *before* the driver claims OSC 52 — which it had
 not been doing, and is exactly the case that was broken.
+
+
+### The About box, and the third fixed space in one session
+
+**Help ▸ About** thanks Turbo Vision and Gren, with a link to each and a note
+that the design is Borland's by way of magiblot's port. That was the ask. What
+it turned into is the same lesson a third time.
+
+`Tui.messageBox` sizes itself from its text — `longest + 8` wide, `count + 7`
+tall — and **clamps both to the desktop without scrolling**. So a box with more
+text than there is room for does not lose the bottom of it politely: the OK
+button is positioned relative to the *dialog*, and lands on top of the text.
+Twenty-one rows of About in a twenty-row terminal came out as
+
+```
+              Written in Gren
+        https     OK    ▄.org
+```
+
+which is not a truncation, a wrap, or an error. It is the button drawn through
+a URL, and it reads as a rendering glitch rather than as "this does not fit".
+
+So the About is a ladder, the way the status line's paste hint is: three
+versions, and `aboutLines` returns the longest whose `count + 7` fits
+`desktop.rows`. The taglines go first, because a reader can get those from the
+README and the credits are the part that is only here; the last rung keeps the
+two names without their links, because a URL nobody can read all of is worse
+than a name they can search for. Checked at 80×24, 80×20, 60×18 and 60×14 — one
+rung each and no overlap at any of them.
+
+There is a floor and it is not mine: below about twelve rows, seven of which
+are `messageBox`'s frame, spacing and button, no dialog with a button fits at
+all. That is `Tui`'s to answer.
+
+**Three times in one session, and each looked like something else.** A status
+line entry that will not fit is dropped whole and in silence; a canvas cuts a
+message at its width and leaves a sentence that reads as finished; a dialog
+draws its button through its own text. None of them says "this does not fit",
+and all three were found by looking rather than by anything failing — which is
+the argument for measuring at the point of render, and for a driver that reads
+the screen at more than one size.

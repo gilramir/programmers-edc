@@ -988,15 +988,92 @@ toolMenus model =
            )
 
 
+{-| What predc is, and what it is standing on.
+
+The two credits are here rather than only in the README because this is the
+window somebody opens when they wonder what they are looking at, and both
+answers are worth giving: the frames, the menus and the modality are Borland's
+design by way of magiblot's port, and every line of predc itself is Gren.
+
+Each URL is on a line of its own. That is not layout for its own sake -- a
+`messageBox` takes its width from the longest line, so a label and a link on
+one row would make the dialog wider than either needs, and a URL sharing a row
+with words is harder to drag a mouse across.
+-}
 aboutDialog : Model -> Tui.DialogSpec
 aboutDialog model =
     Tui.messageBox
         { id = "about"
         , title = "About"
-        , text = "\n\u{0003}predc\n \n\u{0003}the programmer's every-day carry\n \n\u{0003}small tools, one terminal window\n"
+        , text = String.join "\n" (aboutLines model.desktop.rows)
         , buttons = Tui.okButtons
         , desktop = model.desktop
         }
+
+
+{-| The longest version of the About that fits the terminal it is being shown
+in, which is a ladder for the same reason the status line's paste hint is one.
+
+**A `messageBox` clamps to the desktop and does not scroll**, so a dialog with
+more text than there is room for does not lose the bottom of it politely: the
+OK button is placed relative to the dialog and lands *on top of the text*.
+Twenty-one rows of About in a twenty-row terminal came out with
+`https     OK    ▄.org` written across it, which is the third time in this
+program that something rendered into a fixed space has failed by looking like
+a mess rather than by saying so.
+
+`count + 7` is `messageBox`'s own arithmetic -- seven rows of frame, spacing
+and button -- so the rungs are measured against it rather than guessed. The
+floor is the chrome: below about twelve rows no dialog with a button in it
+fits, and that is `Tui`'s to answer rather than something to word around.
+-}
+aboutLines : Int -> Array String
+aboutLines rows =
+    let
+        fits candidate =
+            Array.length candidate + 7 <= rows
+    in
+    [ -- Everything: what it is, what it is for, and both credits in full.
+      [ ""
+      , "\u{0003}predc"
+      , " "
+      , "\u{0003}the programmer's every-day carry"
+      , " "
+      , "\u{0003}small tools, one terminal window"
+      , " "
+      , "\u{0003}Powered by Turbo Vision"
+      , "\u{0003}Borland's, ported by magiblot"
+      , "\u{0003}https://github.com/magiblot/tvision"
+      , " "
+      , "\u{0003}Written in Gren"
+      , "\u{0003}https://gren-lang.org"
+      , ""
+      ]
+    -- The taglines go first: they are the part a reader can get from the
+    -- README, and the credits are the part that is only here.
+    , [ ""
+      , "\u{0003}predc"
+      , " "
+      , "\u{0003}Powered by Turbo Vision"
+      , "\u{0003}https://github.com/magiblot/tvision"
+      , " "
+      , "\u{0003}Written in Gren"
+      , "\u{0003}https://gren-lang.org"
+      , ""
+      ]
+    -- And at the bottom, the two names without their links, because a URL
+    -- nobody can read all of is worse than a name they can search for.
+    , [ ""
+      , "\u{0003}predc"
+      , " "
+      , "\u{0003}Turbo Vision, and Gren"
+      , ""
+      ]
+    ]
+        |> Array.keepIf fits
+        |> Array.first
+        |> Maybe.withDefault
+            [ "", "\u{0003}predc", "" ]
 
 
 -- PROGRAM

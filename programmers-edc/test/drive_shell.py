@@ -95,6 +95,12 @@ def main():
     menu(app, "Help", b"a")
     about = app.render()
     check("About opened", "every-day carry" in about, about)
+    # The two credits, which are the reason anybody opens this box twice.
+    check("it thanks Turbo Vision, and says whose it was",
+          "Powered by Turbo Vision" in about and "Borland" in about
+          and "https://github.com/magiblot/tvision" in about, about)
+    check("and names Gren, with somewhere to go",
+          "Written in Gren" in about and "https://gren-lang.org" in about, about)
     edges = box_edges(about, "About")
     check("and it centred itself on the desktop",
           edges is not None and abs(edges[0] - (79 - edges[1])) <= 1,
@@ -108,10 +114,27 @@ def main():
     # the terminal and open it again: same test, a size the default cannot fake.
     app.resize(70, 20)
     menu(app, "Help", b"a")
-    edges = box_edges(app.render(), "About")
+    shrunk = app.render()
+    edges = box_edges(shrunk, "About")
     check("Resized reaches the model: the box re-centres on the new width",
           edges is not None and abs(edges[0] - (69 - edges[1])) <= 1,
           f"frame at {edges} of 70 columns")
+
+    # And it says less rather than overflowing. A `messageBox` clamps to the
+    # desktop and does not scroll, and the OK button is placed relative to the
+    # dialog -- so a box with more text than room does not lose the bottom of
+    # it, it draws the button *through* the text: `https     OK    ▄.org` was
+    # what twenty-one rows of About looked like in twenty rows. `aboutLines`
+    # picks the longest version that fits, so the credits survive and the
+    # taglines are what go.
+    check("a shorter terminal gets a shorter About",
+          "every-day carry" not in shrunk, shrunk)
+    check("but it keeps both credits, whole",
+          "https://github.com/magiblot/tvision" in shrunk
+          and "https://gren-lang.org" in shrunk, shrunk)
+    check("and nothing is drawn through anything else",
+          not any("https" in line and "OK" in line for line in shrunk.split("\n")),
+          [line for line in shrunk.split("\n") if "https" in line])
     app.send(b"\r", settle=0.9)
 
     # A key that came off the bar still works, because the Window menu carries

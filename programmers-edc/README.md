@@ -211,6 +211,19 @@ them, and closing the window drops the whole tool the way it drops every other
 one here. Where two overlap the newer one shows; taking it off puts the older
 one back.
 
+## What it is standing on
+
+**Help ▸ About** says so, and links both: Turbo Vision — Borland's design, as
+ported by [magiblot](https://github.com/magiblot/tvision) — and
+[Gren](https://gren-lang.org), which every line of predc is written in.
+
+The box shortens itself on a small terminal rather than overflowing. A
+`messageBox` clamps to the desktop and does not scroll, and its OK button is
+placed relative to the dialog, so a box with more text than room draws the
+button *through* the text. There are three versions and the longest that fits
+is the one shown; the credits are the last thing to go, and the taglines are
+the first.
+
 ## The status line says how to paste
 
 The bottom row is `Alt-X Exit`, `Alt-F3 Close`, and a sentence about pasting.
