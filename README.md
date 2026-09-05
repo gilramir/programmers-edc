@@ -230,13 +230,14 @@ Three commits sit on `patches` today:
   - a double-width character that TVision draws and then erases
     ([#233][i233]);
   - and `TMenuView::findHotKey` following a null `subMenu`, which segfaults on
-    the next keystroke after a menu gains an item with no command — not filed
-    upstream yet.
+    the next keystroke after a menu gains an item with no command
+    ([#234][i234]).
 
 FINDINGS has the story of each.
 
 [i230]: https://github.com/magiblot/tvision/issues/230
 [i233]: https://github.com/magiblot/tvision/issues/233
+[i234]: https://github.com/magiblot/tvision/issues/234
 
 **The first build needs network twice**: `gren make` fills `~/.cache/gren` with
 `gren-lang/core`, `gren-lang/node`, `gren-lang/url`, `gilramir/gren-argparse`

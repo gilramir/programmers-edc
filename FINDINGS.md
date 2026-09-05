@@ -6088,6 +6088,13 @@ mapping, alive with it.
 
 ### And the same fix upstream, which is six lines
 
+Reported as [magiblot/tvision#234][234], with a repro that is forty lines of
+`TApplication` and one synthetic keystroke: exit 139 against `8df03a8`,
+`survived the keystroke` and exit 0 with the patch, both run rather than
+reasoned about.
+
+[234]: https://github.com/magiblot/tvision/issues/234
+
 Ours is not to build the malformed item; TVision's is not to dereference a
 pointer it never checked. Both are worth having, and they are independent — so
 `fix/menu-hotkey-null-submenu` on the fork guards the walk:
