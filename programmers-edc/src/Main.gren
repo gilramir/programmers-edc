@@ -238,7 +238,28 @@ init env =
         Init.awaitTask Time.getZoneName <| \zoneName ->
             let
                 shell =
-                    { desktop = { cols = 80, rows = 23 }
+                    { -- What the terminal actually is, rather than the
+                      -- eighty-by-twenty-five everything assumes until
+                      -- `Resized` arrives. `Terminal.initialize` has already
+                      -- been awaited two lines up -- it reads
+                      -- `process.stdout` and touches nothing, so it is safe to
+                      -- ask before Turbo Vision has the terminal -- and it
+                      -- knows, so there is no reason to guess and then correct.
+                      --
+                      -- It matters because a window sized from the desktop is
+                      -- sized in `init`, before the first `Resized` can
+                      -- possibly have been delivered: `predc env` on a
+                      -- fifty-row terminal opened a window for a
+                      -- twenty-three-row one and left half the screen empty.
+                      -- Two rows off the terminal's own count, for the menu
+                      -- bar and the status line.
+                      desktop =
+                        when terminal is
+                            Just tty ->
+                                { cols = tty.columns, rows = max 1 (tty.rows - 2) }
+
+                            Nothing ->
+                                { cols = 80, rows = 23 }
                     , permission = permission
                     , environment = vars
                     , ascii = Nothing
@@ -335,7 +356,7 @@ open command shell =
 
         Cli.Env ->
             Node.startProgram
-                { model = Tui.Start { shell | env = Just (Tool.Env.init shell.environment) }
+                { model = Tui.Start { shell | env = Just (Tool.Env.init shell.environment shell.desktop) }
                 , command = Cmd.none
                 }
 
@@ -604,7 +625,7 @@ handleEvent event model =
             else if cmd == Tool.Env.command then
                 when model.env is
                     Nothing ->
-                        { model = { model | env = Just (Tool.Env.init model.environment) }
+                        { model = { model | env = Just (Tool.Env.init model.environment model.desktop) }
                         , command = Cmd.none
                         }
 

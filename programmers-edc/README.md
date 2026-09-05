@@ -403,6 +403,20 @@ right number for `PATH`. A name wider than the name column is written whole and
 its value starts one space after it, out of line with the rest — out of line is
 honest, cut off would not be.
 
+**The window fills the terminal, in both directions.** This tool is a list of
+everything and the only question it asks of a layout is how much fits, so every
+row the terminal has is a row worth having — and values wrap at whatever width
+the window is, so widening it is worth doing too. Drag the frame or zoom it and
+the wrapping follows.
+
+That forced one thing on the shell. A window sized from the desktop is sized in
+`init`, which runs *before* the first `Resized` can have arrived, so `predc env`
+on a fifty-row terminal opened a window for a twenty-three-row one. `Main` now
+seeds its idea of the desktop from `Terminal.initialize` — which it had already
+awaited, for the `--help` width — rather than from a guess it would correct a
+frame later. Every tool that centres or sizes itself gets the right answer in
+the first frame as a result.
+
 ## Random values
 
 **Tools ▸ Random values** (`Alt-V`) makes v4 UUIDs, or runs of random bytes

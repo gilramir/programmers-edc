@@ -46,16 +46,30 @@ PLANTED = {
 }
 
 
-def inside(app):
-    """The window's own rows.
+def frame(app):
+    """(left column, right column, row) of the window's top frame line."""
+    for row, line in enumerate(app.render().split("\n")):
+        if "╔" in line and "╗" in line:
+            return (line.index("╔"), line.index("╗"), row)
+    return None
 
-    Sliced by column rather than split on the side walls, because **the scroll
-    bar sits on the right wall**: every row of the list has one `║` and not
-    two, which is the hex viewer's layout and the reason a driver that split on
-    the walls found nothing at all here.
+
+def inside(app):
+    """The window's own rows, whatever size it is.
+
+    Sliced between the frame's two side walls rather than split on `║` --
+    because **the scroll bar sits on the right wall**: every row of the list
+    has one `║` and not two, which is the hex viewer's layout and the reason a
+    driver that split on the walls found nothing at all here. And by column
+    numbers read off the frame rather than hard-coded, because the window fills
+    the desktop and the desktop is whatever the terminal is.
     """
-    return [line[1:78].rstrip() for line in app.render().split("\n")
-            if line[:1] == "║"]
+    edges = frame(app)
+    if edges is None:
+        return []
+    left, right, _ = edges
+    return [line[left + 1:right].rstrip() for line in app.render().split("\n")
+            if len(line) > left and line[left] == "║"]
 
 
 def rows(app):
@@ -102,10 +116,18 @@ def entry(app, text, settle=1.0):
 
 
 def clear(app):
-    """Empty the search box. It has the caret only if nothing else took it, so
-    this is `/` first -- which is also the check that `/` comes back."""
-    app.send(b"/", settle=0.5)
-    app.send(b"\x08" * 24, settle=0.9)
+    """Empty the search box.
+
+    Clicked and then rubbed out rather than `/`-then-backspace, because `/`
+    only reaches the box from the *list*, and after a trip through the menu bar
+    the caret is not reliably in either. A click puts it somewhere known; a
+    click past the end of the text puts it at the end, which is the end
+    `Backspace` works from. (`Del` would want a selection, and a field only
+    selects its whole value when it *gains* the caret from the keyboard.)
+    """
+    left, _, row = frame(app)
+    app.click(left + 9 + 24, row + 2, settle=0.7)
+    app.send(b"\x08" * 32, settle=1.0)
 
 
 def main():
@@ -230,6 +252,47 @@ def main():
     app.send(b"\x1bx", settle=1.0)
     code = app.wait(timeout=6)
     check("Alt-X exits, and cleanly", code == 0, f"exit={code}")
+
+    # And the size, which is what this window is a list in.
+    #
+    # The complaint that produced all of this: `predc env` on a tall terminal
+    # opened a window for a twenty-three-row one and left half the screen
+    # empty. The window is sized in `init`, before any `Resized` can have been
+    # delivered, so the fix was for the shell to seed its idea of the desktop
+    # from `Terminal.initialize` rather than from a guess it would correct a
+    # frame later. This is the check that says so: a fresh program on a big
+    # terminal, looked at in its **first** frame with no resize event sent.
+    big = Pty(node_argv(LAUNCHER, "env"), env, cwd=ROOT, size=(100, 34))
+    big.pump(2.5)
+    left, right, row = frame(big)
+    check("the window fills the terminal in the very first frame",
+          (left, right, row) == (0, 99, 1), (left, right, row))
+    check("and the list is as tall as the terminal leaves it",
+          len(rows(big)) == 34 - 2 - 5, len(rows(big)))
+
+    # The other half: a value wraps at whatever width the window is, so a wide
+    # terminal is worth having and not merely tolerated. `ZZ_LONG` is two
+    # hundred characters of `x` and nothing else, so the count on its first
+    # line *is* the room the value was given -- the canvas less the name
+    # column and the two spaces after it.
+    def run_of_x(pty):
+        for line in rows(pty):
+            if line.startswith("ZZ_LONG"):
+                return line.count("x")
+        return 0
+
+    big.send(b"ZZ_LONG", settle=1.2)
+    check("a hundred columns give the value eighty-eight of them",
+          run_of_x(big) == 100 - 3 - len("ZZ_LONG") - 2, run_of_x(big))
+    big.resize(70, 20)
+    check("and seventy columns re-wrap it to fifty-eight, on the resize alone",
+          run_of_x(big) == 70 - 3 - len("ZZ_LONG") - 2, run_of_x(big))
+    check("the window came with the terminal rather than staying put",
+          frame(big)[1] == 69, frame(big))
+
+    big.send(b"\x1bx", settle=1.0)
+    code = big.wait(timeout=6)
+    check("and that one exits cleanly too", code == 0, f"exit={code}")
 
     return check.report(app)
 

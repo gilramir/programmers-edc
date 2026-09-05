@@ -6696,3 +6696,46 @@ version of `drive_env.py` did exactly that. Slice by column instead.
 The status line under the list is the other half of the same fact: it stops one
 column short of the bar, because a status line as wide as the scroll bar rubs
 the wall out on its own row and leaves the window looking torn.
+
+### A window sized from the desktop is sized before the desktop is known
+
+`Tool.Env` fills the terminal, because it is a list of everything and the only
+question it asks of a layout is how much fits. On a fifty-row terminal it
+opened a window for a twenty-three-row one and left half the screen empty.
+
+The rectangle is worked out in `init`, and `Resized` — the event that says how
+big the desktop is — cannot have arrived yet: the first render is what starts
+Turbo Vision, and `init` is what produces the first render. So the model was
+using the shell's placeholder, `{ cols = 80, rows = 23 }`, which is a guess
+written to be corrected one frame later. Every other tool got away with it
+because none of them sizes itself; the About box centres itself and *does*, and
+`drive_shell.py` has a check that it re-centres — which is the same bug, tested
+for and accepted rather than fixed.
+
+The answer was already in `init`, two `await`s up. `Terminal.initialize` reads
+`process.stdout` and touches nothing, so it is safe to ask before Turbo Vision
+has the terminal, and predc already awaited it — to decide whether to colour a
+`--help` and how wide to wrap it. It carries `columns` and `rows`. The shell now
+seeds `desktop` from that, less two rows for the menu bar and the status line,
+so the first frame is right rather than nearly right.
+
+**A placeholder that is corrected a frame later is not free.** It is invisible
+for as long as nothing reads it during that frame, and it is unfixable
+afterwards by anything except a second write that the user sees.
+
+### A stored rectangle is safe when it is a constant
+
+The hex viewer deliberately does *not* store its window's rectangle: what the
+model renders is what the differ compares against, so a rectangle that moves is
+a `setBounds` written over wherever the user last put the window. `Tool.Env`
+stores one, and the same rule is what makes that safe — it is computed once
+from the desktop and never changes, so the differ writes it once and never
+again.
+
+What happens afterwards is Turbo Vision's. A window built here is
+`gfGrowAll | gfGrowRel` (`tvnode.h`, `beWindow`), so it follows the terminal on
+its own; the model hears about the result through `WindowResized` and uses it
+for the two numbers that are about *content* rather than about the frame — how
+many rows of the list are on screen, and where a long value wraps. The frame is
+Turbo Vision's business and the text inside it is the model's, and each one
+minds the other's.
