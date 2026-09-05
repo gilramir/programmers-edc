@@ -7,6 +7,24 @@ the platforms this machine is not.
 Nothing here is done yet. It is written down because the answers took a
 morning to establish and would take another one to establish again.
 
+## Decided, 2026-09-05
+
+Not publishing yet -- Gilbert wants more of predc first -- but the shape is
+settled and these are the answers, so that starting does not mean deciding
+again.
+
+| | |
+|---|---|
+| **linux-x64-gnu** | the only prebuilt binary that matters. Built in a manylinux container, everything but glibc and terminfo linked statically. |
+| **arm64** | no prebuild. No hardware here and no demand; source build covers anybody who has it. |
+| **macOS** | no Mac owned, and none needed: GitHub Actions runners. Documented below, built when somebody wants it. |
+| **Windows** | the box exists but has no toolchain on it. CI runner first; set the box up only to debug something a log cannot explain. |
+| **delivery** | prebuildify, binary inside the tarball, source build as the fallback. Not postinstall downloads. |
+
+The order at the end of this file stands. Steps 1 and 2 -- `NAPI_VERSION` and
+the LICENSE files -- are worth doing whenever, because neither depends on
+anything else and both are things a reader checks first.
+
 ## The good news first: the user's `node` does not matter
 
 The addon is written against **Node-API** (`node-addon-api` 8.x, `Napi::` in
