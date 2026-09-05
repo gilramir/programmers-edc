@@ -5786,3 +5786,82 @@ it is the longest of the four and spends all seventy-six columns. And the
 check that it *fits* is not a length assertion on the string -- it is that
 column 78 of that row is still `║`, which is the frame, and which is the
 question a reader actually has.
+
+## One driver was the whole wall clock
+
+`devbox run test` took 229.6s. `drive_hex.py` took 208.7s of it. The other
+thirty-one suites finished inside the first 56s, and the last two and a half
+minutes were one Python process and fifteen idle cores.
+
+Nothing was wrong with the parallelism -- `run_tests.py` already runs
+`os.cpu_count()` suites at once, and they genuinely do not step on each other:
+separate processes, separate ptys, separate `mkdtemp` scratch directories. That
+is exactly why more of it bought nothing. **A parallel suite's wall clock is
+its slowest single member**, and a driver that outgrows the rest stops being a
+member and becomes the number.
+
+### Measure the phases; do not reason about the file
+
+`drive_hex.py` was a thousand lines in seventeen numbered phases. Timing a
+throwaway instrumented copy of it, rather than counting lines or settles:
+
+```
+ 1-11  open, dialog, dump layout, movement, paging, go-to, mouse, bar    39.1s
+   12  window resize                                                     18.9s
+   13  highlighting                                                      45.2s
+   14  yanking, including the megabyte                                   30.8s
+   15  pasting                                                           61.3s
+16-17  small and empty files, close and reopen                           13.4s
+```
+
+Three phases were two thirds of it, and they fell on a seam that was already
+conceptual -- reading a file, marking it, and the clipboard. Four drivers now
+(`drive_hex.py`, `_marks`, `_yank`, `_paste`) over a shared `hex_common.py`:
+**208.7s to 71.9s**. The predictions were 71/53/39/69 and the measurements
+71.9/56.5/38.5/69.0, which is the useful part -- the phase timings were the
+whole design.
+
+The suite went 229.6s to 149.6s rather than to the ~79s that arithmetic
+suggests, and the reason is the lesson repeating itself one driver later:
+**`drive_time.py` is 125.2s and is the wall clock now.** It was always the
+second pole and was invisible behind the first -- a per-suite table read off a
+still-running log had not seen it report yet, which is its own small warning
+about measuring a parallel run before it finishes. Splitting it the same way is
+the next such win, and 125.2s is the number to beat.
+
+### A driver's cost is not linear in its length
+
+`Pty.display()` replays the entire stream into a fresh emulator whenever the
+buffer changes -- deliberately, because a stateful emulator that could drift is
+not worth debugging. So a session pays for its own history on every check, and
+a long driver is quadratic in itself. Four short sessions each replay a quarter
+as much, a quarter as often.
+
+That is visible in the phase table above: pasting cost more than highlighting
+despite being shorter, because it ran later, against a bigger buffer. It is
+also why `forget_copies` exists, and why the split beats what dividing 208 by
+four would predict for the two long tails.
+
+### Two orderings that were comments are now structure
+
+Both were real constraints held only by a note in the file, and both are held
+by the process boundary now, which is the better half of the change:
+
+  - **`p` with nothing ever copied.** predc falls back to its own last copy, so
+    the check that it names the *terminal* rather than the clipboard -- the
+    true sentence over ssh -- only works before anything has copied. It lives
+    in `drive_hex.py`, which is now the driver that never copies anything.
+  - **`ESC]60;allowWindowOps`**, which is what TVision reads as "this terminal
+    really does answer an OSC 52". Nothing pastes before it. `hex_common`'s
+    `allow_osc52` sends it; `_paste` calls it in setup, `drive_hex.py` calls it
+    after the `p` check and before the paste at the end, and `_yank` does not
+    call it at all -- because opening with the sentence predc prints *without*
+    the claim is what that phase is for.
+
+### The safeguard
+
+A split like this fails by silently dropping checks, which is the same shape of
+problem `check_consistency.py` exists for. The count is the guard: 148 checks
+in the old file, 49 + 39 + 16 + 32 + 12 by phase, and 61 + 39 + 16 + 32 = 148
+across the four afterwards -- and 951 for the suite, unchanged, before and
+after.

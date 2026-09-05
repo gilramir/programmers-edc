@@ -19,9 +19,16 @@ devbox run gren -- <example> [args]
 
 The pty drivers run several at a time, through `tools/run_tests.py`. They are
 almost entirely asleep -- typing at a pty and waiting for a repaint -- so
-running them in parallel took the suite from three and a half minutes to about
-thirty seconds, and the wall clock is now the slowest single driver. That
-script can also be run directly, which is what to do while working on one:
+running them in parallel took the suite from three and a half minutes to the
+length of its slowest single driver, which is the number that matters and the
+only one worth watching. **A driver that grows past the rest of them stops
+being a suite and becomes the wall clock**: `drive_hex.py` reached 208s of a
+229s run with fifteen of sixteen cores idle behind it, and was split into four
+(208.7s to 71.9s; the suite is 149.6s). Measure before splitting -- its phases
+were 45s, 31s and 61s against a dozen that were seconds -- and see
+`hex_common.py` for the shape a split takes. **`drive_time.py` at 125.2s is
+the wall clock now**, and is the next one. That script can also be run
+directly, which is what to do while working on one:
 
 ```sh
 devbox run -- python3 tools/run_tests.py entries   # just this one
