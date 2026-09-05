@@ -6389,3 +6389,28 @@ failing. The bound is exactly the range that was checked against Python's
 the week number. Outside it the dialog refuses, rather than clamping, because a
 calendar that answered a different year than the one asked for would be wrong
 in the one way a calendar must never be.
+
+
+### A drop-down is one value; a list beside a field is two
+
+Typing a month's name is a strange thing to ask somebody to do, and the obvious
+fix — a list of twelve beside the year field — is the wrong one, for a reason
+that is specific to this binding. **A dialog's views are built once and the
+differ has no path into an open modal**, which is written down as a gap in
+`examples/README.md` and is why the time converter's zone picker is an ordinary
+window rather than a dialog. So a list and a field could never be kept in step:
+nothing could move the highlight when the field was typed into, or fill the
+field when the highlight moved. Whichever one the code read on OK, the other
+would sometimes be showing something else.
+
+Turbo Vision already has the answer and the binding already exposes it.
+`THistory` — `Tui.History { id, for, items }` — is a `▼` attached to an input
+line: it opens a pick-list and choosing writes **into the field**. One value by
+construction, and both ways in that were asked for: pick a name, or type a
+number. `9`, `sep` and `September` were already the same month to `monthFrom`,
+so nothing about the parsing changed.
+
+It is worth noticing that `History` had never been used outside
+`Tui.fileDialog`, whose doc names `"fileHistory"` as a reserved id. It is a
+general view type and works in any dialog; the field just has to leave three
+columns for the arrow.

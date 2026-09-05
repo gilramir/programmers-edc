@@ -227,8 +227,15 @@ opens a calendar and sees one month has no way to guess which keys move it.
 poor answer to "show me March 2019": nine presses of one key and then eleven of
 another, counting as you go, with the heading to re-read after each. `g` asks
 for a month and a year instead, prefilled with what is on screen — so "same
-month, other year" is one edit. The month takes a name or a number, and three
-letters is enough because no two months share one. A month it cannot read and a
+month, other year" is one edit.
+
+**The month field has a drop-down on it**: the `▼` opens the twelve names and
+picking one writes it into the field, so nobody has to remember whether
+September is 9 or 10. Typing still works and a number is the short way — `9`,
+`sep` and `September` are the same month. It is a drop-down rather than a list
+beside the field because a dialog's views are built once and nothing patches an
+open modal, so a list and a field could never have been kept in step; one that
+*fills* the field has a single value by construction. A month it cannot read and a
 year it cannot draw are refused separately, since those are different mistakes
 and one message for both would send you to check the field that was fine.
 

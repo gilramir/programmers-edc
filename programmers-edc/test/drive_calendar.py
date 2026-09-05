@@ -199,9 +199,36 @@ def main():
     check("and Escape leaves the calendar where it was",
           heading(app) == (2021, 1), str(heading(app)))
 
-    check("a month by name is a month", go_to(app, 2019, None, name="march") == (2019, 3),
+    #     The drop-down, which is the way somebody who does not remember
+    #     whether September is 9 or 10 gets there. It writes into the field, so
+    #     there is one value and nothing to keep in step -- a list *beside* the
+    #     field could not be kept in step, because a dialog's views are built
+    #     once and nothing patches an open modal.
+    app.send(b"g", settle=1.0)
+    arrow = None
+    for row, line in enumerate(app.render().split("\n")):
+        if "↓" in line:
+            arrow = (line.index("↓") + 1, row + 1)
+            break
+    check("the month field has a drop-down on it", arrow is not None, app.render())
+    app.click(arrow[0], arrow[1], settle=1.4)
+    listed = app.render()
+    check("the drop-down lists the twelve months",
+          all(m in listed for m in ("January", "February", "March")), listed)
+    app.send(b"\x1b[B" * 2, settle=0.5)
+    app.send(b"\r", settle=1.2)
+    check("and picking one writes it into the field",
+          "March" in app.render(), app.render())
+    app.send(b"\t", settle=0.3)
+    app.send(b"\x1b[3~" * 6, settle=0.3)
+    app.send(b"2019", settle=0.4)
+    app.send(b"\r", settle=1.3)
+    check("so the calendar goes where the list said", heading(app) == (2019, 3),
           str(heading(app)))
     check("and 1 March 2019 is week 9", weeks(app)[0] == 9, str(weeks(app)))
+
+    check("a month by name is a month", go_to(app, 2019, None, name="march") == (2019, 3),
+          str(heading(app)))
     check("a three-letter prefix is enough, since no two months share one",
           go_to(app, 2019, None, name="sep") == (2019, 9), str(heading(app)))
     check("and so is a number", go_to(app, 2019, 11) == (2019, 11), str(heading(app)))

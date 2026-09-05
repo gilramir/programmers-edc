@@ -478,14 +478,26 @@ toToday model =
 
 {-| Name a month outright, rather than walking to it.
 
-Two fields and not a list of twelve, because the year needs typing anyway and
-a dialog with a list in it and a field beside it is two ways of answering one
-question. Both are prefilled with what is on screen, so "same month, other
-year" is one edit -- which is the commonest thing anybody does here.
+**The month is a field with a drop-down on it**, which is Turbo Vision's
+`THistory`: the `▼` beside the field opens the twelve names, and choosing one
+writes it into the field. That is the shape this wants and it took a while to
+see. A list *beside* a field would have been two ways to answer one question
+and no way to keep them agreeing -- a dialog's views are built once and the
+differ has no path into an open modal, so nothing could move the list when the
+field was typed in, or the reverse. A drop-down that fills the field has one
+value by construction.
 
-The field goes in the `views` array *before* the `Label` that names it: a label
-names a view that has to exist already, and listing them the other way round
-throws out of the builder and takes the dialog with it.
+So typing still works, and typing a number is the short way: `9`, `sep` and
+`September` are the same month. The list is for the far commoner case of not
+wanting to remember whether September is 9 or 10.
+
+Both fields are prefilled with what is on screen, so "same month, other year"
+-- the commonest thing anybody does here -- is one edit.
+
+The field goes in the `views` array *before* the `Label` that names it and
+before the `History` that drops down from it: both name a view that has to
+exist already, and listing them the other way round throws out of the builder
+and takes the dialog with it.
 -}
 gotoDialog : Model -> Tui.DialogSpec
 gotoDialog model =
@@ -511,10 +523,15 @@ gotoDialog model =
     , views =
         [ InputLine
             { id = monthFieldId
-            , rect = { x1 = 11, y1 = 2, x2 = width - 3, y2 = 3 }
+            , rect = { x1 = 11, y1 = 2, x2 = width - 6, y2 = 3 }
             , maxLen = 12
             , value = monthName showing.month
             , allowed = Nothing
+            }
+        , History
+            { id = "calendar.goto.months"
+            , for = monthFieldId
+            , items = Array.map monthName (Array.range 1 12)
             }
         , Label
             { id = "calendar.goto.monthLabel"
@@ -538,7 +555,7 @@ gotoDialog model =
         , StaticText
             { id = "calendar.goto.hint"
             , rect = { x1 = 3, y1 = 6, x2 = width - 3, y2 = 7 }
-            , text = "a name or 1-12, and 1-9999"
+            , text = "pick a month, or type 1-12"
             }
         , Button
             { id = "calendar.goto.ok"
