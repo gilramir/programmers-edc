@@ -223,10 +223,17 @@ checkout on a detached HEAD, which is a poor place to write the next fix —
 so a clone needs no key; the checkout's own `origin` is the ssh one, and
 `git submodule sync` will overwrite that if you ever run it.
 
-There are two commits on `patches` today: a `delete`/`delete[]` mismatch that
-kills any AddressSanitizer build ([#230][i230]), and a double-width character
-that TVision draws and then erases ([#233][i233]) — see the last section of
-[FINDINGS.md](FINDINGS.md).
+Three commits sit on `patches` today:
+
+  - a `delete`/`delete[]` mismatch that kills any AddressSanitizer build
+    ([#230][i230]);
+  - a double-width character that TVision draws and then erases
+    ([#233][i233]);
+  - and `TMenuView::findHotKey` following a null `subMenu`, which segfaults on
+    the next keystroke after a menu gains an item with no command — not filed
+    upstream yet.
+
+FINDINGS has the story of each.
 
 [i230]: https://github.com/magiblot/tvision/issues/230
 [i233]: https://github.com/magiblot/tvision/issues/233

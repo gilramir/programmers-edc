@@ -6086,7 +6086,32 @@ meant anyway: nothing to dispatch and nothing to choose.
 of menu and one keystroke. Verified in both directions: `-11` without the
 mapping, alive with it.
 
-**Upstream is a separate one-line fix** and worth sending: `findHotKey` should
-null-check `p->subMenu` before following it, which turns a segfault into "no
-hot key here" and costs nothing. That is magiblot's to take; ours is not to
-build the malformed item in the first place.
+### And the same fix upstream, which is six lines
+
+Ours is not to build the malformed item; TVision's is not to dereference a
+pointer it never checked. Both are worth having, and they are independent — so
+`fix/menu-hotkey-null-submenu` on the fork guards the walk:
+
+```cpp
+if( p->command == 0 )
+    {
+    if( p->subMenu != 0 )
+        {
+        TMenuItem *T;
+        if( (T = findHotKey( p->subMenu->items, key )) != 0 )
+            return T;
+        }
+    }
+```
+
+An item with no command and no submenu carries no hot key, so skipping it is
+the only sensible reading. Verified on its own: with the binding's
+`kCmdNothing` mapping taken back out, so that only the library fix is in play,
+`regress_menu.js` survives the keystroke that used to kill it.
+
+The other three readers of the same 0 are left alone deliberately.
+`updateMenu` (`:487`) hands the pointer to a function that null-checks it,
+`~TMenuItem` (`:81`) frees it, and `TMenuBox` only draws an arrow beside it —
+none of them fires on the common path, and fixing them properly means deciding
+whether the constructor should reject such an item at all, which is a question
+for magiblot rather than a null check.
