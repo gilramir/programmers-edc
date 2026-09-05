@@ -47,7 +47,9 @@ package. Nice side effect; the build works offline.
   object, and a `.node` is a shared object.
   `-DCMAKE_POSITION_INDEPENDENT_CODE=ON`.
 - **tvision builds clean under gcc 15.3.0**, PIC, examples off, GPM off, in
-  about two minutes. No patches.
+  about two minutes. No patches -- which stayed true until 2026-09-04 and the
+  wide-character bug at the end of this file; `tvision-node/patches/` now holds
+  one, applied by `build-tvision.sh` and deleted when it lands upstream.
 - **`napi.h` must be included before `<tvision/tv.h>`.** The Borland
   compatibility headers define `Boolean`, `True`, `False` and a pile of macros;
   V8's headers do not enjoy meeting them.
@@ -5612,3 +5614,162 @@ over one list scrolls that list and not the one beside it. It turned one notch
 at a time, so it never built a queue. A test that is slower than a person is a
 test of something a person will not do.
 
+
+## The character that decoded and would not draw
+
+Reported from a real terminal, like the wheel above, and by somebody using the
+Unicode decoder for the thing it is for: paste `メモ`, and predc says `U+30E1`
+and `U+30E2` -- correct, and the whole point of the tool -- while the `char`
+column beside them is **blank**. Every pty check in the suite passed
+throughout, including one written expressly to check that a wide character is
+on the screen.
+
+The first question was whether the font could draw Katakana, and the answer was
+that the same terminal was drawing `メモ` in the message that reported it. So
+the font was not it.
+
+### It is TVision, and no part of this repo is involved
+
+Cheapest way to find out: a thirty-line `TApplication` with one `TView` that
+does `moveStr` of `"[A" "メモ한" "B]"`, linked against `libtvision.a`, run under
+`tmux capture-pane`. No Gren, no node, no binding.
+
+    [A      B]
+
+Six columns reserved for three characters, and nothing in them.
+
+### validateCell eats the flag the flush algorithm needs
+
+A double-width character is one glyph in two cells. `TText::drawOneImpl` writes
+it into the first, marks the second with `TScreenCharacter::fTrail`
+(`ttext.cpp:350`), and returns a width of two -- which is why the columns are
+reserved and why every other column on the row lines up. Nothing there is
+wrong.
+
+Then `DisplayBuffer::validateCell` runs on every cell on its way to the screen:
+
+    TStringView text = cell.character.getText();
+    uchar c = text[0];
+    if (c == '\0')
+        cell.character.initWithChar(' ');
+
+A trail cell's text is one `'\0'`, so it takes the first branch --
+and `initWithChar` begins `*this = {}`, which zeroes `_flags` and takes the
+trail marking with it. `getText()`'s own comment says *"Pre: This is not a wide
+char trail"*, and the flush algorithm has a comment saying the value "is
+otherwise discarded in `ensurePrintable()`", which is what `validateCell` used
+to be called. So the discarding is known about. What is not is what happens
+next.
+
+`FlushScreenAlgorithm::handleWideCharSpill` writes the wide character, then
+walks the cells it spills into to make sure they are trails. They are not any
+more -- they are spaces. On unix `wideOverlapping` is `true`, so the branch it
+takes is the one whose comment reads *"Write over the wide character"*:
+
+    ...U+30E1   ␛[36G    basic multilingual plane
+
+`メ` goes in at column 35, and then the caret is moved **back** to 36 -- the
+right half of it -- and a space is written there. A terminal answers a write
+into the second cell of a double-width character by blanking *both* halves, so
+the character is gone. The columns stay reserved, which is why nothing else on
+the row moves and why this looks like a font problem.
+
+There is a patch in `tvision-node/patches/`, which is a directory this repo did
+not have and did not want. `build-tvision.sh` applies whatever is in it,
+`git apply -R --check` first so a rebuild is a no-op and a checkout where the
+fix has landed upstream is left alone with a message. The rule that the
+`tvision/` checkout tracks upstream master rather than a pinned revision is
+unchanged; a patch lives there only while an upstream bug is open, and the file
+says so at the top.
+
+### The harness was the reason nobody knew
+
+`drive_unicode.py` has had this check since the day it was written:
+
+    check("and the character itself is on the screen",
+          "한" in rows(app)[3] and "😀" in rows(app)[6], ...)
+
+It passed. It passed against the broken library, every run, from the day it
+was written.
+
+`Screen._put` in `harness.py` wrote a wide character into its cell and a filler
+space into the cell beside it -- which is right, and is what keeps a row's
+string index and its column the same number, the thing every driver counts on.
+But a filler space and a *written* space were then the same thing, so the space
+TVision writes over the right half landed on the filler and the left half sat
+there being found by `in`. The model had no way to represent the one state that
+mattered.
+
+It does now. A row keeps the set of columns holding the **left** half of a wide
+character, and `_break_at` erases the pair when anything is written into either
+of them, which is what a terminal does -- tmux is the one that was measured
+here, through `capture-pane`. Erases (`CSI K`, `CSI J`) go through the same
+helper.
+
+With the library patch reverted, the check above fails, and its failure message
+is the blank `char` column the bug report described. That is the point of
+fixing a harness rather than only a library: **the check was already written,
+and the emulator was answering a question a real terminal would have answered
+the other way.**
+
+The general rule, which is worth more than this instance: a screen model that
+cannot represent a state cannot fail a check about it, and it will not say so
+-- it will pass. The wide-character trail was the second cell of a pair the
+model stored as two independent cells, and two independent cells is exactly one
+bit short of what a terminal knows.
+
+### A button costs a row, and says nothing when it does not get one
+
+The same window gained a `Clear` button, because emptying its field by hand is
+the two-trap dance CLAUDE.md warns about -- leave, come back for a fresh
+selection, then `Del` -- and somebody switching a field of text over to hex
+should not have to know either trap.
+
+The first attempt put it on the entry row, one row tall, and it drew nothing at
+all. `TButton::drawState` draws the face on rows `0 .. size.y - 2` and the
+shadow on `size.y - 1` (`tbutton.cpp:124`), so a one-row button is a loop that
+runs zero times followed by a shadow. No error, no warning, no button --
+which is the same silence as the four places a view type has to be added in,
+and the same cure: know the rule. **A `Button` needs two rows**, and the
+window is a row taller than the rows it shows because of it.
+
+The hotkey is `C~l~ear` and the menu entry is `~C~lear the field`, which look
+inconsistent and are each the only letter free where they are: a menu entry's
+hotkey is local to the open pull-down, where `L` is already `Read as UTF-16
+~L~E` and `C` is free, while a button's is an Alt- accelerator competing with
+the status line, where `Alt-C` is Time and `Alt-L` is free.
+
+`takesFocus = False`, so it is pressable by mouse and by `Alt-L` and is not in
+the tab order. That is not a preference: the field is first so that it holds
+the caret when the window opens, and one `Tab` from there has to reach the
+radio and two the rows, which is the route every letter command in
+`drive_unicode.py` depends on. There is a check that says so now.
+
+### And a line that says how to paste, because the window is where the question is
+
+The other half of the same report. predc already has a whole window that
+answers "why can I not paste into this?", measured rather than guessed, and
+`p` in the decoder already says *the terminal will not hand the clipboard
+over; type into the field instead* when it cannot. What it never said is what
+to press instead, and the place to say that is the window somebody is already
+looking at.
+
+So there is a permanent line under the rows: `Paste  Ctrl-Shift-V, Shift-Ins,
+tmux prefix ] into the field.  F1 for why.` It is session-aware -- `prefix ]`
+only inside tmux, `p reads the clipboard` only where there is a display -- and
+the sentence lives in `Help.pasteHint` rather than in the decoder, because
+there is exactly one correct answer to that question and a second copy of it is
+a second copy that will go stale.
+
+It cost no rows. The window's height arithmetic was already leaving one
+interior row empty -- `rowsIn` said `height - 6` while the layout used five
+rows of chrome -- so the line went where the blank row was, and adding the
+button's shadow row made `rowsIn` right for the first time.
+
+Two things about testing it. The sentence depends on the environment, so
+`drive_unicode.py` now dresses one: it clears `SSH_*` and `STY` and sets
+`TMUX`, the way `drive_help.py` already did, and pins the tmux variant because
+it is the longest of the four and spends all seventy-six columns. And the
+check that it *fits* is not a length assertion on the string -- it is that
+column 78 of that row is still `║`, which is the frame, and which is the
+question a reader actually has.

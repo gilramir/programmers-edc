@@ -6,6 +6,7 @@ module Help exposing
     , init
     , menuItem
     , opened
+    , pasteHint
     , update
     , view
     , windowId
@@ -472,6 +473,40 @@ yours model =
                     ]
            )
         ++ [ Gap ]
+
+
+{-| The same answer as [`pressing`](#pressing) in one line, for a window that
+has a row to spare rather than a page.
+
+It lives here and not in the window that draws it because there is exactly one
+correct answer to "how do I paste" and it depends on the session, so a second
+copy of it somewhere else is a second copy that will go stale. The Unicode
+decoder draws this under its rows; the hex viewer's `Type bytes` field is the
+same field and the same sentence would fit it.
+
+**Seventy-six columns is the budget** -- the decoder's canvas -- and the
+`screen` variant already spends all of them, so that is the one to measure
+against when any of this changes.
+
+The order is deliberate. `Ctrl-Shift-V` first because it is the route that
+cannot fail: the terminal reads its own clipboard and types the characters at
+the program, so no display, no helper and no escape sequence is involved. `p`
+is named last, and only where it can work, because `p` is what somebody tries
+first and what fails silently over ssh.
+-}
+pasteHint : Session -> String
+pasteHint it =
+    if it.tmux then
+        "Paste  Ctrl-Shift-V, Shift-Ins, tmux prefix ] into the field.  F1 for why."
+
+    else if it.screen then
+        "Paste  Ctrl-Shift-V, Shift-Ins, screen Ctrl-a ] into the field.  F1 for why."
+
+    else if it.display || it.wayland then
+        "Paste  p reads the clipboard; Ctrl-Shift-V into the field.  F1 for why."
+
+    else
+        "Paste  Ctrl-Shift-V or Shift-Ins into the field.  F1 says why p may not."
 
 
 {-| The section that is the point of the window, and the only other one that

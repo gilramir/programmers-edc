@@ -41,6 +41,7 @@ import Ascii
 import Bytes
 import Bytes.Decode as Decode
 import Char
+import Help
 import Math
 import String
 import Theme exposing (Inks)
@@ -78,6 +79,11 @@ fieldId =
 readingId : String
 readingId =
     "unicode.reading"
+
+
+clearId : String
+clearId =
+    "unicode.clear.button"
 
 
 menuItem : MenuItem
@@ -377,6 +383,9 @@ update ports event model =
         Tui.Command "unicode.copy" ->
             copyPoints ports model
 
+        Tui.Command "unicode.clear" ->
+            clear model
+
         _ ->
             still model
 
@@ -401,6 +410,9 @@ pressKey ports key model =
 
         "y" ->
             copyPoints ports model
+
+        "c" ->
+            clear model
 
         "Up" ->
             moveTo (model.cursor - 1) model
@@ -434,6 +446,26 @@ pretending it does would leave the caret on an unrelated line.
 readAs : Encoding -> Model -> Step msg
 readAs encoding model =
     still { model | encoding = encoding, top = 0, cursor = 0, message = "" }
+
+
+{-| Empty the field, and with it the window.
+
+It is one line because the field is already the source of everything on the
+screen: [`readField`](#readField) on an empty string empties the rows, the
+count and the title, and the differ writes the empty value back to the
+`InputLine` because `typed` changed *in the model*. Nothing else has to be
+said, and a second path that emptied the rows without emptying the field would
+be the one thing this window must never show -- a decode of bytes that are not
+the ones on the line above it.
+
+Silent when there is nothing to clear, which is the one place this tool is
+allowed to say nothing: the status line under an empty window is already the
+sentence about how to fill it, and "there was nothing to clear" would replace
+the answer with a remark.
+-}
+clear : Model -> Step msg
+clear model =
+    readField { model | typed = "" }
 
 
 askClipboard : Tui.Ports msg -> Reading -> Model -> Step msg
@@ -1172,15 +1204,15 @@ copyPoints ports model =
 -- VIEW
 
 
-view : Inks -> Model -> Tui.Window
-view inks model =
+view : Inks -> Help.Session -> Model -> Tui.Window
+view inks session model =
     { id = windowId
     , title = title model
     -- Full width, like the hex viewer, and for the same reason: the last
     -- column of a row is a sentence about what went wrong, and a window two
     -- columns off the right of an eighty-column terminal ends every one of
     -- them early.
-    , rect = { x1 = 0, y1 = 1, x2 = 79, y2 = 2 + openRows + 4 }
+    , rect = { x1 = 0, y1 = 1, x2 = 79, y2 = 2 + openRows + 5 }
     , resize = Tui.resizeHeight
     , palette = Tui.BlueWindow
     , canClose = True
@@ -1195,7 +1227,7 @@ view inks model =
         -- three readings are on the menu as well as on the canvas.
         [ InputLine
             { id = fieldId
-            , rect = { x1 = 8, y1 = 1, x2 = 58, y2 = 2 }
+            , rect = { x1 = 8, y1 = 1, x2 = 46, y2 = 2 }
             , maxLen = fieldMax
             , value = model.typed
             , allowed = Nothing
@@ -1205,6 +1237,33 @@ view inks model =
             , rect = { x1 = 1, y1 = 1, x2 = 8, y2 = 2 }
             , text = "~B~ytes"
             , for = fieldId
+            }
+        -- `takesFocus = False`, which is the whole reason this can be here at
+        -- all: the field is first so that it holds the caret when the window
+        -- opens, and a button in the tab order between the field and the rows
+        -- would put a third stop on the route `Tab` takes and break the two
+        -- that `drive_unicode.py` counts on. It is still pressable -- by mouse
+        -- and by `Alt-L` -- which is what a toolbar button is for.
+        --
+        -- `~L~` and not the obvious `~C~`: `Alt-C` is the status line's Time,
+        -- and a status line entry beats a window's hotkey for the same Alt
+        -- key, silently. That rule is written down under this window's menu
+        -- and it applies here for the same reason.
+        --
+        -- **Two rows, and a button anywhere in this repo needs two.** TButton
+        -- draws its face on rows `0 .. size.y - 2` and its shadow on
+        -- `size.y - 1` (`tbutton.cpp:124`), so a one-row button draws no face
+        -- at all -- not an error, not a warning, just a button-shaped nothing
+        -- where the button was. That is what the row under this one is: the
+        -- shadow, and the reason the window is a row taller than the rows it
+        -- shows.
+        , Button
+            { id = clearId
+            , rect = { x1 = 47, y1 = 1, x2 = 58, y2 = 3 }
+            , title = "C~l~ear"
+            , cmd = "unicode.clear"
+            , isDefault = False
+            , takesFocus = False
             }
         -- One row high, which is what makes a cluster horizontal: Turbo Vision
         -- flows a cluster's items down its rectangle and then across, so a
@@ -1232,7 +1291,7 @@ view inks model =
             }
         , Canvas
             { id = "unicode.header"
-            , rect = { x1 = 1, y1 = 2, x2 = 1 + lineWidth, y2 = 3 }
+            , rect = { x1 = 1, y1 = 3, x2 = 1 + lineWidth, y2 = 4 }
             , lines = [ header inks ]
             , cursor = Nothing
             , takesFocus = False
@@ -1242,7 +1301,7 @@ view inks model =
             , view =
                 Canvas
                     { id = canvasId
-                    , rect = { x1 = 1, y1 = 3, x2 = 1 + lineWidth, y2 = 3 + openRows }
+                    , rect = { x1 = 1, y1 = 4, x2 = 1 + lineWidth, y2 = 4 + openRows }
                     , lines = body inks model
                     , cursor = Nothing
                     , takesFocus = True
@@ -1253,7 +1312,7 @@ view inks model =
             , view =
                 ScrollBar
                     { id = scrollId
-                    , rect = { x1 = 2 + lineWidth, y1 = 3, x2 = 3 + lineWidth, y2 = 3 + openRows }
+                    , rect = { x1 = 2 + lineWidth, y1 = 4, x2 = 3 + lineWidth, y2 = 4 + openRows }
                     , value = model.top
                     , min = 0
                     , max = max 0 (Array.length (pieces model) - model.rows)
@@ -1262,12 +1321,39 @@ view inks model =
                     , for = ""
                     }
             }
+        -- The last interior row: the rows end at `4 + openRows` and the status
+        -- is drawn on the frame below this one. It cost nothing to add,
+        -- because the layout was already a row short of what `rowsIn` counted
+        -- -- `height - 6` against five rows of chrome -- and the button's
+        -- shadow row above made the two agree.
+        --
+        -- `pinBottom` and not `stretchHeight`, so it keeps its one row and
+        -- stays the same distance from the bottom however tall the window
+        -- gets.
+        --
+        -- It is always there rather than only when something has gone wrong.
+        -- The thing it answers is not an error -- `p` over ssh reports itself
+        -- honestly and always has -- it is that somebody who has just been
+        -- told the terminal will not hand the clipboard over still has to be
+        -- told what will work instead, and the place to say that is the window
+        -- they are already looking at.
+        , Grows
+            { grow = Tui.pinBottom
+            , view =
+                Canvas
+                    { id = "unicode.paste"
+                    , rect = { x1 = 1, y1 = 4 + openRows, x2 = 1 + lineWidth, y2 = 5 + openRows }
+                    , lines = [ [ Tui.ink inks.dim (Help.pasteHint session) ] ]
+                    , cursor = Nothing
+                    , takesFocus = False
+                    }
+            }
         , Grows
             { grow = Tui.pinBottom
             , view =
                 Canvas
                     { id = "unicode.status"
-                    , rect = { x1 = 1, y1 = 4 + openRows, x2 = 1 + lineWidth, y2 = 5 + openRows }
+                    , rect = { x1 = 1, y1 = 5 + openRows, x2 = 1 + lineWidth, y2 = 6 + openRows }
                     , lines = [ status inks model ]
                     , cursor = Nothing
                     , takesFocus = False
@@ -1560,5 +1646,20 @@ menu =
             , Item { title = "Read as UTF-16 ~B~E", cmd = "unicode.utf16be", key = "", shortcut = "b" }
             , Separator
             , Item { title = "Cop~y~ the code points", cmd = "unicode.copy", key = "", shortcut = "y" }
+            , Separator
+            -- Here as well as on the button, and for the reason every other
+            -- entry in this menu is here: the plain letter only reaches the
+            -- rows, and while the caret is in the field -- which is where
+            -- somebody who wants to empty it has just been typing -- `c` is a
+            -- `c`. The button's `Alt-L` works from either, and this works from
+            -- the menu bar, which is the route that needs no hotkey at all.
+            --
+            -- `~C~` here and `~L~` on the button, which look inconsistent and
+            -- are each the only letter available where they are. A menu
+            -- entry's hotkey is local to the open pull-down, and in this one
+            -- `L` is already `Read as UTF-16 ~L~E` while `C` is free; a
+            -- button's is an Alt- accelerator competing with the status line,
+            -- where `Alt-C` is Time and `Alt-L` is free.
+            , Item { title = "~C~lear the field", cmd = "unicode.clear", key = "", shortcut = "c" }
             ]
         }

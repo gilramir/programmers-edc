@@ -311,12 +311,19 @@ class Screen:
             return self
         self.grid = [row[:cols] for row in self.grid[:rows]]
         self.attrs = [row[:cols] for row in self.attrs[:rows]]
+        self.wide = [{c for c in row if c + 1 < cols} for row in self.wide[:rows]]
         self.cols, self.rows = cols, rows
         self._clamp()
         return self
 
     def reset(self):
         self.grid = [[" "] * self.cols for _ in range(self.rows)]
+        # The columns holding the *left* half of a double-width character.
+        # Without this a wide character is indistinguishable from a character
+        # plus a space, and the one thing a real terminal does that the
+        # difference matters for -- erasing both halves when either is written
+        # over -- cannot be modelled. See `_break_at`.
+        self.wide = [set() for _ in range(self.rows)]
         # Per cell, the (foreground, background) in force when it was written.
         # None is the terminal's default, which is what SGR 39/49 restore.
         self.attrs = [[(None, None)] * self.cols for _ in range(self.rows)]
@@ -339,6 +346,35 @@ class Screen:
         self.row = max(0, min(self.rows - 1, self.row))
         self.col = max(0, min(self.cols - 1, self.col))
 
+    def _break_at(self, row, col):
+        """Erase the double-width character that column `col` is part of.
+
+        This is what a real terminal does and it is the whole reason the wide
+        halves are tracked. A double-width character is one glyph across two
+        cells; write anything into either of them and the *pair* is gone --
+        a terminal blanks both halves rather than leaving a torn one, which is
+        what `tmux capture-pane` shows and what this was measured against.
+
+        A model that keeps the left half alive because only the right one was
+        written over will pass a check that a CJK character is on the screen
+        while the terminal shows a blank, which is exactly the bug this was
+        added for.
+        """
+        for lead in (col, col - 1):
+            if lead in self.wide[row]:
+                self.wide[row].discard(lead)
+                self.grid[row][lead] = " "
+                if lead + 1 < self.cols:
+                    self.grid[row][lead + 1] = " "
+
+    def _blank(self, row, first, last):
+        """Blank cells `first`..`last` inclusive, wide characters and all."""
+        self._break_at(row, first)
+        self._break_at(row, last)
+        for c in range(first, last + 1):
+            self.grid[row][c] = " "
+            self.wide[row].discard(c)
+
     def _put(self, ch):
         if self.col >= self.cols:
             self.col = self.cols - 1
@@ -352,6 +388,7 @@ class Screen:
             self.grid[self.row][back] += ch
             return
 
+        self._break_at(self.row, self.col)
         self.grid[self.row][self.col] = ch
         self.attrs[self.row][self.col] = (self.fg, self.bg)
         self.col += 1
@@ -361,7 +398,10 @@ class Screen:
             # two columns, so the cell beside it is filled with a space rather
             # than left as whatever was there -- which keeps a row's string
             # index and its column the same number, the thing every driver in
-            # this repo counts on.
+            # this repo counts on. The pair is remembered so that a later write
+            # to either half erases both, the way a terminal does.
+            self._break_at(self.row, self.col)
+            self.wide[self.row].add(self.col - 1)
             self.grid[self.row][self.col] = " "
             self.attrs[self.row][self.col] = (self.fg, self.bg)
             self.col += 1
@@ -447,21 +487,20 @@ class Screen:
             self.row = (nums[0] or 1) - 1
         elif final == "K":
             if nums[0] == 0:
-                for c in range(self.col, self.cols):
-                    self.grid[self.row][c] = " "
+                self._blank(self.row, self.col, self.cols - 1)
             elif nums[0] == 1:
-                for c in range(0, self.col + 1):
-                    self.grid[self.row][c] = " "
+                self._blank(self.row, 0, self.col)
             else:
-                self.grid[self.row] = [" "] * self.cols
+                self._blank(self.row, 0, self.cols - 1)
         elif final == "J":
             if nums[0] == 2:
                 self.grid = [[" "] * self.cols for _ in range(self.rows)]
+                self.wide = [set() for _ in range(self.rows)]
             elif nums[0] == 0:
-                for c in range(self.col, self.cols):
-                    self.grid[self.row][c] = " "
+                self._blank(self.row, self.col, self.cols - 1)
                 for r in range(self.row + 1, self.rows):
                     self.grid[r] = [" "] * self.cols
+                    self.wide[r] = set()
         elif final == "m":
             self._sgr(params)
         self._clamp()

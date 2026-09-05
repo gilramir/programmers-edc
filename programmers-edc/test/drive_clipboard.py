@@ -51,19 +51,36 @@ def line_at(app, row):
     return app.render().split("\n")[row]
 
 
+# The decoder's entry row, and its first decoded row. Row 4 is the Clear
+# button's shadow and row 5 the column header -- `drive_unicode.py` says why a
+# button costs a row -- so the rows start one lower than the arithmetic in this
+# file used to assume.
+FIELD_ROW = 3
+FIRST_ROW = 6
+STATUS_ROW = 21
+
+
 def field(app):
     """The Unicode decoder's entry row."""
-    return line_at(app, 3)
+    return line_at(app, FIELD_ROW)
 
 
 def typed(app):
-    """Just what is in that field, without the label or the radio beside it."""
+    """Just what is in that field, without the furniture on either side.
+
+    Three things share the row now -- the label, the Clear button and the
+    reading -- so this trims at whichever comes first rather than at the `(` of
+    `(*) Text`, which the button sits in front of.
+    """
     row = field(app)
-    return row.split("Bytes", 1)[1].split("(")[0].strip() if "Bytes" in row else ""
+    if "Bytes" not in row:
+        return ""
+    rest = row.split("Bytes", 1)[1]
+    return rest.split("Clear")[0].split("(")[0].strip()
 
 
 def status(app):
-    return line_at(app, 20).strip("║░ ─└┘")
+    return line_at(app, STATUS_ROW).strip("║░ ─└┘")
 
 
 def to_field(app):
@@ -132,8 +149,8 @@ def main():
     app.send(TAB, settle=0.4)
     app.send(b"\x1b[C", settle=0.7)                 # the radio: read it as hex
     check("48 69 read as hex is two ASCII characters",
-          "U+0048" in line_at(app, 5) and "U+0069" in line_at(app, 6),
-          line_at(app, 5) + " / " + line_at(app, 6))
+          "U+0048" in line_at(app, FIRST_ROW) and "U+0069" in line_at(app, FIRST_ROW + 1),
+          line_at(app, FIRST_ROW) + " / " + line_at(app, FIRST_ROW + 1))
     app.send(TAB, settle=0.5)                       # onto the rows
     app.send(b"y", settle=1.0)
     check("y copied the code points, and says nothing confirmed taking them",
@@ -159,9 +176,9 @@ def main():
           line_at(app, 2))
     # One row per *character*, so "beef" is four of them.
     check("and the bytes are the ones the field held",
-          all("U+006" + d in line_at(app, 5 + i)
+          all("U+006" + d in line_at(app, FIRST_ROW + i)
               for i, d in enumerate("2556")),
-          " / ".join(line_at(app, 5 + i).strip("║░ ▲▓") for i in range(4)))
+          " / ".join(line_at(app, FIRST_ROW + i).strip("║░ ▲▓") for i in range(4)))
 
     app.send(b"\x1bx", settle=1.0)
     check("Alt-X exits, and cleanly", app.wait() == 0)

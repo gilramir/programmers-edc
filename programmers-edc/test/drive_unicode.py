@@ -35,12 +35,16 @@ sys.path.insert(0, os.path.join(ROOT, "..", "tvision-node", "test"))
 
 from harness import Pty, Checks, node_argv
 
-# The window sits at desktop (0, 1), so its frame is screen row 2, the entry
-# field is row 3, the column header is row 4 and the first decoded row is row 5.
-FIRST_ROW = 5
+# The window sits at desktop (0, 1), so its frame is screen row 2 and the entry
+# field is row 3. Row 4 is the Clear button's *shadow* -- TButton draws its face
+# on every row but the last and the shadow on that one, so a one-row button is
+# an invisible button and this window is a row taller than it looks -- row 5 is
+# the column header, and the first decoded row is row 6.
+FIRST_ROW = 6
 ROWS = 14
 LEFT = 1
 NOTE_AT = LEFT + 38          # where "what it is" begins, on every row
+PASTE_ROW = FIRST_ROW + ROWS         # the how-to-paste line, always there
 STATUS_ROW = FIRST_ROW + ROWS + 1
 
 
@@ -101,8 +105,13 @@ def note_on(row):
 
 
 def field(app):
-    """The entry row: the field's text and which of the two readings is on."""
-    return line_at(app, FIRST_ROW - 2)
+    """The entry row: the field's text, the Clear button and the reading."""
+    return line_at(app, FIRST_ROW - 3)
+
+
+def paste_line(app):
+    """The line under the rows that says how to get bytes in here."""
+    return line_at(app, PASTE_ROW).strip("\u2551\u2591 ")
 
 
 def to_rows(app):
@@ -160,6 +169,14 @@ def main():
     # this -- the same reason `drive_hex.py` and `drive_clip.py` do it.
     env.pop("DISPLAY", None)
     env.pop("WAYLAND_DISPLAY", None)
+    # And a session dressed the same way every time it runs, because the line
+    # under the rows says what to press *here* and would otherwise be one
+    # sentence on the machine this was written on and another in a bare shell.
+    # tmux is the variant to pin: it is the longest of the four and the only
+    # one that spends the whole seventy-six columns.
+    for name in ("SSH_CONNECTION", "SSH_TTY", "SSH_CLIENT", "STY"):
+        env.pop(name, None)
+    env["TMUX"] = "/tmp/tmux-1000/default,4242,0"
     app = Pty(node_argv(LAUNCHER), env, cwd=tempfile.mkdtemp(prefix="predc-uni-"))
     app.pump(2.5)
 
@@ -174,6 +191,19 @@ def main():
           "Type bytes in the field above" in rows(app)[0], rows(app)[0])
     check("and the field is what has the caret, which is why it says that",
           "( ) Hex" in field(app) and "(\u2022) Text" in field(app), field(app))
+    check("and there is a Clear button beside it",
+          "Clear" in field(app), field(app))
+
+    #    The line under the rows, which is there before anything has gone
+    #    wrong and stays there. What it says depends on the session, and this
+    #    driver dresses one so that it is the same sentence every run.
+    check("the window says how to paste in this session, without being asked",
+          paste_line(app) ==
+          "Paste  Ctrl-Shift-V, Shift-Ins, tmux prefix ] into the field.  "
+          "F1 for why.", repr(paste_line(app)))
+    check("and it fits the columns it has, so the frame is still beside it",
+          line_at(app, PASTE_ROW)[78] == "\u2551",
+          repr(line_at(app, PASTE_ROW)[70:80]))
 
     #    And `p`, before this driver has claimed a terminal that will answer an
     #    `OSC 52` read query -- which is the state a real ssh session is
@@ -248,6 +278,59 @@ def main():
     clear_field(app)
     app.send(b"\t\x1b[D", settle=0.8)               # radio, back to Text
     to_rows(app)
+
+    # 1c. The Clear button, which exists because emptying the field by hand is
+    #     the two-trap dance `clear_field` above has to do -- leave, come back
+    #     for a fresh selection, then Del -- and nobody switching a field of
+    #     text over to hex should have to know either trap.
+    to_field(app)
+    app.send(b"beef", settle=0.8)
+    check("there is something in the field to clear",
+          "typed (4 bytes)" in title(app), title(app))
+    app.send(b"\x1bl", settle=0.9)                   # Alt-L, the button's hotkey
+    check("Alt-L empties the field from inside it",
+          field(app).split("Bytes")[1].strip().startswith("Clear"), field(app))
+    check("and the rows go with it, since the field is what they were made of",
+          "Nothing to read" in rows(app)[0], rows(app)[0])
+    check("and the title stops naming bytes that are no longer there",
+          "bytes)" not in title(app), title(app))
+
+    #     The button is not in the tab order. It must not be: the field is
+    #     first so that it holds the caret when the window opens, and one Tab
+    #     from there has to reach the radio and two the rows, which is what
+    #     `to_rows` walks and what every letter command below depends on.
+    to_field(app)
+    app.send(b"\t", settle=0.6)
+    app.send(b"\x1b[C", settle=0.8)                  # Right, which only a radio takes
+    check("one Tab from the field reaches the radio and not the button",
+          "(\u2022) Hex" in field(app), field(app))
+    app.send(b"\x1b[D", settle=0.8)
+
+    #     And it clears a paste, which a field-only Clear would miss: a paste
+    #     empties the field on its way in, so there is nothing in the field to
+    #     delete and the rows would sit there being the answer to a question
+    #     nobody could see any more. Pasted from the rows, because `p` is a
+    #     plain letter and the field would eat it.
+    to_rows(app)
+    paste(app, "H\u00e9")
+    check("a paste puts rows up with an empty field",
+          "pasted text" in title(app) and "2 characters" in status(app),
+          title(app) + " | " + status(app))
+    encoding_menu(app, b"c", settle=0.9)
+    check("Clear on the menu empties a paste as well",
+          "Nothing to read" in rows(app)[0] and "pasted" not in title(app),
+          rows(app)[0] + " | " + title(app))
+
+    #     And the plain letter, which is the third way in and the one that only
+    #     works where the letter commands work.
+    to_field(app)
+    app.send(b"Hi", settle=0.8)
+    check("something typed again",
+          "2 characters" in status(app), status(app))
+    to_rows(app)
+    app.send(b"c", settle=0.8)
+    check("and c on the rows clears it, like every other letter command here",
+          "Nothing to read" in rows(app)[0], rows(app)[0])
 
     # 2. Text, which arrives as the UTF-8 the string is made of. The fixture is
     #    chosen for its widths: ASCII, a two-byte Latin-1 character, two Hangul
@@ -377,7 +460,7 @@ def main():
     check("reopening starts empty, the way closing a tool here means it does",
           "Nothing to read" in rows(app)[0], rows(app)[0])
     check("and the field it reopens with is empty too",
-          field(app).split("Bytes")[1].strip().startswith("("), field(app))
+          field(app).split("Bytes")[1].strip().startswith("Clear"), field(app))
 
     app.send(b"\x1bx", settle=1.0)
     check("Alt-X exits, and cleanly", app.wait() == 0)

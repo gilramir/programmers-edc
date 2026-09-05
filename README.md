@@ -199,6 +199,15 @@ this repo occasionally turns on a fix as it lands — one recent commit did
 exactly that for a calendar bug reported upstream. A stale clone fails in ways
 that look like this repo's fault.
 
+**`tvision-node/patches/` is the exception**, and is meant to stay nearly
+empty. `build-tvision.sh` applies every `.patch` in it to the checkout before
+configuring, `git apply -R --check` first so a rebuild is a no-op; a patch that
+no longer applies is skipped with a message rather than failing the build,
+which is what happens once the fix has landed upstream and the file should be
+deleted. Each file says at the top what it is for. There is one, for a
+double-width character that TVision draws and then erases — see the last
+section of [FINDINGS.md](FINDINGS.md).
+
 **The first build needs network twice**: `gren make` fills `~/.cache/gren` with
 `gren-lang/core`, `gren-lang/node`, `gren-lang/url`, `gilramir/gren-argparse`
 and `gilramir/gren-bignum`, and node-gyp downloads node's headers.

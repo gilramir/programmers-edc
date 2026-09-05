@@ -812,7 +812,7 @@ view model =
                )
             ++ (when model.unicode is
                     Just unicode ->
-                        [ Tool.Unicode.view (Theme.inks model.theme) unicode ]
+                        [ Tool.Unicode.view (Theme.inks model.theme) model.session unicode ]
 
                     Nothing ->
                         []
