@@ -1518,6 +1518,13 @@ static Napi::Value Start(const Napi::CallbackInfo &info)
     return env.Undefined();
 }
 
+// See the note at its one use, in Step. `eventTimeoutMs` is a global, so this
+// exists to make sure it is a global that is only ever 20 inside one call.
+struct NestedLoopTimeout {
+    NestedLoopTimeout() { TProgram::eventTimeoutMs = 20; }
+    ~NestedLoopTimeout() { TProgram::eventTimeoutMs = 0; }
+};
+
 // tv.step() -- one turn of TGroup::execute(), hoisted out of the library.
 // Returns the number of events handled, or -1 once the application has quit
 // (at which point the terminal has already been restored).
@@ -1572,16 +1579,36 @@ static Napi::Value Step(const Napi::CallbackInfo &info)
 
         ++handled;
 
-        // The mouse capture, which is the whole of dragging. While a button is
-        // held on a canvas, motion and the release go straight to that canvas
-        // rather than through the desktop -- because `TGroup::handleEvent`
-        // routes a positional event to whatever the pointer is over *now*, and
-        // a selection dragged off the edge of its own view would be handed to
-        // the frame, the window underneath, or nothing at all. Turbo Vision's
-        // own views buy the same thing with a nested `mouseEvent` loop; this
-        // buys it with a pointer and no loop. See views.cc.
+        // A window being moved or resized owns every event until the gesture
+        // ends, which is what `TView::dragView`'s nested loop bought and what
+        // this buys with a pointer instead. Ahead of the mouse capture and of
+        // the modal stack both: a drag started from the Window menu takes the
+        // keyboard too, and there is nothing else it could sensibly mean.
+        //
+        // The safe-point flushes below still run, so `flushWindowResize` now
+        // reports each step of a drag rather than only where it stopped. That
+        // is the point of doing it here: the model stays in step with a window
+        // the user is still holding. It cannot fight back -- the differ writes
+        // bounds only when the *model's* rect changes between renders
+        // (diff.js:261), and a model echoing back what it was just told
+        // changes nothing.
+        JsWindow *dragged = draggingWindow();
         TView *captured = mouseCaptureView();
-        if (captured != nullptr &&
+        if (dragged != nullptr)
+            {
+            // No eventError, for the reason below: it clears everything.
+            dragged->dragEvent(event);
+            }
+        // The mouse capture, which is the whole of dragging *inside* a view.
+        // While a button is held on a canvas, motion and the release go
+        // straight to that canvas rather than through the desktop -- because
+        // `TGroup::handleEvent` routes a positional event to whatever the
+        // pointer is over *now*, and a selection dragged off the edge of its
+        // own view would be handed to the frame, the window underneath, or
+        // nothing at all. Turbo Vision's own views buy the same thing with a
+        // nested `mouseEvent` loop; this buys it with a pointer and no loop.
+        // See views.cc.
+        else if (captured != nullptr &&
             (event.what == evMouseMove || event.what == evMouseUp))
             {
             // No eventError: the canvas clears every event it is sent here,
@@ -1590,6 +1617,28 @@ static Napi::Value Step(const Napi::CallbackInfo &info)
             }
         else
             {
+            // A poll that sleeps, but only for the duration of this call.
+            //
+            // `dragView` is not the only nested `getEvent` loop in Turbo
+            // Vision, only the worst: a button, a check box, a scroll bar, a
+            // list, an input line, the editor and the status line all track a
+            // held mouse button the same way, and so does the frame's close
+            // box (tframe.cpp:157). Those are bounded -- they end when the
+            // finger comes up -- so they are left alone rather than
+            // reimplemented. What is not acceptable is what `eventTimeoutMs`
+            // at 0 does to them: the poll returns instantly, so the loop spins
+            // a core flat for as long as the button is held.
+            //
+            // Every one of those loops is reached from inside this call and
+            // nowhere else, so the timeout can be lifted for exactly its
+            // duration. The pump's own getEvent above still has 0 and still
+            // must: this is 20ms of sleeping inside a loop that has already
+            // stopped Node, not 20ms added to a tick that had not.
+            //
+            // Scoped rather than two assignments, because a timeout left at 20
+            // by an early exit would be the pump itself blocking -- the one
+            // thing this whole file is arranged to prevent.
+            NestedLoopTimeout sleepsIfItLoops;
             target->handleEvent(event);
             // TGroup's, not TView's, and it only ever walks up to the
             // application to be ignored. A popup menu swallows everything it is

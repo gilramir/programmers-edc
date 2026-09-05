@@ -21,7 +21,7 @@ TView	getClipRect	internal	the clipping rectangle a draw is limited to
 TView	mouseInView	used	the binding calls it; not itself a thing a Gren program names
 TView	containsMouse	used	the popup menu asks it
 TView	locate	used	the binding calls it; not itself a thing a Gren program names
-TView	dragView	skipped	the user drags a window; nothing has wanted to drag one on the user's behalf
+TView	dragView	skipped	still nothing a Gren program names, but the binding now overrides it: JsWindow::dragView is the drag without the nested loop
 TView	calcBounds	used	the binding calls it; not itself a thing a Gren program names
 TView	changeBounds	internal	a virtual the binding overrides or inherits, not a call a model makes
 TView	growTo	skipped	a window's rectangle is the model's and a render is how it changes

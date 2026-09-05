@@ -6766,3 +6766,138 @@ one level further out.
 The general shape: **a test that asserts on the process's own environment is
 asserting on the launcher too**, and the launcher is the part the test did not
 choose.
+
+## The nested loop that was still there, in the one place nobody wrote
+
+A user opened predc's Environment page, picked **Window ▸ Resize/move** from
+the menu, and the program stopped answering. Not the menus, not the mouse, not
+`Alt-X`. They killed it with `SIGKILL`.
+
+It was not hung. It was in Turbo Vision's size/move mode, which ends on `Enter`
+or `Esc` and on nothing else, and the reason that was indistinguishable from a
+hang is worth more than the fix.
+
+### Everything about it was invisible
+
+`cmResize` reaches `TWindow::handleEvent`, which calls
+`TView::dragView` (`tview.cpp:232`). Arrived at from a menu the event is an
+`evCommand`, so it takes the keyboard branch: arrow keys move the window,
+`Shift`-arrows resize it, `Enter` commits, `Esc` cancels, and
+`TView::keyEvent` — `do { getEvent(event); } while( event.what != evKeyDown )`
+— throws away everything else on the way. The menu bar and `Alt-X` were not
+ignored, they were eaten.
+
+That is Turbo Vision working as designed, and on a normal window you can see it
+working: the window visibly moves. This window was **maximized**. A zoomed
+window is pinned by its own size limits, so `moveGrow` clamped every arrow key
+back to where it started and not one cell on screen changed. The single cue
+that the mode was on at all was the frame dropping from `╔═` to `┌─`, along the
+top edge of a window that filled the terminal.
+
+**A mode with no exit anyone would guess and no feedback anyone would notice is
+a hang, whatever the state machine says.**
+
+### And it was a hang that burned a core
+
+`TProgram::eventTimeoutMs` is 0 (`app.cc`, `Start`) because the pump must never
+block: it is a guest in Node's loop. That is right for the pump and ruinous
+inside a nested loop, where `getEvent` polls and returns instantly forever. The
+process sat at 100% of a core — 1m45s of CPU in 1m56s of wall clock, with
+`stime` larger than `utime` and `syscr` at zero, which is the signature of
+`poll()` with a zero timeout and nothing to read.
+
+That number is how the diagnosis actually happened. `ptrace_scope` was 1 so
+`gdb` could not attach, and the screen was identical to a working one; the only
+honest evidence available was `/proc/<pid>/stat`. **Where nothing on screen can
+distinguish the two states, the CPU can**, and `drive_drag.py` asserts on it for
+that reason rather than as a performance test.
+
+### The capture was written out longhand once and the window was missed
+
+"A drag needs a capture, and a capture is what the nested loop was for", above,
+is the same finding at the level of a canvas: `TGroup::handleEvent` routes to
+whatever the pointer is over now, every stock view gets round it with a nested
+`mouseEvent` loop, and `JsCanvas` gets round it with a pointer the pump
+consults. That was written while adding `Tui.Dragged`, and it looked complete.
+
+It was complete for views the port *wrote*. Moving a window belongs to `TView`
+and `TFrame`, which the port had never subclassed, so nothing on that sweep ever
+looked at it — and there are five routes into it: the title bar, both grow
+corners, a middle-click on the body (all through `TFrame::dragWindow`) and
+`cmResize` off the menu.
+
+Five routes and one fix, because of an accident:
+
+```cpp
+    virtual void dragView( TEvent& event, uchar mode,   //  temporary fix
+      TRect& limits, TPoint minSize, TPoint maxSize );  //  for Miller's stuff
+```
+
+`views.h:361`. `dragView` is virtual, for a reason lost in 1991, and every one
+of the five calls it. `JsWindow::dragView` therefore overrides all five at
+once: it copies what the loop kept on its stack into a `Drag` struct, sets
+`sfDragging`, points `g_dragWindow` at itself and returns. Its three callers all
+`clearEvent` immediately afterwards, which is still exactly right — what
+changed is that by then the drag has *started* rather than finished. The pump
+routes to `draggingWindow()` ahead of the mouse capture and ahead of the modal
+stack, and `dragEvent` is the body of the loop with the `getEvent` taken out.
+
+`TView::moveGrow` and `TView::change` are private, so both are written out
+again in `views.cc`. They are transcribed rather than approximated: the clamps
+are what stop a window being dragged off the desktop entirely, and the order
+they run in is not guessable.
+
+### What that buys, beyond not hanging
+
+`flushWindowResize` runs at the pump's safe point, which the drag now passes
+through on every event — so the model hears each step of a drag rather than
+only where it stopped. It cannot fight back, and the reason is
+`diff.js:261`: the differ writes bounds when the *model's* rectangle changes
+between two renders, not when the window's does. A model that stores what it
+was told and renders it back changes nothing, which is the same rule
+"A stored rectangle is safe when it is a constant" is about, seen from the
+other end.
+
+A modal opened by a timer mid-drag is the one odd case, and it settles itself.
+The dialog paints and receives nothing until the gesture ends — but `Esc`,
+`Enter` and the mouse-up all still reach the drag, so it always can end. A
+gesture already in progress finishing first is the right answer anyway. The
+window being *closed* mid-drag is the dangerous one, and it is dangerous only
+because Node keeps running now: `~JsWindow` clears the pointer, the same third
+thing that fell out of the canvas capture.
+
+### The loops that are deliberately still loops
+
+`dragView` is not the only one. A button, a check box, a scroll bar, a list
+viewer, an input line, the editor, the status line and the frame's close box
+(`tframe.cpp:157`) all track a held mouse button with the same nested
+`mouseEvent` call. They were not rewritten, and the distinction is not effort:
+**they end when the finger comes up.** A gesture the user is holding is a
+gesture the user can stop, which is the property `cmResize` did not have.
+
+What they must not do is spin, and there the fix is one scope. Every one of
+those loops is reached from inside the pump's own `target->handleEvent(event)`
+call and from nowhere else, so the timeout can be lifted for exactly that call
+and put back after:
+
+```cpp
+    NestedLoopTimeout sleepsIfItLoops;   // 20 in, 0 out
+    target->handleEvent(event);
+```
+
+A guard rather than two assignments, because a timeout left at 20 by an early
+exit would be the pump itself blocking, which is the one thing the whole file is
+arranged to prevent.
+
+The pump's own `getEvent` still runs at 0 and still must. This is 20ms of
+sleeping inside a loop that had already stopped Node, not 20ms added to a tick
+that had not — so it costs nothing. Holding the close box goes from 100 ticks
+of CPU a second to 0, and the menu bar's pull-down — the known limitation this
+package has documented since `entries` measured it — from 100 to 0.4, with its
+clock still frozen at 5 → 5 while the menu is open and still jumping the moment
+`Esc` is pressed. **The freeze was the limitation; the spin was a separate bug
+sitting on top of it, and only one of the two was ever written down.**
+
+**A global that is correct for the caller can be wrong for everything the
+caller calls**, and the cheapest place to say so is the one call that reaches
+all of them.

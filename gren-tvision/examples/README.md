@@ -725,6 +725,15 @@ pump can step, five flags carried across iterations and a recursive `execView`
 in the middle, in the least documented code in the library, to buy back a
 one-second freeze. FINDINGS has the measurement and the argument.
 
+What *was* fixed is the cost of the waiting. `eventTimeoutMs` is 0 so the pump
+never blocks, so this loop used to poll without ever sleeping — a stopped
+program and a busy core at the same time. The pump raises the timeout for the
+duration of its own `handleEvent` call, which every nested loop in the library
+is reached from and nothing else is. Measured on the same demo: a pull-down
+open was 100 CPU ticks a second and is now 0.4, with the clock still frozen at
+5 → 5 and still jumping the moment `Esc` is pressed. **The freeze is the
+limitation; the spin was a bug on top of it.**
+
 What was done instead is that nothing new was built on top of it.
 `TMenuPopup::execute()` *is* `TMenuView::execute()`, so the popup here is a
 `TMenuBox` — kept for the drawing — with a `handleEvent` of its own, on the
@@ -1064,6 +1073,27 @@ undoing it means reimplementing the least documented code in the library to
 buy back a one-second freeze. It is a decision, not an oversight, and it is
 written where somebody would hit it: FINDINGS, this file, and
 `Tui.MenuItem`'s doc comment.
+
+**There was a second one and it was worse, and it is fixed.** Moving or
+resizing a window is `TView::dragView`, the same nested loop, reached five ways
+— the title bar, both grow corners, a middle-click on the body, and
+**Window ▸ Resize/move**. The menu route ends only on `Enter` or `Esc` and
+swallows the mouse, the menu bar and `Alt-X` on the way; on a *maximized*
+window the size limits pin every arrow key, so nothing on screen moves and it
+reads as a hang. A user reported it as one and killed the program with
+`SIGKILL`. `dragView` is virtual, so `JsWindow` overrides it into a state the
+pump feeds — one override for all five routes — and a drag is now a thing the
+program keeps running through rather than a thing it stops for. FINDINGS has
+it; `tvision-node/test/drive_drag.py` is the test.
+
+**And the loops that remain no longer spin.** `eventTimeoutMs` is 0 so the pump
+never blocks, which meant every nested loop in the library polled without
+sleeping and burned a whole core: the menu bar, the close box, and the mouse
+tracking in every stock widget. The pump now lifts the timeout to 20ms for
+exactly the duration of its own `handleEvent` call, which is the only place any
+of those loops is reached from. A pull-down open went from 100 CPU ticks a
+second to 0.4, and holding the close box from 100 to 0. They still stop the
+program; they no longer heat the room while doing it.
 
 ## What predc's command line changed
 

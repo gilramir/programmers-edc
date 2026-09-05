@@ -827,6 +827,39 @@ public:
 
     virtual void handleEvent(TEvent &event) override;
 
+    // Dragging a window, without the nested event loop that Turbo Vision
+    // drags it with.
+    //
+    // `TView::dragView` (tview.cpp:232) is the one place all five routes into
+    // moving or resizing a window end up: the frame's title bar, its two grow
+    // corners, a middle-click on its body -- all through `TFrame::dragWindow`
+    // -- and `cmResize` off the Window menu, through `TWindow::handleEvent`.
+    // Every one of them then sits in `do { getEvent(event); } while(...)`
+    // until the gesture ends, which is Node's loop stopped for the duration:
+    // no timers, no promises, no subscriptions, no renders. The same nested
+    // loop `JsMenuPopup` and `openLocalModal` exist to not have.
+    //
+    // For the mouse that is bad; for `cmResize` it is fatal. That mode ends
+    // only on Enter or Esc, it swallows the mouse, the menu bar and Alt-X on
+    // the way, and on a *maximized* window the size limits pin every arrow key
+    // so not one cell on screen changes -- the only cue is the frame dropping
+    // from a double line to a single one. It reads exactly like a hang, and
+    // with `eventTimeoutMs` at 0 (app.cc, Start) the poll never sleeps, so it
+    // is a hang that burns a core. Found by a user killing it with SIGKILL.
+    //
+    // dragView is virtual -- "temporary fix for Miller's stuff", views.h:361,
+    // and the accident this port is built on -- so overriding it here catches
+    // all five routes at once and no frame subclass is needed. It starts a
+    // session and returns; the callers all clear the event straight after,
+    // which is still exactly right. `draggingWindow()` is what the pump then
+    // routes to, the same shape as `mouseCaptureView()` beside it.
+    virtual void dragView(TEvent &event, uchar mode, TRect &limits,
+                          TPoint minSize, TPoint maxSize) override;
+
+    // One event of a drag in progress, from the pump. Swallows every event it
+    // is given, because that is what the loop it replaces did.
+    void dragEvent(TEvent &event);
+
     // The other half of a window that cannot be zoomed: saying so.
     //
     // TWindow::setState *enables* the commands a window supports when it is
@@ -899,6 +932,29 @@ public:
     bool canResizeWidth = true;
     bool canResizeHeight = true;
     TPoint builtSize = {0, 0};
+
+    // What `TView::dragView` keeps on the stack of the loop this replaces.
+    struct Drag {
+        bool active = false;
+        bool byMouse = false;
+        uchar mode = 0;             // dragView's `mode`: dmDrag* | dmLimit*
+        TRect limits = TRect(0, 0, 0, 0);
+        TPoint minSize = {0, 0};
+        TPoint maxSize = {0, 0};
+        // Esc goes back to this. Only the keyboard mode can cancel -- a mouse
+        // drag ends where the button came up, as it does everywhere.
+        TRect saved = TRect(0, 0, 0, 0);
+        // dragView's `p`: what to add to the pointer to get back to the corner
+        // the gesture grabbed, computed once from the press.
+        TPoint grip = {0, 0};
+        // dmDragGrowLeft only, and it has to be kept rather than recomputed:
+        // the loop mutates a.x and b.y each turn and leaves b.x and a.y at the
+        // values the press saw.
+        TRect bounds = TRect(0, 0, 0, 0);
+    };
+    Drag drag;
+
+    void endDrag();
 
     // What the resize poll last saw. Seeded when the window is built, so that
     // building one is not itself reported as a resize.
@@ -1130,6 +1186,11 @@ void noteDragged(const std::string &id, int x, int y, bool done);
 // where the pointer is now -- see the long note in views.cc for why a drag
 // needs a capture and why this one is not Turbo Vision's.
 TView *mouseCaptureView();
+
+// The window in the middle of a move or a resize, or nullptr. The pump's third
+// routing rule, and the reason JsWindow::dragView can return immediately: a
+// gesture that owned the event loop now owns a pointer instead.
+JsWindow *draggingWindow();
 void clearMouseCapture();
 
 /* ------------------------------------------------------------------ */

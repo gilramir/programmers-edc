@@ -758,19 +758,216 @@ void JsCanvas::setCursorAt(int x, int y, bool visible)
         hideCursor();
 }
 
+// The window in the middle of a move or a resize -- see JsWindow::dragView
+// below, which is where all of this is explained. Declared up here because the
+// destructor clears it. One window at a time, because there is one mouse and
+// one keyboard: the same shape as g_dragCanvas above, and for the same reason.
+static JsWindow *g_dragWindow = nullptr;
+
+JsWindow *draggingWindow()
+{
+    return g_dragWindow;
+}
+
 JsWindow::~JsWindow()
 {
     // The user can close a window from its frame, and TVision destroys the
     // children with it. This is the only place that reliably runs in every
     // one of those paths.
     // Unregister before notifying, so nothing can look this window up again.
+    //
+    // The drag pointer goes with it. A window can be closed by the model while
+    // the user is dragging it -- the pump keeps running now, which is the whole
+    // point, so the model really can act mid-gesture -- and the pump would
+    // otherwise route the next mouse move into freed memory. setState is not
+    // called here: the window is going away and sfDragging with it.
+    if (g_dragWindow == this)
+        g_dragWindow = nullptr;
     g_views.forgetWindow(windowId);
     if (reportClose)
         noteWindowClosed(windowId);
 }
 
+/* ------------------------------------------------------------------ */
+/*  Dragging a window                                                 */
+/* ------------------------------------------------------------------ */
+
+// `TView::moveGrow` is private (views.h:476), so here it is again: the same
+// clamps in the same order, ending at the same `locate`. Reproduced rather
+// than approximated, because these are the rules that keep a window from being
+// dragged entirely off the desktop and they are not obvious.
+static void moveGrowInto(TView *view, TPoint p, TPoint s, const TRect &limits,
+                         TPoint minSize, TPoint maxSize, uchar mode)
+{
+    s.x = std::min(std::max(s.x, minSize.x), maxSize.x);
+    s.y = std::min(std::max(s.y, minSize.y), maxSize.y);
+    p.x = std::min(std::max(p.x, limits.a.x - s.x + 1), limits.b.x - 1);
+    p.y = std::min(std::max(p.y, limits.a.y - s.y + 1), limits.b.y - 1);
+
+    if ((mode & dmLimitLoX) != 0)
+        p.x = std::max(p.x, limits.a.x);
+    if ((mode & dmLimitLoY) != 0)
+        p.y = std::max(p.y, limits.a.y);
+    if ((mode & dmLimitHiX) != 0)
+        p.x = std::min(p.x, limits.b.x - s.x);
+    if ((mode & dmLimitHiY) != 0)
+        p.y = std::min(p.y, limits.b.y - s.y);
+
+    TRect r(p.x, p.y, p.x + s.x, p.y + s.y);
+    view->locate(r);
+}
+
+// `TView::change`, which is private for the same reason. Shift is what turns an
+// arrow key from a move into a grow, and only when the mode allows both.
+static void changeBy(uchar mode, TPoint delta, TPoint &p, TPoint &s,
+                     ushort ctrlState)
+{
+    if ((mode & dmDragMove) != 0 && (ctrlState & kbShift) == 0)
+        p += delta;
+    else if ((mode & dmDragGrow) != 0 && (ctrlState & kbShift) != 0)
+        s += delta;
+}
+
+void JsWindow::dragView(TEvent &event, uchar mode, TRect &limits,
+                        TPoint minSize, TPoint maxSize)
+{
+    // A second one cannot start while one is running -- the pump sends every
+    // event to the first -- but a window torn down mid-drag can leave the
+    // pointer behind, so this is the belt to the destructor's braces.
+    if (g_dragWindow != nullptr && g_dragWindow != this)
+        g_dragWindow->endDrag();
+
+    drag = Drag();
+    drag.mode = mode;
+    drag.limits = limits;
+    drag.minSize = minSize;
+    drag.maxSize = maxSize;
+    drag.saved = getBounds();
+    drag.bounds = getBounds();
+    drag.byMouse = event.what == evMouseDown;
+
+    // dragView's `p`, computed once from the press. Which corner it is about
+    // is which of the three mouse branches the mode selects.
+    if (drag.byMouse)
+        {
+        if ((mode & dmDragMove) != 0)
+            drag.grip = origin - event.mouse.where;
+        else if ((mode & dmDragGrow) != 0)
+            drag.grip = size - event.mouse.where;
+        else
+            {
+            TPoint corner = origin;
+            corner.y += size.y;
+            drag.grip = corner - event.mouse.where;
+            }
+        }
+
+    drag.active = true;
+    g_dragWindow = this;
+    setState(sfDragging, True);
+}
+
+void JsWindow::endDrag()
+{
+    if (!drag.active)
+        return;
+    drag.active = false;
+    if (g_dragWindow == this)
+        g_dragWindow = nullptr;
+    setState(sfDragging, False);
+}
+
+void JsWindow::dragEvent(TEvent &event)
+{
+    if (drag.byMouse)
+        {
+        if (event.what == evMouseMove)
+            {
+            TPoint where = event.mouse.where + drag.grip;
+            if ((drag.mode & dmDragMove) != 0)
+                moveGrowInto(this, where, size, drag.limits, drag.minSize,
+                             drag.maxSize, drag.mode);
+            else if ((drag.mode & dmDragGrow) != 0)
+                moveGrowInto(this, origin, where, drag.limits, drag.minSize,
+                             drag.maxSize, drag.mode);
+            else
+                {
+                // dmDragGrowLeft: the left edge follows the pointer and the
+                // right one stays where it was, which is why `bounds` is kept.
+                drag.bounds.a.x =
+                    std::min(std::max(where.x, drag.bounds.b.x - drag.maxSize.x),
+                             drag.bounds.b.x - drag.minSize.x);
+                drag.bounds.b.y = where.y;
+                moveGrowInto(this, drag.bounds.a,
+                             drag.bounds.b - drag.bounds.a, drag.limits,
+                             drag.minSize, drag.maxSize, drag.mode);
+                }
+            }
+        else if (event.what == evMouseUp)
+            endDrag();
+
+        // Everything, and not only the two above. The loop this replaces threw
+        // away every event that was not the one it was waiting for, keystrokes
+        // included, and a gesture that let some of them through would be a
+        // different gesture.
+        clearEvent(event);
+        return;
+        }
+
+    if (event.what == evKeyDown)
+        {
+        static const TPoint goLeft = {-1, 0}, goRight = {1, 0},
+                            goUp = {0, -1}, goDown = {0, 1},
+                            goCtrlLeft = {-8, 0}, goCtrlRight = {8, 0},
+                            goCtrlUp = {0, -4}, goCtrlDown = {0, 4};
+
+        TPoint p = origin;
+        TPoint s = size;
+        ushort ctrl = event.keyDown.controlKeyState;
+        switch (event.keyDown.keyCode & 0xFF00)
+            {
+            case kbLeft:      changeBy(drag.mode, goLeft, p, s, ctrl); break;
+            case kbRight:     changeBy(drag.mode, goRight, p, s, ctrl); break;
+            case kbUp:        changeBy(drag.mode, goUp, p, s, ctrl); break;
+            case kbDown:      changeBy(drag.mode, goDown, p, s, ctrl); break;
+            case kbCtrlLeft:  changeBy(drag.mode, goCtrlLeft, p, s, ctrl); break;
+            case kbCtrlRight: changeBy(drag.mode, goCtrlRight, p, s, ctrl); break;
+            case kbCtrlUp:    changeBy(drag.mode, goCtrlUp, p, s, ctrl); break;
+            case kbCtrlDown:  changeBy(drag.mode, goCtrlDown, p, s, ctrl); break;
+            case kbHome:      p.x = drag.limits.a.x; break;
+            case kbEnd:       p.x = drag.limits.b.x - s.x; break;
+            case kbPgUp:      p.y = drag.limits.a.y; break;
+            case kbPgDn:      p.y = drag.limits.b.y - s.y; break;
+            }
+        moveGrowInto(this, p, s, drag.limits, drag.minSize, drag.maxSize,
+                     drag.mode);
+
+        // After the move and not instead of it, which is the order the loop
+        // had: Enter and Esc match none of the cases above, so the moveGrow
+        // they fall through to is a no-op on the bounds the last arrow left.
+        if (event.keyDown.keyCode == kbEsc)
+            {
+            locate(drag.saved);
+            endDrag();
+            }
+        else if (event.keyDown.keyCode == kbEnter)
+            endDrag();
+        }
+
+    clearEvent(event);
+}
+
 void JsWindow::handleEvent(TEvent &event)
 {
+    // A drag owns every event until it ends. Ahead of TDialog::handleEvent
+    // because that is what reaches TWindow's cmResize, and a second cmResize
+    // arriving mid-drag must not start a drag inside a drag.
+    if (drag.active)
+        {
+        dragEvent(event);
+        return;
+        }
+
     TDialog::handleEvent(event);
 
     // TDialog ends a modal dialog only for cmOK, cmCancel, cmYes and cmNo
