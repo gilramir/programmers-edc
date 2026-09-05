@@ -873,16 +873,36 @@ menuBar model =
             , Tool.Hex.menuItem
             , Tool.Time.menuItem
             , Tool.Unicode.menuItem
-            , Tui.Separator
-            , SubMenu
-                { title = "~C~olors"
-                , key = ""
-                , items = Array.map (themeItem model.theme) Theme.all
-                }
             ]
         }
     ]
         ++ toolMenus model
+        -- Colors was under Tools, where it did not belong: a colour scheme is
+        -- not a tool, and the menu that lists what predc *has* should not also
+        -- be where its settings live. Turbo Vision's own demo answers this --
+        -- `tvdemo3.cpp` has an `~O~ptions` menu with `~C~olors...` in it,
+        -- beside Mouse and Background -- and it is the Borland IDE's answer
+        -- too, where Options always sits just before Window and Help. That is
+        -- where this goes, and the position is the convention rather than a
+        -- preference.
+        --
+        -- One entry in it today. It is still the right menu: Colors is the
+        -- only setting predc has *now*, and the config file already holds a
+        -- second thing the user chose (the converter's zone list). Under Tools
+        -- the next preference had nowhere to go without making that menu wrong
+        -- again -- the same argument that took the tools off the status line.
+        ++ [ SubMenu
+                { title = "~O~ptions"
+                , key = ""
+                , items =
+                    [ SubMenu
+                        { title = "~C~olors"
+                        , key = ""
+                        , items = Array.map (themeItem model.theme) Theme.all
+                        }
+                    ]
+                }
+           ]
         ++ -- Every one of these is Turbo Vision's own: they move windows
            -- around and say nothing to the model, which is why `view` can
            -- render the same rectangle forever without dragging a window back

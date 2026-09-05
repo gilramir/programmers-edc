@@ -72,7 +72,14 @@ def click_entry(app, text, settle=0.9):
 
 
 def choose(app, theme):
-    open_menu(app, "Tools")
+    """Options | Colors | <theme>.
+
+    Under Tools until 2026-09-05, which was the wrong menu: a colour scheme is
+    not a tool, and the menu listing what predc has should not also hold its
+    settings. `~O~ptions` is where `tvdemo3.cpp` puts `~C~olors...` and where
+    the Borland IDE put it, just before Window and Help.
+    """
+    open_menu(app, "Options")
     click_entry(app, "Colors", settle=0.7)
     return click_entry(app, theme, settle=1.3)
 
@@ -122,9 +129,22 @@ def main():
     check("and whose chart ruler is a bright hue, as a blue ground needs",
           is_bright(borland_ruler), str(borland_ruler))
 
+    # 2a. Colors is on Options and is not on Tools, which is worth a check of
+    #     its own rather than being implied by the ones below: a move that left
+    #     it in both menus would pass every "is it reachable" check in this
+    #     file, and two ways to change one setting is the shape of the bug
+    #     where only one of them writes the config.
+    open_menu(app, "Tools")
+    tools = app.render()
+    check("Colors is not on the Tools menu, which lists what predc has",
+          not any("Colors" in line and "\u2502" in line
+                  for line in tools.split("\n")),
+          [line for line in tools.split("\n") if "Colors" in line])
+    app.send(b"\x1b", settle=0.5)
+
     # 2. The menu says which one is in use. Turbo Vision has no checkable menu
     #    item, so it is a character in the title.
-    open_menu(app, "Tools")
+    open_menu(app, "Options")
     click_entry(app, "Colors", settle=0.7)
     box = app.render()
     check("the menu ticks the theme in use",
@@ -140,7 +160,7 @@ def main():
     #    is the whole reason the theme is Rgb rather than Ansi: Black and
     #    DarkGray is the only dark pair the sixteen offer and it is at once too
     #    far apart to read as one surface and too close to be a border.
-    check("Tools | Colors | Midnight is reachable", choose(app, "Midnight"))
+    check("Options | Colors | Midnight is reachable", choose(app, "Midnight"))
     dark = surfaces(app)
     for what in ("desktop", "bar", "frame"):
         check(f"Midnight repaints the {what}, which no ink can reach",
@@ -167,7 +187,7 @@ def main():
 
     # 5. Gren is the light one, and the reason Inks is a record per theme
     #    rather than one set shared by all three.
-    check("Tools | Colors | Gren is reachable", choose(app, "Gren"))
+    check("Options | Colors | Gren is reachable", choose(app, "Gren"))
     app.send(b"\x1ba", settle=1.0)
     gren = surfaces(app)
     gren_ruler = app.display().fg_at(*RULER)
@@ -224,9 +244,9 @@ def main():
         f.write(hand_written)
 
     app = start(home)
-    check("Tools | Colors | Midnight is reachable a second time",
+    check("Options | Colors | Midnight is reachable a second time",
           choose(app, "Midnight"))
-    check("Tools | Colors | Borland is reachable", choose(app, "Borland"))
+    check("Options | Colors | Borland is reachable", choose(app, "Borland"))
     app.send(b"\x1bx", settle=1.0)
     app.wait(timeout=6)
 
@@ -256,7 +276,7 @@ def main():
     check("a file with a syntax error starts in Borland",
           surfaces(app)["desktop"] == borland["desktop"],
           str(surfaces(app)["desktop"]))
-    check("Tools | Colors | Midnight is reachable a third time",
+    check("Options | Colors | Midnight is reachable a third time",
           choose(app, "Midnight"))
     app.send(b"\x1bx", settle=1.0)
     app.wait(timeout=6)

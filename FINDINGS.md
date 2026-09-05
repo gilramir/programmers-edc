@@ -5990,3 +5990,33 @@ go.
 80, 100 and 132 columns. The assertion that matters is not that the right
 words appear but that **the row still fits** at each width, because the way
 this breaks leaves nothing on the screen to notice.
+
+### A colour scheme is not a tool
+
+predc's themes were on **Tools | Colors**, which put a setting inside the menu
+that lists what the program *has*. That reads fine with one setting and stops
+reading fine the moment there is a second, because the menu then answers two
+different questions and the answer to neither is complete.
+
+Turbo Vision settled it rather than taste: `tvdemo3.cpp:218` has an
+`~O~ptions` menu and `~C~olors...` is in it, beside Mouse, Background and the
+desktop save/retrieve. It is the Borland IDE's answer too, where Options always
+sits just before Window and Help. So predc's bar is now
+
+    File   Tools   [the open tool's own menu]   Options   Window   Help
+
+with Colors a submenu of Options. `Alt-O` was free; the `~O~` in Calc's
+**Octal** and Hex's **Open file...** are item hotkeys inside a pull-down and
+never reach the bar.
+
+One entry in a new menu looks thin, and is still right. Colors is the only
+preference predc has *today*, but the config file already stores a second thing
+the user chose -- the converter's zone list -- and under Tools the next one had
+nowhere to go that would not make that menu wrong again. Same argument as the
+status line: a list that has to be edited when the program grows is not a list
+of the thing it claims to list.
+
+`drive_theme.py` gained a check that Colors is **not** on Tools, which is not
+implied by the ones that follow it. A move that left the entry in both menus
+would pass every "is it reachable" check in that file, and two routes to one
+setting is the shape of the bug where only one of them writes the config.

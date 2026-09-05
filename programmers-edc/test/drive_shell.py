@@ -66,7 +66,8 @@ def main():
 
     check("the launcher started the app", "File" in rows[0], rows[0])
     check("the menu bar came from the view",
-          all(x in rows[0] for x in ("File", "Window", "Help")), rows[0])
+          all(x in rows[0] for x in ("File", "Tools", "Options", "Window", "Help")),
+          rows[0])
     check("the status line is the bottom row",
           all(x in rows[24] for x in ("Exit", "Close", "Paste", "F1")), rows[24])
     # A status line is truncated at the terminal's width without a word about

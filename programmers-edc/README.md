@@ -700,7 +700,7 @@ i18n is one step less expensive than it was.
 
 ## Colors
 
-Three schemes, on **Tools | Colors**: Borland, Midnight and Gren. The choice is
+Three schemes, on **Options | Colors**: Borland, Midnight and Gren. The choice is
 written to `$XDG_CONFIG_HOME/predc/config.toml` (or `~/.config/predc/`) the
 moment it is made, and read back before the first frame of the next run.
 
