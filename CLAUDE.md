@@ -132,5 +132,9 @@ No remote; history is a linear chain on `main` and committing there directly is
 the workflow. Commit messages are long and narrative — the finding, not just the
 change — and end with the check count. Match the ones already in `git log`.
 
-`tvision/` is a gitignored checkout of the upstream C++ library, not part of
-this repo.
+`tvision/` is a **submodule** of gilramir/tvision, a fork of the upstream C++
+library, pinned to its `patches` branch — upstream master plus the fixes
+upstream has not taken yet, one commit each, each also a `fix/...` topic branch
+for its PR. There is no patch directory: what the submodule is checked out at
+is what gets built. A fix that lands upstream means deleting both its branches
+and moving the pin. README says the rest.

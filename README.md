@@ -4,8 +4,11 @@ Binding [magiblot/tvision](https://github.com/magiblot/tvision) — a modern por
 Borland's Turbo Vision — into Node, and eventually into
 [Gren](https://gren-lang.org).
 
-The `tvision/` checkout is not part of this repo (it is gitignored); clone it in
-next to these directories.
+The `tvision/` checkout is a **git submodule** pointing at
+[gilramir/tvision](https://github.com/gilramir/tvision), a fork of upstream that
+carries the fixes upstream has not taken yet. Clone with
+`--recurse-submodules`, or run `git submodule update --init` in an existing
+clone.
 
 ## Milestones
 
@@ -163,7 +166,7 @@ On Debian and Ubuntu the system half is
 the package that ships `ncursesw.pc`.
 
 ```sh
-git clone https://github.com/magiblot/tvision.git   # beside the other dirs
+git submodule update --init                        # fills tvision/
 tvision-node/scripts/build-tvision.sh
 (cd tvision-node         && npm install && npx node-gyp rebuild)
 (cd gren-tvision-runtime && npm install)
@@ -194,19 +197,39 @@ about — a static archive and the `.node` that links it have to come from one
 toolchain and one libc, and inside devbox that is nix's gcc rather than the
 system's. Either host is fine; mixing them is not.
 
-**The `tvision/` checkout tracks upstream master**, not a pinned revision, and
-this repo occasionally turns on a fix as it lands — one recent commit did
-exactly that for a calendar bug reported upstream. A stale clone fails in ways
-that look like this repo's fault.
+**The `tvision/` checkout is a submodule, pinned to a revision** of the
+`patches` branch of [gilramir/tvision](https://github.com/gilramir/tvision) —
+upstream master plus the fixes that have not landed upstream yet, one commit
+each. The pin is a fact recorded in this repo's history, which is the point:
+"which tvision was this built against" has an answer afterwards. Moving it
+forward is `git submodule update --remote tvision` and a commit here; a clone
+that skipped `--init` fails in ways that look like this repo's fault.
 
-**`tvision-node/patches/` is the exception**, and is meant to stay nearly
-empty. `build-tvision.sh` applies every `.patch` in it to the checkout before
-configuring, `git apply -R --check` first so a rebuild is a no-op; a patch that
-no longer applies is skipped with a message rather than failing the build,
-which is what happens once the fix has landed upstream and the file should be
-deleted. Each file says at the top what it is for. There is one, for a
-double-width character that TVision draws and then erases — see the last
-section of [FINDINGS.md](FINDINGS.md).
+**The fork's branches**, and what each is for:
+
+| | |
+|---|---|
+| `master` | tracks `upstream/master` untouched |
+| `patches` | what this repo builds — `master` plus every unlanded fix |
+| `fix/…` | one per upstream issue, one commit off `master`, PR-shaped |
+
+Inside `tvision/`, `origin` is the fork and `upstream` is
+`magiblot/tvision`. A fix starts as a `fix/…` branch off `master`, gets
+cherry-picked onto `patches`, and both are deleted once it lands upstream and
+`master` moves past it. There is no patch directory: what the submodule is
+checked out at is what gets built. Note that `git submodule update` leaves the
+checkout on a detached HEAD, which is a poor place to write the next fix —
+`(cd tvision && git checkout patches)` first. `.gitmodules` uses the https URL
+so a clone needs no key; the checkout's own `origin` is the ssh one, and
+`git submodule sync` will overwrite that if you ever run it.
+
+There are two commits on `patches` today: a `delete`/`delete[]` mismatch that
+kills any AddressSanitizer build ([#230][i230]), and a double-width character
+that TVision draws and then erases ([#233][i233]) — see the last section of
+[FINDINGS.md](FINDINGS.md).
+
+[i230]: https://github.com/magiblot/tvision/issues/230
+[i233]: https://github.com/magiblot/tvision/issues/233
 
 **The first build needs network twice**: `gren make` fills `~/.cache/gren` with
 `gren-lang/core`, `gren-lang/node`, `gren-lang/url`, `gilramir/gren-argparse`

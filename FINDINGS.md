@@ -48,8 +48,9 @@ package. Nice side effect; the build works offline.
   `-DCMAKE_POSITION_INDEPENDENT_CODE=ON`.
 - **tvision builds clean under gcc 15.3.0**, PIC, examples off, GPM off, in
   about two minutes. No patches -- which stayed true until 2026-09-04 and the
-  wide-character bug at the end of this file; `tvision-node/patches/` now holds
-  one, applied by `build-tvision.sh` and deleted when it lands upstream.
+  wide-character bug at the end of this file. `tvision/` is now a submodule of
+  a fork, gilramir/tvision, pinned to its `patches` branch: upstream master
+  plus the unlanded fixes, one commit each. See README.
 - **`napi.h` must be included before `<tvision/tv.h>`.** The Borland
   compatibility headers define `Boolean`, `True`, `False` and a pile of macros;
   V8's headers do not enjoy meeting them.
@@ -5685,13 +5686,14 @@ flag.
 
 [233]: https://github.com/magiblot/tvision/issues/233
 
-There is a patch in `tvision-node/patches/`, which is a directory this repo did
-not have and did not want. `build-tvision.sh` applies whatever is in it,
-`git apply -R --check` first so a rebuild is a no-op and a checkout where the
-fix has landed upstream is left alone with a message. The rule that the
-`tvision/` checkout tracks upstream master rather than a pinned revision is
-unchanged; a patch lives there only while an upstream bug is open, and the file
-says so at the top.
+The fix is a commit on the `patches` branch of gilramir/tvision, the fork
+`tvision/` is a submodule of, and on `fix/wide-char-trail` beside it for the
+pull request. It began as a `.patch` file in `tvision-node/patches/`, applied
+by `build-tvision.sh` -- which lasted a day, until a second unlanded fix made
+the shape of the problem obvious: `git apply -R --check` printed
+`already applied` whether the fix was in the checkout or not, so the mechanism
+that was supposed to guarantee the patch was there could not tell you when it
+wasn't. A branch can only be one thing. See README for the fork's layout.
 
 ### The harness was the reason nobody knew
 

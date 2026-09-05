@@ -9,23 +9,11 @@
 set -e
 cd "$(dirname "$0")/../.."
 
-# Patches, if any are still needed. The `tvision/` checkout tracks upstream
-# master rather than a pinned revision, so this is the exception and not the
-# arrangement: a patch is here only while an upstream bug is open, and each
-# file says what it is for and when to delete it. Applied with `git apply -R
-# --check` first, so a checkout that already has one -- a rebuild, or a
-# revision where the fix has landed and the patch no longer applies -- is left
-# alone rather than failing the build.
-for patch in tvision-node/patches/*.patch; do
-    [ -e "$patch" ] || continue
-    if git -C tvision apply -R --check "../$patch" 2>/dev/null; then
-        echo "already applied: $(basename "$patch")"
-    elif git -C tvision apply "../$patch" 2>/dev/null; then
-        echo "applied: $(basename "$patch")"
-    else
-        echo "SKIPPED (does not apply -- fixed upstream? delete it): $(basename "$patch")" >&2
-    fi
-done
+# The `tvision/` checkout is a git submodule pinned to gilramir/tvision's
+# `patches` branch -- upstream master plus the fixes that have not landed there
+# yet, one commit each, each also a topic branch for its upstream PR. There is
+# nothing to apply here: whatever the submodule is checked out at is what gets
+# built. `git submodule update --remote` moves the pin forward.
 
 cmake -S tvision -B build-tvision \
     -DCMAKE_BUILD_TYPE=Release \
