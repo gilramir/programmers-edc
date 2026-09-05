@@ -89,6 +89,16 @@ def main():
           screen.split("\n")[0])
     leave(check, app, "predc calc")
 
+    # `cal`, which is what cal(1) has trained everybody to type -- and is one
+    # letter from `calc`, so both being real commands is worth a check that
+    # they are still two different tools.
+    app = start(env, work, "cal")
+    screen = app.render()
+    check("predc cal opens the calendar", "Calendar" in screen, screen)
+    check("on this month, with its week numbers", "Wk" in screen, screen)
+    check("and it is not the calculator", "RPN" not in screen, screen)
+    leave(check, app, "predc cal")
+
     app = start(env, work, "unicode")
     screen = app.render()
     check("predc unicode opens the decoder", "Unicode" in screen, screen)

@@ -32,6 +32,7 @@ first.
 type Command
     = Ascii
     | Calc
+    | Calendar
     | Time
     | Unicode
     -- `Nothing` is `predc hex`, which opens the viewer with no file in it --
@@ -75,6 +76,20 @@ parser =
                 , summary = "The `calc` command opens the RPN calculator:"
                 , example = PP.words "predc calc"
                 , builder = \_args _flags -> Calc
+                }
+            -- `cal` rather than `calendar`, which is what `cal(1)` has
+            -- trained everybody to type. It is one letter from `calc` and both
+            -- are real commands, so a slip opens the wrong tool -- which costs
+            -- a glance and a retype, since neither does anything but appear.
+            -- Worth the short word.
+            |> Parser.withCommand
+                { word = "cal"
+                , arguments = Parser.noArgs
+                , flags = Parser.noFlags
+                , commonDescription = Just "Open the calendar."
+                , summary = "The `cal` command opens the calendar, on this month:"
+                , example = PP.words "predc cal"
+                , builder = \_args _flags -> Calendar
                 }
             |> Parser.withCommand
                 { word = "time"

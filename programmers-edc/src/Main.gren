@@ -299,6 +299,16 @@ open command shell =
                 , command = Cmd.none
                 }
 
+        Cli.Calendar ->
+            let
+                step =
+                    Tool.Calendar.init
+            in
+            Node.startProgram
+                { model = Tui.Start { shell | calendar = Just step.model }
+                , command = Cmd.map FromCalendar step.command
+                }
+
         Cli.Time ->
             let
                 step =

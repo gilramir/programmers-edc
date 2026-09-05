@@ -92,6 +92,7 @@ Two things about it are temporary, and both are temporary for the same reason
     predc                 the desktop, with nothing open
     predc ascii           ... with the ASCII chart open
     predc calc            ... with the RPN calculator open
+    predc cal             ... with the calendar open, on this month
     predc time            ... with the time zone converter open, at this moment
     predc unicode         ... with the Unicode decoder open
     predc hex [FILE]      ... with the hex viewer open, on FILE if you name one
@@ -217,7 +218,7 @@ one back.
 
 ## A month, and which week it is
 
-**Tools ▸ Calendar** (`Alt-K`) draws a month with today picked out, and a week
+**Tools ▸ Calendar** (`Alt-K`), or `predc cal`, draws a month with today picked out, and a week
 number against each row. `Up`/`Down` move a month, `g` names one outright, `t`
 comes back to today — and the line under the grid says so, because somebody who
 opens a calendar and sees one month has no way to guess which keys move it.
