@@ -5913,3 +5913,80 @@ problem `check_consistency.py` exists for. The count is the guard: 148 checks
 in the old file, 49 + 39 + 16 + 32 + 12 by phase, and 61 + 39 + 16 + 32 = 148
 across the four afterwards -- and 951 for the suite, unchanged, before and
 after.
+
+## A status line that will not fit does not truncate, it disappears
+
+predc's bottom row carried Exit, four of its five tools, and Close. Each new
+tool pushed something off it: `F5` and `F6` went for the fourth, and the fifth
+— the Unicode decoder — never went on at all, so `Alt-U` had been menu-only
+since the day it was written. **A list that has to shrink when the thing it
+lists grows is not a list of that thing**, and the bar had been quietly wrong
+about what predc has for two tools running.
+
+So the tools came off entirely. Nothing is lost: every one carries its `Alt`
+key on the Tools menu, and `TMenuBar` is `ofPreProcess` exactly as
+`TStatusLine` is, so the shortcut still arrives from inside a window whose
+canvas eats every key — the same measurement that let `F5` and `F6` go.
+
+### The failure mode is silence, and it decided the design
+
+`TStatusLine::drawSelect` (`tstatusl.cpp:270`) draws an item only
+
+```cpp
+ushort l = cstrlen( T->text );
+if( i + l < size.x )
+    { ...draw... }
+i += l+2;
+```
+
+and there is **no `else`**. An entry one column too long is not truncated and
+not marked — it is dropped whole, the bar closes over the gap, and nothing
+anywhere says a sentence was discarded. Combined with a terminal that can be
+resized under the program, a hint written for eighty columns is a hint that
+vanishes at sixty: precisely the narrow terminal where somebody most needs it.
+
+That is why the paste hint is a **ladder measured at render time** rather than
+a string. `Help.barVariants` is a list per situation, longest first;
+`Help.pasteBar` takes the columns left after the fixed entries and returns the
+first rung that fits. Selection is by `Help.barWidth`, which is `cstrlen`'s
+rule — length ignoring the `~` that mark highlighted stretches — so a sentence
+that is one character longer than its author counted gets demoted instead of
+disappearing. Nothing depends on anyone's arithmetic being right.
+
+The budget is derived, not written down: `Array.foldl (\i n -> n + barWidth
+i.text + 2) 0 fixed`, then `cols - spent - 1` for the `<` rather than `<=`.
+Change the wording of Exit and the hint re-fits itself.
+
+### Two situations, and the app is told about both
+
+Which routes exist is the environment's answer and `Help.detect` already knew
+it; how much room there is to say it in is the terminal's, and it moves while
+the program runs. The bar reads both — `model.session` and `model.desktop.cols`
+— which is the whole of "detect what situation you are in":
+
+```
+inside tmux    Paste  Ctrl-Shift-V, Shift-Ins, tmux prefix ]   F1
+inside screen  Paste  Ctrl-Shift-V, Shift-Ins, screen Ctrl-a ]   F1
+with a display Paste  Ctrl-Shift-V, Shift-Ins, or p   F1 why
+over bare ssh  Paste  Ctrl-Shift-V or Shift-Ins, not p   F1 why
+```
+
+at eighty columns, growing to the `into a field` versions at a hundred and
+falling through `Paste  Shift-Ins   F1` at sixty to `F1 paste` at forty.
+
+**The bottom rung is `""` and that is a feature.** An entry with no text costs
+no columns and is still offered every keystroke — the trick that already put
+cut, copy and paste on this bar for free — so on a terminal too narrow for any
+sentence, `F1` still opens the explanation with nothing drawn.
+
+`F1` survives down to 35 columns, which was a retune rather than a first
+draft: the first ladder dropped it at eighty for tmux and screen, and `F1` is
+the escape hatch to the page-long answer, so it is the last thing that should
+go.
+
+### Checking it needs a resize, not a screenshot
+
+`drive_statusbar.py` dresses four environments and reads the bar at 40, 60,
+80, 100 and 132 columns. The assertion that matters is not that the right
+words appear but that **the row still fits** at each width, because the way
+this breaks leaves nothing on the screen to notice.

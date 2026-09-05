@@ -734,43 +734,69 @@ view : Model -> Tui.Ui
 view model =
     { menuBar = menuBar model
     , theme = Theme.palette model.theme
-    -- Exit, the four tools, and Close, and nothing else -- which is a change
-    -- the fourth tool forced. A status line is silently truncated at the
-    -- terminal's width, so a bar that will not fit is a bar that lies, and at
-    -- eighty columns there is room for six of these and not eight.
+    -- Exit, Close, and one sentence about pasting -- and no tools at all,
+    -- which is the change a fifth tool forced. Every tool that went on this
+    -- bar had to come off it again as soon as the next one arrived, and the
+    -- Unicode decoder never fitted in the first place: `Alt-U` has been
+    -- reachable only from the Tools menu since the day it was written, so the
+    -- bar was already lying about what predc has. A list that cannot grow is
+    -- not a list of the tools. All five carry their Alt-key on the menu and
+    -- `TMenuBar` is `ofPreProcess` exactly as `TStatusLine` is, so every
+    -- shortcut still works from a window with a focused canvas in it --
+    -- measured for `F5` and `F6` when they came off for the same reason.
     --
-    -- `F5` and `F6` came off rather than a tool, and it costs nothing: they
-    -- are on the Window menu with their shortcuts, and `TMenuBar` is
-    -- `ofPreProcess` exactly as `TStatusLine` is, so both still work from a
-    -- window with a focused canvas in it. Measured, not assumed. Close stayed
-    -- because it is the one window operation somebody has to be able to find.
+    -- What the room bought is the one question this program is asked most.
+    -- Copying and pasting in a terminal is genuinely confusing and every
+    -- layer of it fails in silence, so the answer is now on the screen at all
+    -- times rather than behind a key somebody has to know to press.
+    --
+    -- The width is computed and not assumed, which is the part worth keeping.
+    -- `TStatusLine` drops an entry that does not fit **whole and without
+    -- saying so**, and a terminal's width changes under the program, so a
+    -- sentence chosen for eighty columns is a sentence that silently vanishes
+    -- at sixty. `Help.pasteBar` is handed what is left after the two fixed
+    -- entries and picks the longest rung that fits; the bottom rung is empty,
+    -- which costs nothing and leaves `F1` working.
     , statusLine =
-        [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
-        , { text = "~Alt-A~ ASCII", key = "Alt-A", cmd = Tool.Ascii.command }
-        , { text = "~Alt-R~ RPN", key = "Alt-R", cmd = Tool.Calc.command }
-        , { text = "~Alt-D~ Hex", key = "Alt-D", cmd = Tool.Hex.command }
-        , { text = "~Alt-C~ Time", key = "Alt-C", cmd = Tool.Time.command }
-        , { text = "~Alt-F3~ Close", key = "Alt-F3", cmd = "close" }
-        -- Three keys with nothing beside them, and they are the reason the
-        -- fields in this program can be filled from the rest of it.
-        --
-        -- Turbo Vision binds no keys to cut, copy and paste itself -- it will
-        -- not choose `Ctrl-C` for somebody -- so a program that names none has
-        -- input lines that cannot do either, and nothing reports it. Naming
-        -- them here costs no columns, because a status entry with no text
-        -- draws nothing and is still offered every keystroke.
-        --
-        -- What it buys over ssh is the whole of it. `y` in the Unicode decoder
-        -- puts code points on a clipboard no remote terminal will ever hand
-        -- back, and `Shift-Ins` in the hex viewer's **Type bytes** field takes
-        -- them straight out of it again -- one program, one clipboard, no
-        -- terminal involved. That is a round trip predc could not make until
-        -- the binding stopped letting views keep a second clipboard of their
-        -- own; `gren-tvision/doc/clipboard.md` has the story.
-        , { text = "", key = "Shift-Del", cmd = "clipboard.cut" }
-        , { text = "", key = "Ctrl-Ins", cmd = "clipboard.copy" }
-        , { text = "", key = "Shift-Ins", cmd = "clipboard.paste" }
-        ]
+        let
+            fixed =
+                [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
+                , { text = "~Alt-F3~ Close", key = "Alt-F3", cmd = "close" }
+                ]
+
+            -- `barWidth + 2` per entry is `TStatusLine::drawSelect`'s own
+            -- arithmetic, and the `- 1` is its `i + l < size.x` rather than
+            -- `<=`. Derived from `fixed` instead of written down, so that
+            -- changing an entry above cannot leave a stale number here.
+            spent =
+                Array.foldl (\item total -> total + Help.barWidth item.text + 2) 0 fixed
+        in
+        fixed
+            ++ [ { text = Help.pasteBar model.session (model.desktop.cols - spent - 1)
+                 , key = "F1"
+                 , cmd = Help.command
+                 }
+               ]
+            -- Three keys with nothing beside them, and they are the reason the
+            -- fields in this program can be filled from the rest of it.
+            --
+            -- Turbo Vision binds no keys to cut, copy and paste itself -- it will
+            -- not choose `Ctrl-C` for somebody -- so a program that names none has
+            -- input lines that cannot do either, and nothing reports it. Naming
+            -- them here costs no columns, because a status entry with no text
+            -- draws nothing and is still offered every keystroke.
+            --
+            -- What it buys over ssh is the whole of it. `y` in the Unicode decoder
+            -- puts code points on a clipboard no remote terminal will ever hand
+            -- back, and `Shift-Ins` in the hex viewer's **Type bytes** field takes
+            -- them straight out of it again -- one program, one clipboard, no
+            -- terminal involved. That is a round trip predc could not make until
+            -- the binding stopped letting views keep a second clipboard of their
+            -- own; `gren-tvision/doc/clipboard.md` has the story.
+            ++ [ { text = "", key = "Shift-Del", cmd = "clipboard.cut" }
+               , { text = "", key = "Ctrl-Ins", cmd = "clipboard.copy" }
+               , { text = "", key = "Shift-Ins", cmd = "clipboard.paste" }
+               ]
     , windows =
         (when model.ascii is
             Just ascii ->

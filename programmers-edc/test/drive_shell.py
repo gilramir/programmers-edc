@@ -68,14 +68,21 @@ def main():
     check("the menu bar came from the view",
           all(x in rows[0] for x in ("File", "Window", "Help")), rows[0])
     check("the status line is the bottom row",
-          all(x in rows[24] for x in ("Exit", "ASCII", "Time", "Close")), rows[24])
+          all(x in rows[24] for x in ("Exit", "Close", "Paste", "F1")), rows[24])
     # A status line is truncated at the terminal's width without a word about
-    # it, so a bar that has grown one entry too long is a bar that quietly
-    # stops mentioning how to close a window. Zoom and Next came off for the
-    # fourth tool; this is what stops the fifth from pushing Close off too.
+    # it -- worse, an entry that does not fit is dropped whole and in silence
+    # -- so a bar that has grown one entry too long is a bar that quietly stops
+    # mentioning how to close a window. That is what took the tools off it
+    # altogether and put the paste hint there instead; the hint measures itself
+    # against the width it is given, and `drive_statusbar.py` is where the
+    # ladder and the four situations are checked. Here it is only that the bar
+    # fits, because this file is about the shell.
     check("and it fits in eighty columns", len(rows[24].rstrip()) < 80,
           f"{len(rows[24].rstrip())} columns: {rows[24]}")
-    check("Zoom and Next are the two that came off", 
+    check("no tool is on it, because a list that cannot grow is not a list",
+          not any(t in rows[24] for t in ("ASCII", "RPN", "Hex", "Time", "Unicode")),
+          rows[24])
+    check("Zoom and Next are not on it either",
           "Zoom" not in rows[24] and "Next" not in rows[24], rows[24])
     check("the desktop is empty until a tool is opened",
           not any("─" in row or "═" in row for row in rows[1:24]),

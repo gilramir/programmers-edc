@@ -149,7 +149,9 @@ def type_in_find(app, text, clear=False):
 def space_on(app, entry):
     """Commit a list entry from the keyboard, which is how the picker is meant
     to be driven: the three buttons carry no caption hotkeys, because `~A~dd`
-    would bind Alt-A and the status line already has that for the ASCII chart.
+    would bind Alt-A and the ASCII chart already has it. That was the status
+    line's when this was written and is the Tools menu's now; the collision is
+    the same one either way.
     Space on a `ListBox` sends `Selected`, which is the whole answer."""
     for r, line in enumerate(app.render().split("\n")):
         if entry in line:

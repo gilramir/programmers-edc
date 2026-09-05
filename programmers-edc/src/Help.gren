@@ -1,11 +1,13 @@
 module Help exposing
     ( Model
     , Session
+    , barWidth
     , command
     , detect
     , init
     , menuItem
     , opened
+    , pasteBar
     , pasteHint
     , update
     , view
@@ -507,6 +509,101 @@ pasteHint it =
 
     else
         "Paste  Ctrl-Shift-V or Shift-Ins into the field.  F1 says why p may not."
+
+
+{-| How wide a status-line entry draws, which is not `String.length`.
+
+`TStatusLine::drawSelect` measures with `cstrlen`, which skips the `~` that
+mark the highlighted stretches, and then spends `l + 2` columns on the item --
+one space each side. Nothing in Gren knew that rule, so the bar's width was a
+thing to be counted by hand and got out of date the moment an entry changed.
+-}
+barWidth : String -> Int
+barWidth text =
+    String.count (String.replace "~" "" text)
+
+
+{-| The paste hint as it goes on the **status line**, for a bar with `budget`
+columns left over.
+
+Two situations, not one. Which routes exist is the environment's answer and is
+what [`pasteHint`](#pasteHint) already knew; how much room there is to say it
+in is the terminal's, and changes under the program while it runs. So this
+takes both, and the width is the reason it is a ladder rather than a string:
+the longest version that fits is the one that goes on.
+
+**Measured rather than counted.** Each rung is chosen by `barWidth`, so a
+sentence being one character longer than its author thought demotes it instead
+of overflowing. That matters here more than it usually would, because of how
+`TStatusLine` fails: an entry that does not fit is **dropped whole and in
+silence** -- `if( i + l < size.x )` and no `else` -- so the hint would simply
+not be there, on exactly the narrow terminal where somebody most needs it and
+with nothing on the screen to say a sentence had been discarded.
+
+The bottom rung is `""`, which is deliberate and is not a failure. An entry
+with no text costs no columns and is still offered every keystroke, so on a
+terminal too narrow for any of this `F1` keeps working with nothing drawn --
+the same trick that puts cut, copy and paste on the bar for free.
+
+The order inside a rung is the order in [`pasteHint`](#pasteHint), and for the
+same reason: `Ctrl-Shift-V` first because the terminal types the characters at
+the program and nothing can block that, and `p` last and only where it can
+work, because `p` is what somebody tries first and what fails in silence.
+-}
+pasteBar : Session -> Int -> String
+pasteBar it budget =
+    barVariants it
+        |> Array.keepIf (\text -> barWidth text <= budget)
+        |> Array.first
+        |> Maybe.withDefault ""
+
+
+{-| The rungs, longest first. One list per situation, because the middle of
+the sentence is the part the situation changes: inside a multiplexer the
+reliable route is its own paste key, with a display `p` works, and over a bare
+ssh session `p` is the thing that will never work and saying so is the point.
+-}
+barVariants : Session -> Array String
+barVariants it =
+    if it.tmux then
+        [ "Paste  ~Ctrl-Shift-V~, ~Shift-Ins~, or tmux ~prefix ]~ into a field   ~F1~ why"
+        , "Paste  ~Ctrl-Shift-V~, ~Shift-Ins~, tmux ~prefix ]~   ~F1~ why"
+        , "Paste  ~Ctrl-Shift-V~, ~Shift-Ins~, tmux ~prefix ]~   ~F1~"
+        , "Paste  ~Shift-Ins~ or tmux ~prefix ]~   ~F1~"
+        , "Paste  ~Shift-Ins~   ~F1~"
+        , "~F1~ paste"
+        , ""
+        ]
+
+    else if it.screen then
+        [ "Paste  ~Ctrl-Shift-V~, ~Shift-Ins~, or screen ~Ctrl-a ]~ into a field   ~F1~ why"
+        , "Paste  ~Ctrl-Shift-V~, ~Shift-Ins~, screen ~Ctrl-a ]~   ~F1~ why"
+        , "Paste  ~Ctrl-Shift-V~, ~Shift-Ins~, screen ~Ctrl-a ]~   ~F1~"
+        , "Paste  ~Shift-Ins~ or screen ~Ctrl-a ]~   ~F1~"
+        , "Paste  ~Shift-Ins~   ~F1~"
+        , "~F1~ paste"
+        , ""
+        ]
+
+    else if it.display || it.wayland then
+        [ "Paste  ~Ctrl-Shift-V~ or ~Shift-Ins~ into a field; ~p~ reads the clipboard   ~F1~ why"
+        , "Paste  ~Ctrl-Shift-V~, ~Shift-Ins~, or ~p~ for the clipboard   ~F1~ why"
+        , "Paste  ~Ctrl-Shift-V~, ~Shift-Ins~, or ~p~   ~F1~ why"
+        , "Paste  ~Ctrl-Shift-V~ or ~Shift-Ins~   ~F1~ why"
+        , "Paste  ~Shift-Ins~   ~F1~"
+        , "~F1~ paste"
+        , ""
+        ]
+
+    else
+        [ "Paste  ~Ctrl-Shift-V~ or ~Shift-Ins~ into a field -- ~p~ cannot work here   ~F1~ why"
+        , "Paste  ~Ctrl-Shift-V~ or ~Shift-Ins~ into a field, never ~p~   ~F1~ why"
+        , "Paste  ~Ctrl-Shift-V~ or ~Shift-Ins~, not ~p~   ~F1~ why"
+        , "Paste  ~Ctrl-Shift-V~ or ~Shift-Ins~   ~F1~ why"
+        , "Paste  ~Shift-Ins~   ~F1~"
+        , "~F1~ paste"
+        , ""
+        ]
 
 
 {-| The section that is the point of the window, and the only other one that

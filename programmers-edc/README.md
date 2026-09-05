@@ -180,6 +180,39 @@ them, and closing the window drops the whole tool the way it drops every other
 one here. Where two overlap the newer one shows; taking it off puts the older
 one back.
 
+## The status line says how to paste
+
+The bottom row is `Alt-X Exit`, `Alt-F3 Close`, and a sentence about pasting.
+No tools, which is a change the fifth one forced: every tool that went on the
+bar had to come off again when the next arrived, and the Unicode decoder never
+fitted at all, so a bar listing four of five was already wrong about what predc
+has. All five carry their `Alt` key on the **Tools** menu and every one still
+works from inside a tool, because a menu bar is offered each key before the
+window under it -- the same rule that lets `Alt-F3` out of a focused canvas.
+
+What the room bought is the question predc is asked most, on the screen all the
+time instead of behind a key somebody has to know to press. **The sentence
+knows where it is running**, because the answer genuinely differs:
+
+| | |
+|---|---|
+| inside tmux | `Paste  Ctrl-Shift-V, Shift-Ins, tmux prefix ]   F1` |
+| inside screen | `Paste  Ctrl-Shift-V, Shift-Ins, screen Ctrl-a ]   F1` |
+| with a display | `Paste  Ctrl-Shift-V, Shift-Ins, or p   F1 why` |
+| over bare ssh | `Paste  Ctrl-Shift-V or Shift-Ins, not p   F1 why` |
+
+**And it knows how much room it has**, which is the other half and the one that
+is easy to miss. A terminal's width changes while the program is running, and
+`TStatusLine` draws an entry only if it fits and says nothing when it does not
+-- so a sentence written for eighty columns does not get truncated at sixty, it
+*disappears*, on exactly the terminal where somebody most needs it. The bar is
+therefore a ladder: the longest version that fits is the one drawn, measured
+rather than counted, down through `Paste  Shift-Ins   F1` and `F1 paste` to
+nothing at all. Even the last rung keeps `F1` working, because a status entry
+with no text costs no columns and is still offered every keystroke.
+
+`F1` opens [Copying and pasting](#pasting), which is the page-long version.
+
 ## Pasting
 
 `p` fills the window from the clipboard as text -- the bytes the string is made
@@ -531,8 +564,8 @@ which is also what makes opening the window show all 418 -- Turbo Vision
 highlights a list's first entry whether or not you asked it to.
 
 The buttons carry no `Alt` letters, for the same reason the calculator's keypad
-does not: `~A~dd` would bind Alt-A and the status line already has that for the
-ASCII chart. So the buttons are the mouse's, `Space` on either list is the
+does not: `~A~dd` would bind Alt-A and the ASCII chart already has it, on the
+Tools menu. So the buttons are the mouse's, `Space` on either list is the
 keyboard's, Enter is Done and Alt-F3 closes the window.
 
 **Add and Remove act on the row the highlight is on**, in the zone list and the
@@ -578,12 +611,12 @@ updated because three answers arrived and two have not.
 
 ## Reading bytes as Unicode
 
-**Tools | Unicode decoder** (`Alt-U`) is the only tool here with no place on
-the status line, because at eighty columns there is no room for a sixth entry
-and a status line that will not fit is a status line that quietly stops
-mentioning how to close a window. Its `Alt-U` is on its menu entry instead,
-which works from anywhere for the same reason `Alt-F3` does: a menu bar is
-offered every key before the window under it gets one.
+**Tools | Unicode decoder** (`Alt-U`) was the tool that would not fit on the
+status line, and it is the reason none of them are there now: a bar listing
+four tools out of five is a bar that has stopped saying what predc has. Every
+tool's `Alt` key is on its menu entry, which works from anywhere for the same
+reason `Alt-F3` does -- a menu bar is offered every key before the window under
+it gets one.
 
 Give it bytes and it shows one character to a row: where it starts, the bytes
 it was made of, its code point, the character itself, and a word about what it

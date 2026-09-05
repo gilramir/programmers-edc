@@ -117,8 +117,11 @@ def main():
     check("the Tools menu is on the bar", "Tools" in app.render().split("\n")[0])
     check("no tool is open until one is asked for", frames(app.render()) == 0)
 
-    # Alt-A is on the status line and on the Tools menu; the status line's is
-    # what this sends.
+    # Alt-A is the Tools menu's, and only the menu's, since the tools came off
+    # the status line. `TMenuBar` is `ofPreProcess` exactly as `TStatusLine`
+    # was, so the key still arrives from a window with a focused canvas in it
+    # -- which is the premise of taking it off the bar, and this send is what
+    # checks it.
     app.send(b"\x1ba", settle=1.2)
     screen = app.render()
     check("Alt-A opened the chart", frames(screen) == 1, screen)
