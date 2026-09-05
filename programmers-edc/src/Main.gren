@@ -44,6 +44,7 @@ import Time
 import Tool.Ascii
 import Tool.Calc
 import Tool.Calendar
+import Tool.Encode
 import Tool.Hex
 import Tool.Time
 import Tool.Unicode
@@ -132,6 +133,7 @@ type alias Model =
     , ascii : Maybe Tool.Ascii.Model
     , calc : Maybe Tool.Calc.Model
     , calendar : Maybe Tool.Calendar.Model
+    , encode : Maybe Tool.Encode.Model
     , hex : Maybe Tool.Hex.Model
     , time : Maybe Tool.Time.Model
     , unicode : Maybe Tool.Unicode.Model
@@ -223,6 +225,7 @@ init env =
                     , ascii = Nothing
                     , calc = Nothing
                     , calendar = Nothing
+                    , encode = Nothing
                     , hex = Nothing
                     , time = Nothing
                     , unicode = Nothing
@@ -535,6 +538,18 @@ handleEvent event model =
                         , command = Tui.focus tui Tool.Calendar.windowId
                         }
 
+            else if cmd == Tool.Encode.command then
+                when model.encode is
+                    Nothing ->
+                        { model = { model | encode = Just Tool.Encode.init }
+                        , command = Cmd.none
+                        }
+
+                    Just _ ->
+                        { model = model
+                        , command = Tui.focus tui Tool.Encode.windowId
+                        }
+
             else if cmd == Tool.Hex.command then
                 when model.hex is
                     Nothing ->
@@ -615,6 +630,9 @@ handleEvent event model =
 
             else if id == Tool.Calendar.windowId then
                 { model = { model | calendar = Nothing }, command = Cmd.none }
+
+            else if id == Tool.Encode.windowId then
+                { model = { model | encode = Nothing }, command = Cmd.none }
 
             else if id == Tool.Hex.windowId then
                 { model = { model | hex = Nothing }, command = Cmd.none }
@@ -744,6 +762,7 @@ toTools event model =
             { model
                 | ascii = Maybe.map (Tool.Ascii.update event) model.ascii
                 , calendar = Maybe.map .model calendar
+                , encode = Maybe.map (Tool.Encode.update event) model.encode
                 , calc = Maybe.map .model calc
                 , hex = Maybe.map .model hex
                 , time = Maybe.map .model time
@@ -928,6 +947,13 @@ view model =
                     Nothing ->
                         []
                )
+            ++ (when model.encode is
+                    Just encode ->
+                        [ Tool.Encode.view (Theme.inks model.theme) encode ]
+
+                    Nothing ->
+                        []
+               )
             ++ (when model.hex is
                     Just hex ->
                         [ Tool.Hex.view (Theme.inks model.theme) hex ]
@@ -990,6 +1016,7 @@ menuBar model =
             , Tool.Time.menuItem
             , Tool.Unicode.menuItem
             , Tool.Calendar.menuItem
+            , Tool.Encode.menuItem
             ]
         }
     ]
@@ -1111,6 +1138,13 @@ toolMenus model =
         ++ (when model.hex is
                 Just _ ->
                     [ Tool.Hex.menu ]
+
+                Nothing ->
+                    []
+           )
+        ++ (when model.encode is
+                Just _ ->
+                    [ Tool.Encode.menu ]
 
                 Nothing ->
                     []

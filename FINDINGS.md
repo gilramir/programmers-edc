@@ -6453,3 +6453,49 @@ its own while a search ran.
 Text or hex digits is a radio rather than a guess, which is `p` and `P`'s
 argument in a third place: `beef` is four characters and two bytes, and a hex
 tool that guessed would be quietly looking for something else.
+
+## Four transforms, eight commands, nothing sniffed
+
+`Tool.Encode` does base64, percent-encoding, C string escapes and HTML
+entities, both ways, live as you type. None of them is hard; the reason to
+write them down is what they have in common.
+
+**Which transform and which direction are both chosen.** `SGVsbG8=` is valid
+base64 and a plausible word. `%41` is an escape and also three characters.
+`\n` is one character or two. Every one of those is a real input, and a tool
+that decided for you would be quietly wrong about some of them — which is the
+hex viewer's `p`/`P` argument, made a third time, and it scales the same way: a
+radio for the transform and a radio for the direction is eight commands with
+two controls rather than eight menu entries.
+
+**Bytes are the middle of all eight**, so they are one function. Encoding takes
+text to UTF-8 bytes and bytes to an ASCII representation; decoding goes the
+other way; writing every case as `String -> Result String String` with the byte
+array inside keeps eight cases from becoming eight shapes.
+
+### Two things a cluster's rectangle decides
+
+`RadioButtons` flows its items *down* the rectangle and then across, so the
+number of rows decides the number of columns: four items in a two-row rectangle
+is two columns of two. The column *width* is the rectangle divided by the
+columns, and there is no error and no wrapping if that is too narrow.
+
+At sixteen columns the second column had nothing to draw in and **two radio
+buttons appeared where four were asked for**. At twenty-four it drew
+`( ) C strin`. Twenty-six is what `( ) C string` needs, and the arithmetic is
+`4 + len` per item. This is the third fixed space in this program that fails by
+drawing something plausible rather than by complaining.
+
+### An input line cannot take a Tab, and a canvas cannot draw one
+
+Both are correct behaviour and together they decide which direction of the
+escape transforms is usable at a keyboard. `Tab` moves the focus — that is what
+an input line is *for* — so a control character has to be pasted, never typed;
+and a canvas has no tab stops, so a decoded `\t` is painted as a CP437 glyph.
+
+Neither is worth fighting. Unescaping is the direction somebody types (they
+have `\n` on screen and want to know what it says), escaping is the direction
+they paste into, and the count line under the answer is what distinguishes one
+character from two when the screen cannot. `drive_encode.py` reads that line
+rather than comparing against a literal tab, which is a test that would
+otherwise be asserting on how Turbo Vision draws control characters.

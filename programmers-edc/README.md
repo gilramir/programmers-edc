@@ -312,6 +312,25 @@ with no text costs no columns and is still offered every keystroke.
 
 `F1` opens [Copying and pasting](#pasting), which is the page-long version.
 
+## Encoding and decoding
+
+**Tools ▸ Encode / decode** (`Alt-J`) does base64, percent-encoding, C string
+escapes and HTML entities, in both directions, as you type. The transform and
+the direction are both chosen — never sniffed, which is `p`/`P`'s rule applied
+to eight combinations: `SGVsbG8=` is valid base64 and a plausible word, `%41`
+is an escape and three characters, and `\n` is one character or two.
+
+Errors name the character that stopped them — `Not base64: !`, `Not an entity:
+&nope;` — because "invalid input" is the message that makes somebody paste it
+into a different tool instead of looking at it.
+
+Two things about the field are worth knowing. **A Tab cannot be typed into it**
+— it moves the focus, which is what an input line is for — so escaping a
+control character means pasting one; unescaping, which is the direction you
+usually want at a keyboard, types fine. And a decoded control character is
+drawn as a CP437 glyph, because a canvas has no tab stops; the count line under
+the answer is how you tell one character from two.
+
 ## Finding bytes
 
 `/` asks for a needle and `n` finds the next one, both also on **Bytes**. Text

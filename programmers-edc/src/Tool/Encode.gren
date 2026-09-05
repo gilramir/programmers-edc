@@ -1,0 +1,916 @@
+module Tool.Encode exposing (Model, command, init, menu, menuItem, update, view, windowId)
+
+{-| The four transforms a programmer does by hand a dozen times a week, in
+both directions.
+
+Base64, percent-encoding, C string escapes and HTML entities. None of them is
+hard and all of them are fiddly, and the reason to have them here rather than
+in a shell one-liner is the same reason the rest of predc exists: over ssh,
+in one window, with the answer next to the question and no `echo -n | base64
+-d` to get the trailing newline wrong.
+
+**Nothing is guessed.** Which transform and which direction are both chosen,
+never sniffed -- base64 that happens to be valid hex, percent-encoding that is
+also plain text, and `\\n` that is either two characters or one are all real
+inputs, and a tool that decided for you would be quietly wrong about some of
+them. That is the hex viewer's `p`/`P` rule, applied to eight combinations
+instead of two.
+
+**Bytes are the middle of every one of them.** Encoding takes text to bytes
+(UTF-8) and bytes to an ASCII representation; decoding goes back. Writing them
+all as `String -> Result String String` with the byte array in the middle keeps
+the eight cases from becoming eight shapes.
+
+The errors say which character stopped them and where, because "invalid input"
+is the message that makes somebody paste it into a different tool rather than
+look at it.
+
+-}
+
+import Bytes exposing (Bytes)
+import Bytes.Decode as Decode
+import Math
+import Theme exposing (Inks)
+import Tui exposing (MenuItem(..), Span, View(..))
+
+
+-- NAMES
+
+
+command : String
+command =
+    "tool.encode"
+
+
+windowId : String
+windowId =
+    "encode"
+
+
+fieldId : String
+fieldId =
+    "encode.input"
+
+
+kindId : String
+kindId =
+    "encode.kind"
+
+
+wayId : String
+wayId =
+    "encode.way"
+
+
+canvasId : String
+canvasId =
+    "encode.out"
+
+
+menuItem : MenuItem
+menuItem =
+    Item { title = "Encode / deco~d~e", cmd = command, key = "Alt-J", shortcut = "Alt-J" }
+
+
+menu : MenuItem
+menu =
+    SubMenu
+        { title = "T~r~ansform"
+        , key = ""
+        , items =
+            [ Item { title = "~B~ase64", cmd = "encode.kind.base64", key = "", shortcut = "" }
+            , Item { title = "~U~RL / percent", cmd = "encode.kind.url", key = "", shortcut = "" }
+            , Item { title = "~C~ string escapes", cmd = "encode.kind.cstring", key = "", shortcut = "" }
+            , Item { title = "~H~TML entities", cmd = "encode.kind.html", key = "", shortcut = "" }
+            , Tui.Separator
+            , Item { title = "~E~ncode", cmd = "encode.way.encode", key = "", shortcut = "" }
+            , Item { title = "~D~ecode", cmd = "encode.way.decode", key = "", shortcut = "" }
+            , Tui.Separator
+            , Item { title = "C~l~ear", cmd = "encode.clear", key = "", shortcut = "" }
+            ]
+        }
+
+
+-- MODEL
+
+
+type Kind
+    = Base64
+    | Url
+    | CString
+    | Html
+
+
+type Way
+    = Encoding
+    | Decoding
+
+
+type alias Model =
+    { typed : String
+    , kind : Kind
+    , way : Way
+    }
+
+
+fieldMax : Int
+fieldMax =
+    1024
+
+
+openRows : Int
+openRows =
+    8
+
+
+lineWidth : Int
+lineWidth =
+    76
+
+
+init : Model
+init =
+    { typed = "", kind = Base64, way = Encoding }
+
+
+-- UPDATE
+
+
+update : Tui.Event -> Model -> Model
+update event model =
+    when event is
+        Tui.Changed it ->
+            if it.id == fieldId then
+                when it.value is
+                    Tui.Text text ->
+                        { model | typed = text }
+
+                    _ ->
+                        model
+
+            else if it.id == kindId then
+                when it.value is
+                    Tui.Choice index ->
+                        { model | kind = kindAt index }
+
+                    _ ->
+                        model
+
+            else if it.id == wayId then
+                when it.value is
+                    Tui.Choice index ->
+                        { model
+                            | way =
+                                if index == 1 then
+                                    Decoding
+
+                                else
+                                    Encoding
+                        }
+
+                    _ ->
+                        model
+
+            else
+                model
+
+        Tui.Command cmd ->
+            if String.startsWith "encode." cmd then
+                runCommand (String.dropFirst 7 cmd) model
+
+            else
+                model
+
+        _ ->
+            model
+
+
+kindAt : Int -> Kind
+kindAt index =
+    when index is
+        1 ->
+            Url
+
+        2 ->
+            CString
+
+        3 ->
+            Html
+
+        _ ->
+            Base64
+
+
+kindIndex : Kind -> Int
+kindIndex kind =
+    when kind is
+        Base64 ->
+            0
+
+        Url ->
+            1
+
+        CString ->
+            2
+
+        Html ->
+            3
+
+
+runCommand : String -> Model -> Model
+runCommand name model =
+    when name is
+        "kind.base64" ->
+            { model | kind = Base64 }
+
+        "kind.url" ->
+            { model | kind = Url }
+
+        "kind.cstring" ->
+            { model | kind = CString }
+
+        "kind.html" ->
+            { model | kind = Html }
+
+        "way.encode" ->
+            { model | way = Encoding }
+
+        "way.decode" ->
+            { model | way = Decoding }
+
+        "clear" ->
+            { model | typed = "" }
+
+        _ ->
+            model
+
+
+-- THE TRANSFORMS
+
+
+{-| Every one of the eight, as one function, because they are one shape:
+text in, text out, and a sentence when the input is not what it claimed.
+-}
+run : Kind -> Way -> String -> Result String String
+run kind way text =
+    if String.isEmpty text then
+        Ok ""
+
+    else
+        when way is
+            Encoding ->
+                when kind is
+                    Base64 ->
+                        Ok (base64Encode (utf8 text))
+
+                    Url ->
+                        Ok (urlEncode (utf8 text))
+
+                    CString ->
+                        Ok (cEncode text)
+
+                    Html ->
+                        Ok (htmlEncode text)
+
+            Decoding ->
+                when kind is
+                    Base64 ->
+                        Result.map fromUtf8 (base64Decode text)
+
+                    Url ->
+                        Result.map fromUtf8 (urlDecode text)
+
+                    CString ->
+                        cDecode text
+
+                    Html ->
+                        htmlDecode text
+
+
+utf8 : String -> Array Int
+utf8 text =
+    let
+        bites =
+            Bytes.fromString text
+    in
+    Decode.decode (byteArray (Bytes.length bites)) bites
+        |> Maybe.withDefault []
+
+
+byteArray : Int -> Decode.Decoder (Array Int)
+byteArray count =
+    Decode.loop
+        { left = count, sofar = [] }
+        (\state ->
+            if state.left <= 0 then
+                Decode.succeed (Decode.Done state.sofar)
+
+            else
+                Decode.map
+                    (\byte ->
+                        Decode.Loop
+                            { left = state.left - 1
+                            , sofar = Array.pushLast byte state.sofar
+                            }
+                    )
+                    Decode.unsignedInt8
+        )
+
+
+{-| Bytes back to text, reading them as UTF-8 and saying so when they are not.
+
+`Bytes.toString` answers `Nothing` for a byte sequence that is not UTF-8, which
+is the honest answer and a useless message, so the caller gets a sentence
+instead. Somebody decoding base64 of a PNG wants to be told that is what
+happened, not shown `U+FFFD` eighty times.
+-}
+fromUtf8 : Array Int -> String
+fromUtf8 bytes =
+    Array.foldl (\byte builder -> builder) "" bytes
+        |> (\_ ->
+                bytes
+                    |> Array.map (\b -> b)
+                    |> asString
+           )
+
+
+asString : Array Int -> String
+asString bytes =
+    when Bytes.toString (bytesFrom bytes) is
+        Just text ->
+            text
+
+        Nothing ->
+            "(not UTF-8: "
+                ++ String.fromInt (Array.length bytes)
+                ++ " bytes -- try the hex viewer)"
+
+
+bytesFrom : Array Int -> Bytes
+bytesFrom bytes =
+    Bytes.fromString (String.fromArray (Array.map Char.fromCode bytes))
+
+
+-- BASE64
+
+
+alphabet : String
+alphabet =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+
+base64Encode : Array Int -> String
+base64Encode bytes =
+    let
+        chunk index acc =
+            when Array.get index bytes is
+                Nothing ->
+                    acc
+
+                Just first ->
+                    let
+                        second =
+                            Array.get (index + 1) bytes
+
+                        third =
+                            Array.get (index + 2) bytes
+
+                        packed =
+                            (first * 65536)
+                                + (Maybe.withDefault 0 second * 256)
+                                + Maybe.withDefault 0 third
+
+                        letter shift =
+                            String.fromChar
+                                (Maybe.withDefault '='
+                                    (charAt (Math.modBy 64 (packed // shift)) alphabet)
+                                )
+
+                        four =
+                            letter 262144
+                                ++ letter 4096
+                                ++ (when second is
+                                        Just _ ->
+                                            letter 64
+
+                                        Nothing ->
+                                            "="
+                                   )
+                                ++ (when third is
+                                        Just _ ->
+                                            letter 1
+
+                                        Nothing ->
+                                            "="
+                                   )
+                    in
+                    chunk (index + 3) (acc ++ four)
+    in
+    chunk 0 ""
+
+
+charAt : Int -> String -> Maybe Char
+charAt index text =
+    Array.get index (String.toArray text)
+
+
+base64Decode : String -> Result String (Array Int)
+base64Decode text =
+    let
+        cleaned =
+            String.toArray text
+                |> Array.keepIf (\c -> c /= '\n' && c /= '\r' && c /= ' ' && c /= '\t')
+
+        digits =
+            Array.keepIf (\c -> c /= '=') cleaned
+
+        indexed =
+            Array.map (\c -> { char = c, value = indexIn c alphabet }) digits
+
+        bad =
+            Array.keepIf (\each -> each.value == Nothing) indexed
+    in
+    when Array.first bad is
+        Just wrong ->
+            Err ("Not base64: " ++ String.fromChar wrong.char)
+
+        Nothing ->
+            let
+                values =
+                    Array.map (\each -> Maybe.withDefault 0 each.value) indexed
+            in
+            if Math.modBy 4 (Array.length values) == 1 then
+                Err "Not base64: a length that cannot be right (one digit over)."
+
+            else
+                Ok (unpack values)
+
+
+unpack : Array Int -> Array Int
+unpack values =
+    let
+        go index acc =
+            when Array.get index values is
+                Nothing ->
+                    acc
+
+                Just a ->
+                    let
+                        b =
+                            Maybe.withDefault 0 (Array.get (index + 1) values)
+
+                        c =
+                            Array.get (index + 2) values
+
+                        d =
+                            Array.get (index + 3) values
+
+                        packed =
+                            (a * 262144)
+                                + (b * 4096)
+                                + (Maybe.withDefault 0 c * 64)
+                                + Maybe.withDefault 0 d
+
+                        bytes =
+                            [ Math.modBy 256 (packed // 65536) ]
+                                ++ (when c is
+                                        Just _ ->
+                                            [ Math.modBy 256 (packed // 256) ]
+
+                                        Nothing ->
+                                            []
+                                   )
+                                ++ (when d is
+                                        Just _ ->
+                                            [ Math.modBy 256 packed ]
+
+                                        Nothing ->
+                                            []
+                                   )
+                    in
+                    go (index + 4) (acc ++ bytes)
+    in
+    go 0 []
+
+
+indexIn : Char -> String -> Maybe Int
+indexIn wanted text =
+    String.toArray text
+        |> Array.indexedMap (\index c -> { index = index, c = c })
+        |> Array.keepIf (\each -> each.c == wanted)
+        |> Array.first
+        |> Maybe.map .index
+
+
+-- PERCENT
+
+
+urlEncode : Array Int -> String
+urlEncode bytes =
+    Array.map
+        (\byte ->
+            if unreserved byte then
+                String.fromChar (Char.fromCode byte)
+
+            else
+                "%" ++ String.toUpper (hexPair byte)
+        )
+        bytes
+        |> String.join ""
+
+
+{-| RFC 3986's unreserved set, and nothing else. `+` for a space is
+`application/x-www-form-urlencoded` rather than percent-encoding, and the two
+being confusable is exactly why this does not do it.
+-}
+unreserved : Int -> Bool
+unreserved byte =
+    (byte >= 0x30 && byte <= 0x39)
+        || (byte >= 0x41 && byte <= 0x5A)
+        || (byte >= 0x61 && byte <= 0x7A)
+        || byte == 0x2D
+        || byte == 0x2E
+        || byte == 0x5F
+        || byte == 0x7E
+
+
+hexPair : Int -> String
+hexPair byte =
+    let
+        digit n =
+            String.fromChar
+                (Maybe.withDefault '0' (charAt n "0123456789abcdef"))
+    in
+    digit (byte // 16) ++ digit (Math.modBy 16 byte)
+
+
+urlDecode : String -> Result String (Array Int)
+urlDecode text =
+    let
+        chars =
+            String.toArray text
+
+        go index acc =
+            when Array.get index chars is
+                Nothing ->
+                    Ok acc
+
+                Just c ->
+                    if c == '%' then
+                        when { hi = Array.get (index + 1) chars, lo = Array.get (index + 2) chars } is
+                            { hi = Just hi, lo = Just lo } ->
+                                when { a = hexValue hi, b = hexValue lo } is
+                                    { a = Just a, b = Just b } ->
+                                        go (index + 3) (Array.pushLast ((a * 16) + b) acc)
+
+                                    _ ->
+                                        Err ("Not percent-encoded: %" ++ String.fromChar hi ++ String.fromChar lo)
+
+                            _ ->
+                                Err "Not percent-encoded: a % with fewer than two digits after it."
+
+                    else
+                        go (index + 1) (Array.pushLast (Char.toCode c) acc)
+    in
+    go 0 []
+
+
+{-| `Char` has no `toLower`, and the only letters that reach here are A-F, so
+this is the same arithmetic the calculator's `accepts` uses.
+-}
+lowered : Char -> Char
+lowered c =
+    let
+        code =
+            Char.toCode c
+    in
+    if code >= 0x41 && code <= 0x5A then
+        Char.fromCode (code + 0x20)
+
+    else
+        c
+
+
+hexValue : Char -> Maybe Int
+hexValue c =
+    indexIn (lowered c) "0123456789abcdef"
+
+
+-- C STRINGS
+
+
+cEncode : String -> String
+cEncode text =
+    String.toArray text
+        |> Array.map
+            (\c ->
+                when c is
+                    '\n' ->
+                        "\\n"
+
+                    '\t' ->
+                        "\\t"
+
+                    '\r' ->
+                        "\\r"
+
+                    '\\' ->
+                        "\\\\"
+
+                    '"' ->
+                        "\\\""
+
+                    other ->
+                        let
+                            code =
+                                Char.toCode other
+                        in
+                        if code < 0x20 || code == 0x7F then
+                            "\\x" ++ hexPair code
+
+                        else
+                            String.fromChar other
+            )
+        |> String.join ""
+
+
+cDecode : String -> Result String String
+cDecode text =
+    let
+        chars =
+            String.toArray text
+
+        go index acc =
+            when Array.get index chars is
+                Nothing ->
+                    Ok acc
+
+                Just c ->
+                    if c /= '\\' then
+                        go (index + 1) (acc ++ String.fromChar c)
+
+                    else
+                        when Array.get (index + 1) chars is
+                            Nothing ->
+                                Err "A backslash at the end, with nothing after it."
+
+                            Just next ->
+                                when next is
+                                    'n' ->
+                                        go (index + 2) (acc ++ "\n")
+
+                                    't' ->
+                                        go (index + 2) (acc ++ "\t")
+
+                                    'r' ->
+                                        go (index + 2) (acc ++ "\r")
+
+                                    '\\' ->
+                                        go (index + 2) (acc ++ "\\")
+
+                                    '"' ->
+                                        go (index + 2) (acc ++ "\"")
+
+                                    'x' ->
+                                        when { hi = Array.get (index + 2) chars, lo = Array.get (index + 3) chars } is
+                                            { hi = Just hi, lo = Just lo } ->
+                                                when { a = hexValue hi, b = hexValue lo } is
+                                                    { a = Just a, b = Just b } ->
+                                                        go (index + 4)
+                                                            (acc ++ String.fromChar (Char.fromCode ((a * 16) + b)))
+
+                                                    _ ->
+                                                        Err ("Not an escape: \\x" ++ String.fromChar hi ++ String.fromChar lo)
+
+                                            _ ->
+                                                Err "A \\x with fewer than two digits after it."
+
+                                    other ->
+                                        Err ("Not an escape: \\" ++ String.fromChar other)
+    in
+    go 0 ""
+
+
+-- HTML
+
+
+htmlEncode : String -> String
+htmlEncode text =
+    String.toArray text
+        |> Array.map
+            (\c ->
+                when c is
+                    '&' ->
+                        "&amp;"
+
+                    '<' ->
+                        "&lt;"
+
+                    '>' ->
+                        "&gt;"
+
+                    '"' ->
+                        "&quot;"
+
+                    '\'' ->
+                        "&#39;"
+
+                    other ->
+                        String.fromChar other
+            )
+        |> String.join ""
+
+
+htmlDecode : String -> Result String String
+htmlDecode text =
+    let
+        named =
+            [ { name = "amp", text = "&" }
+            , { name = "lt", text = "<" }
+            , { name = "gt", text = ">" }
+            , { name = "quot", text = "\"" }
+            , { name = "apos", text = "'" }
+            , { name = "nbsp", text = " " }
+            ]
+
+        chars =
+            String.toArray text
+
+        go index acc =
+            when Array.get index chars is
+                Nothing ->
+                    Ok acc
+
+                Just c ->
+                    if c /= '&' then
+                        go (index + 1) (acc ++ String.fromChar c)
+
+                    else
+                        let
+                            rest =
+                                String.fromArray (Array.dropFirst (index + 1) chars)
+                        in
+                        when String.firstIndexOf ";" rest is
+                            Just at ->
+                                let
+                                    body =
+                                        String.takeFirst at rest
+                                in
+                                when entityFor named body is
+                                    Just text_ ->
+                                        go (index + at + 2) (acc ++ text_)
+
+                                    Nothing ->
+                                        Err ("Not an entity: &" ++ body ++ ";")
+
+                            Nothing ->
+                                Err "An & with no ; after it."
+    in
+    go 0 ""
+
+
+entityFor : Array { name : String, text : String } -> String -> Maybe String
+entityFor named body =
+    if String.startsWith "#x" body || String.startsWith "#X" body then
+        codeFrom 16 (String.dropFirst 2 body)
+
+    else if String.startsWith "#" body then
+        codeFrom 10 (String.dropFirst 1 body)
+
+    else
+        named
+            |> Array.keepIf (\each -> each.name == body)
+            |> Array.first
+            |> Maybe.map .text
+
+
+codeFrom : Int -> String -> Maybe String
+codeFrom radix digits =
+    let
+        values =
+            String.toArray digits
+                |> Array.map (\c -> indexIn (lowered c) (String.takeFirst radix "0123456789abcdef"))
+    in
+    if Array.isEmpty values || Array.any (\v -> v == Nothing) values then
+        Nothing
+
+    else
+        values
+            |> Array.foldl (\v total -> (total * radix) + Maybe.withDefault 0 v) 0
+            |> Char.fromCode
+            |> String.fromChar
+            |> Just
+
+
+-- VIEW
+
+
+view : Inks -> Model -> Tui.Window
+view inks model =
+    { id = windowId
+    , title = "Encode / decode"
+    , rect = { x1 = 0, y1 = 1, x2 = 79, y2 = 2 + openRows + 5 }
+    , resize = Tui.resizeHeight
+    , palette = Tui.BlueWindow
+    , canClose = True
+    , canMove = True
+    , views =
+        -- The field first, so it holds the caret when the window opens: this
+        -- tool starts with nothing to look at and the field is the way to
+        -- something. Same reasoning as the decoder's, and the same cost --
+        -- plain letters go to the field until Tab leaves it, which is why the
+        -- transforms are on a menu as well as on the two clusters.
+        [ InputLine
+            { id = fieldId
+            , rect = { x1 = 8, y1 = 1, x2 = 36, y2 = 2 }
+            , maxLen = fieldMax
+            , value = model.typed
+            , allowed = Nothing
+            }
+        , Label
+            { id = "encode.field.label"
+            , rect = { x1 = 1, y1 = 1, x2 = 8, y2 = 2 }
+            , text = "~I~nput"
+            , for = fieldId
+            }
+        , RadioButtons
+            { id = kindId
+            -- Two rows tall and twenty-six wide, and both numbers are load
+            -- bearing. Turbo Vision flows a cluster's items *down* its
+            -- rectangle and then across, so two rows is what makes four items
+            -- into two columns of two; the column width is the rectangle
+            -- divided by the columns, so twenty-six is what gives `( ) C
+            -- string` the thirteen it needs. At sixteen the second column drew
+            -- nothing at all -- no error, just two radio buttons where four
+            -- were asked for -- and at twenty-four it drew `C strin`.
+            , rect = { x1 = 38, y1 = 1, x2 = 64, y2 = 3 }
+            , items = [ "Base64", "URL", "C string", "HTML" ]
+            , selected = kindIndex model.kind
+            , available = []
+            }
+        , RadioButtons
+            { id = wayId
+            , rect = { x1 = 66, y1 = 1, x2 = 78, y2 = 3 }
+            , items = [ "Encode", "Decode" ]
+            , selected =
+                when model.way is
+                    Encoding ->
+                        0
+
+                    Decoding ->
+                        1
+            , available = []
+            }
+        , Grows
+            { grow = Tui.stretchHeight
+            , view =
+                Canvas
+                    { id = canvasId
+                    , rect = { x1 = 1, y1 = 4, x2 = 1 + lineWidth, y2 = 4 + openRows }
+                    , lines = display inks model
+                    , cursor = Nothing
+                    , takesFocus = True
+                    }
+            }
+        ]
+    }
+
+
+display : Inks -> Model -> Array (Array Span)
+display inks model =
+    if String.isEmpty model.typed then
+        [ [ Tui.ink inks.dim "Type or paste something. Tab reaches the output." ] ]
+
+    else
+        when run model.kind model.way model.typed is
+            Err reason ->
+                [ [ Tui.ink inks.alert reason ] ]
+
+            Ok answer ->
+                wrapped answer
+                    ++ [ []
+                       , [ Tui.ink inks.ruler
+                            (String.fromInt (String.count answer) ++ " characters out")
+                         ]
+                       ]
+
+
+{-| The answer across as many rows as it needs, because base64 of anything is
+longer than a line and a canvas does not wrap for you.
+-}
+wrapped : String -> Array (Array Span)
+wrapped text =
+    let
+        go rest acc =
+            if String.count rest <= lineWidth then
+                Array.pushLast [ Tui.plain rest ] acc
+
+            else
+                go (String.dropFirst lineWidth rest)
+                    (Array.pushLast [ Tui.plain (String.takeFirst lineWidth rest) ] acc)
+    in
+    if String.isEmpty text then
+        [ [ Tui.plain "" ] ]
+
+    else
+        go text []
