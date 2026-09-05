@@ -34,6 +34,7 @@ type Command
     | Calc
     | Calendar
     | Encode
+    | Env
     | Random
     | Time
     | Unicode
@@ -101,6 +102,15 @@ parser =
                 , summary = "The `encode` command opens the encoder, with nothing in it and nothing chosen for you:"
                 , example = PP.words "predc encode"
                 , builder = \_args _flags -> Encode
+                }
+            |> Parser.withCommand
+                { word = "env"
+                , arguments = Parser.noArgs
+                , flags = Parser.noFlags
+                , commonDescription = Just "Open the environment variable list."
+                , summary = "The `env` command opens the environment variables predc's own process has:"
+                , example = PP.words "predc env"
+                , builder = \_args _flags -> Env
                 }
             |> Parser.withCommand
                 { word = "random"

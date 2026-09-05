@@ -111,6 +111,17 @@ def main():
     # The one subcommand whose window is not empty when it arrives: the tool's
     # `init` starts a task, and the values are on the screen before anybody has
     # pressed anything.
+    app = start(env, work, "env")
+    screen = app.render()
+    check("predc env opens the environment list", "Environment" in screen, screen)
+    # Sorted, so TERM is a long way down a real environment -- and the search
+    # box has the caret the moment the window arrives, which is what makes this
+    # one line rather than a scroll.
+    app.send(b"TERM", settle=1.2)
+    check("with this process's own variables in it",
+          "xterm-256color" in app.render(), app.render())
+    leave(check, app, "predc env")
+
     app = start(env, work, "random")
     screen = app.render()
     check("predc random opens the random values tool", "Random values" in screen, screen)

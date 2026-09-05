@@ -45,6 +45,7 @@ import Tool.Ascii
 import Tool.Calc
 import Tool.Calendar
 import Tool.Encode
+import Tool.Env
 import Tool.Hex
 import Tool.Random
 import Tool.Time
@@ -135,6 +136,11 @@ type alias Model =
     -- `FileSystem.initialize` is an `Init.Task` and therefore the program's
     -- first act; nothing later can ask for one.
     , permission : FileSystem.Permission
+    -- What the process was started with. Held for the same reason and with the
+    -- same consequence: `Node.getEnvironmentVariables` is an `Init.Task`, so
+    -- this is a snapshot from before the first frame -- which is why
+    -- `Tool.Env` has no Refresh and does not need one.
+    , environment : Dict String String
     -- One field per tool, `Nothing` when its window is not open. A field
     -- rather than a list because the tools do not share a model type and
     -- should not be made to: what they share is the shape of the three
@@ -143,6 +149,7 @@ type alias Model =
     , calc : Maybe Tool.Calc.Model
     , calendar : Maybe Tool.Calendar.Model
     , encode : Maybe Tool.Encode.Model
+    , env : Maybe Tool.Env.Model
     , random : Maybe Tool.Random.Model
     , hex : Maybe Tool.Hex.Model
     , time : Maybe Tool.Time.Model
@@ -233,10 +240,12 @@ init env =
                 shell =
                     { desktop = { cols = 80, rows = 23 }
                     , permission = permission
+                    , environment = vars
                     , ascii = Nothing
                     , calc = Nothing
                     , calendar = Nothing
                     , encode = Nothing
+                    , env = Nothing
                     , random = Nothing
                     , hex = Nothing
                     , time = Nothing
@@ -322,6 +331,12 @@ open command shell =
             Node.startProgram
                 { model = Tui.Start { shell | calendar = Just step.model }
                 , command = Cmd.map FromCalendar step.command
+                }
+
+        Cli.Env ->
+            Node.startProgram
+                { model = Tui.Start { shell | env = Just (Tool.Env.init shell.environment) }
+                , command = Cmd.none
                 }
 
         Cli.Encode ->
@@ -586,6 +601,18 @@ handleEvent event model =
                         , command = Tui.focus tui Tool.Encode.windowId
                         }
 
+            else if cmd == Tool.Env.command then
+                when model.env is
+                    Nothing ->
+                        { model = { model | env = Just (Tool.Env.init model.environment) }
+                        , command = Cmd.none
+                        }
+
+                    Just _ ->
+                        { model = model
+                        , command = Tui.focus tui Tool.Env.windowId
+                        }
+
             else if cmd == Tool.Random.command then
                 when model.random is
                     Nothing ->
@@ -685,6 +712,9 @@ handleEvent event model =
 
             else if id == Tool.Encode.windowId then
                 { model = { model | encode = Nothing }, command = Cmd.none }
+
+            else if id == Tool.Env.windowId then
+                { model = { model | env = Nothing }, command = Cmd.none }
 
             else if id == Tool.Random.windowId then
                 { model = { model | random = Nothing }, command = Cmd.none }
@@ -816,6 +846,9 @@ toTools event model =
         random =
             Maybe.map (Tool.Random.update randomPorts event) model.random
 
+        env =
+            Maybe.map (Tool.Env.update tui event) model.env
+
         moved =
             { model
                 | ascii = Maybe.map (Tool.Ascii.update event) model.ascii
@@ -824,6 +857,7 @@ toTools event model =
                 , calc = Maybe.map .model calc
                 , hex = Maybe.map .model hex
                 , random = Maybe.map .model random
+                , env = Maybe.map .model env
                 , time = Maybe.map .model time
                 , unicode = Maybe.map .model unicode
                 -- Like the chart and the calculator, it starts nothing and so
@@ -890,6 +924,12 @@ toTools event model =
             , when random is
                 Just step ->
                     Cmd.map FromRandom step.command
+
+                Nothing ->
+                    Cmd.none
+            , when env is
+                Just step ->
+                    step.command
 
                 Nothing ->
                     Cmd.none
@@ -1019,6 +1059,13 @@ view model =
                     Nothing ->
                         []
                )
+            ++ (when model.env is
+                    Just env ->
+                        [ Tool.Env.view (Theme.inks model.theme) env ]
+
+                    Nothing ->
+                        []
+               )
             ++ (when model.random is
                     Just random ->
                         [ Tool.Random.view (Theme.inks model.theme) random ]
@@ -1090,6 +1137,7 @@ menuBar model =
             , Tool.Calendar.menuItem
             , Tool.Encode.menuItem
             , Tool.Random.menuItem
+            , Tool.Env.menuItem
             ]
         }
     ]
@@ -1225,6 +1273,13 @@ toolMenus model =
         ++ (when model.random is
                 Just _ ->
                     [ Tool.Random.menu ]
+
+                Nothing ->
+                    []
+           )
+        ++ (when model.env is
+                Just _ ->
+                    [ Tool.Env.menu ]
 
                 Nothing ->
                     []

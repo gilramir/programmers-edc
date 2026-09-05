@@ -90,6 +90,13 @@ A v4 UUID, or N random bytes as hex or base64.
 
 **Done** -- see "Random values" below.
 
+## Environment variables
+
+Every variable predc's own process has, one per line, with a search box and a
+case-sensitivity toggle.
+
+**Done** -- see "Environment variables" below.
+
 **Not wanted:** hashes (md5/sha) and a `chmod` bit calculator, both suggested
 and both declined.
 
@@ -124,6 +131,7 @@ Two things about it are temporary, and both are temporary for the same reason
     predc unicode         ... with the Unicode decoder open
     predc encode          ... with the encoder open, with nothing chosen for you
     predc random          ... with the random values tool open, five UUIDs made
+    predc env             ... with the environment variable list open
     predc hex [FILE]      ... with the hex viewer open, on FILE if you name one
     predc --help          what the commands are
     predc --version
@@ -359,6 +367,41 @@ control character means pasting one; unescaping, which is the direction you
 usually want at a keyboard, types fine. And a decoded control character is
 drawn as a CP437 glyph, because a canvas has no tab stops; the count line under
 the answer is how you tell one character from two.
+
+## Environment variables
+
+**Tools ▸ Environment variables** (`Alt-P`, `predc env`) lists every variable
+this process has, sorted by name, with the value a column away. `Tab` reaches
+the list, `/` comes back to the search box, `c` toggles case, `y` copies what
+is shown as `NAME=value` lines.
+
+**It is a snapshot from before the first frame, and there is no Refresh.**
+`Node.getEnvironmentVariables` is an `Init.Task`, so the shell reads the
+environment on the way in and hands it over. That is not a limitation worked
+around: a process's environment is changed only by the process itself, and
+predc never changes its own, so what is on the screen cannot go stale. A
+Refresh would redraw the same list and quietly imply that it might not.
+
+**The search box filters rather than jumps.** `n`-for-next is the right shape
+for a hex dump, where the answer is a position in something too big to see; a
+list of forty names is not that. Typing `proxy` and being shown the four
+variables that mention one *is* the question. The status line reads
+`4 of 47 match "proxy"`, so a filtered view is never mistaken for the whole of
+it, and emptying the box brings everything back — there is no mode to be stuck
+in. The needle is matched against `NAME=value`, so `PATH=` finds the variable
+rather than the twenty others that mention a path, and the matched text is
+picked out inside each row rather than the whole row being marked: every row
+shown is a match, so marking rows would say nothing and put fifteen lines of
+inverse video on the screen to say it.
+
+Matching ignores case until the check box says otherwise, because somebody
+hunting for `http_proxy` should not have to know how this machine spells it.
+
+**Nothing is truncated.** A value wider than the window wraps to the next line,
+indented to the value column; `PATH` is six lines here and six lines is the
+right number for `PATH`. A name wider than the name column is written whole and
+its value starts one space after it, out of line with the rest — out of line is
+honest, cut off would not be.
 
 ## Random values
 

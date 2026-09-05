@@ -6604,3 +6604,95 @@ wrong side of it. Refusing outright is worse in a different way: a field with
 emptied itself while somebody was mid-edit would be unusable. Clamp so there is
 always something to look at, complain so the number on the screen is never
 unexplained.
+
+## The Alt-key census was wrong, and the source says so
+
+Two files in predc — `Tool/Calendar.gren` and `Tool/Random.gren` — state that
+the only `Alt` letters ever free were `J`, `K`, `Q` and `V`. That was measured
+by grepping every source for `~x~` and treating each one as a claim. It is too
+strict by a wide margin, and the eighth tool is where that started to cost
+something rather than merely being pessimistic.
+
+`TMenuView::findHotKey` (`tmnuview.cpp:557`) matches `p->keyCode` — the item's
+*accelerator*, the `key` field — and never the underlined letter in its title.
+An entry inside a pull-down claims its letter only while that pull-down is on
+the screen, which is exactly when you are looking at it. What actually claims
+an `Alt` key for a whole session is a shorter list: a menu **bar** title, an
+item's `key`, and a caption on a view in an open **window**.
+
+Counted that way, three letters were free rather than one: `E`, `P` and `Q`.
+`E` would have been the obvious one for an environment list and is not free
+after all — `Tool.Unicode`'s menu is `~E~ncoding`, which is on the bar whenever
+the decoder is open — so the tool took `P`, for the **p**rocess's environment,
+and `Q` is what is left for whatever comes next.
+
+The general lesson is not about letters. **A scan that over-claims is not
+safe** just because it errs toward refusing: it retires a resource that is not
+spent, and it does so with the authority of a measurement. This one had been
+written down twice and believed a third time before anybody read the function
+that decides the answer.
+
+### A caption with no tilde works on a menu bar too
+
+`Tool.Random`'s buttons are captioned `Again` and `Copy` with no `~`, so they
+claim nothing. `Tool.Env`'s menu applies the same rule one level up: it is
+titled `Search`, with no underlined letter, because every letter of the word is
+spoken for by something that can be on screen at the same time — `S` is the
+converter's `~S~top clock` button, `e` the decoder's `~E~ncoding` menu, `a` the
+ASCII chart, `r` the calculator, `c` the converter, `h` Help. A menu bar title
+beats a button silently, so underlining any of them would take a key away from
+another window without a word about it. An underline that promises a key which
+opens somebody else's menu is worse than no underline.
+
+## Filtering is not searching, and a list of forty is not a file
+
+`Tool.Env` has a search box that narrows the list rather than a `/` and an `n`
+that walk it. The hex viewer has the opposite and both are right, which is the
+part worth writing down: **find-next is the shape for an answer that is a
+position in something too big to see**, and a filter is the shape for a set
+small enough to look at. Forty environment variables are the second thing.
+Typing `proxy` and being shown the four that mention one *is* the question;
+being taken to the first of them and asked to press `n` is the same question
+with steps in it.
+
+Three things keep the filter from being a mode:
+
+  - the status line reads `4 of 47 match "proxy"`, so a narrowed view is never
+    mistaken for the whole of it;
+  - emptying the box brings everything back, and there is no state to leave;
+  - and the *matched text* is marked, not the row. Every row on screen is a
+    match, so marking rows would say nothing at all and would put fifteen lines
+    of inverse video on the screen to say it. Marking the needle answers the
+    question the eye actually has — which of these matched in the name and
+    which in the value.
+
+The marking is scanned character by character over the original text rather
+than by finding an index in a lower-cased copy, because lower-casing is not
+always length-preserving (Turkish dotted capital `İ` becomes two code points),
+so an offset found in the copy does not always mean the same place in the
+original. A line is seventy-six characters and a needle is short; comparing in
+place costs nothing worth saving.
+
+### An Init.Task is a fact from before the program painted
+
+`Node.getEnvironmentVariables` can only be asked at start-up, so `Main` holds
+the answer and hands it to the tool. That reads like a limitation and is not
+one: a process's environment is changed only by the process itself, and predc
+never changes its own, so the snapshot cannot go stale.
+
+The conclusion is a **Refresh command that deliberately does not exist**. It
+would redraw the same list every time and, by existing, imply that it might
+not. The same argument does not hold for the file the hex viewer has open,
+which is why that one re-reads; the difference is who else can write.
+
+### A scroll bar sits on the frame, and a driver has to know
+
+`Tool.Env`'s list rows have one `║` on them, not two: the scroll bar occupies
+the right wall, which is the hex viewer's layout and the correct one — a bar
+inside the wall wastes a column and reads as part of the text. A driver that
+splits a row on the side walls therefore finds nothing at all, and the first
+version of `drive_env.py` did exactly that. Slice by column instead.
+
+The status line under the list is the other half of the same fact: it stops one
+column short of the bar, because a status line as wide as the scroll bar rubs
+the wall out on its own row and leaves the window looking torn.

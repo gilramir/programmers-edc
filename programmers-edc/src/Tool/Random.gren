@@ -88,6 +88,12 @@ what was left when it took `Alt-K`, and that list was `J`, `K`, `Q` and `V`.
 would be read as a second way to quit, and so `V` for *values* is what remains.
 Whether the letter is a good mnemonic stopped being the question two tools ago;
 that it is unambiguous is the question, and this one is.
+
+**That census was too strict, and `Tool.Env` corrects it.** It counted every
+`~x~` in the sources, including the ones inside pull-down items, which claim
+nothing outside their own open menu -- `TMenuView::findHotKey` matches an
+item's `key`, not the underlined letter in its title. `E`, `P` and `Q` were
+free as well; see `Tool/Env.gren` and FINDINGS.
 -}
 menuItem : MenuItem
 menuItem =
