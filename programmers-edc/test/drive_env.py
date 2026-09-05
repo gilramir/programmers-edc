@@ -21,6 +21,7 @@ rather than left to the hint that says so.
 """
 
 import os
+import subprocess
 import sys
 import tempfile
 
@@ -32,8 +33,10 @@ sys.path.insert(0, os.path.join(ROOT, "..", "tvision-node", "test"))
 from harness import Pty, Checks, node_argv
 
 # A whole environment, and nothing inherited. `env -i` in spirit: every count
-# below is exact because this is the entire list the process will have, and a
-# machine that happened to export one more variable would otherwise move them.
+# below is exact because this is very nearly the entire list the process will
+# have, and a machine that happened to export one more variable would otherwise
+# move them. Very nearly, and not quite -- see `child_env_size`, which is why no
+# count below is written as `len(env)`.
 PLANTED = {
     "TERM": "xterm-256color",
     "ZZ_ALPHA": "one",
@@ -130,17 +133,42 @@ def clear(app):
     app.send(b"\x08" * 32, settle=1.0)
 
 
+def child_env_size(env):
+    """How many variables the program under test will actually have.
+
+    Not `len(env)`. Under `--asan` the launcher is `test/asan.sh`, which
+    exports `LD_PRELOAD` and `ASAN_OPTIONS` -- and, being a bash script, hands
+    on `PWD` and `SHLVL` too. Four more than were planted, and every count in
+    this driver is exact, which is the entire reason it builds an environment
+    instead of inheriting one. Under ASAN the whole suite failed on five checks
+    that were about filtering rather than about counting.
+
+    So the number is asked for rather than assumed, through the same
+    `node_argv` the application is launched with: whatever that wrapper adds
+    today, this follows. A `+ 4` would have been right until somebody edited
+    `asan.sh`, and would then have been wrong in the configuration nobody runs
+    by hand.
+    """
+    argv = node_argv("-e", "console.log(Object.keys(process.env).length)")
+    out = subprocess.run(argv, env=env, capture_output=True, text=True,
+                         timeout=60)
+    return int(out.stdout.strip())
+
+
 def main():
     check = Checks()
     home = tempfile.mkdtemp(prefix="predc-home-")
     env = dict(PLANTED, HOME=home, PATH=os.environ.get("PATH", "/usr/bin"))
+
+    total = child_env_size(env)
+
     app = Pty(node_argv(LAUNCHER, "env"), env, cwd=ROOT)
     app.pump(2.5)
 
     body = listed(app)
     check("predc env opens the list", "Environment" in app.render(), app.render())
     check("every variable is there, and no others",
-          status(app).startswith(f"{len(env)} variables"), status(app))
+          status(app).startswith(f"{total} variables"), status(app))
     check("sorted by name: the first row is the first name",
           body[0].startswith("AA_FIRST"), body[:3])
     check("name and value are separated by whitespace, and the values line up",
@@ -188,7 +216,7 @@ def main():
           len(body) == 2 and body[0].startswith("ZZ_ALPHA")
           and body[1].startswith("ZZ_BETA"), body)
     check("and the status line says how many of how many",
-          status(app).startswith(f"2 of {len(env)} match \"alpha\""), status(app))
+          status(app).startswith(f"2 of {total} match \"alpha\""), status(app))
 
     # Case. `c` belongs to the list, so this is also the Tab and the `/` back.
     app.send(b"\t\t", settle=0.7)
@@ -217,18 +245,18 @@ def main():
     # Empty the box: everything comes back. There is no mode to be stuck in.
     clear(app)
     check("emptying the box brings them all back",
-          status(app).startswith(f"{len(env)} variables"), status(app))
+          status(app).startswith(f"{total} variables"), status(app))
 
     # Nothing matches, and it says so rather than showing an empty box.
     app.send(b"nosuchthing", settle=1.2)
     check("a needle that matches nothing says so",
           "Nothing matches \"nosuchthing\"." in "\n".join(rows(app)), rows(app)[:2])
-    check("and the count agrees", status(app).startswith(f"0 of {len(env)}"), status(app))
+    check("and the count agrees", status(app).startswith(f"0 of {total}"), status(app))
 
     menu(app, "Search")
     entry(app, "Show them all")
     check("Show them all is the same as emptying the box",
-          box(app) == "" and status(app).startswith(f"{len(env)} variables"),
+          box(app) == "" and status(app).startswith(f"{total} variables"),
           (box(app), status(app)))
 
     # Scrolling. The list is taller than the window with ZZ_LONG in it.

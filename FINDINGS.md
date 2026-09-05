@@ -6739,3 +6739,30 @@ for the two numbers that are about *content* rather than about the frame — how
 many rows of the list are on screen, and where a long value wraps. The frame is
 Turbo Vision's business and the text inside it is the model's, and each one
 minds the other's.
+
+## A driver that counts is wrong wherever the launcher adds something
+
+`drive_env.py` asserts exact variable counts — `41 variables`, `2 of 41 match
+"alpha"` — and that is the entire reason it builds its own environment with
+`env -i` in spirit instead of inheriting one: a machine that happened to export
+one more variable would move every number in the file.
+
+It wrote those numbers as `len(env)`, the environment it *plants*, which is not
+the environment the program *gets*. Under `--asan` the launcher is
+`test/asan.sh`, which exports `LD_PRELOAD` and `ASAN_OPTIONS` and, being a bash
+script, hands on `PWD` and `SHLVL` as well. Four more than were planted, five
+checks red, in the one configuration nobody runs by hand — and red for as long
+as the driver has existed, so `test:asan` has not actually been green since
+`predc env` was written.
+
+It asks now, rather than adding four: `node -e
+"Object.keys(process.env).length"` through the same `node_argv` the application
+is launched with, so whatever that wrapper adds today is what the counts expect.
+**A constant would have been right until somebody edited the wrapper, and would
+then have been wrong in the configuration that is only ever run by CI** — which
+is the same reason the driver plants an environment in the first place, applied
+one level further out.
+
+The general shape: **a test that asserts on the process's own environment is
+asserting on the launcher too**, and the launcher is the part the test did not
+choose.
