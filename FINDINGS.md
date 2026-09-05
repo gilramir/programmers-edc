@@ -6301,3 +6301,35 @@ tools exist — one window, nothing shelled out, a thing you look at while you
 work — were true of it. The spec keeps the entry with the reason, because a
 requirement that was considered and declined is worth more than one that
 silently disappeared.
+
+### And the calendar could not be closed
+
+It shipped that way, and it took one click to find. `WindowClosed` in the shell
+is an `if`/`else` chain on window ids:
+
+```gren
+if id == Tool.Ascii.windowId then { model | ascii = Nothing }
+else if id == Tool.Calc.windowId then ...
+```
+
+with no branch for the calendar. Turbo Vision closed the window; the model
+still held `Just`; the next render put it straight back. **Alt-F3 did not work
+either** — same path — so the tool could not be closed at all, only left open
+until predc exited.
+
+The comment sitting directly above that chain says *"A window the user closed
+from its frame has to leave the model, or the next render puts it straight
+back"*, which is the failure exactly. Writing the rule down did not stop it
+being missed, because nothing was going to *check* it: adding a tool means
+editing seven places in `Main`, the compiler catches five of them, and this is
+one of the two it cannot — a missing branch in a string-id chain is a
+well-typed program.
+
+So `drive_shell.py` opens all six tools and closes each one **by clicking the
+close box on its frame**, which is what the bug report did. It is one check
+because it is one bug waiting to happen six times over, and it fails without
+the branch — verified by taking the branch back out.
+
+This is the same shape as the four-place view-type consistency that
+`tools/check_consistency.py` exists for, and the same answer applies: the
+places a compiler cannot join have to be joined by something that runs.

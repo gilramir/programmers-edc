@@ -166,6 +166,27 @@ def main():
     app.send(b"\x1b\x1b[13~", settle=1.0)
     app.send(b"\x1b\x1b[13~", settle=1.0)
 
+    # Every tool closes from its frame, which is one check because it is one
+    # bug waiting to happen six times over. `WindowClosed` in the shell is an
+    # if/else chain on window ids, so a tool whose branch is missing is a tool
+    # Turbo Vision closes and the very next render puts straight back -- it
+    # looks like a close box that does nothing, and nothing about it is a type
+    # error. The calendar shipped that way for exactly as long as it took
+    # somebody to click the dot.
+    for key, name in [(b"\x1ba", "ASCII"), (b"\x1br", "RPN Calculator"),
+                      (b"\x1bd", "Hex Dump"), (b"\x1bc", "Time converter"),
+                      (b"\x1bu", "Unicode"), (b"\x1bk", "Calendar")]:
+        app.send(key, settle=1.4)
+        check(f"{name} opens", name in app.render(), app.render())
+        closed = False
+        for row, line in enumerate(app.render().split("\n")):
+            if name in line and "╔" in line:
+                app.click(line.index("╔") + 4, row + 1, settle=1.2)
+                closed = True
+                break
+        check(f"and the close box on its frame closes {name}",
+              closed and name not in app.render(), app.render())
+
     app.send(b"\x1bx", settle=1.0)
     code = app.wait(timeout=6)
     check("Alt-X exits, and cleanly", code == 0, f"exit={code}")

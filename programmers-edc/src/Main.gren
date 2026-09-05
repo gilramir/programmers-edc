@@ -595,6 +595,10 @@ handleEvent event model =
             else if id == Tool.Calc.windowId then
                 { model = { model | calc = Nothing }, command = Cmd.none }
 
+            else if id == Tool.Calendar.windowId then
+                { model = { model | calendar = Nothing }, command = Cmd.none }
+
+
             else if id == Tool.Hex.windowId then
                 { model = { model | hex = Nothing }, command = Cmd.none }
 
