@@ -13,8 +13,11 @@ both halves, so the character disappears: `[A メモ한 B]` is drawn as
 
 Reproduced at ee11435 (2026-08-30) with a plain TApplication drawing
 TDrawBuffer::moveStr("[A" "メモ한" "B]") -- no Gren, no node -- captured with
-tmux capture-pane. Not yet reported upstream; delete this file when it is
-fixed there, and the build script will stop looking for it.
+tmux capture-pane. A regression in d726902 (2026-07-06): d726902^ draws it,
+d726902 does not, both built and run.
+
+Reported as magiblot/tvision#233. Delete this file when it is fixed upstream;
+build-tvision.sh will skip a patch that no longer applies and say so.
 
 diff --git a/source/platform/dispbuff.cpp b/source/platform/dispbuff.cpp
 index 06a6bf5..49a4d84 100644

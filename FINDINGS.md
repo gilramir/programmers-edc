@@ -5674,6 +5674,17 @@ into the second cell of a double-width character by blanking *both* halves, so
 the character is gone. The columns stay reserved, which is why nothing else on
 the row moves and why this looks like a font problem.
 
+Reported as [magiblot/tvision#233][233], with a bisect: `d726902^` draws the
+characters and `d726902` -- "Rework screen cell and color attributes API",
+2026-07-06 -- does not, both built and run rather than reasoned about. The old
+`validateCell` assigned `ch[0] = ' '` in place, which left `_flags` alone; the
+rework replaced that with `initWithChar`, whose first statement is `*this = {}`.
+The stale comment about the value being "discarded in `ensurePrintable()`" is
+from the era when what got discarded was the trail cell's *text* and not its
+flag.
+
+[233]: https://github.com/magiblot/tvision/issues/233
+
 There is a patch in `tvision-node/patches/`, which is a directory this repo did
 not have and did not want. `build-tvision.sh` applies whatever is in it,
 `git apply -R --check` first so a rebuild is a no-op and a checkout where the
