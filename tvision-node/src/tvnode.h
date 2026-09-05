@@ -76,6 +76,30 @@ namespace tvnode {
 constexpr ushort kUserCmdFirst = 110;
 constexpr ushort kUserCmdLast = 255;
 constexpr ushort kUserCmdOverflow = 1000;
+// A menu entry that names no command. It cannot be 0, and that is not a style
+// choice: TVision reads `command == 0` as **"this item is a submenu"**, and
+// `TMenuItem` keeps the two readings in a union --
+//
+//     union { const char *param; TMenu *subMenu; };
+//
+// so the zero that means "nothing to dispatch" here means "treat the shortcut
+// string as a TMenu *" there. `TMenuView::updateMenu` recurses into
+// `p->subMenu` (tmnuview.cpp:485), `~TMenuItem` frees it with `delete subMenu`
+// (tmnuview.cpp:81), and `TMenuBox` widens the entry and draws a submenu arrow
+// beside it (tmenubox.cpp:36, :110).
+//
+// It cost predc a SIGSEGV on the first keystroke after a menu containing one
+// was built -- `updateMenu` walks the tree when the command set changes, so
+// the item sits there harmlessly until something is typed, and the crash looks
+// like it belongs to the typing. Reducing it to a fixture did not work: a
+// command-less item at the top level, nested, rebuilt and typed at does *not*
+// crash, so the above is the mechanism rather than the whole story, and
+// `programmers-edc/test/drive_calc.py` is what actually catches it. See
+// FINDINGS.
+//
+// So an item with no command gets this instead, and is disabled, which is what
+// "no command" meant anyway: nothing to dispatch and nothing to choose.
+constexpr ushort kCmdNothing = 999;
 
 class CommandRegistry {
 public:

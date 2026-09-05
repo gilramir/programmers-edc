@@ -38,6 +38,14 @@ a leading `~` for the same reason a value that does not fit its width is
 marked `ovf`. `%` is there for the truncating answer, and works on integers
 only.
 
+**It is not sealed off from the rest of the machine.** A number you already
+have is pasted into what you are typing with `v`, and a result is copied off
+the stack with `y` -- because a calculator whose answers can only be read and
+retyped is one you stop using for the numbers that matter, which are the long
+ones. Both go through the one clipboard `gren-tvision/doc/clipboard.md`
+describes, so a copy here and a paste in the hex viewer are the same text even
+over ssh, where no terminal will hand a clipboard over.
+
 -}
 
 import Array exposing (Array)
@@ -117,6 +125,14 @@ type alias Model =
     , entry : String
     , base : Base
     , width : Maybe { bits : Int, signed : Bool }
+    -- A paste asked for and not yet answered. Every open tool is handed every
+    -- event, so without this a paste made in the hex viewer would land in the
+    -- calculator's entry as well.
+    , awaiting : Bool
+    -- What the last copy sent, worded for the message line. `Copied` says
+    -- whether anything outside took the text and nothing about what the text
+    -- was, so the sentence has to wait here for it.
+    , copied : Maybe String
     , message : String
     }
 
@@ -127,6 +143,8 @@ init =
     , entry = ""
     , base = Dec
     , width = Nothing
+    , awaiting = False
+    , copied = Nothing
     , message = ""
     }
 
@@ -139,25 +157,118 @@ rows =
 -- UPDATE
 
 
-update : Tui.Event -> Model -> Model
-update event model =
+{-| Everything the calculator can hand back. The arithmetic produces none of
+it -- only the clipboard does, and only ever an outbound port send, which is
+why this is polymorphic in the message type the way the decoder's is: there is
+no reply to map, so the shell's own ports go in unchanged.
+-}
+type alias Step msg =
+    { model : Model, command : Cmd msg }
+
+
+still : Model -> Step msg
+still model =
+    { model = model, command = Cmd.none }
+
+
+{-| The two clipboard keys are taken out before `pressKey`, and the two
+clipboard commands before `runCommand`, so that the arithmetic underneath stays
+a pure `Model -> Model`. That is worth the two extra branches: everything this
+calculator is actually about can go on being tested without a `Cmd` in sight.
+-}
+update : Tui.Ports msg -> Tui.Event -> Model -> Step msg
+update ports event model =
     when event is
         Tui.KeyPressed pressed ->
             if pressed.id == canvasId then
-                pressKey pressed.key { model | message = "" }
+                let
+                    quiet =
+                        { model | message = "" }
+                in
+                when pressed.key is
+                    -- `y` for the copy, as in the hex viewer and the decoder.
+                    -- `v` for the paste and *not* `p`, which is the hex
+                    -- viewer's: `p` here has been Drop since the day this was
+                    -- written, and a key that drops the top of somebody's
+                    -- stack when they meant to paste is the worst possible
+                    -- place to be consistent. Neither is a hex digit, which
+                    -- is what makes them free at all.
+                    "y" ->
+                        copyLevel ports 1 quiet
+
+                    "v" ->
+                        askClipboard ports quiet
+
+                    other ->
+                        still (pressKey other quiet)
 
             else
-                model
+                still model
+
+        -- The guard is not politeness: every open tool is handed every event,
+        -- and `awaiting` is what says this one asked.
+        Tui.ClipboardText it ->
+            if model.awaiting then
+                still (pasted it { model | awaiting = False })
+
+            else
+                still model
+
+        Tui.Copied it ->
+            when model.copied is
+                Just what ->
+                    still
+                        { model
+                            | copied = Nothing
+                            , message =
+                                "Copied "
+                                    ++ what
+                                    ++ (if it.toSystem then
+                                            "."
+
+                                        else
+                                            -- Not "nothing took it": the
+                                            -- `OSC 52` goes out every time and
+                                            -- the terminal simply never
+                                            -- answers for it. See `Tui.Copied`.
+                                            " -- the terminal did not confirm it."
+                                       )
+                        }
+
+                Nothing ->
+                    still model
 
         Tui.Command cmd ->
             if String.startsWith "calc." cmd then
-                runCommand (String.dropFirst 5 cmd) { model | message = "" }
+                let
+                    name =
+                        String.dropFirst 5 cmd
+
+                    quiet =
+                        { model | message = "" }
+                in
+                if name == "paste" then
+                    askClipboard ports quiet
+
+                else if name == "copy.all" then
+                    copyAll ports quiet
+
+                else if String.startsWith "copy." name then
+                    when String.toInt (String.dropFirst 5 name) is
+                        Just level ->
+                            copyLevel ports level quiet
+
+                        Nothing ->
+                            still quiet
+
+                else
+                    still (runCommand name quiet)
 
             else
-                model
+                still model
 
         _ ->
-            model
+            still model
 
 
 {-| The menu and the buttons both arrive here. They are the same commands,
@@ -430,6 +541,153 @@ radix base =
 
         Bin ->
             2
+
+
+-- THE CLIPBOARD
+
+
+{-| Ask for the clipboard and remember that it was this tool asking.
+
+The message is not decoration. `readClipboard` is a request, and on a terminal
+that owns the clipboard the answer comes back through the input stream and may
+take a moment or never arrive at all -- so "waiting" is the one state this tool
+can be in that it cannot otherwise draw.
+-}
+askClipboard : Tui.Ports msg -> Model -> Step msg
+askClipboard ports model =
+    { model = { model | awaiting = True, message = "Asking for the clipboard..." }
+    , command = Tui.readClipboard ports
+    }
+
+
+{-| The clipboard answered, and what came back goes where the digits go.
+
+**Into the entry rather than onto the stack**, because that is what was asked
+for: a pasted number is a typed number, and `Enter` is still what pushes it.
+It appends for the same reason -- paste after typing `1` and you have `1` and
+then what you pasted, which is what a field would have done.
+
+**Read in the base showing, and refused otherwise.** `0xFF` pasted while the
+calculator is in decimal is not 255 here; it is an error with a sentence,
+because a calculator that quietly changed base under a paste would answer a
+different question than the one asked and look right doing it. That is the hex
+viewer's rule about `p` and `P` in another costume.
+
+The one thing it does forgive is predc's own prefix. `show` writes `0xDEAD_BEEF`
+and the underscores were always typeable; the `0x` was not, so a value copied
+off this stack could not be pasted back into it. Stripping the prefix *of the
+base already showing* is not sniffing -- it is the round trip closing.
+-}
+pasted : { text : String, fromSystem : Bool } -> Model -> Model
+pasted answer model =
+    let
+        cleaned =
+            String.trim answer.text
+    in
+    if String.isEmpty cleaned then
+        { model
+            | message =
+                if answer.fromSystem then
+                    "There is nothing on the clipboard."
+
+                else
+                    -- Nothing outside answered *and* nothing here has copied:
+                    -- the state every ssh session is permanently in, where it
+                    -- is a fact about the terminal and not about a clipboard.
+                    "The terminal will not hand the clipboard over -- type it instead."
+        }
+
+    else
+        let
+            candidate =
+                model.entry ++ withoutPrefix model.base cleaned
+        in
+        when parse model.base candidate is
+            Just _ ->
+                -- The "asking" line goes with the answer. It is the only
+                -- message here that describes a question rather than a result,
+                -- so leaving it up would say the calculator was still waiting
+                -- while the number sat on the screen in front of it.
+                { model | entry = candidate, message = "" }
+
+            Nothing ->
+                { model | message = "Not a " ++ baseName model.base ++ " number: " ++ cleaned }
+
+
+{-| Drop the prefix `show` writes for this base, and no other. In decimal the
+prefix is empty, and dropping nothing from the front is what that means.
+-}
+withoutPrefix : Base -> String -> String
+withoutPrefix base text =
+    let
+        mark =
+            prefix base
+    in
+    if not (String.isEmpty mark) && String.startsWith mark text then
+        String.dropFirst (String.count mark) text
+
+    else
+        text
+
+
+{-| Copy one level of the stack, numbered the way the display numbers it: `1`
+is the top, which is where the last answer is.
+
+The guard on `index` is [`Array.get`](https://packages.gren-lang.org)'s trap
+rather than defensiveness -- a negative index counts from the *end* in Gren, so
+asking an empty stack for level 1 would hand back its own last value if there
+were one, and the same mistake once put a stale row on this program's screen.
+-}
+copyLevel : Tui.Ports msg -> Int -> Model -> Step msg
+copyLevel ports level model =
+    let
+        index =
+            Array.length model.stack - level
+    in
+    if index < 0 then
+        still { model | message = "There is nothing on level " ++ String.fromInt level ++ "." }
+
+    else
+        when Array.get index model.stack is
+            Just value ->
+                sending ports (plainly model value) model
+
+            Nothing ->
+                still { model | message = "There is nothing on level " ++ String.fromInt level ++ "." }
+
+
+{-| The whole stack, one value to a line, in the order the window shows them --
+deepest first, so the last line is the top and the last answer.
+-}
+copyAll : Tui.Ports msg -> Model -> Step msg
+copyAll ports model =
+    if Array.isEmpty model.stack then
+        still { model | message = "The stack is empty." }
+
+    else
+        sending ports
+            (String.join "\n" (Array.map (plainly model) model.stack))
+            model
+
+
+sending : Tui.Ports msg -> String -> Model -> Step msg
+sending ports text model =
+    { model = { model | copied = Just text, message = "" }
+    , command = Tui.copyToClipboard ports text
+    }
+
+
+{-| A value as the window shows it, without the `ovf` beside it.
+
+The marker is an annotation and not part of the number -- the digits next to it
+*are* the value seen through the width chosen, which is the thing worth
+copying. Everything else `show` writes is kept, including the `~` on an
+inexact division: a number that is not quite the answer must not be copied as
+though it were.
+-}
+plainly : Model -> Value -> String
+plainly model value =
+    String.trim (String.replace "  ovf" "" (show model value))
 
 
 -- THE STACK
@@ -970,8 +1228,68 @@ menu model =
             , Item { title = "~S~wap", cmd = "calc.swap", key = "", shortcut = "s" }
             , Item { title = "D~u~plicate", cmd = "calc.dup", key = "", shortcut = "u" }
             , Item { title = "C~l~ear stack", cmd = "calc.clear", key = "", shortcut = "z" }
+            , Tui.Separator
+            -- `y` copies the top, which is the answer you just worked out and
+            -- is what the key is for. Any *other* level needs somewhere to say
+            -- which, and this is it -- with the value written beside the
+            -- number, so the menu is the thing that shows what is about to be
+            -- copied rather than a mode on the canvas with a cursor in it that
+            -- has to be moved, drawn, and put back whenever the stack changes.
+            , SubMenu
+                { title = "Cop~y~"
+                , key = ""
+                , items = copyItems model
+                }
+            , Item { title = "Paste number", cmd = "calc.paste", key = "", shortcut = "v" }
             ]
         }
+
+
+{-| One entry per level that has something on it, deepest last so that the top
+of the stack -- the level `y` copies -- is nearest the bottom of the box, as it
+is nearest the entry line on the canvas.
+
+A level holding nothing is left out rather than greyed: the point of the list
+is to show what would be copied, and there is no answer to write beside an
+empty one. An empty stack therefore leaves only **All of it**, which says the
+stack is empty when it is chosen -- and nothing here carries an empty command,
+which is a thing to keep true rather than an accident. See FINDINGS.
+-}
+copyItems : Model -> Array MenuItem
+copyItems model =
+    let
+        depth =
+            Array.length model.stack
+    in
+    (Array.range 1 depth
+        |> Array.map
+            (\level ->
+                Item
+                    { title =
+                        String.fromInt level
+                            ++ ":  "
+                            ++ (when Array.get (depth - level) model.stack is
+                                    Just value ->
+                                        plainly model value
+
+                                    Nothing ->
+                                        ""
+                               )
+                    , cmd = "calc.copy." ++ String.fromInt level
+                    , key = ""
+                    , shortcut =
+                        if level == 1 then
+                            "y"
+
+                        else
+                            ""
+                    }
+            )
+        |> Array.reverse
+    )
+        ++ [ Tui.Separator
+           , Item { title = "~A~ll of it", cmd = "calc.copy.all", key = "", shortcut = "" }
+           ]
 
 
 {-| A menu has no radio buttons, so the current choice is marked in its
@@ -1117,7 +1435,11 @@ nothing else to do, and it is the answer to the question the mode line raises.
 messageLine : Inks -> Model -> Array Span
 messageLine inks model =
     if String.isEmpty model.message then
-        [ Tui.ink inks.dim "Tab changes base, w changes width" ]
+        -- Thirty-four columns is the canvas, and this spends all of them.
+        -- It was `Tab changes base, w changes width` at thirty-three; the two
+        -- clipboard keys are worth the word "changes" twice over, because a
+        -- key nothing mentions is a key nobody presses.
+        [ Tui.ink inks.dim "Tab base, w width, y copy, v paste" ]
 
     else
         [ Tui.ink inks.alert model.message ]

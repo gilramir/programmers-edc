@@ -6020,3 +6020,43 @@ of the thing it claims to list.
 implied by the ones that follow it. A move that left the entry in both menus
 would pass every "is it reachable" check in that file, and two routes to one
 setting is the shape of the bug where only one of them writes the config.
+
+## A menu item with no command is a type confusion, not an item that does nothing
+
+The calculator grew a **Copy** submenu listing the stack, and with an empty
+stack it listed one placeholder: `Item { title = "(the stack is empty)",
+cmd = "", ... }`. predc then died with SIGSEGV on the *first keystroke after
+opening the calculator* — which looked like a crash in typing a digit, and was
+not.
+
+`""` interns to command 0, and the binding's own comment said that was the safe
+value: "an item with no command gets 0 (cmValid), which nothing dispatches on."
+Nothing dispatches on it. But **Turbo Vision reads `command == 0` as "this item
+is a submenu"**, and `TMenuItem` keeps the two possibilities in a union:
+
+```cpp
+union { const char *param; TMenu *subMenu; };
+```
+
+So the same zero that means "no command" to the binding means "read `param` as
+a `TMenu *`" to at least three places in TVision: `TMenuView::updateMenu`
+recurses into `p->subMenu` (`tmnuview.cpp:485`), `~TMenuItem` frees it with
+`delete subMenu` (`tmnuview.cpp:81`), and `TMenuBox` widens the item by three
+columns and draws a submenu arrow beside it (`tmenubox.cpp:36`, `:110`). The
+item is built, drawn and left alone until something walks the tree; the first
+keystroke is what does.
+
+The fix is in the binding, because no Gren program should be able to reach
+this: `makeMenuItem` gives a command-less item `kCmdNothing` and disables it,
+which is what "no command" meant anyway — nothing to dispatch and nothing to
+choose. Verified both ways on the same Gren source: the crash returns when the
+mapping is taken out and goes when it is put back.
+
+**What I could not do is reduce it.** A fixture with a command-less item at the
+top level, nested one deep, rebuilt on a timer, and typed at, does not crash —
+so something about predc's menu that the fixture does not have is part of the
+trigger, and the account above is the mechanism rather than the whole story. A
+regression test that passes with and without the fix is worse than none, so
+there is no fixture: the real coverage is `drive_calc.py`, which dies outright
+against the unfixed build and was verified doing so. If this ever comes back,
+reduce it properly and put the fixture in `drive_regress.py`.

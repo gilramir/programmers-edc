@@ -29,6 +29,7 @@ to arrive as "0x0000". Every line below that types more than two characters at
 once would fail without that fix, which is most of them.
 """
 
+import base64
 import os
 import re
 import sys
@@ -93,12 +94,55 @@ def press(app, label):
     return False
 
 
+def entry(app):
+    """What is typed but not yet pushed: the line the caret is on."""
+    for row in app.render().split("\n"):
+        if "║ >" in row:
+            return row.split("║")[1].lstrip(" >").strip()
+    return ""
+
+
+def copied(app, mark):
+    """What the last OSC 52 written since `mark` carried."""
+    found = re.findall(rb"\x1b\]52;;([A-Za-z0-9+/=]*)\x07", app.buf[mark:])
+    return base64.b64decode(found[-1]).decode() if found else ""
+
+
+def paste(app, text):
+    """Press `v` and answer the OSC 52 it sends. True if predc actually asked.
+
+    Only works once the driver has claimed OSC 52 support, which is what makes
+    the clipboard the *terminal's* -- and the terminal is this file.
+    """
+    mark = len(app.buf)
+    app.send(b"v", settle=0.7)
+    asked = b"\x1b]52;;?\x07" in app.buf[mark:]
+    app.send(b"\x1b]52;;" + base64.b64encode(text.encode()) + b"\x07", settle=1.0)
+    return asked
+
+
+def open_menu(app, name):
+    bar = app.render().split("\n")[0]
+    app.click(bar.index(name) + 1, 1, settle=0.7)
+
+
+def click_entry(app, text, settle=0.9):
+    """Click the menu line containing `text`, wherever the box put it."""
+    for row, line in enumerate(app.render().split("\n")):
+        if text in line and "│" in line:
+            app.click(line.index(text) + 1, row + 1, settle=settle)
+            return True
+    return False
+
+
 def message(app):
     """The last line of the display: an error, or the standing hint that says
     how to change the two modes above it."""
     for row in app.render().split("\n"):
         if "║" in row and ("needs" in row or "divide" in row or "not a number" in row
-                           or "changes base" in row):
+                           or "Tab base" in row or "Copied" in row
+                           or "clipboard" in row or "Not a" in row
+                           or "nothing on level" in row or "stack is empty" in row):
             return row.split("║")[1].strip()
     return ""
 
@@ -127,11 +171,11 @@ def main():
     # them -- standing, not shown once. The version of this that wiped the hint
     # on the first keystroke left two unexplained words on screen.
     check("the modes say what they are", mode(app) == ("dec", "exact"), str(mode(app)))
-    check("and how to change them", "changes base" in message(app), message(app))
+    check("and how to change them", "Tab base" in message(app), message(app))
 
     # RPN: type, push, operate. Nothing here is a button.
     app.send(b"255\r16\r*", settle=1.0)
-    check("the hint is still there after typing", "changes base" in message(app),
+    check("the hint is still there after typing", "Tab base" in message(app),
           message(app))
     check("255 16 * is 4080", top(app) == "4080", str(stack(app)))
     check("and the operands are gone", stack(app).get(2) is None, str(stack(app)))
@@ -284,6 +328,101 @@ def main():
     app.send(b"\r", settle=0.9)
     check("and Ctrl-F5 plus shifted arrows changes nothing",
           app.render() == before, app.render())
+
+    # ---- the clipboard, in both directions ----
+    #
+    # A calculator sealed off from the rest of the machine is one you stop
+    # using for the numbers that matter, which are the long ones: the whole
+    # point of exact 64-bit arithmetic is numbers nobody wants to retype.
+    #
+    # The terminal has to claim OSC 52 before any of this can be answered --
+    # `ESC]60;allowWindowOps` is what TVision reads as that claim -- and this
+    # driver is the terminal, so it can put what it likes on the clipboard and
+    # read back what predc puts there.
+    app.send(b"\x1b]60;allowWindowOps\x07", settle=0.5)
+    app.send(b"z", settle=0.6)
+
+    check("v asks the clipboard for a number", paste(app, "1234567890"))
+    check("and what comes back is in the entry, not on the stack",
+          entry(app) == "1234567890" and top(app) == "", entry(app))
+    check("and the asking line goes with the answer",
+          "clipboard" not in message(app), message(app))
+    app.send(b"\r", settle=0.7)
+    check("so Enter is still what pushes it", top(app) == "1234567890", str(stack(app)))
+
+    # A pasted number is a typed one, which is what "into the entry" buys: it
+    # can be finished by hand.
+    paste(app, "12345678")
+    app.send(b"90", settle=0.5)
+    app.send(b"\r", settle=0.7)
+    check("a paste can be typed after", top(app) == "1234567890", str(stack(app)))
+
+    mark = len(app.buf)
+    app.send(b"y", settle=0.9)
+    check("y copies the top of the stack", copied(app, mark) == "1234567890",
+          repr(copied(app, mark)))
+    check("and says so, naming what it sent",
+          "Copied 1234567890" in message(app), message(app))
+
+    # The round trip, which is the check the rest are for. `show` writes hex
+    # with an `0x` and underscores every four digits; the underscores were
+    # always typeable and the prefix was not, so a value copied off this stack
+    # could not be pasted back into it until paste learned to drop the prefix
+    # of the base already showing.
+    set_base(app, "hex")
+    mark = len(app.buf)
+    app.send(b"y", settle=0.9)
+    yanked = copied(app, mark)
+    check("a hex copy carries the prefix and the grouping, as the screen does",
+          yanked.startswith("0x") and "_" in yanked, repr(yanked))
+    app.send(b"p", settle=0.6)
+    paste(app, yanked)
+    app.send(b"\r", settle=0.7)
+    check("and predc reads its own hex back, which is the round trip",
+          top(app) == yanked, f"{top(app)} != {yanked}")
+
+    # And what it will not do. `zz` is not hex, and a paste that is not a
+    # number in the base showing is refused with a sentence rather than
+    # quietly changing base -- which is the hex viewer's rule about `p` and
+    # `P` wearing different clothes.
+    app.send(b"\x1b", settle=0.4)
+    paste(app, "zz")
+    check("something that is not a number in this base is refused",
+          "Not a hex number" in message(app), message(app))
+    check("and nothing is left half-typed", entry(app) == "", repr(entry(app)))
+
+    # Any level, not just the top, and the menu is where the level is chosen --
+    # with the value written beside it, so the thing that shows what is about
+    # to be copied is the thing you pick from.
+    set_base(app, "dec")
+    app.send(b"z", settle=0.5)
+    for n in (b"11", b"22", b"33"):
+        app.send(n, settle=0.4)
+        app.send(b"\r", settle=0.6)
+    check("three on the stack", stack(app).get(3) == "11" and top(app) == "33",
+          str(stack(app)))
+    open_menu(app, "Calc")
+    click_entry(app, "Copy")
+    box = app.render()
+    check("the Copy menu writes the value beside the level",
+          any("3:" in line and "11" in line for line in box.split("\n")),
+          [line for line in box.split("\n") if "3:" in line])
+    mark = len(app.buf)
+    click_entry(app, "3:")
+    check("and copies the level that was chosen, not the top",
+          copied(app, mark) == "11", repr(copied(app, mark)))
+
+    open_menu(app, "Calc")
+    click_entry(app, "Copy")
+    mark = len(app.buf)
+    click_entry(app, "All of it")
+    check("All of it copies the whole stack, deepest first",
+          copied(app, mark) == "11\n22\n33", repr(copied(app, mark)))
+
+    app.send(b"z", settle=0.5)
+    check("and with nothing on it, y says so rather than copying nothing",
+          (app.send(b"y", settle=0.7), "nothing on level 1" in message(app))[1],
+          message(app))
 
     app.send(b"\x1bx", settle=1.0)
     code = app.wait(timeout=6)

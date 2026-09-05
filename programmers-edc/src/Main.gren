@@ -634,17 +634,21 @@ toTools event model =
         time =
             Maybe.map (Tool.Time.update timeWiring event) model.time
 
-        -- No `Cmd.map`, and no port record of its own. The decoder starts no
-        -- tasks, so every command it can produce is an outbound port send that
-        -- never answers -- which makes its `update` polymorphic in the message
-        -- type and lets it take the shell's own ports unchanged.
+        -- No `Cmd.map`, and no port record of its own. Neither starts a task,
+        -- so every command either can produce is an outbound port send that
+        -- never answers -- which makes both `update`s polymorphic in the
+        -- message type and lets them take the shell's own ports unchanged.
+        -- The calculator joined them when it learned to copy and paste.
         unicode =
             Maybe.map (Tool.Unicode.update tui event) model.unicode
+
+        calc =
+            Maybe.map (Tool.Calc.update tui event) model.calc
 
         moved =
             { model
                 | ascii = Maybe.map (Tool.Ascii.update event) model.ascii
-                , calc = Maybe.map (Tool.Calc.update event) model.calc
+                , calc = Maybe.map .model calc
                 , hex = Maybe.map .model hex
                 , time = Maybe.map .model time
                 , unicode = Maybe.map .model unicode
@@ -692,6 +696,12 @@ toTools event model =
                 Nothing ->
                     Cmd.none
             , when unicode is
+                Just step ->
+                    step.command
+
+                Nothing ->
+                    Cmd.none
+            , when calc is
                 Just step ->
                     step.command
 

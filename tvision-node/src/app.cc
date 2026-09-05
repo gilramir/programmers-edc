@@ -571,9 +571,17 @@ static TMenuItem *makeMenuItem(const MenuItemDef &def)
         return sub;
         }
 
-    return new TMenuItem(def.title.c_str(), def.command, def.key, hcNoContext,
-                         def.shortcut.empty() ? TStringView()
-                                              : TStringView(def.shortcut.c_str()));
+    // See kCmdNothing: command 0 on a plain item is a type confusion in
+    // TVision's own destructor, not merely an item that does nothing.
+    TMenuItem *item =
+        new TMenuItem(def.title.c_str(),
+                      def.command == 0 ? kCmdNothing : def.command,
+                      def.key, hcNoContext,
+                      def.shortcut.empty() ? TStringView()
+                                           : TStringView(def.shortcut.c_str()));
+    if (def.command == 0)
+        item->disabled = True;
+    return item;
 }
 
 static TMenu *buildMenu(const std::vector<MenuItemDef> &items)

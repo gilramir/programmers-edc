@@ -150,6 +150,29 @@ A width is a lens rather than a cast: the stack keeps the exact number, and
 `u64` or `i64` decides how it is shown and whether it is marked `ovf` for not
 fitting. Nothing here is quietly cut down to size.
 
+**Numbers go in and out of it.** `v` pastes into what you are typing and `y`
+copies the top of the stack -- which is the point of exact 64-bit arithmetic,
+since the numbers worth being exact about are the ones nobody wants to retype.
+
+A pasted number is a *typed* number: it lands in the entry rather than on the
+stack, `Enter` still pushes it, and you can go on typing after it. It is read
+in the base showing and refused otherwise, so `0xFF` pasted into a decimal
+calculator is an error with a sentence and not 255 -- the same refusal to guess
+that gives the hex viewer separate `p` and `P`. The one thing it forgives is
+predc's own prefix: `y` in hex copies `0x4996_02d2`, and pasting that back
+works, because the `0x` of the base you are already in is dropped.
+
+For any level other than the top, **Calc | Copy** lists the stack with each
+value written beside its number, so the menu showing what will be copied is the
+menu you choose from -- and **All of it** takes the lot, one to a line, deepest
+first. The keys are on the display's bottom line, which now reads
+`Tab base, w width, y copy, v paste` and spends all thirty-four columns of it.
+
+`v` rather than `p`, which is the hex viewer's paste key: `p` here has been
+Drop since the day the calculator was written, and a key that throws away the
+top of your stack when you meant to paste is the worst possible place to be
+consistent. Neither `y` nor `v` is a hex digit, which is what makes them free.
+
 ## Highlighting a hex dump
 
 `v` marks from the cursor, `V` marks whole rows, and one of `1`-`6` paints what
