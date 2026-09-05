@@ -82,23 +82,23 @@ constexpr ushort kUserCmdOverflow = 1000;
 //
 //     union { const char *param; TMenu *subMenu; };
 //
-// so the zero that means "nothing to dispatch" here means "treat the shortcut
-// string as a TMenu *" there. `TMenuView::updateMenu` recurses into
-// `p->subMenu` (tmnuview.cpp:485), `~TMenuItem` frees it with `delete subMenu`
-// (tmnuview.cpp:81), and `TMenuBox` widens the entry and draws a submenu arrow
-// beside it (tmenubox.cpp:36, :110).
+// so the zero that means "nothing to dispatch" here means "follow the shortcut
+// string as a `TMenu *`" there. The one that kills you is
+// `TMenuView::findHotKey` (tmnuview.cpp:567):
 //
-// It cost predc a SIGSEGV on the first keystroke after a menu containing one
-// was built -- `updateMenu` walks the tree when the command set changes, so
-// the item sits there harmlessly until something is typed, and the crash looks
-// like it belongs to the typing. Reducing it to a fixture did not work: a
-// command-less item at the top level, nested, rebuilt and typed at does *not*
-// crash, so the above is the mechanism rather than the whole story, and
-// `programmers-edc/test/drive_calc.py` is what actually catches it. See
-// FINDINGS.
+//     if( p->command == 0 )
+//         if( (T = findHotKey( p->subMenu->items, key )) != 0 )
+//
+// with no null check, called from `TMenuView::handleEvent` (:531) on *every*
+// evKeyDown -- through a menu bar that is `ofPreProcess` and therefore sees
+// every key before anything else. So it is the first keystroke after such a
+// menu is built, whatever has focus, and it looks like a crash in whatever was
+// being typed. (`~TMenuItem` at :81 and `updateMenu` at :487 read the same 0;
+// the destructor would free the string as a `TMenu *`.)
 //
 // So an item with no command gets this instead, and is disabled, which is what
 // "no command" meant anyway: nothing to dispatch and nothing to choose.
+// `test/regress_menu.js` is one keystroke away from the crash without it.
 constexpr ushort kCmdNothing = 999;
 
 class CommandRegistry {
