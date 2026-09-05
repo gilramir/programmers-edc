@@ -23,7 +23,11 @@ clone.
 | **5** | A program written *for* the API rather than translated into it | done: `watch` |
 
 See [FINDINGS.md](FINDINGS.md) for what we learned doing it, including the
-things that were not what we expected.
+things that were not what we expected, and
+[doc/publishing.md](doc/publishing.md) for what shipping a package with a
+compiled shared library in it costs -- and what it does not: the addon is
+Node-API, so one binary works on every Node version, and glibc rather than
+`node` is the thing that decides where it runs.
 
 ## Layout
 
