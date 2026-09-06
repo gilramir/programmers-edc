@@ -7506,11 +7506,29 @@ and it clamps the origin as well as the size. `TGroup::changeBounds` sets its
 own bounds before walking its subviews, so `owner->size` inside `calcBounds` is
 already the *new* desktop, which is what makes this one line.
 
-It is upstream's bug rather than ours, and not reported:
-`doc/upstream-calcbounds-origin.md` is the draft. The nearest existing issue is
+It is upstream's bug rather than ours, and it is now reported:
+[magiblot/tvision#235](https://github.com/magiblot/tvision/issues/235), written
+up in `doc/upstream-calcbounds-origin.md`. The nearest existing issue is
 [#63](https://github.com/magiblot/tvision/issues/63), "Layout/resizing console
 window in Windows - will become broken", which is open, undiagnosed, and may
 well be this.
+
+Reducing it to a `tvdemo` reproduction took finding the one window in that
+program it can happen to. `TDialog`'s constructor sets `growMode = 0`, and
+tvdemo's `TWindow`s set it to 0 explicitly or use `gfGrowHiX | gfGrowHiY`, so
+the Event Viewer is the only candidate — and it opens at origin `(0, 0)`, where
+scaling zero gives zero, so it has to be dragged off the left edge first. **The
+shipped demo cannot show this untouched**, which is the likeliest reason a bug
+this old went unnoticed.
+
+We also have a patch: `fix/calcbounds-origin` in the fork, carried on
+`patches`, clamping the origin in `calcBounds` on each axis the view actually
+grows on. Per-axis because a view with no grow bits keeps the bounds it came in
+with, and moving it would slide fixed controls together inside a shrinking
+window instead of clipping them. With it in place the override here is
+redundant: the sweep passes with `JsWindow::calcBounds` removed, and fails with
+both gone, which is the control that makes the first statement worth
+anything.
 
 ### What is *not* asserted at the small size, and why that is not a dodge
 
