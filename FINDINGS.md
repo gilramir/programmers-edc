@@ -966,6 +966,16 @@ keyboard mask depends on `ofSelectable`.
 Two of the canvases already written wanted `False` in hindsight -- the palette
 example paints two pictures and reads nothing.
 
+**`resize` is the one window field a mode change cannot patch**, which is what
+predc's ASCII chart found when it grew a second layout. A window's rectangle
+has `setBounds` and a canvas's lines are content, so two layouts of the same
+window are almost free -- but `resize` becomes `sizeLimits` at construction and
+nothing changes those, so `sameShape` compares it and a model that changes it
+gets a new window. That is the right answer rather than a limitation to route
+around: a chart with nothing more to show should not offer a resize handle, one
+with a hundred and twenty-eight rows should, and the two statements cannot both
+be true of one window. The cost is a repaint the user asked for.
+
 **An editor traps the caret the same way, and has no `takesFocus` to turn it
 off.** `TEditor::handleEvent` accepts `charCode 9` alongside the printable
 range (`teditor1.cpp:588`) and inserts it, so `Tab` never reaches the group and

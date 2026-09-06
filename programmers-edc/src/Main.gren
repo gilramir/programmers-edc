@@ -393,7 +393,7 @@ open command shell =
     when command is
         Cli.Ascii ->
             Node.startProgram
-                { model = Tui.Start { shell | ascii = Just Tool.Ascii.init }
+                { model = Tui.Start { shell | ascii = Just (Tool.Ascii.init shell.desktop) }
                 , command = Cmd.none
                 }
 
@@ -659,7 +659,7 @@ handleEvent event model =
             if cmd == Tool.Ascii.command then
                 when model.ascii is
                     Nothing ->
-                        { model = { model | ascii = Just Tool.Ascii.init }
+                        { model = { model | ascii = Just (Tool.Ascii.init model.desktop) }
                         , command = Cmd.none
                         }
 
@@ -1464,13 +1464,20 @@ weekItem current rule =
 
 toolMenus : Model -> Array MenuItem
 toolMenus model =
-    (when model.calc is
-        Just calc ->
-            [ Tool.Calc.menu calc ]
+    (when model.ascii is
+        Just ascii ->
+            [ Tool.Ascii.menu ascii ]
 
         Nothing ->
             []
     )
+        ++ (when model.calc is
+                Just calc ->
+                    [ Tool.Calc.menu calc ]
+
+                Nothing ->
+                    []
+           )
         ++ (when model.hex is
                 Just _ ->
                     [ Tool.Hex.menu ]

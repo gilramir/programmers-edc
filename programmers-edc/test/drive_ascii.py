@@ -99,6 +99,21 @@ def frames(screen):
     return screen.count("ASCII Chart")
 
 
+def listed(screen):
+    """The list mode's rows, as (dec, hex, oct, sym, name) tuples.
+
+    Matched by their shape rather than by counting rows off the frame, because
+    the number of them is the whole point of the mode and changes with the
+    terminal.
+    """
+    out = []
+    for line in screen.split("\n"):
+        m = re.search(r"\s(\d{1,3})\s+([0-9A-F]{2})\s+(\d{3})\s\s(.{1,4}?)\s\s+(.*?)\s*[│║▲▼▒■]", line)
+        if m:
+            out.append(tuple(m.group(i) for i in range(1, 6)))
+    return out
+
+
 def main():
     check = Checks()
     # A temporary HOME, so that this driver reads no config file but the one
@@ -278,10 +293,113 @@ def main():
     check("Window | Zoom is greyed out while it is the active window",
           zoom_is_greyed(app), str(zoom_attr(app)))
 
+    # ---- the other chart -------------------------------------------------
+    # Two modes over one selected code, which is the reason they are a mode
+    # and not two tools: switching keeps your place.
+    app.send(b"*", settle=0.8)
+    check("back on a printable code before switching",
+          numbers(app.render())["dec"] == 0x2A, str(numbers(app.render())))
+
+    app.send(b"\t", settle=1.5)
+    rows = listed(app.render())
+    check("Tab switches to the long list", "ASCII Chart - list" in app.render(),
+          app.render().split("\n")[1])
+    check("which is what man ascii prints: dec, hex, oct, and a name",
+          "Dec  Hex  Oct  Sym   Name" in app.render(),
+          [r for r in app.render().split("\n") if "Dec" in r])
+    check("the selected code came with it, so the list opened at 42",
+          numbers(app.render())["dec"] == 0x2A, str(numbers(app.render())))
+    check("and 42 is one of the rows on screen",
+          any(r[0] == "42" and r[3] == "*" for r in rows), rows[:4])
+
+    # A control code's row carries what the grid could only say underneath it.
+    app.send(b"\x1b[1;5H", settle=0.6)       # Ctrl-Home is not bound; Home is
+    app.send(b"\x1b[H", settle=0.8)
+    rows = listed(app.render())
+    check("the list starts at 0 and names the control codes",
+          rows[0][:4] == ("0", "00", "000", "NUL") and "null" in rows[0][4],
+          rows[:2])
+    check("with the chord and the escape on the same line, which is the whole "
+          "reason to open this mode",
+          any(r[0] == "7" and "Ctrl-G" in r[4] and "\\a" in r[4] for r in rows),
+          [r for r in rows if r[0] == "7"])
+
+    # A row is one code here and sixteen in the grid, which is the only thing
+    # the arrows have to know about the mode.
+    app.send(b"\x1b[B", settle=0.8)
+    check("Down moves one code in the list, not a row of sixteen",
+          numbers(app.render())["dec"] == 1, str(numbers(app.render())))
+
+    app.send(b"\x1b[F", settle=1.0)          # End
+    rows = listed(app.render())
+    check("End scrolls to the end of a list longer than the window",
+          numbers(app.render())["dec"] == 127
+          and any(r[0] == "127" and r[3] == "DEL" for r in rows),
+          rows[-2:])
+    check("and 0 is no longer on screen, which is what scrolling means",
+          not any(r[0] == "0" for r in rows), rows[:2])
+
+    # `resize` is the one window-level field the differ cannot patch, so the
+    # two modes are two windows -- and this is the difference that makes them
+    # so. The grid has nothing more to show and says so; the list does.
+    frame = [row for row in app.render().split("\n") if "ASCII Chart" in row][0]
+    check("the list window offers a zoom box where the grid offered none",
+          "[↑]" in frame or "[↕]" in frame, frame)
+    check("and a resize handle at its foot",
+          any("└─" in row for row in app.render().split("\n")), app.render())
+
+    # The menu is the other way in, and the only place the mode is *named*.
+    # Turbo Vision has no checkable item, so the tick is a character.
+    bar = app.render().split("\n")[0]
+    app.click(bar.index("Chart") + 1, 1, settle=0.8)
+    box = app.render()
+    check("the Chart menu ticks the mode you are in",
+          "√ List" in box and "√ Grid" not in box,
+          [r for r in box.split("\n") if "Grid" in r or "List" in r])
+    for row, line in enumerate(box.split("\n")):
+        if "Grid" in line and "│" in line:
+            app.click(line.index("Grid") + 1, row + 1, settle=1.5)
+            break
+    check("and choosing the other one from the menu switches too",
+          "ASCII Chart - list" not in app.render(), app.render().split("\n")[1])
+
+    app.send(b"\t", settle=1.5)
+    app.send(b"\t", settle=1.5)
+    check("Tab goes back, and the code is still 127",
+          "ASCII Chart - list" not in app.render()
+          and numbers(app.render())["dec"] == 127,
+          app.render().split("\n")[1])
+    check("so the grid is showing DEL again", naming(app.render()).startswith("DEL"),
+          naming(app.render()))
+
     app.send(b"\x1bx", settle=1.0)
     code = app.wait(timeout=6)
     check("Alt-X exits from inside the chart, and cleanly", code == 0,
           f"exit={code}")
+
+    # ---- taller if the screen can take it --------------------------------
+    # The grid is 48 by 15 whatever the terminal is; the list is not, because
+    # there is more of it than fits and a bigger screen should show more.
+    small = Pty(node_argv(LAUNCHER, "ascii"), env, cwd=ROOT, size=(80, 24))
+    small.pump(2.0)
+    small.send(b"\t", settle=1.5)
+    short = len(listed(small.render()))
+    small.send(b"\x1bx", settle=0.8)
+    small.wait(timeout=6)
+
+    tall = Pty(node_argv(LAUNCHER, "ascii"), env, cwd=ROOT, size=(80, 44))
+    tall.pump(2.0)
+    tall.send(b"\t", settle=1.5)
+    long_ = len(listed(tall.render()))
+    check("a taller terminal shows more of the list", long_ > short + 15,
+          f"{short} rows at 24, {long_} at 44")
+    check("and its bottom frame is on the screen rather than under it, which "
+          "is what taking the rows off the rectangle rather than the other way "
+          "round is for",
+          any("└─" in row for row in tall.render().split("\n")),
+          tall.render().split("\n")[-3:])
+    tall.send(b"\x1bx", settle=0.8)
+    check("and that one exits cleanly too", tall.wait(timeout=6) == 0, "exit")
 
     return check.report(app)
 

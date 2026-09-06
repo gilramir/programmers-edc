@@ -1,4 +1,4 @@
-module Tool.Ascii exposing (Model, command, init, menuItem, update, view, windowId)
+module Tool.Ascii exposing (Model, command, init, menu, menuItem, update, view, windowId)
 
 {-| The ASCII chart: 128 codes in a grid you can walk around in, and a line
 underneath saying what the selected one is in every base a programmer asks for.
@@ -16,6 +16,12 @@ rather than count on your fingers: the cell for 7 cannot show a glyph, but the
 line underneath can say `BEL  bell  Ctrl-G  \a`, and that is the answer you
 came for. The grid shows a `·` in every cell that has nothing to draw, and the
 names carry the meaning.
+
+**There are two of it.** The grid is a chart you point at; the list is the
+thing `man ascii` prints, one code per line with its bases and its name, and
+they answer different questions. Which one you are looking at is a mode --
+`Tab` toggles it -- and the *selected code* is shared, so switching keeps your
+place. Two tools would not have that property, and neither would two windows.
 
 **It is a window, not a program.** `examples/ascii` *is* an application: it
 owns the menu bar, the status line and the event loop. Here it is one tool
@@ -63,24 +69,113 @@ canvasId =
     "ascii.grid"
 
 
+scrollId : String
+scrollId =
+    "ascii.scroll"
+
+
 menuItem : MenuItem
 menuItem =
     Item { title = "~A~SCII chart", cmd = command, key = "Alt-A", shortcut = "Alt-A" }
 
 
+{-| The tool's own menu, and **its title carries no underlined letter**: a menu
+*bar* title claims its Alt key for as long as the menu is on the bar, which is
+as long as this window is open, and there are none left.
+
+The tick is a character in the title, because Turbo Vision has no checkable
+menu item -- the same answer the theme and week menus give.
+
+Neither entry carries a `key`. A menu accelerator would be claimed
+program-wide, and `Tab` is only free *here*: the chart is a focused canvas,
+which consumes every key it is given, so nothing else in predc could have
+wanted it. The entries name it as a `shortcut`, which is a label rather than a
+binding.
+-}
+menu : Model -> MenuItem
+menu model =
+    SubMenu
+        { title = "Chart"
+        , key = ""
+        , items =
+            [ modeItem model.mode Grid "~G~rid"
+            , modeItem model.mode List "~L~ist"
+            ]
+        }
+
+
+modeItem : Mode -> Mode -> String -> MenuItem
+modeItem current mode title =
+    Item
+        { title =
+            (if mode == current then
+                "√ "
+
+             else
+                "  "
+            )
+                ++ title
+        , cmd =
+            when mode is
+                Grid ->
+                    "ascii.grid"
+
+                List ->
+                    "ascii.list"
+        , key = ""
+        , shortcut = "Tab"
+        }
+
+
 -- MODEL
 
 
-{-| One number. The chart is a pure function of which code is selected, which
-is what made the C++ original's `draw()` and `handleEvent()` unnecessary.
+{-| Which of the two charts is on screen.
+
+They show the same 128 facts and answer different questions. `Grid` is for
+"where does the printable range start" and "what is this character's code" --
+the shape of the table is the information. `List` is `man ascii`: one code per
+line with every base and, for the third of the table with no glyph, the name
+and the meaning, which is a thing you read rather than point at.
+-}
+type Mode
+    = Grid
+    | List
+
+
+{-| One number, and now four more.
+
+The chart was a pure function of the selected code and the grid still is. The
+list is a pure function of the code *and* of how much of it is on screen, which
+is what the other four are for: which mode, where the window has been scrolled
+to, how many rows it can show, and how big the desktop is -- because unlike the
+grid, the list is worth making as tall as the screen allows.
 -}
 type alias Model =
-    { code : Int }
+    { code : Int
+    , mode : Mode
+    -- The first code drawn in the list. Only ever moved to keep the selection
+    -- in sight or by the scroll bar, and meaningless in `Grid`.
+    , top : Int
+    -- How many list rows fit, which starts as what the window was built at and
+    -- follows `WindowResized` after that.
+    , rows : Int
+    , desktop : { cols : Int, rows : Int }
+    }
 
 
-init : Model
-init =
-    { code = 0 }
+init : { cols : Int, rows : Int } -> Model
+init desktop =
+    let
+        model =
+            { code = 0
+            , mode = Grid
+            , top = 0
+            , rows = 0
+            , desktop = desktop
+            }
+    in
+    { model | rows = listRows model }
 
 
 columns : Int
@@ -102,9 +197,116 @@ labelWidth =
     3
 
 
+-- HOW BIG THE LIST IS
+
+
+{-| The whole table, and the one number both layouts are written against.
+-}
+codes : Int
+codes =
+    128
+
+
+{-| The list window, which is the primitive the row count is taken from rather
+than the other way round.
+
+That order matters and the other one was wrong. Deriving the height from a row
+count means a floor on the rows becomes a window taller than the desktop, and
+on a fourteen-row terminal the bottom frame went off the bottom of the screen
+-- so the rectangle is clamped to the desktop first and the rows are whatever
+is left. `y2` is at most the desktop's own height, at least enough to be worth
+scrolling, and never more than the table needs: a window taller than a hundred
+and twenty-eight rows of content would be a list with space under it.
+-}
+listBox : Model -> Tui.Rect
+listBox model =
+    let
+        width =
+            paneWidth model
+
+        left =
+            max 0 (min 6 (model.desktop.cols - width))
+    in
+    { x1 = left
+    , y1 = 1
+    , x2 = left + width
+    , y2 = clamp 10 model.desktop.rows (1 + codes + 6)
+    }
+
+
+{-| Rows of list on screen.
+
+Six of the window's rows are not list -- the two frame rows, the header, the
+two lines that spell the selected code out, and the blank between them -- and
+this is the same arithmetic `WindowResized` does to a rectangle somebody
+dragged, which is why both are written against the rectangle rather than one
+against the desktop.
+-}
+listRows : Model -> Int
+listRows model =
+    let
+        box =
+            listBox model
+    in
+    clamp 3 codes (box.y2 - box.y1 - 6)
+
+
+{-| The window in each mode, which is the only reason this tool knows how big
+the desktop is.
+
+The grid is 48 by 15 and always was: sixteen columns of eight rows is the chart
+and there is no more of it to show. The list is as tall as the screen allows
+and wider, because the column that makes it worth having is the meaning --
+`end of transmission block` is twenty-five characters and does not fit beside
+four number columns in forty-eight.
+-}
+frame : Model -> Tui.Rect
+frame model =
+    when model.mode is
+        Grid ->
+            { x1 = 6, y1 = 2, x2 = 54, y2 = 17 }
+
+        List ->
+            listBox model
+
+
+listWidth : Int
+listWidth =
+    64
+
+
+{-| The width the list actually has, which is the window's.
+-}
+paneWidth : Model -> Int
+paneWidth model =
+    min listWidth model.desktop.cols
+
+
 moveTo : Int -> Model -> Model
 moveTo code model =
-    { model | code = clamp 0 127 code }
+    scrollInto { model | code = clamp 0 (codes - 1) code }
+
+
+{-| Move the list so that the selected code is on it.
+
+The least it can, rather than centring: a `Down` at the bottom edge should
+scroll one row, which is what every list on the machine does and what makes the
+position of the selection mean something.
+-}
+scrollInto : Model -> Model
+scrollInto model =
+    { model
+        | top =
+            clamp
+                (model.code - model.rows + 1)
+                model.code
+                (clamp 0 (maxTop model) model.top)
+    }
+
+
+maxTop : Model -> Int
+maxTop model =
+    max 0 (codes - model.rows)
 
 
 -- UPDATE
@@ -131,8 +333,87 @@ update event model =
             else
                 model
 
+        Tui.Command "ascii.grid" ->
+            showing Grid model
+
+        Tui.Command "ascii.list" ->
+            showing List model
+
+        -- The bar moves the *view* and not the selection, which is what a
+        -- scroll bar means everywhere else: you are looking somewhere else for
+        -- a moment, and the next arrow key brings the selection back into
+        -- sight along with it.
+        Tui.Scrolled it ->
+            if it.id == scrollId then
+                { model | top = clamp 0 (maxTop model) it.value }
+
+            else
+                model
+
+        -- The desktop decides how tall the list may be, so a terminal that
+        -- changed size is a window that should have changed with it.
+        Tui.Resized size ->
+            let
+                grown =
+                    { model | desktop = size }
+            in
+            scrollInto { grown | rows = listRows grown }
+
+        -- And the *window* decides how tall it actually is, which is a
+        -- different number the moment somebody drags the frame.
+        Tui.WindowResized it ->
+            if it.id == windowId then
+                let
+                    dragged =
+                        { model | rows = clamp 6 codes (it.rect.y2 - it.rect.y1 - 6) }
+                in
+                scrollInto dragged
+
+            else
+                model
+
         _ ->
             model
+
+
+{-| Change mode, and put the selection back on screen for the mode being
+entered -- `rows` means nothing in the grid, so the list has to be told where
+it is the moment it becomes the thing on screen.
+-}
+showing : Mode -> Model -> Model
+showing mode model =
+    let
+        switched =
+            { model | mode = mode }
+    in
+    scrollInto { switched | rows = listRows switched }
+
+
+{-| How far `Up` and `Down` go, which is a row -- and a row is sixteen codes
+in the grid and one in the list.
+-}
+step : Model -> Int
+step model =
+    when model.mode is
+        Grid ->
+            columns
+
+        List ->
+            1
+
+
+{-| And how far a page goes, which in the list is a screenful rather than a
+number written down: a window somebody made taller pages further, because that
+is what "a page" means.
+-}
+page : Model -> Int
+page model =
+    when model.mode is
+        Grid ->
+            4 * columns
+
+        List ->
+            max 1 (model.rows - 1)
 
 
 pressKey : String -> Model -> Model
@@ -144,23 +425,42 @@ pressKey key model =
         "Right" ->
             moveTo (model.code + 1) model
 
+        -- A row is sixteen codes in the grid and one in the list, which is
+        -- the only thing the arrows have to know about the mode.
         "Up" ->
-            moveTo (model.code - columns) model
+            moveTo (model.code - step model) model
 
         "Down" ->
-            moveTo (model.code + columns) model
+            moveTo (model.code + step model) model
 
         "Home" ->
             moveTo 0 model
 
         "End" ->
-            moveTo 127 model
+            moveTo (codes - 1) model
 
         "PgUp" ->
-            moveTo (model.code - 4 * columns) model
+            moveTo (model.code - page model) model
 
         "PgDn" ->
-            moveTo (model.code + 4 * columns) model
+            moveTo (model.code + page model) model
+
+        -- **`Tab`, because every printable key is spoken for.** Typing a
+        -- character to jump to its code is the best thing this tool does, so
+        -- `g` and `l` are 103 and 108 and cannot also be commands. `Tab` is
+        -- free precisely because the chart is a focused canvas: nothing else
+        -- in the window can be tabbed to, and `JsCanvas::handleEvent` would
+        -- have swallowed the key anyway.
+        "Tab" ->
+            showing
+                (when model.mode is
+                    Grid ->
+                        List
+
+                    List ->
+                        Grid
+                )
+                model
 
         other ->
             -- A printable key jumps to itself, which is the fastest way to ask
@@ -169,7 +469,7 @@ pressKey key model =
             -- the ones outside ASCII are simply not on the chart.
             when String.popFirst other is
                 Just { first, rest } ->
-                    if String.isEmpty rest && Char.toCode first < 128 then
+                    if String.isEmpty rest && Char.toCode first < codes then
                         moveTo (Char.toCode first) model
 
                     else
@@ -186,14 +486,22 @@ row is the answer.
 -}
 click : Int -> Int -> Model -> Model
 click x y model =
-    let
-        atColumn =
-            clamp 0 (columns - 1) ((x - labelWidth) // cellWidth)
+    when model.mode is
+        Grid ->
+            let
+                atColumn =
+                    clamp 0 (columns - 1) ((x - labelWidth) // cellWidth)
 
-        atRow =
-            clamp 0 7 (y - 1)
-    in
-    moveTo (atRow * columns + atColumn) model
+                atRow =
+                    clamp 0 7 (y - 1)
+            in
+            moveTo (atRow * columns + atColumn) model
+
+        -- Row zero is the header, and a click on it lands on the top row for
+        -- the same reason a click on the grid's labels lands on the nearest
+        -- cell: the user pointed at the list, and the list is the answer.
+        List ->
+            moveTo (model.top + max 0 (y - 1)) model
 
 
 -- THE CHART
@@ -266,11 +574,152 @@ cell inks model code =
         Tui.plain (Ascii.glyph code)
 
 
-cursorAt : Model -> { x : Int, y : Int }
+-- THE LIST
+
+
+{-| One code per line, which is what `man ascii` prints and what the grid
+cannot say.
+
+The columns are built by one function so that the header cannot drift out of
+line with the rows -- the alternative is two strings padded by hand, and they
+agree until somebody widens a column in one of them.
+-}
+listLine : String -> String -> String -> String -> String -> String
+listLine dec hex oct sym name =
+    String.padLeft 3 ' ' dec
+        ++ "  "
+        ++ String.padLeft 3 ' ' hex
+        ++ "  "
+        ++ String.padLeft 3 ' ' oct
+        ++ "  "
+        ++ String.padRight 4 ' ' sym
+        ++ "  "
+        ++ name
+
+
+{-| The symbol column: the mnemonic where there is one, and the character
+otherwise.
+
+`SP` is in the names table and is the reason this is not "the glyph, or the
+name when there is no glyph" -- a space *has* a glyph, it is blank, and a row
+that showed it would be a row with nothing in the one column that is supposed
+to identify it.
+-}
+symbolOf : Int -> String
+symbolOf code =
+    when Ascii.named code is
+        Just it ->
+            it.name
+
+        Nothing ->
+            Ascii.glyph code
+
+
+{-| The name column, which is empty for a printable character and is the whole
+reason to open this mode for everything else.
+-}
+nameOf : Int -> String
+nameOf code =
+    when Ascii.named code is
+        Just it ->
+            let
+                chord =
+                    Ascii.chord code
+
+                escape =
+                    Ascii.escape code
+            in
+            it.meaning
+                ++ (if String.isEmpty chord then
+                        ""
+
+                    else if String.isEmpty escape then
+                        "  (" ++ chord ++ ")"
+
+                    else
+                        "  (" ++ chord ++ ", " ++ escape ++ ")"
+                   )
+
+        Nothing ->
+            ""
+
+
+{-| The header and the rows that are on screen.
+
+Only the visible slice is built. A hundred and twenty-eight rows is not a lot,
+and building all of them and slicing afterwards would be the same picture --
+but `view` runs on every tick of every subscription, and the rule that keeps
+this program cheap is that a render costs what is on the screen.
+-}
+list : Inks -> Model -> Array (Array Span)
+list inks model =
+    Array.pushFirst
+        [ Tui.ink inks.ruler
+            (padded model (listLine "Dec" "Hex" "Oct" "Sym" "Name"))
+        ]
+        (Array.map (listRow inks model)
+            (Array.range model.top (min (codes - 1) (model.top + model.rows - 1)))
+        )
+
+
+{-| Painted across the **whole** width when it is the selected one, which is
+why every row is padded to the canvas rather than left ragged: a highlight that
+stopped at the last character of the text would be a different length on every
+row, and a list is read down its left edge.
+-}
+listRow : Inks -> Model -> Int -> Array Span
+listRow inks model code =
+    let
+        text =
+            padded model
+                (listLine (String.fromInt code)
+                    (String.padLeft 2 '0' (Ascii.radix 16 code))
+                    (String.padLeft 3 '0' (Ascii.radix 8 code))
+                    (symbolOf code)
+                    (nameOf code)
+                )
+    in
+    if code == model.code then
+        [ Tui.on inks.selected.bg (Tui.ink inks.selected.fg text) ]
+
+    else if Ascii.isControl code then
+        [ Tui.ink inks.dim text ]
+
+    else
+        [ Tui.plain text ]
+
+
+{-| Every row padded to the pane, because the selected one is painted across
+its whole width and a highlight that stopped at the last character of the text
+would be a different length on every row. A list is read down its left edge and
+a ragged right one says nothing.
+-}
+padded : Model -> String -> String
+padded model text =
+    String.padRight (paneWidth model - 4) ' ' text
+
+
+{-| Where the block cursor goes, and `Nothing` when the selected code is not
+on screen -- which the list can be and the grid cannot.
+
+A cursor parked at the edge of a list it is not on would be pointing at the
+wrong code, and the terminal draws it whether or not the model meant it.
+-}
+cursorAt : Model -> Maybe { x : Int, y : Int }
 cursorAt model =
-    { x = labelWidth + Math.modBy columns model.code * cellWidth
-    , y = 1 + model.code // columns
-    }
+    when model.mode is
+        Grid ->
+            Just
+                { x = labelWidth + Math.modBy columns model.code * cellWidth
+                , y = 1 + model.code // columns
+                }
+
+        List ->
+            if model.code < model.top || model.code >= model.top + model.rows then
+                Nothing
+
+            else
+                Just { x = 0, y = 1 + model.code - model.top }
 
 
 -- VIEW
@@ -278,34 +727,138 @@ cursorAt model =
 
 view : Inks -> Model -> Tui.Window
 view inks model =
+    let
+        box =
+            frame model
+
+        -- The last usable row inside the window, which both layouts hang their
+        -- bottom two lines off.
+        foot =
+            box.y2 - box.y1 - 2
+    in
     { id = windowId
-    , title = "ASCII Chart"
-    , rect = { x1 = 6, y1 = 2, x2 = 54, y2 = 17 }
-    -- Sixteen rows of eight columns is the chart, and there is no more of it
-    -- to show. A window that could be dragged bigger would be the same chart
-    -- with space around it, so the frame is told not to offer one: no resize
-    -- handle, no zoom box.
-    , resize = Tui.fixedSize
+    , title =
+        when model.mode is
+            Grid ->
+                "ASCII Chart"
+
+            List ->
+                "ASCII Chart - list"
+    , rect = box
+    -- **The one field that makes a mode change a rebuild.** Everything else
+    -- about these two layouts could have been patched -- the window's
+    -- rectangle has `setBounds`, a canvas's lines are content -- but `resize`
+    -- becomes the window's `sizeLimits` at the moment it is built and there is
+    -- no call that changes them, so the differ compares it and a model that
+    -- changes it gets a new window. Which is the right trade here rather than
+    -- something to work around: the grid genuinely has nothing more to show
+    -- and should not offer a handle that reveals blank space, the list
+    -- genuinely does, and a rebuild the user asked for by pressing Tab costs a
+    -- repaint of one window.
+    , resize =
+        when model.mode is
+            Grid ->
+                Tui.fixedSize
+
+            List ->
+                Tui.resizeHeight
     , palette = Tui.BlueWindow
     , canClose = True
     , canMove = True
     , views =
-        [ Canvas
-            { id = canvasId
-            , rect = { x1 = 2, y1 = 1, x2 = 46, y2 = 10 }
-            , lines = grid inks model
-            , cursor = Just (cursorAt model)
-            , takesFocus = True
-            }
-        , StaticText
-            { id = "ascii.bases"
-            , rect = { x1 = 2, y1 = 11, x2 = 46, y2 = 12 }
-            , text = Ascii.bases model.code
-            }
-        , StaticText
-            { id = "ascii.naming"
-            , rect = { x1 = 2, y1 = 12, x2 = 46, y2 = 13 }
-            , text = Ascii.naming model.code
-            }
-        ]
+        when model.mode is
+            Grid ->
+                [ Canvas
+                    { id = canvasId
+                    , rect = { x1 = 2, y1 = 1, x2 = 46, y2 = 10 }
+                    , lines = grid inks model
+                    , cursor = cursorAt model
+                    , takesFocus = True
+                    }
+                , StaticText
+                    { id = "ascii.bases"
+                    , rect = { x1 = 2, y1 = 11, x2 = 46, y2 = 12 }
+                    , text = Ascii.bases model.code
+                    }
+                , StaticText
+                    { id = "ascii.naming"
+                    , rect = { x1 = 2, y1 = 12, x2 = 46, y2 = 13 }
+                    , text = Ascii.naming model.code
+                    }
+                ]
+
+            List ->
+                -- The canvas before the bar, which is the rule a `Label`
+                -- follows and for the same reason -- and the bar is left
+                -- `for = ""` anyway, because the list is the only thing in
+                -- this window that scrolls and a wheel turn should be taken
+                -- wherever the pointer is.
+                [ Grows
+                    { grow = Tui.stretch
+                    , view =
+                        Canvas
+                            { id = canvasId
+                            , rect =
+                                { x1 = 2
+                                , y1 = 1
+                                , x2 = paneWidth model - 3
+                                , y2 = foot - 2
+                                }
+                            , lines = list inks model
+                            , cursor = cursorAt model
+                            , takesFocus = True
+                            }
+                    }
+                , Grows
+                    { grow = Tui.stretchHeight
+                    , view =
+                        ScrollBar
+                            { id = scrollId
+                            , rect =
+                                { x1 = paneWidth model - 3
+                                , y1 = 1
+                                , x2 = paneWidth model - 2
+                                , y2 = foot - 2
+                                }
+                            , value = model.top
+                            , min = 0
+                            , max = maxTop model
+                            , pageStep = page model
+                            , arrowStep = 1
+                            , for = ""
+                            }
+                    }
+                -- The same two lines the grid has, in the same order, kept
+                -- rather than dropped as redundant: a row of the list is
+                -- necessarily terse, and the code you are on is worth spelling
+                -- out in full in the one place it is always in the same
+                -- position.
+                , Grows
+                    { grow = acrossTheFoot
+                    , view =
+                        StaticText
+                            { id = "ascii.bases"
+                            , rect = { x1 = 2, y1 = foot - 1, x2 = paneWidth model - 2, y2 = foot }
+                            , text = Ascii.bases model.code
+                            }
+                    }
+                , Grows
+                    { grow = acrossTheFoot
+                    , view =
+                        StaticText
+                            { id = "ascii.naming"
+                            , rect = { x1 = 2, y1 = foot, x2 = paneWidth model - 2, y2 = foot + 1 }
+                            , text = Ascii.naming model.code
+                            }
+                    }
+                ]
     }
+
+
+{-| Both horizontal edges and both vertical ones follow, so a line stays the
+same distance from the bottom frame while the window grows. There is no name
+for it in `Tui` because only a footer wants it.
+-}
+acrossTheFoot : Tui.Grow
+acrossTheFoot =
+    { left = False, top = True, right = True, bottom = True }

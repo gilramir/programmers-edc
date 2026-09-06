@@ -103,6 +103,14 @@ and both declined.
 
 # v4
 
+## The ASCII chart's long form
+
+The concise grid, and a second mode: the long list `man ascii` prints, one code
+per line with dec/hex/oct and a name for everything unprintable. A toggle
+between them, and the list as tall as the screen allows.
+
+**Done** -- see "The ASCII chart has two of it" below.
+
 ## Notes
 
 Many independent free-form notes, each with a name: a list down the left and an
@@ -967,6 +975,46 @@ made of them.
 
 That was also the thing standing in front of testing anything translated, so
 i18n is one step less expensive than it was.
+
+## The ASCII chart has two of it
+
+`Tab` toggles, and **Chart | Grid** / **Chart | List** name the two on the
+menu. The grid is the concise sixteen-by-eight table predc always had; the list
+is what `man ascii` prints -- one code per line, dec/hex/oct, the mnemonic, and
+for the third of the table with no glyph the meaning, the control chord and the
+C escape all on the same line.
+
+They are a **mode over one selected code** rather than two tools, which is the
+whole reason to build it this way: switching keeps your place, so you can find
+a character in the grid, press `Tab`, and read about it.
+
+Three things fell out of it.
+
+**`Tab`, because every printable key is spoken for.** Typing a character to
+jump to its code is the best thing the chart does, so `g` and `l` are 103 and
+108 and cannot also be commands. `Tab` is free precisely *because* the chart is
+a focused canvas: `JsCanvas::handleEvent` consumes every key it is given, so
+nothing else in predc could ever have wanted it, and there is nowhere in the
+window to tab to.
+
+**Switching modes rebuilds the window, and that is the right trade.** Almost
+everything about the two layouts could have been patched -- a window's
+rectangle has `setBounds`, a canvas's lines are content -- but `resize` becomes
+the window's `sizeLimits` at the moment it is built and there is no call that
+changes them, so the differ compares it and a model that changes it gets a new
+window. Which is exactly what should happen here: the grid is `Tui.fixedSize`
+because sixteen rows of eight columns is the whole chart and a handle would
+only reveal blank space, and the list is `Tui.resizeHeight` because there is
+more of it than fits. A rebuild the user asked for by pressing `Tab` costs one
+window's repaint.
+
+**The rows come off the rectangle, not the other way round.** The first version
+computed a row count from the desktop and the window height from the row count,
+which put a floor under the height -- and on a fourteen-row terminal the bottom
+frame went off the bottom of the screen. The rectangle is clamped to the
+desktop first now and the rows are whatever is left, which is also the
+arithmetic `WindowResized` does when somebody drags the frame, so the two
+cannot disagree.
 
 ## Notes
 
