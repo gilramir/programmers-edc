@@ -1,4 +1,4 @@
-module Tool.Ascii exposing (Model, command, init, menu, menuItem, update, view, windowId)
+module Tool.Ascii exposing (Model, command, init, menu, menuItem, mode, update, view, windowId)
 
 {-| The ASCII chart: 128 codes in a grid you can walk around in, and a line
 underneath saying what the selected one is in every base a programmer asks for.
@@ -45,6 +45,7 @@ status line.
 import Array exposing (Array)
 import Ascii
 import Char
+import Chart exposing (Mode(..))
 import Math
 import String
 import Theme exposing (Inks)
@@ -97,31 +98,22 @@ menu model =
     SubMenu
         { title = "Chart"
         , key = ""
-        , items =
-            [ modeItem model.mode Grid "~G~rid"
-            , modeItem model.mode List "~L~ist"
-            ]
+        , items = Array.map (modeItem model.mode) Chart.all
         }
 
 
-modeItem : Mode -> Mode -> String -> MenuItem
-modeItem current mode title =
+modeItem : Mode -> Mode -> MenuItem
+modeItem current it =
     Item
         { title =
-            (if mode == current then
+            (if it == current then
                 "√ "
 
              else
                 "  "
             )
-                ++ title
-        , cmd =
-            when mode is
-                Grid ->
-                    "ascii.grid"
-
-                List ->
-                    "ascii.list"
+                ++ Chart.title it
+        , cmd = "ascii." ++ Chart.toKey it
         , key = ""
         , shortcut = "Tab"
         }
@@ -130,17 +122,14 @@ modeItem current mode title =
 -- MODEL
 
 
-{-| Which of the two charts is on screen.
-
-They show the same 128 facts and answer different questions. `Grid` is for
-"where does the printable range start" and "what is this character's code" --
-the shape of the table is the information. `List` is `man ascii`: one code per
-line with every base and, for the third of the table with no glyph, the name
-and the meaning, which is a thing you read rather than point at.
+{-| Which form is on screen, and it is `Chart.Mode` rather than a union of this
+module's own because it is *remembered*: `Config` has to name its type, and a
+config module reaching into a tool for it would be the dependency the wrong way
+round. [`mode`](#mode) is how the shell reads it back.
 -}
-type Mode
-    = Grid
-    | List
+mode : Model -> Mode
+mode model =
+    model.mode
 
 
 {-| One number, and now four more.
@@ -164,12 +153,12 @@ type alias Model =
     }
 
 
-init : { cols : Int, rows : Int } -> Model
-init desktop =
+init : Mode -> { cols : Int, rows : Int } -> Model
+init opensIn desktop =
     let
         model =
             { code = 0
-            , mode = Grid
+            , mode = opensIn
             , top = 0
             , rows = 0
             , desktop = desktop
@@ -381,10 +370,10 @@ entered -- `rows` means nothing in the grid, so the list has to be told where
 it is the moment it becomes the thing on screen.
 -}
 showing : Mode -> Model -> Model
-showing mode model =
+showing wanted model =
     let
         switched =
-            { model | mode = mode }
+            { model | mode = wanted }
     in
     scrollInto { switched | rows = listRows switched }
 

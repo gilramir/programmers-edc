@@ -25,6 +25,7 @@ import Argparse.Parser as Parser
 import Argparse.PrettyPrinter as PP
 import Array exposing (Array)
 import Bytes exposing (Bytes)
+import Chart
 import Cli
 import Config
 import Dict exposing (Dict)
@@ -184,6 +185,10 @@ type alias Model =
     -- the calendar's own state: it is remembered when the window is not open,
     -- and it is on the Options menu with the colour scheme.
     , weeks : Week.Rule
+    -- Which form the ASCII chart opens in. Held here rather than in the tool
+    -- for the same reason the converter's zone list is: it has to outlive a
+    -- window that was closed, and it is the shell that read the config file.
+    , chart : Chart.Mode
     -- The other half of the config file, held here for the same reason the
     -- theme is: it belongs to the program rather than to a tool, and it has to
     -- outlive a tool that is closed and reopened.
@@ -335,6 +340,7 @@ init env =
                     , theme = config.theme
                     , timezones = config.timezones
                     , weeks = config.weeks
+                    , chart = config.chart
                     , here =
                         when zoneName is
                             Time.Name name ->
@@ -393,7 +399,7 @@ open command shell =
     when command is
         Cli.Ascii ->
             Node.startProgram
-                { model = Tui.Start { shell | ascii = Just (Tool.Ascii.init shell.desktop) }
+                { model = Tui.Start { shell | ascii = Just (Tool.Ascii.init shell.chart shell.desktop) }
                 , command = Cmd.none
                 }
 
@@ -659,7 +665,7 @@ handleEvent event model =
             if cmd == Tool.Ascii.command then
                 when model.ascii is
                     Nothing ->
-                        { model = { model | ascii = Just (Tool.Ascii.init model.desktop) }
+                        { model = { model | ascii = Just (Tool.Ascii.init model.chart model.desktop) }
                         , command = Cmd.none
                         }
 
@@ -916,6 +922,7 @@ saveSettings model =
         { theme = model.theme
         , timezones = model.timezones
         , weeks = model.weeks
+        , chart = model.chart
         }
         |> Task.perform (\_ -> Saved)
 
@@ -1026,8 +1033,23 @@ toTools event model =
         chosen =
             Maybe.map Tool.Time.zones moved.time
 
+        -- The ASCII chart's mode, read the same way and for the same reason:
+        -- the tool changes it from three places -- `Tab` and two menu entries
+        -- -- and a tool that had to remember to announce each one is a tool
+        -- with a third place to forget. What is on the screen cannot drift
+        -- from what is on the screen.
+        --
+        -- No `Nothing` case to guard here, unlike the zone list: the chart is
+        -- opened *from* this value, so a window nobody has touched agrees with
+        -- what is already written down and nothing is saved.
+        showing =
+            Maybe.map Tool.Ascii.mode moved.ascii
+
+        turned =
+            showing /= Nothing && showing /= Just model.chart
+
         wrote =
-            chosen /= Nothing && chosen /= model.timezones
+            (chosen /= Nothing && chosen /= model.timezones) || turned
 
         -- The environment tool asking for the hex viewer, which is the only
         -- place in predc where one tool opens another.
@@ -1064,7 +1086,15 @@ toTools event model =
     in
     { model =
         if wrote then
-            { moved2 | timezones = chosen }
+            { moved2
+                | timezones =
+                    if chosen /= Nothing then
+                        chosen
+
+                    else
+                        moved2.timezones
+                , chart = Maybe.withDefault moved2.chart showing
+            }
 
         else
             moved2
@@ -1126,7 +1156,16 @@ toTools event model =
                 Nothing ->
                     Cmd.none
             , if wrote then
-                saveSettings { model | timezones = chosen }
+                saveSettings
+                    { model
+                        | timezones =
+                            if chosen /= Nothing then
+                                chosen
+
+                            else
+                                model.timezones
+                        , chart = Maybe.withDefault model.chart showing
+                    }
 
               else
                 Cmd.none

@@ -966,6 +966,26 @@ keyboard mask depends on `ofSelectable`.
 Two of the canvases already written wanted `False` in hindsight -- the palette
 example paints two pictures and reads nothing.
 
+**`Toml.Edit.introduce` and `Toml.Edit.remove` are not inverses**, found by
+giving predc a setting you can toggle with a keystroke. `introduce` with
+`blankBefore = True` writes a blank line above the block and `remove` leaves it
+behind, so every write-then-unwrite cycle adds one empty line to the file:
+four toggles of the ASCII chart's mode left two. With `blankBefore = False` the
+same cycle round-trips byte for byte, which is what points at the blank line
+rather than at the comments -- and `blankBefore` is a field of the record
+`comments`/`setComments` round-trip, so by the module's own account the line
+belongs to the key's block and should go when the key goes.
+
+The workaround a caller reaches for first is unsafe and is worth knowing about:
+`setComments` with `blankBefore = False` before `remove` takes the blank away,
+and its own docs say that "makes the block above join this key's -- which is to
+say it will go when this key goes". On a hand-edited config file that deletes a
+floating comment somebody wrote. So predc does not remove that key at all --
+`Edit.member` decides between `introduce` and `set` -- which is stable at the
+cost of leaving a defaulted key in the file, and is why `chart` is written
+differently from `weeks` two lines above it in the same function. The fix
+belongs in gren-toml; `/tmp/gren-toml-feature.md` has the report.
+
 **`resize` is the one window field a mode change cannot patch**, which is what
 predc's ASCII chart found when it grew a second layout. A window's rectangle
 has `setBounds` and a canvas's lines are content, so two layouts of the same

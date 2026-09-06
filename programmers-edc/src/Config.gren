@@ -39,6 +39,7 @@ parsed: see [`save`](#save).
 -}
 
 import Bytes exposing (Bytes)
+import Chart
 import Dict exposing (Dict)
 import FileSystem
 import FileSystem.Path as Path exposing (Path)
@@ -67,6 +68,12 @@ type alias Config =
     -- configured" and "ISO" are the same calendar, so there is nothing for the
     -- absence to mean.
     , weeks : Week.Rule
+    -- Which of the ASCII chart's two forms it opens in. A mode rather than a
+    -- taste -- the grid and the list answer different questions -- and it is
+    -- remembered for the same reason the theme is: predc is a program people
+    -- leave open and close with the window, and a mode that survived only a
+    -- tidy exit is a mode that gets lost.
+    , chart : Chart.Mode
     }
 
 
@@ -75,6 +82,7 @@ default =
     { theme = Theme.Borland
     , timezones = Nothing
     , weeks = Week.Iso
+    , chart = Chart.Grid
     }
 
 
@@ -130,15 +138,19 @@ parse bytes =
         |> Result.withDefault default
 
 
+{-| `andMap` and not `map3`, which is what a fourth field costs: the numbered
+`mapN`s stop at three here and the pipeline does not stop at all.
+-}
 decoder : Decode.Decoder Config
 decoder =
-    Decode.map3
-        (\theme timezones weeks ->
-            { theme = theme, timezones = timezones, weeks = weeks }
+    Decode.succeed
+        (\theme timezones weeks chart ->
+            { theme = theme, timezones = timezones, weeks = weeks, chart = chart }
         )
-        (optional "theme" (Decode.map Theme.fromKey Decode.string) default.theme)
-        (Decode.maybe (Decode.field "timezones" (Decode.array Decode.string)))
-        (optional "weeks" (Decode.map Week.fromKey Decode.string) default.weeks)
+        |> Decode.andMap (optional "theme" (Decode.map Theme.fromKey Decode.string) default.theme)
+        |> Decode.andMap (Decode.maybe (Decode.field "timezones" (Decode.array Decode.string)))
+        |> Decode.andMap (optional "weeks" (Decode.map Week.fromKey Decode.string) default.weeks)
+        |> Decode.andMap (optional "chart" (Decode.map Chart.fromKey Decode.string) default.chart)
 
 
 {-| A field that may not be there, and is its default when it is not.
@@ -295,4 +307,47 @@ apply config document =
                         , trailing = Nothing
                         }
                         (Edit.string (Week.toKey other))
+           )
+        -- **Introduced or set, never removed**, which is not the rule the two
+        -- keys above follow and is the right one for a key you can toggle with
+        -- a keystroke.
+        --
+        -- `introduce` with `blankBefore = True` adds a blank line above the
+        -- block and `remove` does not take it away again, so the pair is not a
+        -- round trip: every list-then-grid cycle leaves one more empty line in
+        -- somebody's config file. `weeks` has the same hole and gets away with
+        -- it because it is changed from a menu once in a blue moon; `chart` is
+        -- `Tab`, and a file that grew a blank line every time somebody
+        -- compared the two charts would be predc doing exactly what this
+        -- module exists to promise it does not. The bug is `gren-toml`'s and
+        -- is written up there; when it is fixed this can become the same
+        -- `remove` the others use.
+        --
+        -- So: choosing the list writes the key with its explanation, and
+        -- choosing the grid back writes `grid` into the key that is already
+        -- there. `member` is what keeps the promise -- a file that has never
+        -- had a `chart` key does not get one for a chart nobody switched --
+        -- and a file that has one has it because somebody pressed the key, so
+        -- it is not a setting they never asked about.
+        |> (\document_ ->
+                when config.chart is
+                    Chart.Grid ->
+                        if Edit.member [ "chart" ] document_ then
+                            Edit.set [ "chart" ] (Edit.string (Chart.toKey Chart.Grid)) document_
+
+                        else
+                            document_
+
+                    other ->
+                        Edit.introduce [ "chart" ]
+                            { blankBefore = True
+                            , leading =
+                                [ " Which form the ASCII chart opens in: grid (sixteen by"
+                                , " eight, the concise table) or list (one code per line,"
+                                , " with names, the way man ascii prints it)."
+                                ]
+                            , trailing = Nothing
+                            }
+                            (Edit.string (Chart.toKey other))
+                            document_
            )

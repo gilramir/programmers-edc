@@ -1008,6 +1008,23 @@ only reveal blank space, and the list is `Tui.resizeHeight` because there is
 more of it than fits. A rebuild the user asked for by pressing `Tab` costs one
 window's repaint.
 
+**And the mode is remembered**, in `chart` in the config file, the way the
+colour scheme and the calendar's week numbering are. It is written the moment
+you switch, because predc is a program people leave open and close with the
+window.
+
+That key is written differently from its neighbours and the difference is a
+workaround. `Toml.Edit.introduce` adds a blank line above the block and
+`Toml.Edit.remove` does not take it away again, so the usual
+write-it-or-remove-it pair leaves one more empty line in the file every time
+the setting goes back to its default. `weeks` gets away with that because it is
+changed from a menu once in a blue moon; `chart` is a key you can hold down. So
+choosing the list *introduces* the key with its explanation, and choosing the
+grid back *sets* it to `grid` rather than removing it -- and `Edit.member` is
+what keeps the other promise, that a file which has never had a `chart` key
+does not grow one because somebody looked at the chart. The bug is gren-toml's
+and is written up there.
+
 **The rows come off the rectangle, not the other way round.** The first version
 computed a row count from the desktop and the window height from the row count,
 which put a floor under the height -- and on a fourteen-row terminal the bottom
@@ -1161,7 +1178,7 @@ dark scheme.
 ## The config file
 
 `$XDG_CONFIG_HOME/predc/config.toml`, or `~/.config/predc/config.toml`. It has
-two keys in it, and predc writes it the moment either one changes rather than
+four keys in it, and predc writes it the moment any of them changes rather than
 at exit -- a setting that survives only a tidy close is a setting that gets
 lost, and predc is a program people close with Alt-X.
 
@@ -1173,7 +1190,23 @@ theme = "midnight"
 # shows them. Delete the key to go back to this machine's own
 # zone; an empty list shows UTC and POSIX alone.
 timezones = ["America/Chicago", "Asia/Seoul"]
+
+# How the calendar numbers weeks, and therefore which day a
+# week starts on: iso (Monday, the week holding 4 January)
+# or us (Sunday, the week holding 1 January). Absent is iso.
+weeks = "us"
+
+# Which form the ASCII chart opens in: grid (sixteen by
+# eight, the concise table) or list (one code per line,
+# with names, the way man ascii prints it).
+chart = "list"
 ```
+
+Only `theme` is always there. `timezones` and `weeks` are written when they
+stop being the default and taken out again when they go back to it, so a file
+you have never touched stays a file with one key in it. `chart` is written the
+same way round but never removed -- see the note under the ASCII chart, and the
+gren-toml bug it works around.
 
 It was JSON and is now TOML, for the comments -- both the ones above, which
 predc writes when it invents a key, and the ones you write yourself. Which

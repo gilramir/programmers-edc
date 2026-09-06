@@ -1,0 +1,67 @@
+module Chart exposing (Mode(..), all, fromKey, title, toKey)
+
+{-| Which of the ASCII chart's two forms is on screen.
+
+Here rather than in `Tool.Ascii` for the reason `Week.Rule` is not in
+`Tool.Calendar`: it is a setting, so `Config` has to name its type, and a
+config module that reached into a tool to do it would be the dependency the
+wrong way round. What a tool *does* with the value is the tool's; what the
+value is, and how it is spelled in a file, is shared.
+
+The two forms answer different questions, which is why this is a mode and not a
+preference about how to draw one thing. [`Grid`](#Mode) is sixteen by eight:
+the shape of the table is the information, and it is what you point at to ask
+"where does the printable range start" or "what is this character's code".
+[`List`](#Mode) is what `man ascii` prints -- one code per line with every
+base, and, for the third of the table that has no glyph, the name, the meaning,
+the control chord and the C escape. That is a thing you read.
+
+-}
+
+
+type Mode
+    = Grid
+    | List
+
+
+{-| In the order they appear on the menu.
+-}
+all : Array Mode
+all =
+    [ Grid, List ]
+
+
+title : Mode -> String
+title mode =
+    when mode is
+        Grid ->
+            "~G~rid"
+
+        List ->
+            "~L~ist"
+
+
+{-| How it is spelled in the config file. Lower case and one word, like every
+other key predc writes.
+-}
+toKey : Mode -> String
+toKey mode =
+    when mode is
+        Grid ->
+            "grid"
+
+        List ->
+            "list"
+
+
+{-| Anything that is not `list` is the grid, which is the same shape every
+other key in `Config` reads: a config file never reports an error, so a value
+nobody recognises has to be the default rather than a failure.
+-}
+fromKey : String -> Mode
+fromKey key =
+    if key == "list" then
+        List
+
+    else
+        Grid

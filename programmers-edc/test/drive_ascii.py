@@ -377,17 +377,82 @@ def main():
     check("Alt-X exits from inside the chart, and cleanly", code == 0,
           f"exit={code}")
 
+    # ---- and it is remembered ---------------------------------------------
+    # The mode is a setting, so it goes in the config file -- and the file is
+    # one somebody may have written by hand, which is the other half of every
+    # check here.
+    kept = tempfile.mkdtemp(prefix="predc-home-")
+    os.makedirs(os.path.join(kept, ".config", "predc"))
+    config = os.path.join(kept, ".config", "predc", "config.toml")
+    written = '# my own words, which predc must not touch\ntheme = "midnight"\n'
+    with open(config, "w") as out:
+        out.write(written)
+    saved = dict(env, HOME=kept)
+
+    first = Pty(node_argv(LAUNCHER, "ascii"), saved, cwd=ROOT)
+    first.pump(2.0)
+    check("a chart nobody switched writes nothing at all, because a key you "
+          "never asked about is not predc's to add",
+          open(config).read() == written, open(config).read())
+    first.send(b"\t", settle=1.5)
+    first.pump(0.8)
+    body = open(config).read()
+    check("switching writes the mode down, with a sentence saying what it is",
+          'chart = "list"' in body and "man ascii" in body, body)
+    check("and the hand-written part came back untouched",
+          body.startswith(written), body)
+    first.send(b"\x1bx", settle=0.8)
+    first.wait(timeout=6)
+
+    again = Pty(node_argv(LAUNCHER, "ascii"), saved, cwd=ROOT)
+    again.pump(2.0)
+    check("so the next run opens in the list", "ASCII Chart - list" in again.render(),
+          again.render().split("\n")[1])
+
+    # **The key is set back rather than removed**, which is not the rule the
+    # theme's neighbours follow. `introduce` adds a blank line above the block
+    # and `remove` does not take it away, so a toggle you can hold down would
+    # grow the file by a line every time; `gren-toml` has the bug and this has
+    # the workaround.
+    again.send(b"\t", settle=1.5)
+    again.send(b"\t", settle=1.5)
+    again.send(b"\t", settle=1.5)
+    again.pump(0.8)
+    body = open(config).read()
+    check("toggling repeatedly does not grow the file, which the obvious "
+          "remove-when-default would have done a blank line at a time",
+          body.count("\n\n") == 1 and 'chart = "grid"' in body, repr(body))
+    again.send(b"\x1bx", settle=0.8)
+    check("and that one exits cleanly", again.wait(timeout=6) == 0, "exit")
+
+    back = Pty(node_argv(LAUNCHER, "ascii"), saved, cwd=ROOT)
+    back.pump(2.0)
+    check("and the run after that is back in the grid",
+          "ASCII Chart - list" not in back.render() and frames(back.render()) == 1,
+          back.render().split("\n")[1])
+    back.send(b"\x1bx", settle=0.8)
+    back.wait(timeout=6)
+
     # ---- taller if the screen can take it --------------------------------
     # The grid is 48 by 15 whatever the terminal is; the list is not, because
     # there is more of it than fits and a bigger screen should show more.
-    small = Pty(node_argv(LAUNCHER, "ascii"), env, cwd=ROOT, size=(80, 24))
+    # A HOME of its own for each, and that is not tidiness: the mode is
+    # remembered now, so an app that inherits the config another one wrote
+    # opens in the mode that one left behind -- and a `Tab` here would switch
+    # it *off* the list rather than on to it. Which is what happened, and what
+    # these two checks said instead.
+    small = Pty(node_argv(LAUNCHER, "ascii"),
+                dict(env, HOME=tempfile.mkdtemp(prefix="predc-home-")),
+                cwd=ROOT, size=(80, 24))
     small.pump(2.0)
     small.send(b"\t", settle=1.5)
     short = len(listed(small.render()))
     small.send(b"\x1bx", settle=0.8)
     small.wait(timeout=6)
 
-    tall = Pty(node_argv(LAUNCHER, "ascii"), env, cwd=ROOT, size=(80, 44))
+    tall = Pty(node_argv(LAUNCHER, "ascii"),
+               dict(env, HOME=tempfile.mkdtemp(prefix="predc-home-")),
+               cwd=ROOT, size=(80, 44))
     tall.pump(2.0)
     tall.send(b"\t", settle=1.5)
     long_ = len(listed(tall.render()))

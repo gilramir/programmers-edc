@@ -36,8 +36,8 @@ in three of seventeen phases) and wanted four files; time was flat (36s, then
 **And know when to stop, because that point has been passed.** Past about
 thirty suites on sixteen cores the run is no longer its slowest member: the sum
 matters again, and it puts a floor under the wall clock that no amount of
-further splitting goes below. At 52 suites (2026-09-06) the sum is 1715.8s,
-which over 16 cores is a **107.2s floor** against a 144.5s run and a 93.1s
+further splitting goes below. At 52 suites (2026-09-06) the sum is 1729.8s,
+which over 16 cores is a **108.1s floor** against a 145.7s run and a 93.1s
 slowest driver (`programmers-edc/encode`). Splitting `encode` would buy
 essentially nothing -- it is already under the floor. **The only win left is a
 *cheaper* driver, not a smaller one**, and `pump()` sleeping its whole duration
