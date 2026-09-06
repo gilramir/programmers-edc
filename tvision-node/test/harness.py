@@ -97,6 +97,8 @@ class Pty:
         # Every distinct (glyph, ink, ground) this application has ever drawn
         # where the ink was the ground. See `display` and `Checks.report`.
         self.invisible = {}
+        # The exit status, once anything has reaped it. See `alive`.
+        self.exited = None
         _ptys.append(self)
 
     def resize(self, cols, rows, settle=1.5):
@@ -312,12 +314,35 @@ class Pty:
         for _ in range(turns):
             self.send(f"\x1b[<{code};{col};{row}M".encode(), settle=settle)
 
+    def alive(self):
+        """Is the program still running?
+
+        The question a driver actually wants when it has just done something
+        unusual to a program -- started it on a terminal too small for its own
+        rectangles, say. Reading the screen does not answer it: a program that
+        died a second ago leaves its last frame sitting there, and a program
+        that printed a stack trace has drawn *something*, which is what a
+        "did it draw anything" check accepts.
+
+        Reaps, if it has exited, and keeps the code for `wait` -- so calling
+        this does not take the exit status away from the check that wants it.
+        """
+        if self.exited is not None:
+            return False
+        pid, status = os.waitpid(self.pid, os.WNOHANG)
+        if pid:
+            self.exited = os.waitstatus_to_exitcode(status)
+        return self.exited is None
+
     def wait(self, timeout=5):
+        if self.exited is not None:
+            return self.exited
         end = time.time() + timeout
         while time.time() < end:
             pid, status = os.waitpid(self.pid, os.WNOHANG)
             if pid:
-                return os.waitstatus_to_exitcode(status)
+                self.exited = os.waitstatus_to_exitcode(status)
+                return self.exited
             self.pump(0.1)
         os.kill(self.pid, signal.SIGKILL)
         os.waitpid(self.pid, 0)

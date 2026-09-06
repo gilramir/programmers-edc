@@ -1078,6 +1078,19 @@ public:
     // right-hand edge. Upstream does that too; it is one line to not.
     TRect fittedToDesktop(TRect r, TPoint minSize, TPoint maxSize) const;
 
+    // The terminal changing size, which turns out to be the same defect one
+    // more time.
+    //
+    // `TView::calcBounds` scales a `gfGrowRel` window's coordinates with the
+    // desktop and then calls `fitToLimits` (tview.cpp:158), which clamps the
+    // *width and height* against `sizeLimits` and never touches the origin. So
+    // a window whose origin has been scaled to column 21 of a hundred-column
+    // desktop, with its width clamped to the full hundred, ends at column 121:
+    // no right border, no bottom border, and the part that is missing is the
+    // part nobody can see. Shrinking a tmux pane to twenty-four columns and
+    // dragging it back is enough to produce it, in any Turbo Vision program.
+    void calcBounds(TRect &bounds, TPoint delta) override;
+
     // A window the model says cannot be resized in either direction has no
     // resize handle and no zoom box, because both would be corners the user
     // can grab and nothing would move. One dimension pinned keeps them: a

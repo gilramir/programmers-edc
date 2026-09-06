@@ -835,6 +835,19 @@ TRect JsWindow::fittedToDesktop(TRect r, TPoint minSize, TPoint maxSize) const
     return out;
 }
 
+void JsWindow::calcBounds(TRect &bounds, TPoint delta)
+{
+    TDialog::calcBounds(bounds, delta);
+
+    // The owner has already been given its new size by the time a child's
+    // bounds are recalculated (`TGroup::changeBounds` sets its own bounds
+    // before it walks its subviews), so this is the desktop the window is
+    // about to live on rather than the one it is leaving.
+    TPoint minSize, maxSize;
+    sizeLimits(minSize, maxSize);
+    bounds = fittedToDesktop(bounds, minSize, maxSize);
+}
+
 void JsWindow::zoom()
 {
     TPoint minSize, maxSize;

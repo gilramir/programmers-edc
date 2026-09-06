@@ -239,6 +239,13 @@ Three commits sit on `patches` today:
 
 FINDINGS has the story of each.
 
+A fourth is diagnosed and not filed: `TView::calcBounds` clamps a view's size
+against the desktop and never its origin, so shrinking a terminal and growing
+it back can leave a window hanging off the right or the bottom edge. The port
+works around it in `JsWindow::calcBounds`;
+[`doc/upstream-calcbounds-origin.md`](doc/upstream-calcbounds-origin.md) is the
+report to file.
+
 [i230]: https://github.com/magiblot/tvision/issues/230
 [i233]: https://github.com/magiblot/tvision/issues/233
 [i234]: https://github.com/magiblot/tvision/issues/234

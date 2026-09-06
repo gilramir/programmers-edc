@@ -1098,6 +1098,15 @@ would do nothing: three-quarters of the desktop, centred, in whichever
 dimensions [`Resize`](#Resize) left free. Nothing in the API changed, because
 the answer turned out to be a default rather than a field.
 
+**A window survives the terminal being made small and large again.**
+`TView::calcBounds` scales a `gfGrowRel` window's coordinates with the desktop
+and then clamps its *size* against `sizeLimits` while leaving the origin where
+the scaling put it -- so a shrink and a re-grow could leave a window running off
+the right of the screen, with no right border and no bottom border.
+`JsWindow::calcBounds` fits the result to the desktop, origin included, with
+the same `fittedToDesktop` the zoom box already used. It is upstream's defect;
+`doc/upstream-calcbounds-origin.md` is the report.
+
 **And the loops that remain no longer spin.** `eventTimeoutMs` is 0 so the pump
 never blocks, which meant every nested loop in the library polled without
 sleeping and burned a whole core: the menu bar, the close box, and the mouse

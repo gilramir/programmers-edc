@@ -7443,3 +7443,100 @@ the comment above it says the model keeps running behind the list. Nothing had
 ever checked that it does, and nothing could see it either way, so the checks
 stay: the drop-down does not spin, the counter climbs while it is open, and
 resizing the terminal underneath one does not stop the program.
+
+## A window that comes back from a small terminal outside the desktop
+
+The invisible-ink sweep and the hotkey driver both came from asking what
+predc's bugs had in common. This one came from the other half of that list --
+*a rectangle computed against a desktop that is no longer there* -- which has
+now produced four separate defects: the About box that had to re-centre, the
+hex viewer's dialogs opening nine columns from the left because `Tool.Hex`
+never heard `Resized`, the environment list born at the shell's placeholder
+`80x23`, and the window that opened maximized with nowhere to un-maximize to.
+
+Four instances is a class. So: start every program in the repo on a terminal
+too small for it, make the terminal big again, and look at the frame.
+
+### The check that cannot be written, and the one that can
+
+"Nothing was drawn outside the terminal" is the obvious assertion and it passes
+on everything, because there is nothing out there to find. A terminal clips: a
+program that addresses column ninety of an eighty-column screen has those cells
+thrown away, and the harness's own emulator crops for the same reason.
+
+What a rectangle bigger than its desktop leaves behind is a **hole**. A window
+whose right edge is past the last column draws its top border to the edge and
+no `╗`; one whose bottom edge is past the last row has no lower border at all.
+So `clipped()` finds the active window's top-left corner, requires a matching
+corner on the same row, and requires a bottom border *in the same column* --
+anchored by column and not by character, because `examples/ascii` draws `╚` as
+**content**: it is a chart of all two hundred and fifty-six of them, and a
+search by character finds the chart and calls the window broken.
+
+The bottom corners are `└` and `┘` rather than `╚` and `╝`, incidentally, on
+any window that can be resized: `TFrame::draw` puts the grow handles there, so
+a window's bottom border is drawn in a different alphabet from its top one.
+
+### `TView::calcBounds` clamps the size and never the origin
+
+Seven of sixteen programs failed, in two shapes -- a top border running off the
+right of a hundred-column screen, and a window with no bottom border. Both are
+`tview.cpp:134`.
+
+With `gfGrowRel` -- which is what `TWindow`'s constructor sets, so this is every
+ordinary window -- `grow()` scales *each coordinate*, origin included, by the
+ratio the desktop changed by. Then `fitToLimits(a, b, min, max)` is
+`b = a + balancedRange(b - a, ...)`: it takes the origin as given and clamps
+only the size, against `sizeLimits`, which for a view that is not `gfFixed` is
+`owner->size`. **The origin is never compared with the owner at all.** A window
+whose origin scaled to column 21 of a hundred-column desktop, with its width
+then clamped to the full hundred, occupies columns 21 to 121 of a desktop that
+ends at 100.
+
+The scaling is lossy in one direction as well, which is why a *round trip*
+exposes it rather than a single resize: a window narrower than the terminal,
+divided down onto a 24-column desktop, cannot be multiplied back to where it
+was. That half is inherent to `gfGrowRel` and is not a defect -- a window that
+comes back a different size is defensible. A window that comes back outside its
+owner is not.
+
+`JsWindow::calcBounds` calls the base and then `fittedToDesktop`, which existed
+already: it was written for `zoom`, for the same defect in `TView::locate`,
+and it clamps the origin as well as the size. `TGroup::changeBounds` sets its
+own bounds before walking its subviews, so `owner->size` inside `calcBounds` is
+already the *new* desktop, which is what makes this one line.
+
+It is upstream's bug rather than ours, and not reported:
+`doc/upstream-calcbounds-origin.md` is the draft. The nearest existing issue is
+[#63](https://github.com/magiblot/tvision/issues/63), "Layout/resizing console
+window in Windows - will become broken", which is open, undiagnosed, and may
+well be this.
+
+### What is *not* asserted at the small size, and why that is not a dodge
+
+Nothing about the frame is checked on the 24x8 terminal itself. A window
+declared as a constant rectangle wider or taller than the desktop **is**
+clipped, and that is what a constant rectangle means: `TGroup::insert` does not
+fit one, and neither does this port, because shrinking a window the model asked
+for would be the port overruling the model. A window the model pinned with no
+`Tui.resizable` is the same case one step further -- `sizeLimits` reports no
+maximum for it at all, so nothing is allowed to clamp it.
+
+The defect is not the small terminal. It is what a resize does to the rectangle
+afterwards, which is the only place the assertion belongs.
+
+### And `Pty.alive`, because a dead program draws its last frame
+
+The first version of this driver checked that each program "started" by looking
+for text on the screen and no "Error" in it. Every one of the sixteen passed
+while every one of them had died on startup -- the ASAN build was in place from
+a concurrent run, and `ASan runtime does not come first in initial library
+list` is text on a screen. **A program that died a second ago leaves its last
+frame sitting there**, and a program that printed a stack trace has drawn
+something. `Pty.alive` reaps with `WNOHANG` and keeps the status for `wait`, so
+asking does not take the exit code away from the check that wants it.
+
+Two suites over `tiny_common.py`, split alphabetically, because sixteen
+programs resized three times each is 107.8s and the slowest suite in the repo
+is 93.2s. The split is by name and means nothing: every program here costs the
+same, since the cost is sleeping while a terminal settles.
