@@ -1359,7 +1359,9 @@ view inks model =
     -- window's title bar reachable. Where a window *starts* is the only say
     -- the model has about its position: after that it is the user's, and
     -- Turbo Vision's.
-    , rect = { x1 = 20, y1 = 3, x2 = 58, y2 = 22 }
+    -- The keypad's last row ends at 15 and the frame takes one more, so 17
+    -- rows of interior is the content and 19 was two rows of nothing.
+    , rect = { x1 = 20, y1 = 3, x2 = 58, y2 = 20 }
     -- Its size is not the user's, though. A keypad, a stack and two lines of
     -- text are what this window holds, all of them a fixed size, and a bigger
     -- window would be the same keypad with a gap beside it.
@@ -1372,7 +1374,15 @@ view inks model =
             { id = canvasId
             , rect = { x1 = 2, y1 = 1, x2 = 2 + canvasWidth, y2 = 9 }
             , lines = display inks model
-            , cursor = Just { x = 2 + String.count model.entry, y = rows + 1 }
+            -- `rows` and not `rows + 1`: a canvas counts its lines from zero,
+            -- so the five stack levels are 0..4 and the entry line is 5. It
+            -- said `rows + 1` from the day it was written, which put the
+            -- terminal's cursor one line low -- under `base dec`, on the mode
+            -- line, where there is text for it to look like it belongs in.
+            -- Nothing caught it because the cursor was the *only* thing saying
+            -- where the typing went, so there was nothing for it to disagree
+            -- with. Painting the caret is what made the two disagree.
+            , cursor = Just { x = 2 + String.count model.entry, y = rows }
             , takesFocus = True
             }
         , keypadButton "add" "~+~" 2 10
@@ -1453,9 +1463,53 @@ stackLines inks model =
             )
 
 
+{-| The one line on this canvas the user *writes* to, and the reason it is
+painted differently from the five above it that they only read.
+
+Two things about it, and the second is the one that matters over ssh.
+
+**It is a ground, and it spans the whole canvas.** Turbo Vision's answer to
+"you type here" is a `TInputLine`, and what makes one legible is not a border:
+it is that the field is a different surface from the window. A canvas can say
+that with one span, so it does. Full width rather than just the characters
+typed, because a box that changes width as you type is a highlight and not a
+field -- the empty part of it is the part that says there is room here.
+
+**The caret is painted rather than only asked for.** The view still sets
+`cursor`, so a terminal that shows one puts it here; but whether a terminal
+shows its cursor at all is the terminal's business, and this window is often
+looked at through tmux over ssh, where it is nobody's. Every other tool in
+predc settled that already -- `Inks.selected` exists for it -- and the
+calculator, which is the one place a person is actually typing, was the one
+that had not. So the cell the next character will land in is painted, and the
+answer to "where does this go" no longer depends on the terminal agreeing to
+help.
+
+The guard is the overflow: an entry longer than the canvas has no on-screen
+cell to paint, and `String.repeat` with a negative count would be the bug.
+Nothing scrolls yet -- the line is simply cut, as it was before -- but it is
+cut without arithmetic underneath it.
+-}
 entryLine : Inks -> Model -> Array Span
 entryLine inks model =
-    [ Tui.ink inks.ruler "> ", Tui.plain model.entry ]
+    let
+        ground span =
+            Tui.on inks.field.bg span
+
+        caretAt =
+            2 + String.count model.entry
+    in
+    [ ground (Tui.ink inks.ruler "> ")
+    , ground (Tui.ink inks.field.fg model.entry)
+    ]
+        ++ (if caretAt < canvasWidth then
+                [ Tui.on inks.selected.bg (Tui.ink inks.selected.fg " ")
+                , ground (Tui.ink inks.field.fg (String.repeat (canvasWidth - caretAt - 1) " "))
+                ]
+
+            else
+                []
+           )
 
 
 {-| The two modes, labelled.

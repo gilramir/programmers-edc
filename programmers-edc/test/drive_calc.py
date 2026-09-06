@@ -173,8 +173,50 @@ def main():
     check("the modes say what they are", mode(app) == ("dec", "exact"), str(mode(app)))
     check("and how to change them", "Tab base" in message(app), message(app))
 
+    # The entry line is a *field*, and both halves of that are checked here
+    # because both were missing and the second is the one that matters.
+    #
+    # It was a line of text like the five stack levels above it, distinguished
+    # only by a `>` and by the terminal's own cursor -- and whether a terminal
+    # shows its cursor at all is the terminal's business, which over ssh into
+    # tmux is nobody's. Every other tool in predc had already settled that;
+    # `Inks.selected` exists for it. The one window a person actually types in
+    # was the one still asking the terminal for help.
+    app.send(b"1234", settle=0.8)
+    d = app.display()
+    lines = app.render().split("\n")
+    erow = next(r for r, line in enumerate(lines) if "\u2551 >" in line)
+    # One column in from the frame is where the canvas starts, and 34 columns
+    # of it is `canvasWidth`.
+    left = lines[erow].index("\u2551") + 2
+    ground = d.bg_at(left, erow)
+    check("the entry line is a ground of its own",
+          ground != d.bg_at(left, erow - 1),
+          f"{ground} against the stack line's {d.bg_at(left, erow - 1)}")
+    caret = left + 2 + len("1234")
+    # Every column of it, not just the characters typed: a field that stopped
+    # at the last digit would be a highlight, and the whole job of the empty
+    # part is to say there is room here.
+    check("and it spans the canvas rather than the text",
+          all(d.bg_at(left + i, erow) == ground
+              for i in range(34) if left + i != caret),
+          str([d.bg_at(left + i, erow) for i in range(34)]))
+    check("and stops there", d.bg_at(left, erow + 1) != ground,
+          f"the mode line is on it too: {d.bg_at(left, erow + 1)}")
+    check("the cell the next digit lands in is painted",
+          d.bg_at(caret, erow) != ground,
+          f"caret {d.bg_at(caret, erow)} is the field's own {ground}")
+    check("and the terminal's cursor agrees with the paint",
+          app.cursor() == (caret, erow), f"{app.cursor()} != {(caret, erow)}")
+    # It has to move, or a painted caret is just a decoration in a fixed place.
+    app.send(b"5", settle=0.6)
+    check("the painted caret follows what is typed",
+          app.display().bg_at(caret + 1, erow) != ground
+          and app.display().bg_at(caret, erow) == ground,
+          f"{app.display().bg_at(caret, erow)} / {app.display().bg_at(caret + 1, erow)}")
+
     # RPN: type, push, operate. Nothing here is a button.
-    app.send(b"255\r16\r*", settle=1.0)
+    app.send(b"z255\r16\r*", settle=1.0)
     check("the hint is still there after typing", "Tab base" in message(app),
           message(app))
     check("255 16 * is 4080", top(app) == "4080", str(stack(app)))

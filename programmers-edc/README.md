@@ -245,6 +245,24 @@ Drop since the day the calculator was written, and a key that throws away the
 top of your stack when you meant to paste is the worst possible place to be
 consistent. Neither `y` nor `v` is a hex digit, which is what makes them free.
 
+**The line you type on is a field.** For a long time it was `> ` and your
+digits, painted like the five stack levels above it -- and the first person to
+open the calculator asked where the text entry box was, which was fair, because
+there wasn't one. It has a ground of its own now, thirty-four columns of it
+whether you have typed anything or not, because the empty part of a field is
+the part that says there is room here. Turbo Vision draws a `TInputLine` the
+same way and for the same reason: what makes a field legible is that it is a
+different surface, not that it has a border around it.
+
+The cell your next character will land in is *painted*, rather than only having
+the terminal's cursor asked to go there. Whether a terminal shows its cursor at
+all is the terminal's business -- a thin bar, a hollow box, a blink switched
+off, or over ssh into tmux nothing you can count on -- and this is the one
+window in predc where a person is typing. Painting it also settled a question
+nobody had been able to ask: the cursor had been going to the *mode* line all
+along, one row below the entry, and with only one thing on that canvas claiming
+to know where the typing went there had been nothing for it to disagree with.
+
 ## Highlighting a hex dump
 
 `v` marks from the cursor, `V` marks whole rows, and one of `1`-`6` paints what

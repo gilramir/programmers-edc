@@ -7844,3 +7844,112 @@ lib`, or the addon you are testing is the one you built before. Deleting
 copy step restores it from `obj.target` without relinking.
 
 [i235]: https://github.com/magiblot/tvision/issues/235
+
+## The field that was only a `>`, and the cursor that was on the wrong line
+
+Somebody opened the RPN calculator and asked where the text entry box was.
+
+There wasn't one. The display is a canvas of eight lines -- five stack levels,
+the entry, the mode line, the message -- and the entry line was
+`Tui.ink inks.ruler "> "` followed by `Tui.plain model.entry`. Which is to say
+it was painted exactly like the five lines above it that the user only *reads*.
+The whole of what distinguished the one line they *write* to was a greater-than
+sign and the terminal's own cursor.
+
+### A field is a ground, not a border
+
+Turbo Vision's answer to "you type here" is a `TInputLine`, and what makes one
+legible is not that it has an outline. It is that the field is a **different
+surface** from the window. predc's own `Theme` says so already, in a comment on
+the `midnight` palette that had been sitting there unapplied:
+
+> Recessed rather than raised: a field sits *below* the window's ground and a
+> button sits above it, which is the whole of why Turbo Vision keeps two
+> colours here and this theme keeps two grounds.
+
+That is `Tui.ThemePanel.input`, and no canvas can reach it -- a `Tui.Span` names
+a `Tui.Hue` and a palette entry is a `Tui.Tint`, which is the seam the whole
+`Inks` type exists because of. So `Inks` grew a `field : { fg, bg }`, which is
+the sixteen-colour restatement of the same idea, and `entryLine` paints it.
+
+**Full canvas width, not the width of what has been typed.** A box that changes
+size as you type is a highlight; the empty part of a field is the part that says
+*there is room here*. Thirty-four columns whether the entry is empty or not.
+
+The three values are not a shade of one idea, and the reason is the reason
+`Inks` is per-theme at all:
+
+| theme | window | field | direction |
+|---|---|---|---|
+| Borland | blue | `White` on `Black` | recessed |
+| Midnight | near-black `0x1E1E26` | `White` on `DarkGray` | **raised** |
+| Gren | paper `0xFAF8F3` | `Black` on `LightGray` | recessed |
+
+Midnight is the interesting row. Recessed is the principle and the theme's own
+`input` is `0x14141A`, darker than its window -- but `Inks` cannot say
+`0x14141A`, it can only say `Black`, and "the terminal's black is darker than
+`0x1E1E26`" is a promise a terminal has to keep and this program has no way to
+check. A field on the wrong side of the surface is a smaller mistake than a
+field nobody can see, so Midnight's goes up.
+
+### The caret was the terminal's business, in the one window that is typing
+
+The second half is the one that actually mattered. `Inks.selected` exists, and
+its docstring says why:
+
+> the byte, cell or row the caret is on, painted rather than merely pointed at,
+> **because whether a terminal shows its cursor at all is the terminal's
+> business.**
+
+The hex viewer follows that. So does the ASCII chart, and `drive_ascii.py`
+asserts it in as many words. The calculator -- the one window in predc where a
+person is *actually typing*, and the one usually looked at through tmux over
+ssh -- was the only tool that had not applied its own rule. It set `cursor` and
+stopped there. So the cell the next character will land in is now painted in
+`inks.selected`, and `cursor` stays as well: the paint is the answer, and the
+hardware cursor is a bonus from terminals that feel like helping.
+
+### Which is how the off-by-one came out
+
+Painting it produced two answers to "where does the next digit go", and they
+disagreed. The paint said screen row 10 and the terminal cursor said row 11.
+
+```gren
+cursor = Just { x = 2 + String.count model.entry, y = rows + 1 }
+```
+
+`rows` is 5. A canvas counts its lines from zero -- which the same expression
+says out loud in its other half, since the `2` in `x` is the width of `"> "` --
+so the stack levels are lines 0..4 and the entry line is line **5**. `rows + 1`
+is 6, which is the mode line. The terminal's cursor had been sitting under
+`base dec` since the day the calculator was written.
+
+It survived because it was **unopposed**. The cursor was the only thing on that
+canvas claiming to know where the typing went, so there was nothing for it to
+be wrong against, and one line low in a window with text on every line does not
+look like an error -- it looks like a cursor. It also has an obvious hand in the
+original complaint: the one indicator the entry line had was pointing at a
+different line.
+
+This is the general shape and it is worth having twice: **a fact with one
+witness cannot be checked.** The fix for the invisible field is what made the
+cursor testable, in the same way that adding `restore_checks` to `drive_drag.py`
+is what made `JsWindow::zoom`'s `fittedToDesktop` testable. Neither bug was
+found by looking harder at the code.
+
+### What the driver asserts
+
+Six checks in `drive_calc.py`, and the shape of them is the finding:
+
+  - the entry line's ground differs from the stack line above it,
+  - it runs all thirty-four columns rather than stopping at the last character,
+  - it stops at the mode line below,
+  - the caret cell is painted in something other than the field,
+  - the terminal's cursor agrees with the paint -- which is the off-by-one,
+  - and the paint *moves* when another character is typed, because a caret
+    painted in a fixed place is a decoration.
+
+The window also lost two rows while this was open. Its rect was
+`y1 = 3, y2 = 22`, nineteen rows, seventeen of interior; the keypad's last row
+ends at 15. Two rows of nothing under a `fixedSize` window, which is a window
+that had never been measured against what it holds. `y2 = 20`.

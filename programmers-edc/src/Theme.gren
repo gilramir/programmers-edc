@@ -82,6 +82,11 @@ what colour they are is what a theme changes.
   - `dim` -- a placeholder for something that is not there, and a standing
     hint. Quieter still.
   - `alert` -- something went wrong and the line under the window says so.
+  - `field` -- a run of cells the user *types into*, painted as a surface of
+    its own so that it reads as a box rather than as one more line of text.
+    Both halves are given, because a field is a change of *ground*: the theme
+    already says as much about the palette's `input`, where the comment is
+    that a field sits below the window and a button above it.
   - `selected` -- the byte, cell or row the caret is on, painted rather than
     merely pointed at, because whether a terminal shows its cursor at all is
     the terminal's business.
@@ -104,6 +109,7 @@ type alias Inks =
     { ruler : Hue
     , dim : Hue
     , alert : Hue
+    , field : { fg : Hue, bg : Hue }
     , selected : { fg : Hue, bg : Hue }
     , marking : { fg : Hue, bg : Hue }
     , highlights : Array { fg : Hue, bg : Hue }
@@ -130,6 +136,10 @@ inks name =
             { ruler = LightCyan
             , dim = Cyan
             , alert = LightRed
+            -- Recessed, which on this ground is easy: every terminal's black
+            -- is darker than its blue, so the field is a hole in the window
+            -- rather than a stripe across it.
+            , field = { fg = White, bg = Black }
             , selected = { fg = Blue, bg = LightGray }
             -- A lighter blue than the window, so a range being dragged out
             -- reads as part of the same surface until it is committed to a
@@ -145,6 +155,12 @@ inks name =
             { ruler = LightCyan
             , dim = Cyan
             , alert = LightRed
+            -- The one theme where the field is *lifted* instead. Recessed is
+            -- the principle, but at sixteen colours "darker than near-black"
+            -- is a promise the terminal has to keep and this one cannot check,
+            -- and a field nobody can see is worse than a field on the wrong
+            -- side of the surface.
+            , field = { fg = White, bg = DarkGray }
             , selected = { fg = Black, bg = LightGray }
             -- `Blue` is free here in a way it is not on Borland's blue, and it
             -- is the one dark ground that reads as a marker rather than as one
@@ -160,6 +176,9 @@ inks name =
             { ruler = Blue
             , dim = DarkGray
             , alert = Red
+            -- Paper's own answer, and the oldest one: a grey well with black
+            -- in it.
+            , field = { fg = Black, bg = LightGray }
             , selected = { fg = White, bg = Blue }
             -- Blue is the selection here, so the marker is the other thing a
             -- light ground has always used for this: a highlighter pen.
