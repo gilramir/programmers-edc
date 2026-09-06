@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
-"""Help | Copying and pasting -- the window that answers for *this* machine.
+"""The help window, which has two pages and one window id.
+
+**What is in here** is the inventory: ten tools, three lines each, with the
+Alt-key that opens one from anywhere and the word that opens it on the way in.
+The last of those is why the page pays for itself -- a menu can show a name and
+a key and no menu can show a command line. Section 0 below checks the page
+against the two lists it is a copy of: the tools' own menu entries, by way of
+`tests/src/HelpTests.gren` in milliseconds, and `predc --help`, which is
+checked here because `Cli.gren` keeps its words inside a parser rather than in
+a list anything can read.
+
+**Copying and pasting** is the rest of this file, and the window that answers
+for *this* machine.
 
 The subject is confusing enough that a page of prose is not an answer: there
 are six stores unix calls the clipboard, Turbo Vision touches one of them, a
@@ -21,6 +33,8 @@ an ssh session inside tmux, one dressed as a local X11 session.
 
 import base64
 import os
+import re
+import subprocess
 import sys
 import tempfile
 
@@ -47,15 +61,23 @@ def base_env():
     return env
 
 
+TITLES = ("Copying and pasting", "What is in here")
+
+
 def frame(app):
     """(first row, last row) of the window's own border, on screen.
 
     Found rather than assumed, because the whole point of the window is that
     its height is the desktop's: a driver with `ROWS = 17` in it would be
     testing the terminal this file was written on.
+
+    Either title, because there is one window and the title is the page: the
+    two entries on the Help menu open the same `windowId` and the second one
+    re-renders the first rather than adding a window.
     """
     rows = app.render().split("\n")
-    top = next((i for i, r in enumerate(rows) if "Copying and pasting" in r), None)
+    top = next((i for i, r in enumerate(rows)
+                if any(t in r for t in TITLES)), None)
     if top is None:
         return None
     bottom = next((i for i in range(top + 1, len(rows)) if "\u2514" in rows[i]), None)
@@ -96,8 +118,123 @@ def answer_clipboard(app, body, settle=1.2):
     return asked
 
 
+def open_menu(app, name):
+    bar = app.render().split("\n")[0]
+    app.click(bar.index(name) + 1, 1, settle=0.7)
+
+
+def click_entry(app, text, settle=0.9):
+    for row, line in enumerate(app.render().split("\n")):
+        if text in line and "\u2502" in line:
+            app.click(line.index(text) + 1, row + 1, settle=settle)
+            return True
+    return False
+
+
+def whole_page(app):
+    """Every line of the page, by paging to the bottom and keeping what is new.
+
+    The window is as tall as the desktop and both pages are longer than that,
+    so nothing that asks "is X on this page" can look at one screenful. `End`
+    would reach the last screen and skip the middle.
+    """
+    app.send(b"\x1b[H", settle=0.7)
+    seen = list(text(app))
+    for _ in range(12):
+        before = list(text(app))
+        app.send(PGDN, settle=0.5)
+        if text(app) == before:
+            break
+        seen += text(app)
+    return "\n".join(seen)
+
+
 def main():
     check = Checks()
+
+    # 0. The inventory page, and the two lists it is a copy of.
+    #
+    #    It is a copy because `Help` cannot import the tools -- `Tool.Unicode`
+    #    imports `Help` for `pasteHint`, so the other direction is a cycle --
+    #    and a copy nothing checks is a copy that goes stale. The titles and
+    #    the Alt-keys are checked against the tools' own menu items by
+    #    `tests/src/HelpTests.gren`, which is a leaf and can import both, in
+    #    milliseconds. What is left for this file is the third column: the
+    #    command-line word, which has no other copy in the program to compare
+    #    against because `Cli.gren` keeps its words inside an
+    #    `Argparse.Parser.App` rather than in a list. `predc --help` prints
+    #    them, so that is the copy to check against.
+    env = base_env()
+    app = start(env)
+
+    open_menu(app, "Help")
+    menu = app.render()
+    check("the Help menu offers the inventory as well as the clipboard page",
+          "What is in here" in menu and "Copying and pasting" in menu, menu)
+    #    Order, not just presence: this is the entry somebody opens the menu
+    #    looking for, and the clipboard page is the one they are *sent* to.
+    rows = app.render().split("\n")
+    at = lambda title: next(i for i, r in enumerate(rows) if title in r)
+    check("with the inventory first", at("What is in here") < at("Copying and pasting"),
+          "\n".join(rows[at("What is in here") - 1:at("Copying and pasting") + 1]))
+
+    #    Opening it must not ask the terminal for its clipboard. The probe is a
+    #    real OSC 52 read going out on the wire, and it belongs to the question
+    #    "why will this not paste" rather than to "what tools are there".
+    mark = len(app.buf)
+    check("the inventory opens", click_entry(app, "What is in here", settle=1.4))
+    check("under its own title", "What is in here" in app.render().split("\n")[2],
+          app.render().split("\n")[2])
+    check("and asking what is here does not ask the terminal for its clipboard",
+          b"\x1b]52;;?\x07" not in app.buf[mark:])
+
+    listing = whole_page(app)
+    listed = re.findall(r"^  (\S.{0,21}?)\s{2,}(Alt-\w)\s+predc (\w+)",
+                        listing, re.M)
+    words = {name: word for name, _key, word in listed}
+    keys = {name: key for name, key, _word in listed}
+    check("it lists ten tools", len(words) == 10, str(sorted(words)))
+    check("with an Alt-key for each", len(keys) == 10, str(sorted(keys.items())))
+    #    Every name says something a menu title does not: the ASCII chart is a
+    #    grid of 128, the calculator is exact, the decoder names what is wrong.
+    for phrase in ("Ctrl- chord", "2^64-1", "never loads the file",
+                   "daylight saving", "U+FFFD", "week it is in",
+                   "sniffed", "v4 UUID", "not refreshable", "outlive the terminal"):
+        check(f"and what it is for, not only what it is called: {phrase!r}",
+              phrase in listing, listing)
+    check("the shell's own keys are on it too",
+          "F6" in listing and "Alt-F3" in listing and "Alt-X" in listing, listing)
+    check("and it points at the other page for the clipboard",
+          "its own subject: F1" in listing, listing)
+
+    #    The third column against the only other place the words exist.
+    printed = subprocess.run(node_argv(LAUNCHER, "--help"),
+                             capture_output=True, env=env).stdout.decode()
+    for name, word in sorted(words.items()):
+        check(f"predc --help knows the command the page gives for {name}",
+              re.search(rf"^\s+predc {word}$", printed, re.M) is not None,
+              f"{word!r} is not a command in --help")
+    #    And the other direction, which is the one that catches a *new* tool:
+    #    a command added to the parser and not to the page. A set because
+    #    --help prints its commands twice, once as the common ones and once as
+    #    the full list.
+    offered = set(re.findall(r"^\s+predc (\w+)$", printed, re.M))
+    check("and the page names every command predc --help offers",
+          offered == set(words.values()),
+          f"only in --help: {sorted(offered - set(words.values()))}; "
+          f"only on the page: {sorted(set(words.values()) - offered)}")
+
+    #    One window, two pages: F1 from here swaps the page rather than
+    #    stacking a second window on the desktop.
+    app.send(F1, settle=1.4)
+    check("F1 from the inventory turns it into the clipboard page",
+          "Copying and pasting" in app.render().split("\n")[2],
+          app.render().split("\n")[2])
+    check("and there is still only one help window",
+          app.render().count("What is in here") == 0, app.render())
+    app.send(ALT_F3, settle=0.9)
+    app.send(b"\x1bx", settle=1.0)
+    check("that session exits cleanly", app.wait() == 0)
 
     # 1. Dressed as an ssh session inside tmux, with a terminal that answers
     #    nothing -- which is the session the window exists for.

@@ -1,0 +1,179 @@
+module HelpTests exposing (helpSuite)
+
+{-| The help window's inventory page, against the menu it describes.
+
+The page lists ten tools with a title and an Alt-key each, and those are
+**copies**: `Help` cannot import the tools, because `Tool.Unicode` imports
+`Help` for `pasteHint` and an import the other way round would be a cycle. So
+the page says `Alt-P` for the environment list because somebody typed `Alt-P`
+into it, and nothing in the compiler connects that to the key
+`Tool.Env.menuItem` actually carries.
+
+This file is what connects them, and it can because it is a **leaf**: the test
+application's source path is `src` and `../src`, so it imports the ten tools
+and the help page at once and compares them. A tool renamed, an Alt-key moved
+or a tool added to the menu and not to the page fails here in milliseconds --
+where the alternative is that the page is quietly wrong about a program nobody
+re-reads the help of.
+
+The order matters as much as the contents. The page is a list somebody runs an
+eye down looking for a tool, and the Tools menu is the other list of the same
+ten; two orders would be two answers to "what is in here".
+
+@docs helpSuite
+
+-}
+
+import Expect
+import Help
+import String
+import Task
+import Test.Runner.UnitNode as U
+import Tool.Ascii
+import Tool.Calc
+import Tool.Calendar
+import Tool.Encode
+import Tool.Env
+import Tool.Hex
+import Tool.Notes
+import Tool.Random
+import Tool.Time
+import Tool.Unicode
+import Tui
+
+
+{-| -}
+helpSuite : U.Suite
+helpSuite =
+    U.suite
+        { name = "Help"
+        , setUpSuite = U.noSuiteFixture
+        , tearDownSuite = U.noTearDown
+        , setUp = \_ -> Task.succeed {}
+        , tearDown = U.noTearDown
+        , tests = inventoryTests ++ widthTests
+        }
+
+
+-- WHAT A MENU ITEM SAYS
+
+
+{-| The two facts about a tool that the page repeats, off the tool's own item.
+
+`~` comes out because a menu title carries its hot key as a tilde pair and the
+help page is prose: `~A~SCII chart` on a menu is `ASCII chart` on a page. That
+is the one difference between the two spellings that is allowed, so it is done
+here rather than being a second thing to keep in step.
+
+A `SubMenu` or a `Separator` is not a tool and cannot be compared to one, so it
+is turned into a value that will fail loudly rather than into a default that
+would pass -- the point of the suite is that a wrong answer is visible.
+-}
+facts : Tui.MenuItem -> { title : String, key : String }
+facts item =
+    when item is
+        Tui.Item it ->
+            { title = String.replace "~" "" it.title, key = it.key }
+
+        Tui.SubMenu it ->
+            { title = "a submenu called " ++ it.title, key = "" }
+
+        Tui.Separator ->
+            { title = "a separator", key = "" }
+
+
+{-| The ten, in the order `Main.menuBar` puts them on the Tools menu.
+
+Spelled out rather than taken from `Main`, which is where the same list lives:
+`Main` builds the menu inside `menuBar` out of `model`, so there is no array to
+import. Two hand-written orders is exactly the thing this file exists to
+police, and the policing works in the direction that matters -- both of these
+are compared against the page, so a tool that reaches the menu without reaching
+the page has to reach this file first, and a tool that reaches neither is a
+tool nobody can open.
+-}
+onTheMenu : Array { title : String, key : String }
+onTheMenu =
+    Array.map facts
+        [ Tool.Ascii.menuItem
+        , Tool.Calc.menuItem
+        , Tool.Hex.menuItem
+        , Tool.Time.menuItem
+        , Tool.Unicode.menuItem
+        , Tool.Calendar.menuItem
+        , Tool.Encode.menuItem
+        , Tool.Random.menuItem
+        , Tool.Env.menuItem
+        , Tool.Notes.menuItem
+        ]
+
+
+onThePage : Array { title : String, key : String }
+onThePage =
+    Array.map (\entry -> { title = entry.title, key = entry.key }) Help.inventory
+
+
+inventoryTests : Array (U.Test {})
+inventoryTests =
+    [ U.test "the page names every tool the menu does, spelled the same and in the same order" <| \_ ->
+        Task.succeed (Expect.equal onTheMenu onThePage)
+    -- Separately from the equality above, because the equality says *what*
+    -- differs and these two say what kind of mistake it was. A count that is
+    -- right with a name that is wrong reads very differently from a tool that
+    -- was added to one list only.
+    , U.test "there are ten of them" <| \_ ->
+        Task.succeed (Expect.equal 10 (Array.length Help.inventory))
+    , U.test "and no Alt-key is used twice" <| \_ ->
+        Task.succeed
+            (Expect.equal (Array.length Help.inventory)
+                (Array.length (unique (Array.map .key Help.inventory)))
+            )
+    -- The command word is the one column with no other copy in the program to
+    -- check against -- `Cli.gren` keeps it inside an `Argparse.Parser.App`,
+    -- which is a builder rather than a list. `drive_help.py` checks it the
+    -- only way it can be checked: against what `predc --help` prints.
+    , U.test "every tool says how to open it from the command line" <| \_ ->
+        Task.succeed
+            (Expect.equal []
+                (Array.keepIf (\entry -> not (String.startsWith "predc " entry.word))
+                    Help.inventory
+                    |> Array.map .word
+                )
+            )
+    , U.test "and every tool has an Alt-key" <| \_ ->
+        Task.succeed
+            (Expect.equal []
+                (Array.keepIf (\entry -> not (String.startsWith "Alt-" entry.key))
+                    Help.inventory
+                    |> Array.map .title
+                )
+            )
+    ]
+
+
+widthTests : Array (U.Test {})
+widthTests =
+    -- A canvas cuts a line off at its width and draws no mark saying it did,
+    -- so an overlong line arrives looking like a finished sentence. Both pages
+    -- are prose and nobody counts columns while writing prose; two of the
+    -- inventory blurbs were over when they were first written, and on screen
+    -- the only sign was a sentence that stopped early.
+    [ U.test "no line on either page is wider than the canvas" <| \_ ->
+        Task.succeed (Expect.equal [] Help.overlong)
+    ]
+
+
+{-| The distinct members of an array, which `Array` has no function for.
+-}
+unique : Array String -> Array String
+unique items =
+    Array.foldl
+        (\item kept ->
+            if Array.member item kept then
+                kept
+
+            else
+                Array.pushLast item kept
+        )
+        []
+        items

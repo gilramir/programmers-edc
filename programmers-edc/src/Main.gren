@@ -792,17 +792,21 @@ handleEvent event model =
                         , command = Tui.focus tui Tool.Unicode.windowId
                         }
 
-            else if
+            else if Help.pageFor cmd /= Nothing then
                 -- The one window that has something to do when it is *re*-opened
-                -- as well as when it is opened: it measures whether this terminal
-                -- will hand a clipboard back, and that can change under a running
-                -- program. So a second F1 on an open window asks again rather than
-                -- only bringing it to the front.
-                cmd == Help.command
-            then
+                -- as well as when it is opened, and now two things. It measures
+                -- whether this terminal will hand a clipboard back, and that can
+                -- change under a running program, so a second F1 on an open
+                -- window asks again rather than only bringing it to the front --
+                -- and either Help entry re-opens the one window on the page it
+                -- names, which is what makes two menu items and one
+                -- `Maybe Help.Model` behave the way the menu implies.
                 let
+                    page =
+                        Maybe.withDefault Help.Clipboard (Help.pageFor cmd)
+
                     step =
-                        Help.opened tui model.desktop model.session
+                        Help.opened tui page model.desktop model.session
                 in
                 { model = { model | help = Just step.model }
                 , command =
@@ -1281,7 +1285,7 @@ view model =
         fixed
             ++ [ { text = Help.pasteBar model.session (model.desktop.cols - spent - 1)
                  , key = "F1"
-                 , cmd = Help.command
+                 , cmd = Help.command Help.Clipboard
                  }
                ]
             -- Three keys with nothing beside them, and they are the reason the
@@ -1490,7 +1494,14 @@ menuBar model =
                 { title = "~H~elp"
                 , key = ""
                 , items =
-                    [ Help.menuItem
+                    -- The inventory first. It is the entry somebody opens
+                    -- this menu *looking* for -- "what does this program have
+                    -- in it" -- whereas the clipboard page is the one they are
+                    -- sent to by a paste that did not arrive, and they are sent
+                    -- there by F1 and by the status line rather than by reading
+                    -- down a menu.
+                    [ Help.menuItem Help.Tools
+                    , Help.menuItem Help.Clipboard
                     , Tui.Separator
                     , Item { title = "~A~bout...", cmd = "about", key = "", shortcut = "" }
                     ]

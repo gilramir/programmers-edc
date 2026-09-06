@@ -1,12 +1,18 @@
 module Help exposing
-    ( Model
+    ( Entry
+    , Model
+    , Page(..)
     , Session
     , barWidth
     , command
     , detect
     , init
+    , inventory
+    , lineWidth
     , menuItem
     , opened
+    , overlong
+    , pageFor
     , pasteBar
     , pasteHint
     , update
@@ -14,9 +20,21 @@ module Help exposing
     , windowId
     )
 
-{-| One window that answers "why can I not paste into this?".
+{-| The help window, which has two pages.
 
-It exists because the answer is genuinely hard and every layer of it is silent.
+**What is in here** is the inventory: ten tools, what each one is for, its
+Alt-key and the word that opens it from the command line. It exists because
+predc's own answer to "what does this program have in it" was a menu of ten
+titles, and a title is a name rather than a description -- "Encode / decode"
+does not say which four transforms, and `Alt-P` for the environment list is not
+guessable from anything. It is one page and not ten, and each tool gets three
+lines, because somebody reading it is deciding which window to open rather than
+learning how to use one.
+
+**Copying and pasting** is the other page, and the older one.
+
+It answers "why can I not paste into this?", and it exists because the answer
+is genuinely hard and every layer of it is silent.
 There are five stores on unix that people call the clipboard; Turbo Vision
 touches one of them; a mouse selection fills a different one; over ssh none is
 reachable and no setting changes that; and the thing that *does* work is not a
@@ -36,6 +54,12 @@ how the subject is usually written down. Somebody in front of a terminal that
 will not paste wants three lines; the page-long version is
 `gren-tvision/doc/clipboard.md`, and the last line here says so.
 
+**One window and two pages, rather than two windows.** Both are prose that
+scrolls, and everything but the text -- the layout, the scroll bar, `PgDn`,
+sizing to the desktop -- was already written once. Opening either from the Help
+menu shows it, which is the shape a Turbo Vision help viewer has always had:
+one window, whichever topic you asked for.
+
 -}
 
 import Array exposing (Array)
@@ -48,37 +72,86 @@ import Tui exposing (Span, View(..))
 -- NAMES
 
 
-command : String
-command =
-    "help.clipboard"
+{-| Which page the window is showing. Not two windows: see the module note.
+-}
+type Page
+    = Tools
+    | Clipboard
 
 
+command : Page -> String
+command page =
+    when page is
+        Tools ->
+            "help.tools"
+
+        Clipboard ->
+            "help.clipboard"
+
+
+{-| The page a command opens, or `Nothing` for a command that is not ours.
+
+`Main` dispatches through this rather than testing two names, which is what
+keeps adding a third page to one file: a `Page` with no line here would not
+compile.
+-}
+pageFor : String -> Maybe Page
+pageFor cmd =
+    if cmd == command Tools then
+        Just Tools
+
+    else if cmd == command Clipboard then
+        Just Clipboard
+
+    else
+        Nothing
+
+
+{-| One id for both pages, because there is one window. Opening the other page
+from the menu re-renders this one rather than putting a second window on the
+desktop -- which is also why `Main` keeps a single `Maybe Help.Model`.
+-}
 windowId : String
 windowId =
-    "help.clipboard"
+    "help"
 
 
 canvasId : String
 canvasId =
-    "help.clipboard.text"
+    "help.text"
 
 
 scrollId : String
 scrollId =
-    "help.clipboard.scroll"
+    "help.scroll"
 
 
-menuItem : Tui.MenuItem
-menuItem =
-    Tui.Item
-        { title = "~C~opying and pasting"
-        , cmd = command
-        -- `F1` because it is where help has been since before Turbo Vision,
-        -- and because nothing else in predc wants it: the status line is all
-        -- Alt-keys and Alt-F3, and the Window menu has F5 and F6.
-        , key = "F1"
-        , shortcut = "F1"
-        }
+menuItem : Page -> Tui.MenuItem
+menuItem page =
+    when page is
+        Tools ->
+            Tui.Item
+                { title = "~W~hat is in here"
+                , cmd = command Tools
+                -- No accelerator. `F1` is the clipboard page's and there is no
+                -- second function key that means help; an Alt-letter would be
+                -- the eleventh in a program whose ten tools already have one
+                -- each, and this is the entry somebody reaches for once.
+                , key = ""
+                , shortcut = ""
+                }
+
+        Clipboard ->
+            Tui.Item
+                { title = "~C~opying and pasting"
+                , cmd = command Clipboard
+                -- `F1` because it is where help has been since before Turbo
+                -- Vision, and because nothing else in predc wants it: the
+                -- status line is all Alt-keys and Alt-F3, and the Window menu
+                -- has F5 and F6.
+                , key = "F1"
+                , shortcut = "F1"
+                }
 
 
 -- SHAPE
@@ -184,7 +257,8 @@ type Probe
 
 
 type alias Model =
-    { session : Session
+    { page : Page
+    , session : Session
     -- The desktop, because this window opens as tall as the desktop will let
     -- it. Handed over at `init` and kept up to date by `Resized`, and it needs
     -- both: `Resized` fires when the size *changes*, so a window opened after
@@ -196,13 +270,14 @@ type alias Model =
     }
 
 
-init : { cols : Int, rows : Int } -> Session -> Model
-init desktop session =
-    { session = session
+init : Page -> { cols : Int, rows : Int } -> Session -> Model
+init page desktop session =
+    { page = page
+    , session = session
     , desktop = desktop
     , probe = Asking
     , top = 0
-    , rows = textRows desktop
+    , rows = textRows page desktop
     }
 
 
@@ -220,10 +295,13 @@ The cap is `wholeThing` rather than the current line count, and that is not
 the same number: the probe's answer is two lines longer than the question, so
 sizing to what is on screen *now* would make the window jump a moment after it
 opened. Sizing to the longest it can ever be does not.
+
+Per page, because the two are different lengths and the shorter one should not
+open with the taller one's empty rows under it.
 -}
-textRows : { cols : Int, rows : Int } -> Int
-textRows desktop =
-    clamp leastRows wholeThing (desktop.rows - 4)
+textRows : Page -> { cols : Int, rows : Int } -> Int
+textRows page desktop =
+    clamp leastRows (wholeThing page) (desktop.rows - 4)
 
 
 type alias Step msg =
@@ -244,10 +322,23 @@ A terminal's answer can change under a running program -- tmux's
 `set-clipboard` is a live setting and so is kitty's `clipboard_control` -- and
 a window somebody opened *because* they just changed one should not be
 answering out of a cache.
+
+**And only the clipboard page asks.** The probe is a real `OSC 52` read going
+out at the terminal, which is a thing to do when somebody has asked why pasting
+does not work and not when they have asked what tools there are. The tools page
+opens with `Cmd.none`; its `probe` stays `Asking` and nothing ever draws it.
 -}
-opened : Tui.Ports msg -> { cols : Int, rows : Int } -> Session -> Step msg
-opened ports desktop session =
-    { model = init desktop session, command = Tui.readClipboard ports }
+opened : Tui.Ports msg -> Page -> { cols : Int, rows : Int } -> Session -> Step msg
+opened ports page desktop session =
+    { model = init page desktop session
+    , command =
+        when page is
+            Clipboard ->
+                Tui.readClipboard ports
+
+            Tools ->
+                Cmd.none
+    }
 
 
 -- UPDATE
@@ -261,7 +352,7 @@ update event model =
         -- bounds by itself -- and writes nothing while the size is unchanged,
         -- which is what leaves a window the user dragged where they put it.
         Tui.Resized size ->
-            still (at model.top { model | desktop = size, rows = textRows size })
+            still (at model.top { model | desktop = size, rows = textRows model.page size })
 
         Tui.WindowResized it ->
             if it.id == windowId then
@@ -373,18 +464,73 @@ paint inks line =
             []
 
 
-{-| The most lines this can ever be, which is what the window sizes itself
+textOf : Line -> String
+textOf line =
+    when line is
+        Head text ->
+            text
+
+        Text text ->
+            text
+
+        Warn text ->
+            text
+
+        Gap ->
+            ""
+
+
+{-| Every line of either page that is wider than the canvas, which should be
+none of them.
+
+A canvas cuts a line off at its width **without a mark**, so a sentence one
+column too long arrives looking like a finished sentence -- the same trap the
+calculator's message line is written against, and worse here, because this is
+a page of prose and nobody counts columns while writing one. Two of the tools
+page's entries were over when it was written.
+
+Exposed only so that `tests/src/HelpTests.gren` can assert it is empty. The
+session lines are the longest case of the clipboard page's conditionals, which
+is why it is measured against the same made-up model `wholeThing` uses.
+-}
+overlong : Array String
+overlong =
+    let
+        sample page =
+            { page = page
+            , session =
+                { display = False
+                , wayland = False
+                , ssh = True
+                , tmux = True
+                , screen = False
+                , term = "xterm-256color"
+                }
+            , desktop = { cols = 80, rows = 24 }
+            , probe = Answered False
+            , top = 0
+            , rows = 1
+            }
+    in
+    (rows (sample Tools) ++ rows (sample Clipboard))
+        |> Array.map textOf
+        |> Array.keepIf (\text -> String.count text > lineWidth)
+
+
+{-| The most lines a page can ever be, which is what the window sizes itself
 against.
 
 Measured off a model with the probe *answered* and both conditional sections
-in, because those are the longest cases -- and taken once rather than
-recomputed, since it is a fact about the text rather than about a session.
+in, because those are the longest cases -- a fact about the text rather than
+about a session, which is why it is computed from a made-up model rather than
+from the real one.
 -}
-wholeThing : Int
-wholeThing =
+wholeThing : Page -> Int
+wholeThing page =
     Array.length
         (rows
-            { session =
+            { page = page
+            , session =
                 { display = False
                 , wayland = False
                 , ssh = True
@@ -400,12 +546,211 @@ wholeThing =
         )
 
 
-{-| Every line of it. The visible ones are taken from here, and the scroll bar
-counts it.
+{-| Every line of the page being shown. The visible ones are taken from here,
+and the scroll bar counts it.
 -}
 rows : Model -> Array Line
 rows model =
-    yours model ++ pressing model ++ pasting ++ copying ++ table ++ stores
+    when model.page is
+        Tools ->
+            whatIsInHere
+
+        Clipboard ->
+            yours model ++ pressing model ++ pasting ++ copying ++ table ++ stores
+
+
+-- WHAT IS IN HERE
+
+
+{-| One tool, as the inventory page describes it.
+
+`title` and `key` are **copies** of what the tool's own `menuItem` says, and
+they have to be, because `Help` cannot import the tools: `Tool.Unicode` imports
+this module for [`pasteHint`](#pasteHint), so an import the other way is a
+cycle. A copy that nothing checks is a copy that goes stale, and the thing that
+checks these is `tests/src/HelpTests.gren` -- which is a leaf and can therefore
+import both. It compares the set of tools, every title and every Alt-key
+against the ten `menuItem` values, so renaming a tool or moving its key breaks
+a unit test in milliseconds rather than leaving this page quietly wrong.
+
+`word` is the command-line word from `Cli.gren`, checked the same way, and it
+is on the page because it is the one thing about a tool that the user interface
+never says anywhere.
+
+-}
+type alias Entry =
+    { title : String
+    , key : String
+    , word : String
+    , blurb : Array String
+    }
+
+
+{-| The ten, in the order the Tools menu lists them -- which is the order they
+were written in rather than an alphabet, and is the order somebody who has seen
+the menu is expecting.
+
+Three lines each, at most. This page is read by somebody deciding *which window
+to open*, not by somebody learning to use one, so what each entry owes them is
+what the tool is for and the one thing about it that is not guessable from its
+name. The tool's own module doc is where the rest lives.
+-}
+inventory : Array Entry
+inventory =
+    [ { title = "ASCII chart"
+      , key = "Alt-A"
+      , word = "predc ascii"
+      , blurb =
+            [ "0 to 127 in a grid you walk around in. Every control code has"
+            , "its name, its C escape and its Ctrl- chord, which is the part"
+            , "a chart usually leaves out."
+            ]
+      }
+    , { title = "RPN calculator"
+      , key = "Alt-R"
+      , word = "predc calc"
+      , blurb =
+            [ "Exact arithmetic in dec, hex, oct and bin: 2^64-1 is a value"
+            , "here and not a rounding error, and division promotes rather"
+            , "than truncating, so 7 2 / is 3.5."
+            ]
+      }
+    , { title = "Hex dump viewer"
+      , key = "Alt-D"
+      , word = "predc hex [file]"
+      , blurb =
+            [ "Offsets, sixteen bytes a row, the printable rendering beside"
+            , "them. It never loads the file, so anything opens at once; six"
+            , "colours are available for marking ranges up."
+            ]
+      }
+    , { title = "Time converter"
+      , key = "Alt-C"
+      , word = "predc time"
+      , blurb =
+            [ "One instant on several wall clocks, all of them editable:"
+            , "type into any row and the rest move with it. The zones are the"
+            , "machine's, so daylight saving is right rather than modelled."
+            ]
+      }
+    , { title = "Unicode decoder"
+      , key = "Alt-U"
+      , word = "predc unicode"
+      , blurb =
+            [ "What a run of bytes says in UTF-8 or UTF-16, one character a"
+            , "row. The point is the rows that are wrong: overlongs,"
+            , "surrogates and truncations are named, not turned into U+FFFD."
+            ]
+      }
+    , { title = "Calendar"
+      , key = "Alt-K"
+      , word = "predc cal"
+      , blurb =
+            [ "A month, the weekday every date falls on, and the number of"
+            , "the week it is in -- ISO or US, whichever Options says."
+            ]
+      }
+    , { title = "Encode / decode"
+      , key = "Alt-J"
+      , word = "predc encode"
+      , blurb =
+            [ "Base64, percent-encoding, C string escapes and HTML entities,"
+            , "both directions. Which transform and which way are both chosen"
+            , "rather than sniffed, because all four inputs overlap."
+            ]
+      }
+    , { title = "Random values"
+      , key = "Alt-V"
+      , word = "predc random"
+      , blurb =
+            [ "A v4 UUID, or a run of random bytes as hex or as base64 --"
+            , "the three things a shell gets asked for when a name has to be"
+            , "one nothing else has. Again makes a new one."
+            ]
+      }
+    , { title = "Environment variables"
+      , key = "Alt-P"
+      , word = "predc env"
+      , blurb =
+            [ "Every variable this process has, with a filter. A snapshot"
+            , "from before the first frame and deliberately not refreshable:"
+            , "only a process itself can change its own environment."
+            ]
+      }
+    , { title = "Quick notes"
+      , key = "Alt-Q"
+      , word = "predc notes [name]"
+      , blurb =
+            [ "Small free-form documents that outlive the terminal. The one"
+            , "tool here that keeps something rather than answering a"
+            , "question; it saves as you type, one file per note."
+            ]
+      }
+    ]
+
+
+{-| The page.
+
+The three columns are the three ways to get at a tool and they are in the order
+somebody needs them: what it is called, the key that opens it from anywhere,
+and the word that opens it on the way in. The last of those is the reason the
+page pays for itself twice -- a menu can show the first two and no menu can
+show the third.
+-}
+whatIsInHere : Array Line
+whatIsInHere =
+    [ Head "THE TOOLS"
+    , Gap
+    , Text "  All ten are on the Tools menu. The Alt-key opens one from"
+    , Text "  anywhere, including from inside another tool, and the command"
+    , Text "  opens it on the way in -- predc on its own is the bare desktop."
+    , Gap
+    , Text "  Name                    Key       Command line"
+    , Text "  ----------------------  --------  ---------------------------"
+    , Gap
+    ]
+        ++ Array.flatten (Array.map entryLines inventory)
+        ++ [ Head "AND THE REST OF THE SHELL"
+           , Gap
+           , Text "  Several tools at once   Every window here is a window. F6"
+           , Text "                          moves between them, F5 zooms one,"
+           , Text "                          Ctrl-F5 resizes, Alt-F3 closes it,"
+           , Text "                          and Window | Tile lays them out."
+           , Gap
+           , Text "  Settings                Options: the colour scheme, whether"
+           , Text "                          weeks are numbered the ISO way or"
+           , Text "                          the US way, and the ASCII chart's"
+           , Text "                          shape. All three are remembered in"
+           , Text "                          ~/.config/predc/predc.toml, which is"
+           , Text "                          a file you may edit and comment."
+           , Gap
+           , Text "  Moving text about       y copies and v pastes, in the tools"
+           , Text "                          that deal in values. Whether that"
+           , Text "                          reaches the rest of the machine is"
+           , Text "                          its own subject: F1."
+           , Gap
+           , Text "  Leaving                 Alt-X."
+           ]
+
+
+{-| One tool: the heading row, then its blurb indented under it.
+
+The blurb is indented past the name column rather than starting at it, so that
+the ten names line up as a list somebody can run an eye down. Reading the page
+for "is there a thing that does X" is what it is mostly for, and that is a
+scan rather than a read.
+-}
+entryLines : Entry -> Array Line
+entryLines entry =
+    [ Text
+        ("  "
+            ++ String.padRight 24 ' ' entry.title
+            ++ String.padRight 10 ' ' entry.key
+            ++ entry.word
+        )
+    ]
+        ++ Array.map (\line -> Text ("      " ++ line)) entry.blurb
+        ++ [ Gap ]
 
 
 {-| The half that is about *this* machine, and the reason to open the window at
@@ -752,7 +1097,13 @@ stores =
 view : Inks -> Model -> Tui.Window
 view inks model =
     { id = windowId
-    , title = "Copying and pasting"
+    , title =
+        when model.page is
+            Tools ->
+                "What is in here"
+
+            Clipboard ->
+                "Copying and pasting"
     -- Narrower than the hex viewer and the decoder, because this is prose and
     -- eighty columns of it is a wall. It is also why the window is offset
     -- rather than at the left edge: it is meant to be read in front of the
@@ -768,7 +1119,7 @@ view inks model =
         { x1 = 4
         , y1 = 1
         , x2 = 4 + lineWidth + 3
-        , y2 = 1 + textRows model.desktop + 3
+        , y2 = 1 + textRows model.page model.desktop + 3
         }
     , resize = Tui.resizeHeight
     , palette = Tui.BlueWindow
@@ -784,7 +1135,7 @@ view inks model =
                         { x1 = 1
                         , y1 = 1
                         , x2 = 1 + lineWidth
-                        , y2 = 1 + textRows model.desktop
+                        , y2 = 1 + textRows model.page model.desktop
                         }
                     , lines = shown inks model
                     , cursor = Nothing
@@ -803,7 +1154,7 @@ view inks model =
                         { x1 = 1 + lineWidth
                         , y1 = 1
                         , x2 = 2 + lineWidth
-                        , y2 = 1 + textRows model.desktop
+                        , y2 = 1 + textRows model.page model.desktop
                         }
                     , value = model.top
                     , min = 0

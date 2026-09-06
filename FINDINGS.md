@@ -7953,3 +7953,82 @@ The window also lost two rows while this was open. Its rect was
 `y1 = 3, y2 = 22`, nineteen rows, seventeen of interior; the keypad's last row
 ends at 15. Two rows of nothing under a `fixedSize` window, which is a window
 that had never been measured against what it holds. `y2 = 20`.
+
+## A menu of ten titles is not an answer to "what is in here"
+
+predc's Tools menu lists ten entries and every one of them is a *name*. "Encode
+/ decode" does not say which four transforms; "Quick notes" does not say the
+notes are files that outlive the terminal; and `Alt-P` for the environment list
+is not guessable from anything at all, because `Alt-E` went to the encoder
+first. There was nowhere in the program that said what a tool was *for*, and
+the one place that came close -- `predc --help` -- is not reachable from inside
+predc, which is where somebody wondering is sitting.
+
+So the Help menu grew a second entry, **What is in here**, above the clipboard
+page it already had.
+
+### Two pages, one window
+
+Both are prose that scrolls, and everything except the words was written once
+already: the layout, the scroll bar, `PgDn` moving by exactly what is on the
+screen, the window sizing itself to the desktop's height. So `Help.Model` grew
+a `page : Page` rather than the program growing a second window module, and
+`windowId` stayed `"help"`. Opening either entry re-renders the one window on
+the page asked for, which is the shape a Turbo Vision help viewer has always
+had -- one window, whichever topic you asked for -- and it is why `Main` still
+holds a single `Maybe Help.Model`.
+
+`Main` dispatches through `Help.pageFor : String -> Maybe Page` rather than
+testing two command names, so a third page is one file's problem: a `Page` with
+no line in `command` does not compile.
+
+**Only the clipboard page probes.** Opening that window writes a real `OSC 52`
+read query at the terminal, which is the right thing to do when somebody has
+asked why pasting does not work and the wrong thing when they have asked what
+tools there are. `opened` takes the page and answers `Cmd.none` for the
+inventory; the driver asserts that no query goes out, because this is exactly
+the kind of thing that would work for a year and then surprise somebody whose
+terminal prompts on a clipboard read.
+
+### The page is a copy of two lists, and both copies are checked
+
+The inventory holds a title, an Alt-key and a command word per tool. The first
+two are copies of what the tool's own `menuItem` says, and they have to be:
+**`Tool.Unicode` imports `Help`** for `pasteHint`, so `Help` importing the
+tools is a cycle. The obvious fix -- split the clipboard facts out into their
+own module so the dependency runs the other way -- is a bigger change than the
+page is worth, and it would only move the problem, because the third column has
+no importable source at all: `Cli.gren` keeps its words inside an
+`Argparse.Parser.App`, which is a builder rather than a list.
+
+A copy nothing checks is a copy that goes stale, so both get checked, in the
+two layers that can each reach one of them:
+
+  - **`tests/src/HelpTests.gren`**, in milliseconds, compares the page's titles
+    and Alt-keys against the ten `Tool.X.menuItem` values -- *including their
+    order*, because the page and the menu are two lists of the same ten and two
+    orders would be two answers. It can import both because it is a **leaf**:
+    the test application's source path is `src` and `../src`, so a suite has
+    reach that neither module has.
+  - **`drive_help.py`** reads the third column off the rendered page and
+    compares it against what `predc --help` prints, in both directions. The
+    second direction is the one that catches a *new* tool: a command added to
+    the parser and not to the page.
+
+Both control cases were run. Renaming `predc cal` to `predc calendar` on the
+page fails two driver checks with the word in the message; the unit tests fail
+the same way for a title or a key.
+
+### And a width check, because a canvas cuts without a mark
+
+`Help.overlong` is every line of either page wider than `lineWidth`, and a unit
+test asserts it is empty. This is the calculator's message-line rule applied to
+a hundred and fifty lines of prose: a canvas truncates at its width and draws
+nothing to say it did, so a sentence one column too long arrives looking like a
+finished sentence. Two of the inventory's blurbs were over when they were first
+written and neither looked wrong on screen. Nobody counts columns while writing
+prose, which is the argument for the check rather than against it.
+
+The measurement is taken against the same made-up model `wholeThing` uses --
+probe answered, both conditionals in -- so the clipboard page's longest case is
+the one measured rather than whichever case this session happens to be.

@@ -509,6 +509,56 @@ plants one at offset 16382 of a file whose chunk is 16384 for exactly that
 reason, and another that is not there at all, because the first version of the
 walk answered that one by searching for ever.
 
+## What is in here
+
+**Help | What is in here** is the inventory: ten tools, three lines each, with
+the Alt-key that opens one from anywhere and the word that opens it on the way
+in.
+
+    Name                    Key       Command line
+    ----------------------  --------  ---------------------------
+
+    ASCII chart             Alt-A     predc ascii
+        0 to 127 in a grid you walk around in. Every control code has
+        its name, its C escape and its Ctrl- chord, which is the part
+        a chart usually leaves out.
+
+    RPN calculator          Alt-R     predc calc
+        Exact arithmetic in dec, hex, oct and bin: 2^64-1 is a value
+        here and not a rounding error, and division promotes rather
+        than truncating, so 7 2 / is 3.5.
+
+It exists because a menu of ten titles is not an answer to "what is in here".
+A title is a name: **Encode / decode** does not say which four transforms,
+**Quick notes** does not say the notes are files that outlive the terminal, and
+`Alt-P` for the environment list is not guessable from anything, since `Alt-E`
+went to the encoder first. The only place that came close was `predc --help`,
+which is not reachable from inside predc -- where the person wondering is
+sitting.
+
+The third column is why the page pays for itself twice: a menu can show a name
+and a key, and no menu can show a command line.
+
+Under the ten is a shorter section about the shell itself -- that every tool is
+a window and `F6`, `F5`, `Ctrl-F5`, `Alt-F3` and **Window | Tile** apply to all
+of them, that the settings are under Options and live in a TOML file you may
+edit and comment, and that `y` and `v` move values between tools with the
+clipboard page a keystroke away for why that may not reach the rest of the
+machine.
+
+**It is one window with the clipboard page**, not a second one: both are prose
+that scrolls, and the layout, the scroll bar and the sizing-to-the-desktop were
+written once. `F1` from the inventory turns it into the clipboard page rather
+than putting a second window on the desktop.
+
+**Its Alt-keys and names are checked against the menu, and its commands against
+`predc --help`.** They are copies -- `Help` cannot import the tools, because
+`Tool.Unicode` imports `Help` -- so the unit tests in `tests/` compare the page
+with the ten `menuItem` values, order included, and `test/drive_help.py`
+compares the command column with what `--help` prints, in both directions.
+Renaming a tool or adding one to the menu and not to the page fails a test in
+milliseconds.
+
 ## Pasting
 
 `p` fills the window from the clipboard as text -- the bytes the string is made
@@ -648,7 +698,10 @@ So one line in `~/.tmux.conf`:
 ### The window that explains all this
 
 **Help | Copying and pasting** (`F1`) is the whole of the section below, in the
-program, for the person who is not going to read a README. It opens on *this*
+program, for the person who is not going to read a README.
+
+It is the second of the help window's two pages; the first is
+[what is in here](#what-is-in-here), which is what the Help menu opens with. It opens on *this*
 session rather than on the background:
 
     THIS SESSION

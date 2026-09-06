@@ -2,7 +2,7 @@ module Tests exposing (main)
 
 {-| Unit tests for the parts of predc that are a value rather than a screen.
 
-There is one suite so far and it is the config file, which earned it: every
+Two suites. The first is the config file, which earned it: every
 other decision in this program can be read off a terminal by a pty driver in
 `../test`, and what `Config.apply` decides is a sequence of `Toml.Edit` calls
 whose result is a *file*. A driver can look at that file, and does -- but it
@@ -23,6 +23,7 @@ Run with `./run.sh`, or as part of `devbox run check`.
 -}
 
 import ConfigTests exposing (configSuite)
+import HelpTests exposing (helpSuite)
 import Node
 import Test.Runner.UnitNode as U
 
@@ -32,5 +33,5 @@ main =
     U.run
         { name = "predc"
         , version = "0.1.0"
-        , suites = [ configSuite ]
+        , suites = [ configSuite, helpSuite ]
         }
