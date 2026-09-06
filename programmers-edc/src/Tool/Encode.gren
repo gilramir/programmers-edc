@@ -67,15 +67,38 @@ canvasId =
     "encode.out"
 
 
+{-| The entry on the Tools menu.
+
+The underline is on the `n` and it used to be on the second `d`, which was the
+same letter `Hex ~d~ump viewer` four lines above it already had.
+`TMenuView::findItem` walks the displayed menu's items and returns the first
+match, so `d` opened the hex viewer and this entry's underline was a promise
+that did nothing.
+
+Worth being clear about which namespace that is. The underlined letter of an
+entry claims **only** the plain letter, and **only** while its pull-down is on
+the screen -- so `n` here costs nothing anywhere else, and the rule is simply
+that no two entries of one pull-down may share one. `Alt-J` is the accelerator
+and lives in the other namespace entirely.
+-}
 menuItem : MenuItem
 menuItem =
-    Item { title = "Encode / deco~d~e", cmd = command, key = "Alt-J", shortcut = "Alt-J" }
+    Item { title = "E~n~code / decode", cmd = command, key = "Alt-J", shortcut = "Alt-J" }
 
 
+{-| The tool's own menu, and **its title has no underlined letter on purpose**.
+
+It was `T~r~ansform`, which took `Alt-R` away from the RPN calculator for as
+long as this tool was open -- the same defect `Tool.Calc`'s own menu had with
+`Alt-C`, and the same reason: a bar title beats an accelerator. No letter of
+*Transform* is free either (`~N~ow` and `~S~top clock` are buttons in the
+converter, `T` and `O` and `F` and `M` are bar titles), so it follows
+`Tool.Env` and `Tool.Calc` and underlines nothing.
+-}
 menu : MenuItem
 menu =
     SubMenu
-        { title = "T~r~ansform"
+        { title = "Transform"
         , key = ""
         , items =
             [ Item { title = "~B~ase64", cmd = "encode.kind.base64", key = "", shortcut = "" }

@@ -7255,3 +7255,108 @@ bar while it is open and a bar title claims its `Alt` letter for as long as it
 is there. That is a defect in predc rather than in the sweep -- it is written
 up below -- but a sweep whose job is to walk everything must not be the thing
 that decides what order everything opens in.
+
+## Four promises that drew exactly the same whether they worked or not
+
+The ink sweep above opened predc's tools with their `Alt` keys and one of them
+did not open. With the calculator already up, `Alt-C` -- printed beside **Time
+converter** on the Tools menu, and the converter's key since the day it was
+written -- opened the calculator's own `~C~alc` pull-down instead. Pulling that
+thread found four defects, all of one shape: a menu draws an underlined letter
+and an accelerator identically whether or not pressing them does anything.
+
+### Two namespaces, and confusing them is the whole bug
+
+An underlined letter and an `Alt` key look like the same mechanism and are not.
+
+  - **The underlined letter** is matched by `TMenuView::findItem`
+    (`tmnuview.cpp:415`) against the items of the menu that is **on the
+    screen**, first match wins, disabled entries skipped. It claims a plain
+    letter, only while its pull-down is open, and it costs nothing anywhere
+    else in the program.
+  - **The `Alt` key** goes to `findAltShortcut` first, on the top menu -- the
+    **bar** -- and only if that finds nothing is `hotKey` called to walk the
+    whole tree for a matching accelerator (`tmnuview.cpp:314-327`). So a bar
+    title does not *collide* with an accelerator. It takes it.
+
+`~C~alc` is a bar title. `Alt-C` is an accelerator. The calculator's menu won
+every time it was on the bar, and the Tools menu went on printing `Alt-C`
+beside the converter throughout.
+
+### And the same defect three more times
+
+`Tool.Encode`'s menu was `T~r~ansform`, which took `Alt-R` from the RPN
+calculator on exactly the same terms.
+
+Inside the **Tools** pull-down, `Hex ~d~ump viewer` and `Encode / deco~d~e`
+both underlined a `d`, and `Random ~v~alues` and `En~v~ironment variables` both
+underlined a `v`. `findItem` returns the first match, so the second of each
+pair was not ambiguous -- it was dead. `d` opened the hex viewer whichever of
+the two you meant.
+
+The census in *The Alt-key census was wrong* got the rules right and is not
+what failed here. What failed is that it was taken once. `~C~alc` and
+`T~r~ansform` are bar titles that did not exist when it was taken, and two of
+the nine Tools entries were added afterwards. **A census is a measurement, and
+a measurement of a program that is still being written has a shelf life.**
+
+### The fix is the rule that was already written down
+
+`Tool.Env`'s menu is titled `Search` with no underline at all, and the comment
+above it says why: every letter of the word is spoken for by something that can
+be on the screen at the same time, and a bar title beats a button silently. The
+same is true of *Calc* -- `C` is the converter, `a` the ASCII chart, and `l` is
+`~L~ive clock` and `C~l~ear`, two buttons -- and of *Transform*, where `~N~ow`
+and `~S~top clock` take the only two letters that were otherwise free. So both
+lose their tilde and gain the same comment.
+
+The two Tools entries move within the pull-down namespace instead, where the
+constraint is only "no two of these nine", so `E~n~code / decode` and
+`~E~nvironment variables`. `E` had been ruled out for `Alt` purposes years of
+commits ago, and is perfectly free here, which is the practical difference the
+two namespaces make.
+
+### The driver reads the promises rather than being told them
+
+`drive_hotkeys.py` hard-codes nothing about predc. Turbo Vision does not
+underline a hot letter -- it draws it in the menu palette's *shortcut* colour --
+so once a menu is rendered, the colour is the only place that information
+exists, and the harness can read colours. `hot_letter` takes the foreground all
+the ordinary text is in and returns the one cell that is not. A title with no
+`~` gives no odd cell, which is a real answer and not a failure.
+
+From that the driver reads the Tools menu's entries, letters and accelerators;
+presses each letter and records which window turns up; asserts that nine
+entries produce nine *different* windows; walks every pull-down on the bar
+asserting one letter per entry; compares the bar's claimed letters against the
+advertised `Alt` keys; and finally, with all nine tools open and every tool
+menu on the bar, presses each accelerator and asserts that tool comes to the
+front. Adding a tenth tool adds three checks and no lines.
+
+Which matters more than the convenience: a table of predc's keys written into a
+test file would be a second place to keep them right, and two places that
+disagree is the entire class of defect being tested for.
+
+### Verified in both directions, and one defect was hiding another
+
+With the four fixes taken back out, six checks fail and between them name every
+one: the duplicated letters by count, the two dead ones by opening the wrong
+window, the stolen `Alt-C` by the bar's own census, and again by raising the
+calculator's menu instead of the converter.
+
+`Alt-R` passed in that run, which is the interesting part. The driver opens
+each tool by pressing its letter, and with the bug in place `Encode / deco~d~e`
+opened the hex viewer -- so the encoder never opened, its `T~r~ansform` menu
+never reached the bar, and the letter it was stealing was never claimed. **A
+suite that walks a program through the program's own broken promises walks a
+smaller program than it thinks it does.** Re-broken on its own, the `Alt-R`
+theft fails two checks exactly as it should.
+
+`hot_letter`, `bar_titles`, `menu_entries` and `active_title` are in the
+harness rather than in the driver, because every word of them is a fact about
+how Turbo Vision draws a menu and a frame. Any driver can now ask what a menu
+promises.
+
+The suite is 61.1s -- sixth, behind `programmers-edc/encode` at 93.2s -- so it
+stays one file. Most of it is the nine open-and-close rounds, and the settles
+are already where trimming them further buys a flake rather than a second.

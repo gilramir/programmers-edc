@@ -1228,10 +1228,25 @@ widthName width =
 -- VIEW
 
 
+{-| The tool's own menu, and **its title has no underlined letter on purpose**.
+
+It was `~C~alc`, which took `Alt-C` away from the time converter for as long as
+the calculator was open. A bar title is matched by `TMenuView::findItem` before
+any accelerator is looked for (`tmnuview.cpp:314`), so the bar wins and the
+converter's own advertised key opened this pull-down instead -- silently, with
+`Alt-C` still printed beside **Time converter** on the Tools menu the whole
+time.
+
+There is no letter of *Calc* to move it to. `C` is the converter, `a` the ASCII
+chart, and `l` is `~L~ive clock` and `C~l~ear`, two buttons. So it takes the
+answer `Tool.Env`'s menu already reached for the same reason: no `~` at all.
+The menu still opens with the mouse and with `F10`, and everything on it has a
+one-letter key on the list itself.
+-}
 menu : Model -> MenuItem
 menu model =
     SubMenu
-        { title = "~C~alc"
+        { title = "Calc"
         , key = ""
         , items =
             [ SubMenu

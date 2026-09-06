@@ -26,6 +26,10 @@ import unicodedata
 
 COLS, ROWS = 80, 25
 
+# What a menu, a frame and the desktop are drawn out of. None of it is text, so
+# none of it can be the hot letter or part of a title.
+MENU_FRAME = " ░│┌┐└┘─╔╗╚╝║═[]■↕↑►"
+
 # CSI / OSC / single-char escapes. Enough to turn a TVision screen dump into
 # something we can run substring checks against.
 ANSI = re.compile(
@@ -178,6 +182,71 @@ class Pty:
     def render(self):
         """What the screen looks like *now*. Good for "what does X say"."""
         return self.display().text()
+
+    def bar_titles(self):
+        """`[(title, hot letter or None)]` for the menu bar, left to right.
+
+        The bar is row zero and `TMenuBar` separates its titles with spaces, so
+        a run of non-space characters is one title.
+        """
+        screen = self.display()
+        row = "".join(screen.grid[0])
+        found = []
+        col = 0
+        while col < len(row):
+            if row[col] == " ":
+                col += 1
+                continue
+            end = col
+            while end < len(row) and row[end] != " ":
+                end += 1
+            found.append((row[col:end], screen.hot_letter(0, col, end)))
+            col = end
+        return found
+
+    def menu_entries(self):
+        """`[(text, hot letter, accelerator)]` for the pull-down that is open.
+
+        A `TMenuBox` is the only thing on a Turbo Vision screen drawn in single
+        lines with text between them, and its accelerator column is printed
+        hard against the right-hand edge -- so the entry's own words are
+        everything before the last run of two spaces. Separators come back as
+        nothing and are dropped.
+        """
+        screen = self.display()
+        found = []
+        for row in range(screen.rows):
+            line = "".join(screen.grid[row])
+            if "│" not in line:
+                continue
+            first, last = line.index("│"), line.rindex("│")
+            if last - first < 4:
+                continue
+            text = line[first + 1:last].strip()
+            if not text or set(text) <= set("─"):
+                continue
+            parts = text.rsplit("  ", 1)
+            found.append((parts[0].strip(),
+                          screen.hot_letter(row, first + 1, last),
+                          parts[1].strip() if len(parts) == 2 else ""))
+        return found
+
+    def active_title(self):
+        """The title on the frame of the window that has the focus, or None.
+
+        Turbo Vision draws the active window's frame in double lines and every
+        other window's in single ones, so the `╔` is the whole of the question
+        -- and it is the only way a driver can tell "that tool came to the
+        front" from "that tool is somewhere on the screen".
+        """
+        for line in self.render().split("\n"):
+            if "╔" in line:
+                middle = line[line.index("╔"):line.rindex("╗") + 1] if "╗" in line else line
+                # The close and zoom boxes are drawn *into* the top border, so
+                # they have to come out before the border does: stripping first
+                # leaves the bracket behind and a yard of `═` with it.
+                return " ".join(re.sub(r"\[.\]", " ", middle).strip("░╔╗═ ").split()) or None
+        return None
 
     def cursor(self):
         """Where the terminal's own cursor is now, as (col, row), zero-based.
@@ -412,6 +481,31 @@ class Screen:
     def bg_at(self, col, row):
         """The background colour of one cell: 40-47, 100-107, or None."""
         return self.attrs[row][col][1]
+
+    def hot_letter(self, row, first, last):
+        """The letter Turbo Vision drew as a hot key between two columns.
+
+        There is no underline. A hot letter is drawn in the menu palette's
+        *shortcut* colour and everything around it in the ordinary one, so once
+        a menu has been rendered the colour is the only place that information
+        exists -- which makes this the one question about a menu that cannot be
+        answered by reading the text off the screen.
+
+        The odd colour out is the answer: whatever all the ordinary text is in
+        occurs many times, and the hot letter's occurs once. `None` when there
+        is no single odd cell, which is what a title with no `~` in it looks
+        like and is an answer rather than a failure.
+        """
+        cells = [
+            (self.grid[row][col], self.attrs[row][col][0])
+            for col in range(first, min(last, self.cols))
+            if self.grid[row][col] not in MENU_FRAME
+        ]
+        counts = {}
+        for _, fg in cells:
+            counts[fg] = counts.get(fg, 0) + 1
+        odd = [ch for ch, fg in cells if counts[fg] == 1]
+        return odd[0] if len(odd) == 1 else None
 
     def invisible_cells(self):
         """Every cell holding a glyph drawn in the colour it is drawn on.
