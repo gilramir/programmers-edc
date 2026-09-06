@@ -33,6 +33,7 @@ sys.path.insert(0, os.path.join(ROOT, "..", "tvision-node", "test"))
 from harness import Pty, Checks, node_argv
 
 F2 = b"\x1bOQ"
+F4 = b"\x1bOS"
 SHIFT_DOWN = b"\x1b[1;2B"
 CTRL_INS = b"\x1b[2;5~"
 SHIFT_INS = b"\x1b[2;2~"
@@ -268,6 +269,36 @@ def main():
               str(body(app, 5)))
         check("and reported how many",
               "2 replaced" in caption(app), caption(app))
+
+        # 7. Go to line, which is where the caret stops belonging to the
+        #    keyboard alone. `setEditorText` puts it at the top and nothing
+        #    else could move it, so a program that rewrote a document it had
+        #    just read could not put the reader back with it.
+        app.send(b"\x1b[1;5H", settle=0.5)      # Ctrl-Home
+        app.send(F4, settle=1.2)
+        check("Go to line is a dialog too, because a line number is a thing "
+              "only the model can ask for",
+              "Go to line" in app.render(), app.render())
+        app.send(b"\x08" * 4, settle=0.4)
+        app.send(b"3", settle=0.4)
+        app.send(b"\r", settle=1.2)
+        check("and the caret went there, counting from one the way a person "
+              "does",
+              caption(app).startswith("3:1"), caption(app))
+
+        # A line past the end is the last line, because setEditorCaret is
+        # clamped by the walk that finds it rather than by a check -- which is
+        # what Down does, and what a caret restored into a document that got
+        # shorter has to do.
+        app.send(F4, settle=1.2)
+        app.send(b"\x08" * 4, settle=0.4)
+        app.send(b"999", settle=0.4)
+        app.send(b"\r", settle=1.2)
+        check("a line past the end is the last line rather than an error",
+              caption(app).startswith("5:1"), caption(app))
+        check("and the caption says which line that turned out to be, because "
+              "the model was told by an Edited event rather than assuming",
+              "5:1" in caption(app), caption(app))
 
         app.send(b"\x1bx", settle=1.0)
         code = app.wait(timeout=6)

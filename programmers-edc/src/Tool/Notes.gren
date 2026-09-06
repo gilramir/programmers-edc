@@ -84,6 +84,7 @@ import Json.Decode
 import Task exposing (Task)
 import Time
 import Tui exposing (MenuItem(..), View(..))
+import Width
 
 
 -- NAMES
@@ -186,6 +187,8 @@ menu =
             , Item { title = "~R~ename...", cmd = "notes.rename", key = "", shortcut = "" }
             , Item { title = "~D~elete...", cmd = "notes.delete", key = "", shortcut = "" }
             , Tui.Separator
+            , Item { title = "Re~f~ormat to 80", cmd = "notes.reformat", key = "F8", shortcut = "F8" }
+            , Tui.Separator
             , Item { title = "Go to the ~l~ist", cmd = "notes.tolist", key = "F4", shortcut = "F4" }
             ]
         }
@@ -267,6 +270,13 @@ type alias Model =
     -- compares against it, so a caret that moved and a document that did not
     -- change cost a round trip and no write.
     , saved : String
+    -- Where the caret is, which every `Edited` event carries and which only
+    -- one thing needs: putting it back after a reformat has replaced the
+    -- document under it. `line` counts from zero and `column` is a *display*
+    -- column, both as the event reported them and as
+    -- `Tui.setEditorCaret` reads them back.
+    , line : Int
+    , column : Int
     -- The editor has reported a change since the last read. The only thing
     -- that makes this tool subscribe to anything.
     , dirty : Bool
@@ -311,6 +321,7 @@ believes -- and "already saved" is a different sentence from silence.
 type Next
     = Quietly
     | Announce
+    | Reflow
     | Open String
 
 
@@ -365,6 +376,8 @@ init permission dir wanted desktop =
             , focused = 0
             , open = Nothing
             , saved = ""
+            , line = 0
+            , column = 0
             , dirty = False
             , pending = Idle
             , wanted =
@@ -499,9 +512,17 @@ update ports event model =
         -- Three numbers per keystroke instead of a document. All this does is
         -- remember that there is something to save, which is what turns the
         -- subscription on.
+        -- Three numbers per keystroke instead of a document. Two of them are
+        -- kept because a reformat has to put the caret back, and the third
+        -- turns the autosave's subscription on.
         Tui.Edited it ->
-            if it.id == bodyId && it.isModified then
-                still { model | dirty = True }
+            if it.id == bodyId then
+                still
+                    { model
+                        | line = it.line
+                        , column = it.column
+                        , dirty = model.dirty || it.isModified
+                    }
 
             else
                 still model
@@ -540,6 +561,9 @@ update ports event model =
 
             else if cmd == "notes.save" then
                 saveNow ports model
+
+            else if cmd == "notes.reformat" then
+                reformat ports model
 
             else if cmd == "notes.rename" then
                 when model.open is
@@ -677,6 +701,71 @@ flushed ports text model =
                     }
             in
             when it.next is
+                Reflow ->
+                    when
+                        (if known then
+                            reflowed { line = model.line, column = model.column } text
+
+                         else
+                            Nothing
+                        )
+                    is
+                        Nothing ->
+                            -- Two ways to have nothing to do, and they are
+                            -- worth telling apart: a key that says the same
+                            -- sentence whether you aimed badly or aimed well
+                            -- teaches nothing either time.
+                            { model =
+                                { settled
+                                    | message =
+                                        if blankLine model.line text then
+                                            "The caret is on a blank line."
+
+                                        else
+                                            "That paragraph already fits in "
+                                                ++ String.fromInt wrapAt
+                                                ++ " columns."
+                                }
+                            , command = write
+                            }
+
+                        Just done ->
+                            -- Written here rather than left to the autosave,
+                            -- and that is not belt and braces: `setText`
+                            -- clears the editor's modified flag, so the
+                            -- `Edited` that follows says nothing changed and
+                            -- `dirty` is never set. A reformat that relied on
+                            -- the autosave would sit unwritten until the next
+                            -- keystroke, and would be lost outright to an
+                            -- Alt-X.
+                            { model =
+                                { settled
+                                    | saved = done.text
+                                    , dirty = False
+                                    , line = done.line
+                                    , column = done.column
+                                    -- Nothing said here, because the write is
+                                    -- about to say "Saved" and the paragraph
+                                    -- visibly moved. Which width it went to is
+                                    -- on the menu entry, where it is true all
+                                    -- the time rather than for one repaint.
+                                    , message = ""
+                                }
+                            , command =
+                                Cmd.batch
+                                    [ Tui.setEditorText ports bodyId done.text
+                                    -- The whole reason this call exists.
+                                    -- `setEditorText` puts the caret at the
+                                    -- top, which is right for a different
+                                    -- document and wrong for the same one
+                                    -- reflowed.
+                                    , Tui.setEditorCaret ports
+                                        bodyId
+                                        { line = done.line, column = done.column }
+                                    , writeNote model it.note done.text
+                                    ]
+                            }
+
                 Quietly ->
                     { model = settled, command = write }
 
@@ -764,6 +853,255 @@ saveNow ports model =
                         }
                     , command = Tui.readEditor ports bodyId
                     }
+
+
+{-| `F8`. The same read as a save, used for something else when it comes back.
+
+It goes through `Pending` rather than being done on the spot for the reason
+everything about this tool does: the model has no copy of the document. What is
+on the screen is the editor's, and asking for it is a `Cmd` whose answer is an
+event.
+-}
+reformat : Tui.Ports Msg -> Model -> Step
+reformat ports model =
+    when model.open is
+        Nothing ->
+            still { model | message = "No note is open." }
+
+        Just name ->
+            when model.pending is
+                Flushing _ ->
+                    still model
+
+                Idle ->
+                    { model =
+                        { model
+                            | pending = Flushing { note = name, next = Reflow }
+                            , dirty = False
+                            , message = ""
+                        }
+                    , command = Tui.readEditor ports bodyId
+                    }
+
+
+-- REFLOW
+
+
+{-| Eighty columns, and a fixed number on purpose.
+
+The window is whatever size somebody dragged it to and the terminal is whatever
+size it is, and neither is a fact about the text. A note reformatted to the
+window is a note that reads differently on the next machine, and the whole
+point of pressing this is to make a paragraph the shape everything else already
+expects.
+-}
+wrapAt : Int
+wrapAt =
+    80
+
+
+{-| The paragraph around the caret, rewrapped, and where the caret goes.
+
+`Nothing` when there is nothing to do -- the caret is on a blank line, or the
+paragraph already reads exactly as the wrap would write it -- which is what
+lets the command say so instead of reporting a change it did not make.
+
+A paragraph is **the run of non-blank lines around the caret**, so a blank line
+is the only separator and a note is free to be one long paragraph or forty
+short ones. The indentation of the paragraph's *first* line is kept and put on
+every line of the result, which is what makes an indented block stay an
+indented block; the budget shrinks by that much, so the right-hand edge is
+still `wrapAt` and not `wrapAt` plus the indent.
+
+Everything is measured in **display columns** rather than characters. A line of
+Japanese is half as many characters as a line of English at the same width, and
+a wrap that counted characters would run a CJK paragraph twice as far past the
+margin as it meant to -- see [`Width`](Width).
+-}
+reflowed : { line : Int, column : Int } -> String -> Maybe { text : String, line : Int, column : Int }
+reflowed caret document =
+    let
+        lines =
+            String.split "\n" document
+
+        blank text =
+            String.trim text == ""
+
+        here =
+            Maybe.withDefault "" (Array.get caret.line lines)
+    in
+    if caret.line < 0 || caret.line >= Array.length lines || blank here then
+        Nothing
+
+    else
+        let
+            first =
+                edge (\at -> at - 1) blank lines caret.line
+
+            last =
+                edge (\at -> at + 1) blank lines caret.line
+
+            para =
+                lines |> Array.takeFirst (last + 1) |> Array.dropFirst first
+
+            indent =
+                String.takeFirst
+                    (String.count (Maybe.withDefault "" (Array.first para))
+                        - String.count (String.trimLeft (Maybe.withDefault "" (Array.first para)))
+                    )
+                    (Maybe.withDefault "" (Array.first para))
+
+            -- Where the caret is in the paragraph's *prose*, counted in
+            -- characters, with each line break standing for the single space
+            -- the rewrap will join those lines with. Characters and not
+            -- columns, because this number is only ever used to find the same
+            -- place again in the same words.
+            offset =
+                Array.foldl (\row sofar -> sofar + String.count (String.trim row) + 1)
+                    0
+                    (Array.takeFirst (caret.line - first) para)
+                    + charAt here caret.column
+                    - (String.count here - String.count (String.trimLeft here))
+
+            words =
+                String.words (String.join " " (Array.map String.trim para))
+
+            wrapped =
+                fill (max 8 (wrapAt - Width.ofString indent)) words
+
+            landed =
+                landing offset wrapped
+
+            rebuilt =
+                (lines |> Array.takeFirst first)
+                    ++ Array.map (\text -> indent ++ text) wrapped
+                    ++ (lines |> Array.dropFirst (last + 1))
+
+            rewritten =
+                String.join "\n" rebuilt
+        in
+        if rewritten == document then
+            Nothing
+
+        else
+            Just
+                { text = rewritten
+                , line = first + landed.line
+                , column =
+                    Width.ofString indent
+                        + Width.ofString
+                            (String.takeFirst landed.column
+                                (Maybe.withDefault "" (Array.get landed.line wrapped))
+                            )
+                }
+
+
+blankLine : Int -> String -> Bool
+blankLine at document =
+    String.trim (Maybe.withDefault "" (Array.get at (String.split "\n" document))) == ""
+
+
+{-| How far the paragraph runs in one direction, given a step. The first line
+that is blank, or the end of the document, stops it.
+-}
+edge : (Int -> Int) -> (String -> Bool) -> Array String -> Int -> Int
+edge step blank lines from =
+    let
+        next =
+            step from
+    in
+    when Array.get next lines is
+        Just text ->
+            if next < 0 || blank text then
+                from
+
+            else
+                edge step blank lines next
+
+        Nothing ->
+            from
+
+
+{-| Which character a display column falls on.
+
+`Edited` reports a column and `String.takeFirst` wants a count of characters,
+and in a line with a `한` in it those are different numbers. Walked rather than
+divided, because the widths are not uniform.
+-}
+charAt : String -> Int -> Int
+charAt text column =
+    Array.foldl
+        (\char sofar ->
+            if sofar.used >= column then
+                sofar
+
+            else
+                { index = sofar.index + 1
+                , used = sofar.used + Width.ofPoint (Char.toCode char)
+                }
+        )
+        { index = 0, used = 0 }
+        (String.toArray text)
+        |> .index
+
+
+{-| Greedy wrapping: put a word on the line if it fits and start a new line if
+it does not.
+
+A word longer than the whole budget gets a line to itself rather than being
+broken, because a 90-character URL is a thing you want to be able to
+double-click and a 90-character word is not something a notes app should have
+an opinion about.
+-}
+fill : Int -> Array String -> Array String
+fill budget words =
+    Array.foldl
+        (\word sofar ->
+            when Array.last sofar is
+                Nothing ->
+                    [ word ]
+
+                Just line ->
+                    if Width.ofString line + 1 + Width.ofString word <= budget then
+                        Array.dropLast 1 sofar ++ [ line ++ " " ++ word ]
+
+                    else
+                        sofar ++ [ word ]
+        )
+        []
+        words
+
+
+{-| Which wrapped line a prose offset lands on, and how far into it.
+
+The *first* line whose content reaches the offset, so a caret that was at the
+end of a line stays at the end of that line rather than jumping to the start of
+the next one -- which is where it looks like it should be and is the difference
+between the command feeling like a reformat and feeling like a jump.
+-}
+landing : Int -> Array String -> { line : Int, column : Int }
+landing offset wrapped =
+    Array.foldl
+        (\text sofar ->
+            if sofar.done then
+                sofar
+
+            else if sofar.left <= String.count text then
+                { sofar | done = True, column = sofar.left }
+
+            else
+                { sofar
+                    | line = sofar.line + 1
+                    , left = sofar.left - (String.count text + 1)
+                }
+        )
+        { line = 0, column = 0, left = max 0 offset, done = False }
+        wrapped
+        |> (\it ->
+                { line = min it.line (max 0 (Array.length wrapped - 1))
+                , column = it.column
+                }
+           )
 
 
 -- UPDATE, THE TASK HALF

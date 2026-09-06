@@ -153,6 +153,10 @@ module.exports = {
   // travel with the render: setEditorText puts one in, readEditor takes it
   // out. See the note on JsEditor in tvnode.h.
   setEditorText: addon.setEditorText,
+  // And the caret, which setEditorText resets: a model that puts back a
+  // reflowed copy of what it just read has to be able to put the reader back
+  // too.
+  setEditorCaret: addon.setEditorCaret,
   readEditor: addon.readEditor,
   searchEditor: addon.searchEditor,
   setLines: addon.setLines,

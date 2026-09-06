@@ -14,7 +14,7 @@ const { createDiffer } = require('./diff');
 // Bumped in lockstep with Tui.protocolVersion on the Gren side. A Gren package
 // and an npm package version independently, and they will skew; refusing an
 // unknown version beats rendering nothing and leaving the author to guess.
-const PROTOCOL = 21;
+const PROTOCOL = 22;
 
 /**
  * Drive a compiled Gren program's UI.
@@ -246,6 +246,14 @@ function run(grenModule, options = {}) {
 
       case 'setEditorText':
         tv.setEditorText(message.id, message.text);
+        break;
+
+      // Where the caret goes, which setEditorText has just reset. The pair of
+      // numbers is the pair an `Edited` event carries, so a model that reads
+      // a document, rewrites it and puts it back can put the reader back with
+      // what it was already told.
+      case 'setEditorCaret':
+        tv.setEditorCaret(message.id, message.line, message.column);
         break;
 
       case 'readEditor': {

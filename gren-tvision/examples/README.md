@@ -471,6 +471,32 @@ when a command needs something only the model can produce, it is a command the
 model handles and answers with a `Cmd` of its own, and a built-in name is for
 the ones that need nothing.
 
+**And protocol 22 is the third editor call, which the first two implied and
+nobody noticed.** `setEditorText` resets the caret to the top -- correct for
+"here is a different document", wrong for the case that turns out to be the
+common one: a model that reads a document, rewrites part of it, and puts the
+*same* document back. Reflowing a paragraph, re-indenting a block, sorting a
+list of lines -- every one of them threw the reader to line 1, and there was no
+way to say otherwise, because an editor's caret belonged to the keyboard and to
+nothing else.
+
+[`setEditorCaret`](#setEditorCaret) takes the two numbers
+[`Edited`](#Event) already reports, which is what makes the round trip
+symmetrical: read `line` and `column` out of the event, hand the same pair
+back. `column` is a *display* column at both ends, so a caret restored into a
+line of Japanese lands where the event said it was. Both are clamped by the
+walk that finds them rather than by a check -- a line past the end is the last
+line, a column past the end is the end of its line -- which is what `Down` and
+`End` do and what a caret restored into a document that just got shorter has to
+do.
+
+`examples/edit` uses it for **Go to line**, on the Search menu with `F4`, which
+is the fourth thing in that program needing something only the model can
+produce and the first whose answer is a place rather than a string. The one-off
+lives there rather than in the call: a person counts lines from one and an
+index counts from zero, and the conversion belongs where the word "line" means
+what the person typing it meant.
+
 One deliberate divergence, in FINDINGS: `all = True` replaces every match in
 the *document* rather than from the caret, because Turbo Vision's Replace All
 replaces nothing at all after a search that ran off the end, and that is not

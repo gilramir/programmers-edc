@@ -871,6 +871,37 @@ public:
                          const std::string &replacement, bool matchCase,
                          bool wholeWords, bool all);
 
+    // Put the caret on a line and a column, the two numbers the model was
+    // last told by an `Edited` event.
+    //
+    // It exists because setText() resets the caret to the top, which is a
+    // reasonable thing for "here is a different document" to do and the wrong
+    // thing for "here is this document, reflowed". A model that rewrites what
+    // it just read has to be able to put the reader back where they were, and
+    // there was no way to say it.
+    //
+    // Walked line by line with nextLine() and then across with charPtr(),
+    // because a column in TEditor is a *display* column and not a byte -- the
+    // same number curPos.x carries, so a caret restored from an Edited event
+    // lands where that event said it was. Both are clamped by the walk itself
+    // rather than checked: nextLine() stops at bufLen and charPtr() stops at
+    // the end of its line, so a line past the end is the last line and a
+    // column past the end is the end of that line, which is what every editor
+    // does with Down and End.
+    //
+    // selectMode 0 rather than smExtend, so the selection collapses to the
+    // caret: this is a move, not a drag. trackCursor(False) scrolls the least
+    // it can to bring it into view, which is what typing there would have done.
+    void setCaret(int line, int column)
+    {
+        uint p = 0;
+        for (int i = 0; i < line && p < bufLen; ++i)
+            p = nextLine(p);
+        setCurPtr(charPtr(p, column < 0 ? 0 : column), 0);
+        trackCursor(False);
+        noteEditIfChanged();
+    }
+
     // Text in at the caret, replacing the selection. `insertText` is
     // `insertBuffer` with the buffer arithmetic done for us (editors.h:219),
     // so the undo record, the modified flag and the scroll bars all end up

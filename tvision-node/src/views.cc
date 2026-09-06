@@ -2149,6 +2149,28 @@ static Napi::Value SetEditorText(const Napi::CallbackInfo &info)
     return Napi::Boolean::New(env, ok);
 }
 
+// tv.setEditorCaret(id, line, column) -- put the caret on a line and a column.
+//
+// The other half of setEditorText, and it exists because that call resets the
+// caret to the top. Replacing a document should start it at the beginning;
+// replacing a document with a *reflowed copy of itself* should not, and until
+// this there was no way for a model that had just rewritten what it read to
+// put the reader back where they were.
+//
+// The two numbers are the ones an `Edited` event carries, so the round trip is
+// symmetrical: read line and column out of the event, hand the same pair back.
+static Napi::Value SetEditorCaret(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    ViewRef *ref = g_views.find(info[0].ToString().Utf8Value());
+    if (ref == nullptr || ref->kind != "editor")
+        return Napi::Boolean::New(env, false);
+
+    ((JsEditor *) ref->view)->setCaret(info[1].ToNumber().Int32Value(),
+                                       info[2].ToNumber().Int32Value());
+    return Napi::Boolean::New(env, true);
+}
+
 // tv.readEditor(id) -- the document, as a string, or null if there is no such
 // editor. The one call in this binding that hands back something big, which is
 // why it is asked for rather than volunteered.
@@ -2378,6 +2400,7 @@ void registerViewApi(Napi::Env env, Napi::Object exports)
     exports.Set("setItemsEnabled", Napi::Function::New(env, SetItemsEnabled));
     exports.Set("setItems", Napi::Function::New(env, SetItems));
     exports.Set("setEditorText", Napi::Function::New(env, SetEditorText));
+    exports.Set("setEditorCaret", Napi::Function::New(env, SetEditorCaret));
     exports.Set("readEditor", Napi::Function::New(env, ReadEditor));
     exports.Set("searchEditor", Napi::Function::New(env, SearchEditor));
     exports.Set("getValue", Napi::Function::New(env, GetValue));

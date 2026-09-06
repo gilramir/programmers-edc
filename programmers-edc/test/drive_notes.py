@@ -48,6 +48,8 @@ F4 = b"\x1bOS"
 ALT_Q = b"\x1bq"
 ALT_F3 = b"\x1b\x1bOR"
 DOWN = b"\x1b[B"
+RIGHT = b"\x1b[C"
+F8 = b"\x1b[19~"
 
 
 def notes_dir(home):
@@ -67,10 +69,11 @@ def plant(notes):
     return home
 
 
-def start(home, *args):
+def start(home, *args, size=None):
     env = dict(TERM="xterm-256color", HOME=home,
                PATH=os.environ.get("PATH", "/usr/bin"))
-    app = Pty(node_argv(LAUNCHER, *args), env, cwd=ROOT)
+    app = Pty(node_argv(LAUNCHER, *args), env, cwd=ROOT,
+              **({"size": size} if size else {}))
     app.pump(2.5)
     return app
 
@@ -308,6 +311,56 @@ def main():
 
     app.send(b"\x1bx", settle=0.6)
     check("it exits cleanly", app.wait(timeout=6) == 0, "exit")
+
+    # ---- F8, and the reason the binding grew a caret command --------------
+    # Driven in a hundred-column terminal on purpose: the wrap is 80 whatever
+    # the window is, because a paragraph reformatted to the window reads
+    # differently on the next machine.
+    wide = ("alpha bravo charlie delta echo foxtrot golf hotel india juliet "
+            "kilo lima mike november oscar papa quebec romeo sierra tango "
+            "uniform victor whiskey xray yankee zulu")
+    flow = plant({"Wide.md": "head\n\n" + wide + "\n\ntail\n"})
+    app = start(flow, "notes", size=(100, 30))
+    file = os.path.join(notes_dir(flow), "Wide.md")
+
+    check("the note opens with its long paragraph on one line",
+          len(open(file).read().split("\n")[2]) > 150,
+          len(open(file).read().split("\n")[2]))
+
+    app.send(F8, settle=1.2)
+    check("F8 on a paragraph that already fits says so rather than nothing",
+          "already fits in 80 columns" in status(app), status(app))
+
+    app.send(DOWN, settle=0.5)
+    app.send(F8, settle=1.2)
+    check("and on a blank line it says that instead, because a key with one "
+          "sentence for both teaches nothing either time",
+          "blank line" in status(app), status(app))
+
+    # Into the middle of the long paragraph, sixty columns along.
+    app.send(DOWN, settle=0.5)
+    app.send(RIGHT * 60, settle=0.8)
+    app.send(F8, settle=1.5)
+    wrapped = saved(app, file).split("\n")
+    check("F8 wraps the paragraph the caret is in",
+          len(wrapped) > 5 and all(len(row) <= 80 for row in wrapped),
+          wrapped)
+    check("to 80 columns and not to the window, which is a hundred here",
+          max(len(row) for row in wrapped) > 60, [len(r) for r in wrapped])
+    check("and leaves the paragraphs either side of it alone",
+          wrapped[0] == "head" and "tail" in wrapped,
+          wrapped[:2] + wrapped[-2:])
+
+    # The caret. `setEditorText` puts it at the top, so without the new
+    # binding call this types into the word "head".
+    app.send(b"<HERE>", settle=1.2)
+    check("the caret comes back to the same place in the prose, which is the "
+          "whole reason setEditorCaret exists",
+          "juli<HERE>et" in saved(app, file),
+          saved(app, file).split("\n")[2])
+
+    app.send(b"\x1bx", settle=0.6)
+    check("and that one exits cleanly", app.wait(timeout=6) == 0, "exit")
 
     # ---- the command line ------------------------------------------------
     named_app = start(home, "notes", "Beta")

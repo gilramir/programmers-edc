@@ -58,6 +58,7 @@ module Tui exposing
     , resizeHeight
     , resizeWidth
     , setDoubleClickDelay
+    , setEditorCaret
     , setEditorText
     , setEnabled
     , stretch
@@ -212,7 +213,7 @@ its own is a pull-down, and one without is a command sitting on the bar.
 @docs MenuItem, StatusItem, PopupItem, popupMenu
 @docs Event, Value, DialogSpec
 @docs dialog, quit, setEnabled, setDoubleClickDelay, focus, bringToFront
-@docs setEditorText, insertIntoEditor, readEditor, findInEditor, replaceInEditor
+@docs setEditorText, setEditorCaret, insertIntoEditor, readEditor, findInEditor, replaceInEditor
 @docs copyToClipboard, readClipboard
 @docs messageBox, MessageButton, okButtons, okCancelButtons, yesNoButtons, yesNoCancelButtons
 @docs fileDialog
@@ -298,11 +299,17 @@ thing in this package that talks to a program outside it. Version 20 added
 is what makes a double click in [`fileDialog`](#fileDialog) open the file. An
 older runtime would pass the field to a binding that ignores what it does not
 know, and the double click would go on doing nothing -- which is exactly the
-silence this number turns into a sentence.
+silence this number turns into a sentence. Version 21 added the
+[`Dragged`](#Event) event: the binding forwarded `evMouseDown` and nothing
+else, so a model could hear a click and not the drag it turned into. Version 22
+added [`setEditorCaret`](#setEditorCaret), which is the half of
+[`setEditorText`](#setEditorText) that was missing -- putting a document back
+reset the caret to the top, so a model that reflowed what it had just read
+could not put the reader back where they were.
 -}
 protocolVersion : Int
 protocolVersion =
-    21
+    22
 
 
 -- GEOMETRY
@@ -1936,6 +1943,41 @@ setEditorText ports id body =
             [ { key = "type", value = Encode.string "setEditorText" }
             , { key = "id", value = Encode.string id }
             , { key = "text", value = Encode.string body }
+            ]
+
+
+{-| Put an [`Editor`](#View)'s caret on a line and a column.
+
+The other half of [`setEditorText`](#setEditorText), which resets it. That is
+right for "here is a different document" and wrong for the case this exists
+for: a model that reads a document, rewrites some of it, and puts the *same*
+document back reflowed. Without this, every such command threw the reader to
+the top of the file, and there was no way to say otherwise.
+
+    Tui.setEditorCaret tui "body" { line = model.line, column = model.column }
+
+The two numbers are the two an [`Edited`](#Event) event carries, and mean the
+same thing at both ends: `line` counts lines from zero and `column` is a
+**display** column, so a line of Japanese counts two per character exactly as
+`Edited` reported it. A model can therefore hand back what it was told.
+
+Both are clamped by the walk that finds them rather than rejected: a line past
+the end of the document is the last line, and a column past the end of its line
+is the end of that line -- which is what `Down` and `End` do, and what a caret
+restored into a document that got shorter should do.
+
+The selection collapses to the caret, because this is a move rather than a
+drag, and the view scrolls the least it can to bring the caret into sight.
+
+-}
+setEditorCaret : Ports msg -> String -> { line : Int, column : Int } -> Cmd msg
+setEditorCaret ports id at =
+    ports.toJs <|
+        Encode.object
+            [ { key = "type", value = Encode.string "setEditorCaret" }
+            , { key = "id", value = Encode.string id }
+            , { key = "line", value = Encode.int at.line }
+            , { key = "column", value = Encode.int at.column }
             ]
 
 

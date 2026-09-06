@@ -976,6 +976,25 @@ flag but a key: a window with an editor *and* another focusable view needs a
 command of its own answered with `focus`, and predc's notes window uses `F4`
 for it.
 
+**And the caret an editor resets was the other half of the same gap.**
+`JsEditor::setText` calls `setBufLen`, which puts the caret at the top along
+with clearing the selection, the undo counters and `modified` -- right for a
+different document and wrong for the same document reflowed. Nothing else could
+move a caret: it belonged to the keyboard. So `setEditorCaret` (protocol 22)
+walks with `nextLine` and then across with `charPtr`, which is the pair that
+makes `column` mean a *display* column at both ends -- the same number
+`curPos.x` carries and therefore the same number an `Edited` event reported, so
+a model hands back what it was told. `setCurPtr(p, 0)` rather than `smExtend`,
+because this is a move and not a drag.
+
+There is a second cost to `setText` that this does **not** fix and that is
+worth knowing before building on it: the undo history goes too, so a command
+built out of read-rewrite-write is one the user cannot undo. predc's reformat
+lives with it and writes the file immediately instead -- which it has to do
+anyway, since a cleared `modified` flag means no `Edited` arrives to arm an
+autosave, and the reformat would otherwise sit unwritten until the next
+keystroke.
+
 Which makes the choice of key part of the same finding. The menu bar is
 `ofPreProcess` and is offered every keystroke before the focused view is, so an
 accelerator on that menu is taken *away* from the editor underneath, in

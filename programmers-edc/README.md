@@ -109,6 +109,9 @@ Many independent free-form notes, each with a name: a list down the left and an
 editor pane beside it. A very small OneNote, and no more than that -- no
 folders, no tags, no formatting, no search across notes.
 
+Plus a key that reformats the paragraph the caret is in to 80 columns,
+regardless of the size of the window.
+
 **Done** -- see "Notes" below.
 
 
@@ -1027,6 +1030,39 @@ offer, and it appears once per burst of typing rather than once per keystroke.
 `F2` is the same path with one difference: it says something even when there
 was nothing left to write, because a save key that sometimes produces no
 visible answer is a save key nobody believes.
+
+### F8 reformats the paragraph you are in
+
+To 80 columns, whatever the window is. A paragraph reformatted to the window
+reads differently on the next machine, and the point of pressing this is to
+make a paragraph the shape everything else already expects -- so the number is
+on the menu entry (**Note | Reformat to 80**) rather than taken from the frame.
+
+A paragraph is the run of non-blank lines around the caret, so a blank line is
+the only separator. The first line's indentation is kept and put on every line
+of the result, and the budget shrinks by it, so an indented block stays indented
+*and* still ends at 80. Everything is measured in display columns rather than
+characters -- a line of Japanese is half as many characters at the same width --
+which is why `src/Width.gren` exists and why the Unicode decoder now shares it
+rather than keeping a second copy of the table.
+
+**This is what made gren-tvision grow `setEditorCaret`.** The only way to put a
+document back is `setEditorText`, and that resets the caret to the top: press
+F8 in the ninth paragraph and you would be looking at the first. The model
+knows where the caret should go, because it did the wrapping -- it counts the
+characters of prose before the caret, rewraps, and finds the same place in the
+new lines -- but until protocol 22 there was no way to say it. Now there is,
+and the caret lands mid-word exactly where it was.
+
+It writes the file itself rather than leaving it to the autosave, and that is
+not belt and braces: `setEditorText` clears the editor's modified flag, so the
+`Edited` event that follows says nothing changed and the autosave is never
+armed. A reformat that trusted the autosave would sit unwritten until the next
+keystroke and be lost outright to an `Alt-X`.
+
+The one cost that remains is undo: `setText` drops the undo history, so a
+reformat cannot be taken back. That is a gap in the package rather than a
+choice here, and FINDINGS says so.
 
 ### A note is a file
 

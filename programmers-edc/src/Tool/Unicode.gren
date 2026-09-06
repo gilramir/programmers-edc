@@ -46,6 +46,7 @@ import Math
 import String
 import Theme exposing (Inks)
 import Tui exposing (Hue(..), MenuItem(..), Span, View(..))
+import Width
 
 
 -- NAMES
@@ -1473,36 +1474,13 @@ lineFor model piece =
                         -- CJK character or an emoji those are different
                         -- numbers.
                         ++ glyphOf point
-                        ++ String.repeat (noteAt - charAt - widthOf point) " "
+                        ++ String.repeat (noteAt - charAt - Width.ofPoint point) " "
                         ++ noteOn point
 
                 Broken why ->
                     String.padRight (noteAt - pointAt) ' ' "--"
                         ++ why
            )
-
-
-{-| One column or two, and the same answer Turbo Vision and the terminal will
-give. Only the ranges that matter here: a decoder's output is mostly ASCII,
-CJK and emoji, and everything in between is one column wide.
--}
-widthOf : Int -> Int
-widthOf point =
-    if
-        (point >= 0x1100 && point <= 0x115F)
-            || (point >= 0x2E80 && point <= 0xA4CF)
-            || (point >= 0xAC00 && point <= 0xD7A3)
-            || (point >= 0xF900 && point <= 0xFAFF)
-            || (point >= 0xFE30 && point <= 0xFE6F)
-            || (point >= 0xFF00 && point <= 0xFF60)
-            || (point >= 0xFFE0 && point <= 0xFFE6)
-            || (point >= 0x1F300 && point <= 0x1F9FF)
-            || (point >= 0x20000 && point <= 0x3FFFD)
-    then
-        2
-
-    else
-        1
 
 
 bytesOf : Model -> Piece -> String

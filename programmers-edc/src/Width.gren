@@ -1,0 +1,51 @@
+module Width exposing (ofPoint, ofString)
+
+{-| How many columns a character takes on the screen.
+
+One table, shared, because there were about to be two. `Tool.Unicode` has
+needed it since it started drawing a caret under a code point, and reflowing a
+paragraph needs the same answer for the same reason: a line of Japanese is
+half as many characters as a line of English at the same width, and anything
+that counts characters instead gets it wrong in the direction that looks like
+a bug in the terminal.
+
+Only the ranges that matter to this program. A hex dump, an ASCII chart and a
+note are mostly ASCII, CJK and emoji, and everything in between is one column
+wide -- which is also the answer for anything unassigned, so the table is a
+list of what is *wide* rather than a decision about every code point there is.
+
+Combining marks are not here, and that is the known hole: they are zero
+columns and this calls them one. Turbo Vision does not compose them either, so
+the two agree, which is the property that matters -- what predc measures and
+what predc draws are the same number.
+
+-}
+
+
+{-| One column or two, and the same answer Turbo Vision and the terminal give.
+-}
+ofPoint : Int -> Int
+ofPoint point =
+    if
+        (point >= 0x1100 && point <= 0x115F)
+            || (point >= 0x2E80 && point <= 0xA4CF)
+            || (point >= 0xAC00 && point <= 0xD7A3)
+            || (point >= 0xF900 && point <= 0xFAFF)
+            || (point >= 0xFE30 && point <= 0xFE6F)
+            || (point >= 0xFF00 && point <= 0xFF60)
+            || (point >= 0xFFE0 && point <= 0xFFE6)
+            || (point >= 0x1F300 && point <= 0x1F9FF)
+            || (point >= 0x20000 && point <= 0x3FFFD)
+    then
+        2
+
+    else
+        1
+
+
+{-| The width of a whole string, which is what wrapping measures against and
+is not `String.count`.
+-}
+ofString : String -> Int
+ofString text =
+    String.foldl (\char total -> total + ofPoint (Char.toCode char)) 0 text

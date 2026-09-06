@@ -248,6 +248,19 @@ handleEvent event model =
             , command = Tui.dialog tui (searchDialog model True)
             }
 
+        -- Go to line, which is the third thing in this program that needs
+        -- something only the model can produce -- a number, asked for in a
+        -- dialog -- and the only one whose answer is a place rather than a
+        -- string.
+        --
+        -- It exists because `setEditorText` puts the caret at the top, and for
+        -- a long time that was the only thing that could move it: an editor's
+        -- caret belonged to the keyboard and to nothing else. A program that
+        -- reads a document, rewrites part of it and puts it back could not put
+        -- the reader back with it.
+        Command "goto" ->
+            { model = model, command = Tui.dialog tui (gotoDialog model) }
+
         -- And search again is this program issuing the same command twice.
         -- Turbo Vision's own Ctrl-L works too and is not told anything: the
         -- binding leaves TEditor's static search string set to whatever was
@@ -265,6 +278,32 @@ handleEvent event model =
         DialogClosed closed ->
             if closed.cmd /= "ok" then
                 { model = model, command = Cmd.none }
+
+            else if closed.id == "goto" then
+                when String.toInt (String.trim (Tui.text "line" closed.values)) is
+                    Just wanted ->
+                        { model = { model | status = "" }
+                        -- **One off, on purpose.** A person counts lines from
+                        -- one and `setEditorCaret` counts from zero, because
+                        -- the number it takes is the number `Edited` reports
+                        -- and that one is an index. The conversion belongs
+                        -- here, where the word "line" means what it means to
+                        -- the person who typed it.
+                        --
+                        -- Nothing is checked against the length of the
+                        -- document, and nothing needs to be: a line past the
+                        -- end is the last line, and the caption will say which
+                        -- line that turned out to be.
+                        , command =
+                            Tui.setEditorCaret tui
+                                "body"
+                                { line = max 0 (wanted - 1), column = 0 }
+                        }
+
+                    Nothing ->
+                        { model = { model | status = "not a line number" }
+                        , command = Cmd.none
+                        }
 
             else
                 let
@@ -331,6 +370,66 @@ runSearch it =
             , matchCase = it.matchCase
             , wholeWords = it.wholeWords
             }
+
+
+{-| Ask for a line number.
+
+`allowed` is the digits and nothing else -- a `TFilterValidator`, so a letter
+never arrives rather than being complained about afterwards -- which leaves
+`String.toInt` with only one way to fail: an empty field.
+-}
+gotoDialog : Model -> Tui.DialogSpec
+gotoDialog model =
+    let
+        width =
+            clamp 24 model.desk.cols 40
+
+        height =
+            clamp 8 model.desk.rows 9
+
+        left =
+            max 0 ((model.desk.cols - width) // 2)
+
+        top =
+            max 0 ((model.desk.rows - height) // 2)
+    in
+    { id = "goto"
+    , title = "Go to line"
+    , rect = { x1 = left, y1 = top, x2 = left + width, y2 = top + height }
+    , views =
+        -- The field before the label, because a `Label` names a view that has
+        -- to have been listed already.
+        [ Tui.InputLine
+            { id = "line"
+            , rect = { x1 = 9, y1 = 2, x2 = width - 3, y2 = 3 }
+            , maxLen = 9
+            , value = String.fromInt (model.line + 1)
+            , allowed = Just "0123456789"
+            }
+        , Tui.Label
+            { id = "goto.label"
+            , rect = { x1 = 3, y1 = 2, x2 = 9, y2 = 3 }
+            , text = "~L~ine"
+            , for = "line"
+            }
+        , Tui.Button
+            { id = "goto.ok"
+            , rect = { x1 = width - 28, y1 = height - 4, x2 = width - 16, y2 = height - 2 }
+            , title = "~O~K"
+            , cmd = "ok"
+            , isDefault = True
+            , takesFocus = True
+            }
+        , Tui.Button
+            { id = "goto.cancel"
+            , rect = { x1 = width - 15, y1 = height - 4, x2 = width - 3, y2 = height - 2 }
+            , title = "Cancel"
+            , cmd = "cancel"
+            , isDefault = False
+            , takesFocus = True
+            }
+        ]
+    }
 
 
 {-| One dialog for both, because Replace is Find with one more field. Four
@@ -490,6 +589,8 @@ view model =
                 [ Item { title = "~F~ind...", cmd = "find", key = "", shortcut = "" }
                 , Item { title = "~R~eplace...", cmd = "replace", key = "", shortcut = "" }
                 , Item { title = "~S~earch again", cmd = "searchAgain", key = "F7", shortcut = "F7" }
+                , Tui.Separator
+                , Item { title = "~G~o to line...", cmd = "goto", key = "F4", shortcut = "F4" }
                 ]
             }
         ]
