@@ -7188,3 +7188,70 @@ later, so the fix is structural rather than careful: the copy checks filter to
 `ZZ_` first, and nothing else in any environment begins that way. **A check
 that names a position in a list has to name a list the driver decides the whole
 of.**
+
+## The check the suite could not make: is anything on this screen invisible?
+
+Every bug predc found is written up above, one section each. Read them
+together and most of them are not "feature X does not work" -- they are a
+property nothing asserted. The colour one is the clearest of them: the hex
+viewer's offset column was `ink Blue` on a blue window, `fg=34 bg=44`,
+perfectly invisible, and it stayed that way for a month with a green suite,
+because no check asserted on cells nobody was looking at. A colour that stops
+contrasting still draws.
+
+So the assertion is now made by the harness rather than by a driver.
+`Screen.invisible_cells` returns every cell holding a glyph drawn in the colour
+it is drawn on, `Pty.display` runs it over every screen it replays, and
+`Checks.report` -- which every driver in the repo already calls -- fails if
+anything accumulated. Forty-six suites gained the check and none of them had
+to be edited.
+
+### Where it hooks in is the whole of why it is free
+
+`display()` is memoised: a replay is a pure function of the bytes and the size,
+so the scan runs once per distinct stream rather than once per check. And every
+driver reads the screen for every assertion it makes, so "every screen a driver
+looked at" is very nearly "every screen the program drew" without a single
+`app.render()` being added anywhere. An opt-in version of this would have been
+called in the places somebody already suspected, which are the places it is not
+needed.
+
+### Comparing two colours is only possible when they share a vocabulary
+
+TVision emits `30`-`37` and `90`-`97` for an ink and `40`-`47` and `100`-`107`
+for a ground, so the same colour is the same number ten apart. A theme sets
+both halves from one palette and both go out as `38;2;r;g;b`, so equal tuples
+are the whole of that case. A *mixed* pair -- an indexed ink on a 24-bit ground
+-- is not comparable and is not guessed at; it does not arise, because a theme
+colours a window's ground and its text together. `None` is the terminal's own
+default and two defaults are readable by definition.
+
+A space is not a glyph. The desktop outside a window is acres of one colour on
+the same colour and none of it is a defect; a border, a digit or a letter is.
+
+### And a sweep of the two grounds nobody was walking
+
+The invariant found nothing on the existing suites, which is what it should do:
+every instance it is named after has been fixed. What it needed was screens
+nobody had swept. A fresh `HOME` gets the Borland scheme, so all forty-four
+drivers were walking one ground -- and a scheme change moves the ground out
+from under every ink in the program at once, because a palette recolours what
+gren-tvision draws and cannot reach a `Tui.Span` at all.
+
+`ink_common.py` opens all nine tools under one scheme and asserts almost
+nothing about them; `drive_ink_gren.py` and `drive_ink_midnight.py` are four
+lines each. Two suites and not three, because Borland is what everything else
+already covers. Gren is the one worth having: it is the only light scheme, and
+every ink the other two use is a bright hue.
+
+Two things the sweep needed to be honest. It counts the distinct `(ink,
+ground)` pairs on each screen, because a driver that opened nine *empty*
+windows and found nothing invisible would pass on a program with no colour in
+it. And it clicks the tools' entries in the **Tools** pull-down by name rather
+than pressing their `Alt` keys, which is not fussiness: the first version
+pressed `Alt-C` for the time converter with the calculator already open, and
+got the calculator's `~C~alc` pull-down instead. A tool's own menu goes on the
+bar while it is open and a bar title claims its `Alt` letter for as long as it
+is there. That is a defect in predc rather than in the sweep -- it is written
+up below -- but a sweep whose job is to walk everything must not be the thing
+that decides what order everything opens in.

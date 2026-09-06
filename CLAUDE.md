@@ -139,6 +139,14 @@ palette and reads the same either way. A disabled **menu entry** is checked by
 its colour, compared against an enabled entry's, because an entry is only ever
 looked at, so how it looks is what it does.
 
+**Every driver already checks that nothing it saw was invisible**, and it costs
+nothing to keep. `Pty.display` scans each screen it replays for a glyph drawn
+in the colour behind it, and `Checks.report` fails on what accumulated — so a
+span whose ink stopped contrasting with its ground fails here rather than in
+somebody's eyes. Nothing has to be added to a new driver. What *is* worth
+adding, whenever a driver opens a window it is not otherwise asserting colour
+about, is a look at the screen: the sweep only sees screens a driver read.
+
 The fastest layer is `gren-tvision-runtime/test/diff.test.js`: pure-logic tests
 of the patch paths against a fake binding, in milliseconds and with no terminal.
 Anything about *what the differ decides to call* belongs there rather than in a

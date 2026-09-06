@@ -33,6 +33,41 @@ ANSI = re.compile(
 )
 
 
+# Every `Pty` ever built, so that `Checks.report` can ask all of them what they
+# drew. A driver that opens two applications -- `drive_env.py` opens a second
+# one at a different size -- gets both swept without saying so.
+_ptys = []
+
+
+def same_colour(fg, bg):
+    """Is a glyph in `fg` invisible on a background of `bg`?
+
+    The two halves are written in different vocabularies and only the pairs
+    that share one can be compared. Indexed: TVision emits 30-37 and 90-97 for
+    a foreground and 40-47 and 100-107 for a background, so the same colour is
+    the same number ten apart -- `ink Blue` on a blue window is `fg=34 bg=44`,
+    which is the pair that was on the screen for a month. 24-bit: a theme sets
+    both halves from the same palette, so equal tuples are the whole of it, and
+    `("xterm", n)` compares the same way.
+
+    A mixed pair -- an indexed ink on a 24-bit ground -- is not comparable and
+    is not guessed at. It does not arise: a theme colours a window's ground and
+    its text together, so either both halves went out as `38;2;r;g;b` or
+    neither did.
+
+    `None` is the terminal's own default, which is whatever the user's terminal
+    is set to. Two defaults are a readable pair by definition, and one default
+    against a colour cannot be judged from here.
+    """
+    if fg is None or bg is None:
+        return False
+    if isinstance(fg, tuple) and isinstance(bg, tuple):
+        return fg == bg
+    if isinstance(fg, int) and isinstance(bg, int):
+        return bg == fg + 10
+    return False
+
+
 class Pty:
     def __init__(self, argv, env=None, cwd=None, size=(COLS, ROWS)):
         env = env or dict(os.environ)
@@ -55,6 +90,10 @@ class Pty:
         self.buf = b""
         # The last replay, and what it was a replay of. See `display`.
         self.replayed = None
+        # Every distinct (glyph, ink, ground) this application has ever drawn
+        # where the ink was the ground. See `display` and `Checks.report`.
+        self.invisible = {}
+        _ptys.append(self)
 
     def resize(self, cols, rows, settle=1.5):
         """Resize the terminal, the way dragging a window's corner does.
@@ -123,6 +162,17 @@ class Pty:
         # repaints inside the current size, so crop to it.
         cropped = screen.crop(self.cols, self.rows)
         self.replayed = (key, cropped)
+        # Every screen this driver looks at is also asked whether anything on
+        # it is invisible. Free, because the replay is memoised and this runs
+        # once per distinct stream; universal, because a driver reads the
+        # screen for every check it makes and does not have to opt in. The
+        # cells nobody asserted on are exactly where a colour that stopped
+        # contrasting has always hidden.
+        for col, row, ch, fg, bg in cropped.invisible_cells():
+            self.invisible.setdefault(
+                (ch, fg, bg),
+                (col, row, "".join(cropped.grid[row]).rstrip()),
+            )
         return cropped
 
     def render(self):
@@ -242,7 +292,32 @@ class Checks:
             self.failures.append(name)
         return ok
 
+    def ink(self):
+        """One check, per driver, that nothing it saw was invisible.
+
+        Run from `report`, so every driver already makes it. It is one check
+        rather than one per cell because it is one defect -- a colour chosen
+        against a ground it is no longer drawn on -- and a driver that walks
+        past it twenty times has not found twenty of them.
+
+        What it catches is the class the suite was structurally blind to. A
+        span whose ink stopped contrasting still draws, so nothing crashes and
+        nothing looks wrong except to the eye: the hex viewer's offset column
+        was `fg=34 bg=44` for a month, and no check failed because no check
+        asserted on cells nobody was looking at.
+        """
+        seen = []
+        for pty in _ptys:
+            # By the printed form: a key holds an int for an indexed colour
+            # and a tuple for a 24-bit one, and sorting those against each
+            # other is a TypeError rather than an order.
+            for (ch, fg, bg), (col, row, line) in sorted(pty.invisible.items(), key=str):
+                seen.append(f"{ch!r} fg={fg} bg={bg} at ({col},{row}) in {line!r}")
+        self("nothing was drawn in the colour behind it", not seen,
+             "; ".join(seen[:6]) + (f" ... and {len(seen) - 6} more" if len(seen) > 6 else ""))
+
     def report(self, app=None, extra=None):
+        self.ink()
         print()
         if extra:
             print(extra)
@@ -337,6 +412,26 @@ class Screen:
     def bg_at(self, col, row):
         """The background colour of one cell: 40-47, 100-107, or None."""
         return self.attrs[row][col][1]
+
+    def invisible_cells(self):
+        """Every cell holding a glyph drawn in the colour it is drawn on.
+
+        `(col, row, glyph, fg, bg)` each. A space is not a glyph: the whole
+        screen outside a window is spaces in some colour on the same colour's
+        ground and none of it is a defect. Everything else is -- a border, a
+        digit, a letter -- because a character nobody can see is a character
+        that was not drawn, and it draws exactly as happily as one that can.
+        """
+        found = []
+        for row in range(self.rows):
+            for col in range(self.cols):
+                ch = self.grid[row][col]
+                if ch == " ":
+                    continue
+                fg, bg = self.attrs[row][col]
+                if same_colour(fg, bg):
+                    found.append((col, row, ch, fg, bg))
+        return found
 
     def fg_run(self, col, row, width):
         """The foreground colours of `width` cells, left to right."""
