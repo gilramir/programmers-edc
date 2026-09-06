@@ -1020,17 +1020,15 @@ colour scheme and the calendar's week numbering are. It is written the moment
 you switch, because predc is a program people leave open and close with the
 window.
 
-That key is written differently from its neighbours and the difference is a
-workaround. `Toml.Edit.introduce` adds a blank line above the block and
-`Toml.Edit.remove` does not take it away again, so the usual
-write-it-or-remove-it pair leaves one more empty line in the file every time
-the setting goes back to its default. `weeks` gets away with that because it is
-changed from a menu once in a blue moon; `chart` is a key you can hold down. So
-choosing the list *introduces* the key with its explanation, and choosing the
-grid back *sets* it to `grid` rather than removing it -- and `Edit.member` is
-what keeps the other promise, that a file which has never had a `chart` key
-does not grow one because somebody looked at the chart. The bug is gren-toml's
-and is written up there.
+It is written the way `weeks` is -- the key appears when you choose the list
+and goes away again, with its explanation, when you choose the grid -- and that
+was a workaround for a while. `Toml.Edit.introduce` wrote a blank line above
+the block and `Toml.Edit.remove` left it behind, so the pair added an empty
+line to the file per cycle: fine for a menu entry touched once in a blue moon
+and not for a key you can hold `Tab` down on. predc worked around it by never
+removing the key. gren-toml 1.2.0's `remove` takes the blank line, the
+workaround is gone, and `drive_ascii.py` asserts what it bought: toggling three
+times leaves the file byte for byte as it was written.
 
 **The rows come off the rectangle, not the other way round.** The first version
 computed a row count from the desktop and the window height from the row count,
@@ -1209,11 +1207,10 @@ weeks = "us"
 chart = "list"
 ```
 
-Only `theme` is always there. `timezones` and `weeks` are written when they
-stop being the default and taken out again when they go back to it, so a file
-you have never touched stays a file with one key in it. `chart` is written the
-same way round but never removed -- see the note under the ASCII chart, and the
-gren-toml bug it works around.
+Only `theme` is always there. The other three are written when they stop being
+the default and taken out again when they go back to it, so a file you have
+never touched stays a file with one key in it, and a setting you turned on and
+off again leaves the file exactly as it was.
 
 It was JSON and is now TOML, for the comments -- both the ones above, which
 predc writes when it invents a key, and the ones you write yourself. Which
@@ -1231,17 +1228,30 @@ not written over.
 
 Setting a value that has not changed does nothing at all, which matters most
 for the key predc is *not* changing. Setting a value replaces the whitespace
-inside it, so a list you spread over four lines with a note against each zone:
+inside it, so a list you spread over four lines with a note against each zone
+would otherwise come back as one line -- on the key you had not touched,
+because you picked a colour.
+
+**And the zone list is changed an element at a time**, which is the same
+promise on the key predc *is* changing. Writing a whole array flattens it,
+because a new array has no formatting, so adding one zone to this:
 
 ```toml
 timezones = [
-  "Asia/Seoul",     # them
-  "America/Chicago" # me
+  "Asia/Seoul",      # them
+  "America/Chicago", # me
+  "Europe/Oslo",     # the other office
 ]
 ```
 
-would otherwise come back as one line -- on the key you had not touched,
-because you picked a colour.
+used to cost all four lines and all three notes. `Config.zonesIn` works out
+which zones went, which arrived and which merely moved, and asks gren-toml for
+exactly that: `removeAt` takes a zone out and its note with it, `insertAt` puts
+a new one where it belongs with no note of its own, and `moveAt` carries a zone
+*and* its note to a new position -- which is what **Move Up** needs, and what
+could not be written at all before gren-toml 1.2.0. A note can only ever be
+against the zone it was written for; `drive_time_picker.py` drives all three
+against a file written by hand.
 
 The one thing it will not do is repair a file. A TOML syntax error means predc
 starts in the defaults and then leaves the file completely alone: a typo is

@@ -2,7 +2,8 @@
     "type": "application",
     "platform": "node",
     "source-directories": [
-        "src"
+        "src",
+        "../src"
     ],
     "gren-version": "0.6.6",
     "dependencies": {
@@ -10,9 +11,11 @@
             "gilramir/gren-argparse": "2.0.0",
             "gilramir/gren-bignum": "1.0.0",
             "gilramir/gren-toml": "1.1.0",
-            "gilramir/gren-tvision": "local:../gren-tvision",
+            "gilramir/gren-tvision": "local:../../gren-tvision",
+            "gilramir/gren-unit-node": "1.1.0",
             "gren-lang/core": "7.4.2",
-            "gren-lang/node": "6.1.0"
+            "gren-lang/node": "6.1.0",
+            "gren-lang/test": "5.0.0"
         },
         "indirect": {
             "gilramir/gren-civil-time": "1.0.0",

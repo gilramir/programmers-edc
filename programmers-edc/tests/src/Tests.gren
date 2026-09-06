@@ -1,0 +1,36 @@
+module Tests exposing (main)
+
+{-| Unit tests for the parts of predc that are a value rather than a screen.
+
+There is one suite so far and it is the config file, which earned it: every
+other decision in this program can be read off a terminal by a pty driver in
+`../test`, and what `Config.apply` decides is a sequence of `Toml.Edit` calls
+whose result is a *file*. A driver can look at that file, and does -- but it
+can only reach the states the user interface can produce, which is a small and
+lopsided sample of them. Duplicates in a list, a value of the wrong type under
+a key predc owns, a list reversed in one save: all real, none reachable by
+clicking.
+
+**The module is `Tests` and not `Main`**, which is not a style choice: this
+application's source path is `src` *and* `../src`, so that the suite can reach
+predc's own modules, and predc has a `Main` of its own. Calling this one `Main`
+too compiled *predc* into `app` -- which ran, found no terminal and no
+arguments, and exited 0 in silence. A test suite that passes by not running is
+the worst possible failure, so the name is the fix and this paragraph is the
+reason.
+
+Run with `./run.sh`, or as part of `devbox run check`.
+-}
+
+import ConfigTests exposing (configSuite)
+import Node
+import Test.Runner.UnitNode as U
+
+
+main : Node.SimpleProgram a
+main =
+    U.run
+        { name = "predc"
+        , version = "0.1.0"
+        , suites = [ configSuite ]
+        }

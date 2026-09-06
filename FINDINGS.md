@@ -966,27 +966,48 @@ keyboard mask depends on `ofSelectable`.
 Two of the canvases already written wanted `False` in hindsight -- the palette
 example paints two pictures and reads nothing.
 
-**`Toml.Edit.introduce` and `Toml.Edit.remove` are not inverses**, found by
-giving predc a setting you can toggle with a keystroke. `introduce` with
-`blankBefore = True` writes a blank line above the block and `remove` leaves it
-behind, so every write-then-unwrite cycle adds one empty line to the file:
-four toggles of the ASCII chart's mode left two. With `blankBefore = False` the
-same cycle round-trips byte for byte, which is what points at the blank line
-rather than at the comments -- and `blankBefore` is a field of the record
-`comments`/`setComments` round-trip, so by the module's own account the line
-belongs to the key's block and should go when the key goes.
+**`Toml.Edit.introduce` and `Toml.Edit.remove` were not inverses**, found by
+giving predc a setting you can toggle with a keystroke, and **fixed in
+gren-toml 1.2.0**. `introduce` with `blankBefore = True` wrote a blank line
+above the block and `remove` left it behind, so every write-then-unwrite cycle
+added one empty line to the file: four toggles of the ASCII chart's mode left
+two. `blankBefore` is a field of the record `comments`/`setComments`
+round-trip, so by the module's own account the line belonged to the key's block
+and had to go when the key went.
 
-The workaround a caller reaches for first is unsafe and is worth knowing about:
-`setComments` with `blankBefore = False` before `remove` takes the blank away,
-and its own docs say that "makes the block above join this key's -- which is to
-say it will go when this key goes". On a hand-edited config file that deletes a
-floating comment somebody wrote. So predc does not remove that key at all --
-`Edit.member` decides between `introduce` and `set` -- which is stable at the
-cost of leaving a defaulted key in the file, and is why `chart` is written
-differently from `weeks` two lines above it in the same function. The fix
-belongs in gren-toml; `/tmp/gren-toml-feature.md` has the report.
+The workaround a caller reaches for first is unsafe and is worth knowing about
+whatever version you are on: `setComments` with `blankBefore = False` before
+`remove` does take the blank away, and its own docs say that "makes the block
+above join this key's -- which is to say it will go when this key goes". On a
+hand-edited config file that deletes a floating comment somebody wrote --
+measured, not inferred. predc's own workaround was to not remove the key at all
+(`Edit.member` deciding between `introduce` and `set`), which was stable at the
+cost of leaving a defaulted key in the file; both are gone now.
 
-**`resize` is the one window field a mode change cannot patch**, which is what
+`remove` takes the blank line **only when the block leaves a blank line or the
+end of the file below it**, which is the part worth keeping in mind: a block
+with a blank on one side only keeps it, because that one separates what is
+above the key from what is below and both are staying. Two blanks around a
+block become one. A key with nothing above it takes nothing -- and the guard
+that makes that true is `Array.get -1` being the *last* element in Gren, which
+had the first key of a file asking whether the line after the final newline was
+blank. Same family as [[gren-array-negative-index]] and the third time that
+rule has cost something in this tree.
+
+**And there was no way to move an array element and take its note with it**,
+which the element API made visible rather than caused: `appendTo`, `setAt`,
+`removeAt` and `respellAt` cover adding at the end, changing in place and
+taking out, and predc's zone picker has Move Up and Move Down. A note belongs
+to the *value* -- `# me` is written against the city you live in -- and neither
+primitive could keep it there. `removeAt` then `insertAt` drops it, each of
+them correctly; walking the new order down the list with `setAt` keeps every
+note against its *position*, so a move leaves `# me` against somebody else's
+city, silently, which is worse than losing it. gren-toml 1.2.0 added `moveAt`,
+which carries the value and its note together, and `insertAt`, which puts a new
+element where it belongs rather than only on the end. `Config.zonesIn` is
+predc's use of all three and the reason a Move Up now costs no notes at all.
+
+**`resize` is the one window field a mode change cannot patch****`resize` is the one window field a mode change cannot patch**, which is what
 predc's ASCII chart found when it grew a second layout. A window's rectangle
 has `setBounds` and a canvas's lines are content, so two layouts of the same
 window are almost free -- but `resize` becomes `sizeLimits` at construction and

@@ -36,8 +36,8 @@ in three of seventeen phases) and wanted four files; time was flat (36s, then
 **And know when to stop, because that point has been passed.** Past about
 thirty suites on sixteen cores the run is no longer its slowest member: the sum
 matters again, and it puts a floor under the wall clock that no amount of
-further splitting goes below. At 52 suites (2026-09-06) the sum is 1730.6s,
-which over 16 cores is a **108.2s floor** against a 145.7s run and a 93.1s
+further splitting goes below. At 52 suites (2026-09-06) the sum is 1749.8s,
+which over 16 cores is a **109.4s floor** against a 150.2s run and a 93.1s
 slowest driver (`programmers-edc/encode`). Splitting `encode` would buy
 essentially nothing -- it is already under the floor. **The only win left is a
 *cheaper* driver, not a smaller one**, and `pump()` sleeping its whole duration
@@ -172,10 +172,21 @@ somebody's eyes. Nothing has to be added to a new driver. What *is* worth
 adding, whenever a driver opens a window it is not otherwise asserting colour
 about, is a look at the screen: the sweep only sees screens a driver read.
 
-The fastest layer is `gren-tvision-runtime/test/diff.test.js`: pure-logic tests
-of the patch paths against a fake binding, in milliseconds and with no terminal.
-Anything about *what the differ decides to call* belongs there rather than in a
-driver.
+The fastest layer is unit tests, in milliseconds and with no terminal, and
+there are three of them: `gren-tvision-runtime/test/diff.test.js` for the patch
+paths against a fake binding, `gren-tvision/tests/` for the package's pure
+logic, and `programmers-edc/tests/` for predc's. All three run in `check` as
+well as in `test`. Anything about *what the differ decides to call* belongs in
+the first, and anything about *what predc decides to write into its config
+file* in the third -- a driver can only reach the states the user interface can
+produce, which for a file is a small and lopsided sample of them.
+
+**A test application whose source path includes another program's `src` must
+not call its entry module `Main`.** `programmers-edc/tests` has `../src` on the
+path so that it can reach `Config`, and predc has a `Main`; calling the suite's
+own module `Main` too compiled *predc* into `app`, which ran, found no terminal
+and no arguments, and exited 0 in silence. A suite that passes by not running
+is the worst failure there is, so the module is `Tests`.
 
 ## Git
 

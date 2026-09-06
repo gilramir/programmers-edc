@@ -426,19 +426,20 @@ def main():
     check("so the next run opens in the list", "ASCII Chart - list" in again.render(),
           again.render().split("\n")[1])
 
-    # **The key is set back rather than removed**, which is not the rule the
-    # theme's neighbours follow. `introduce` adds a blank line above the block
-    # and `remove` does not take it away, so a toggle you can hold down would
-    # grow the file by a line every time; `gren-toml` has the bug and this has
-    # the workaround.
+    # **Toggling is a round trip on the file**, which it was not until
+    # gren-toml 1.2.0: `introduce` wrote the blank line above the block and
+    # `remove` left it behind, so a key you can toggle with a keystroke grew
+    # the file by an empty line every time. predc worked around it by never
+    # removing the key; `remove` takes the blank line now, and the file comes
+    # back exactly as it was written.
     again.send(b"\t", settle=1.5)
     again.send(b"\t", settle=1.5)
     again.send(b"\t", settle=1.5)
     again.pump(0.8)
     body = open(config).read()
-    check("toggling repeatedly does not grow the file, which the obvious "
-          "remove-when-default would have done a blank line at a time",
-          body.count("\n\n") == 1 and 'chart = "grid"' in body, repr(body))
+    check("toggling repeatedly leaves the file exactly as it was written, "
+          "rather than growing it a blank line at a time",
+          body == written, repr(body))
     again.send(b"\x1bx", settle=0.8)
     check("and that one exits cleanly", again.wait(timeout=6) == 0, "exit")
 

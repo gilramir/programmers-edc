@@ -16,3 +16,6 @@ gren-tvision/tests/app.js
 programmers-edc/.gren/
 programmers-edc/gren_packages/
 programmers-edc/main.js
+programmers-edc/tests/.gren/
+programmers-edc/tests/gren_packages/
+programmers-edc/tests/app

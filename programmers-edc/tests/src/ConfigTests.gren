@@ -1,0 +1,395 @@
+module ConfigTests exposing (configSuite)
+
+{-| What predc writes into the config file, which is the one thing in this
+program whose answer is a file.
+
+`Config.apply` is a pure function from the settings and the document that is on
+disk to the document that will be written back, so every one of these is a
+string in and a string out. That matters more here than anywhere else in predc
+for two reasons.
+
+**The file is somebody's.** It is TOML so that it can be commented, and the
+promise the module makes is that predc changes the one thing it was asked to
+change and gives everything else back byte for byte. That is a property of a
+whole file, and the way to test a property of a whole file is to write one out
+and compare it.
+
+**And the interesting states are not reachable by clicking.** The pty drivers
+in `../test` drive the real program and read the real file, which is the right
+test for "does the zone picker save what it shows". It is the wrong test for a
+list with the same zone in it twice, a `timezones` key holding a number, or a
+list reversed in a single save -- none of which the user interface can produce
+and all of which `apply` has to survive.
+
+@docs configSuite
+-}
+
+import Bytes
+import Chart
+import Config
+import Expect
+import Task
+import Test.Runner.UnitNode as U
+import Theme
+import Toml
+import Week
+
+
+{-| -}
+configSuite : U.Suite
+configSuite =
+    U.suite
+        { name = "Config"
+        , setUpSuite = U.noSuiteFixture
+        , tearDownSuite = U.noTearDown
+        , setUp = \_ -> Task.succeed {}
+        , tearDown = U.noTearDown
+        , tests =
+            zoneTests ++ keyTests ++ fileTests ++ readingTests
+        }
+
+
+-- WHAT A TEST IS
+
+
+{-| The file predc would write, given the file that is there and the settings
+it is holding.
+
+`Toml.parse` and not `parseBytes`, which is what `Config.save` uses: the byte
+order mark and the invalid-UTF-8 cases belong to the read rather than to this,
+and every source here is a string somebody could type.
+-}
+after : Config.Config -> String -> String
+after config source =
+    when Toml.parse source is
+        Ok document ->
+            Toml.toString (Config.apply config document)
+
+        Err _ ->
+            "<the source did not parse>"
+
+
+{-| The defaults, as a starting point to change one field of. Spelled out
+rather than taken from `Config.default` so that a change to the defaults does
+not quietly change what these tests are about.
+-}
+settings : Config.Config
+settings =
+    { theme = Theme.Borland
+    , timezones = Nothing
+    , weeks = Week.Iso
+    , chart = Chart.Grid
+    }
+
+
+withZones : Array String -> Config.Config
+withZones zones =
+    { settings | timezones = Just zones }
+
+
+{-| A file as its lines, which is how every fixture and every expectation here
+is written.
+
+Not Gren's `"""`, which trims the newline before the closing delimiter as well
+as the one after the opening: a fixture written that way ends without the final
+newline a text file has, and the first version of this suite spent its failures
+saying so rather than saying anything about predc.
+-}
+file : Array String -> String
+file lines =
+    String.join "\n" lines ++ "\n"
+
+
+{-| A file with a hand-arranged zone list in it: three zones, one per line,
+each with a note, all aligned to the same column. This is the shape
+`README.md` shows, and the shape every test below is about keeping.
+-}
+byHand : String
+byHand =
+    listing [ seoul, chicago, oslo ]
+
+
+seoul : String
+seoul =
+    "  \"Asia/Seoul\",      # them"
+
+
+chicago : String
+chicago =
+    "  \"America/Chicago\", # me"
+
+
+oslo : String
+oslo =
+    "  \"Europe/Oslo\",     # the other office"
+
+
+auckland : String
+auckland =
+    "  \"Pacific/Auckland\","
+
+
+{-| The same file with the zone lines replaced. Written this way so that a test
+says which lines it expects and in what order, and nothing else.
+-}
+listing : Array String -> String
+listing lines =
+    file
+        ([ "theme = \"borland\""
+         , ""
+         , "# The zones I care about."
+         , "timezones = ["
+         ]
+            ++ lines
+            ++ [ "]" ]
+        )
+
+
+-- THE ZONE LIST
+
+
+{-| The element-at-a-time edits, which are the whole reason predc asks
+gren-toml for `removeAt`, `insertAt` and `moveAt` rather than writing the array
+out. Every one of these fails against a `set` of the whole value, and most of
+them fail against any two of the three.
+-}
+zoneTests : Array (U.Test {})
+zoneTests =
+    [ U.test "a list that has not changed is not touched" <| \_ ->
+        Task.succeed
+            (Expect.equal byHand
+                (after (withZones [ "Asia/Seoul", "America/Chicago", "Europe/Oslo" ]) byHand)
+            )
+    , U.test "a zone added arrives on its own line, with no note of its own" <| \_ ->
+        Task.succeed
+            (Expect.equal (listing [ seoul, chicago, oslo, auckland ])
+                (after (withZones [ "Asia/Seoul", "America/Chicago", "Europe/Oslo", "Pacific/Auckland" ]) byHand)
+            )
+    , U.test "one added in the middle goes where it belongs, not on the end" <| \_ ->
+        Task.succeed
+            (Expect.equal (listing [ seoul, auckland, chicago, oslo ])
+                (after (withZones [ "Asia/Seoul", "Pacific/Auckland", "America/Chicago", "Europe/Oslo" ]) byHand)
+            )
+    , U.test "a zone taken out takes the note written against it" <| \_ ->
+        Task.succeed
+            (Expect.equal (listing [ seoul, oslo ])
+                (after (withZones [ "Asia/Seoul", "Europe/Oslo" ]) byHand)
+            )
+    , U.test "and the others keep theirs, and their alignment" <| \_ ->
+        Task.succeed
+            (Expect.equal (listing [ chicago ])
+                (after (withZones [ "America/Chicago" ]) byHand)
+            )
+    , U.test "a zone moved up carries its note with it" <| \_ ->
+        Task.succeed
+            (Expect.equal (listing [ seoul, oslo, chicago ])
+                (after (withZones [ "Asia/Seoul", "Europe/Oslo", "America/Chicago" ]) byHand)
+            )
+    , U.test "and so does every zone in a list reversed in one go" <| \_ ->
+        Task.succeed
+            (Expect.equal (listing [ oslo, chicago, seoul ])
+                (after (withZones [ "Europe/Oslo", "America/Chicago", "Asia/Seoul" ]) byHand)
+            )
+    , U.test "one out and one in at the same position is not a rename: the note goes with the zone that went" <| \_ ->
+        Task.succeed
+            (Expect.equal (listing [ seoul, auckland, oslo ])
+                (after (withZones [ "Asia/Seoul", "Pacific/Auckland", "Europe/Oslo" ]) byHand)
+            )
+    , U.test "emptying the list leaves the key, because empty is a thing it can say" <| \_ ->
+        Task.succeed
+            (Expect.equal (listing []) (after (withZones []) byHand))
+    , U.test "and Nothing takes the key away, because absent is a different answer" <| \_ ->
+        Task.succeed
+            (Expect.equal (file [ "theme = \"borland\"" ]) (after settings byHand))
+    , U.test "a duplicate the file has and the settings do not is the one that goes" <| \_ ->
+        Task.succeed
+            (Expect.equal (file [ "theme = \"borland\"", "z = [ \"a\", \"b\" ]", "timezones = [ \"a\" ]" ])
+                (after (withZones [ "a" ])
+                    (file [ "theme = \"borland\"", "z = [ \"a\", \"b\" ]", "timezones = [ \"a\", \"a\" ]" ])
+                )
+            )
+    , U.test "and a duplicate the settings want and the file does not is added" <| \_ ->
+        Task.succeed
+            (Expect.equal (file [ "theme = \"borland\"", "timezones = [ \"a\", \"a\" ]" ])
+                (after (withZones [ "a", "a" ]) (file [ "theme = \"borland\"", "timezones = [ \"a\" ]" ]))
+            )
+    , U.test "a one-line list stays on one line" <| \_ ->
+        Task.succeed
+            (Expect.equal (file [ "theme = \"borland\"", "timezones = [ \"a\", \"b\" ]" ])
+                (after (withZones [ "a", "b" ]) (file [ "theme = \"borland\"", "timezones = [ \"a\" ]" ]))
+            )
+    , U.test "a key predc cannot read is written over rather than diffed against" <| \_ ->
+        Task.succeed
+            (Expect.equal (file [ "theme = \"borland\"", "timezones = [\"a\"]" ])
+                (after (withZones [ "a" ]) (file [ "theme = \"borland\"", "timezones = 7" ]))
+            )
+    , U.test "a file with no list yet gets one, explained" <| \_ ->
+        Task.succeed
+            (Expect.equal True
+                (String.contains "# The time zones the time converter shows"
+                    (after (withZones [ "a" ]) (file [ "theme = \"borland\"" ]))
+                )
+            )
+    ]
+
+
+-- THE KEYS THAT COME AND GO
+
+
+{-| `weeks` and `chart` are written when they are not the default and removed
+when they go back to it, which is a round trip only because gren-toml 1.1.0's
+`remove` takes the blank line `introduce` wrote. predc worked around that for a
+while; these are what say the workaround is not needed.
+-}
+keyTests : Array (U.Test {})
+keyTests =
+    [ U.test "a setting at its default writes no key at all" <| \_ ->
+        Task.succeed
+            (Expect.equal (file [ "theme = \"borland\"" ]) (after settings (file [ "theme = \"borland\"" ])))
+    , U.test "the chart's list mode writes one, with a sentence saying what it is" <| \_ ->
+        Task.succeed
+            (Expect.equal True
+                (String.contains "chart = \"list\""
+                    (after { settings | chart = Chart.List } (file [ "theme = \"borland\"" ]))
+                )
+            )
+    , U.test "and going back to the grid leaves the file exactly as it was" <| \_ ->
+        Task.succeed
+            (Expect.equal "theme = \"borland\"\n"
+                (after settings
+                    (after { settings | chart = Chart.List } (file [ "theme = \"borland\"" ]))
+                )
+            )
+    , U.test "which is true however many times it is done" <| \_ ->
+        Task.succeed
+            (Expect.equal (file [ "theme = \"borland\"" ])
+                (cycled 4 (file [ "theme = \"borland\"" ]))
+            )
+    , U.test "the week rule is the same shape" <| \_ ->
+        Task.succeed
+            (Expect.equal (file [ "theme = \"borland\"" ])
+                (after settings
+                    (after { settings | weeks = Week.Us } (file [ "theme = \"borland\"" ]))
+                )
+            )
+    , U.test "and two settings on at once are two keys" <| \_ ->
+        Task.succeed
+            (Expect.equal True
+                (let
+                    written =
+                        after { settings | weeks = Week.Us, chart = Chart.List } (file [ "theme = \"borland\"" ])
+                 in
+                 String.contains "weeks = \"us\"" written && String.contains "chart = \"list\"" written
+                )
+            )
+    ]
+
+
+{-| On, off, on, off. Each pair is an `introduce` and a `remove`, which is
+where the blank line used to pile up.
+-}
+cycled : Int -> String -> String
+cycled times source =
+    Array.foldl
+        (\_ sofar -> after settings (after { settings | chart = Chart.List } sofar))
+        source
+        (Array.range 1 times)
+
+
+-- WHAT IT WRITES, IT READS BACK
+
+
+{-| The other half, and the one that makes the rest worth having: `apply`
+decides what goes into the file and `parse` decides what a file means, and the
+two are only right *together*. A key written under a name the decoder does not
+read is a setting that silently stops being remembered, and every test above
+would still pass.
+
+The upgrade case is here for the same reason it is in the module's own header:
+a file written by the version before this one has fewer keys than this one
+looks for, and reading it must keep the ones it does have.
+-}
+readingTests : Array (U.Test {})
+readingTests =
+    [ U.test "the defaults come back as the defaults" <| \_ ->
+        Task.succeed (Expect.equal settings (readBack settings))
+    , U.test "and so does every setting turned off its default at once" <| \_ ->
+        Task.succeed (Expect.equal loud (readBack loud))
+    , U.test "an emptied zone list is not a missing one" <| \_ ->
+        Task.succeed
+            (Expect.equal (Just []) (readBack (withZones [])).timezones)
+    , U.test "and a missing one is not an empty one" <| \_ ->
+        Task.succeed (Expect.equal Nothing (readBack settings).timezones)
+    , U.test "a file from an older predc keeps the keys it has" <| \_ ->
+        Task.succeed
+            (Expect.equal { settings | theme = Theme.Midnight }
+                (read (file [ "theme = \"midnight\"" ]))
+            )
+    , U.test "a key holding the wrong shape is its default, not a thrown-away file" <| \_ ->
+        Task.succeed
+            (Expect.equal { settings | theme = Theme.Midnight }
+                (read (file [ "theme = \"midnight\"", "weeks = 7", "chart = []" ]))
+            )
+    , U.test "and a word nobody recognises is its default too" <| \_ ->
+        Task.succeed
+            (Expect.equal settings
+                (read (file [ "theme = \"chartreuse\"", "weeks = \"lunar\"", "chart = \"pie\"" ]))
+            )
+    ]
+
+
+{-| Every setting off its default, which is the config with the most to lose.
+-}
+loud : Config.Config
+loud =
+    { theme = Theme.Gren
+    , timezones = Just [ "Asia/Seoul", "America/Chicago" ]
+    , weeks = Week.Us
+    , chart = Chart.List
+    }
+
+
+{-| Write a config into an empty document and read the file back.
+-}
+readBack : Config.Config -> Config.Config
+readBack config =
+    read (after config "")
+
+
+read : String -> Config.Config
+read source =
+    Config.parse (Bytes.fromString source)
+
+
+-- THE FILE AROUND IT ALL
+
+
+fileTests : Array (U.Test {})
+fileTests =
+    [ U.test "a comment of your own is not predc's to touch" <| \_ ->
+        Task.succeed
+            (Expect.equal True
+                (String.contains "# mine, and predc leaves it alone"
+                    (after { settings | theme = Theme.Midnight }
+                        (file [ "# mine, and predc leaves it alone", "theme = \"borland\"" ])
+                    )
+                )
+            )
+    , U.test "and a key predc has never heard of survives a save" <| \_ ->
+        Task.succeed
+            (Expect.equal True
+                (String.contains "future = 1"
+                    (after { settings | theme = Theme.Midnight } (file [ "theme = \"borland\"", "future = 1" ]))
+                )
+            )
+    , U.test "the theme is the one key always written, so a new file gets it" <| \_ ->
+        Task.succeed
+            (Expect.equal True (String.contains "theme = \"borland\"" (after settings "")))
+    , U.test "and a save that changes nothing changes nothing" <| \_ ->
+        Task.succeed
+            (Expect.equal byHand
+                (after (withZones [ "Asia/Seoul", "America/Chicago", "Europe/Oslo" ])
+                    (after (withZones [ "Asia/Seoul", "America/Chicago", "Europe/Oslo" ]) byHand)
+                )
+            )
+    ]

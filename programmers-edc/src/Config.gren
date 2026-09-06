@@ -1,4 +1,4 @@
-module Config exposing (Config, default, load, save, where_)
+module Config exposing (Config, apply, default, load, parse, save, where_)
 
 {-| What predc remembers between runs, which was one field and is now two.
 
@@ -124,7 +124,15 @@ load permission path =
                 |> Task.onError (\_ -> Task.succeed default)
 
 
-{-| `Toml.Decode.fromBytes` and not `Toml.parseBytes` followed by
+{-| What a file means, which is the other half of [`apply`](#apply).
+
+Exposed for `tests/`, and the two of them together are why: what predc writes
+it has to be able to read back, and that is one assertion when both ends are
+reachable and none when either is not. A key written under a name the decoder
+does not read is a setting that quietly stops being remembered, and nothing
+that only looked at the writing would notice.
+
+`Toml.Decode.fromBytes` and not `Toml.parseBytes` followed by
 `fromDocument`, because reading is all this does: the document the parse built
 is thrown away here, and `save` reads it again from the file rather than being
 handed a copy that went stale while predc was open. Bytes rather than a
@@ -233,8 +241,186 @@ write permission path document =
         |> Task.onError (\_ -> Task.succeed {})
 
 
+{-| What the file says right now, which only the zone list needs.
+
+`Toml.Decode.fromDocument` over the decoder this module already has, rather
+than a walk down `Toml.Ast`: the question is "what zones does this file list",
+and that is exactly what the decoder answers. A failure is the empty answer,
+which is right -- `save` has already established that the document parsed, so
+the only way this fails is a `timezones` key holding something that is not an
+array of strings, and a value predc cannot read is a value it should not be
+diffing against.
+-}
+reading : Toml.Document -> Maybe (Array String)
+reading document =
+    Decode.fromDocument decoder document
+        |> Result.map .timezones
+        |> Result.withDefault Nothing
+
+
+{-| The zone list, **one element at a time**.
+
+`Edit.set` writes a whole array, and a whole array has no formatting -- so the
+line breaks, the indentation and the note somebody wrote against each zone all
+went the first time predc changed the list. Which is the one thing this module
+promises not to do, and it did it on the key most likely to have been arranged
+by hand: `README.md` shows exactly that four-line list with a comment on each
+zone. `Toml.Edit`'s element functions are gren-toml 1.2.0's answer, and this is
+the whole of using them.
+
+**Three verbs, and each is the one that keeps a note where it belongs.**
+`removeAt` takes a zone out and its note with it. `insertAt` puts a new one at
+the position it belongs at, with no note, because a note is written against a
+value and this value is new. `moveAt` carries a zone *and* its note to a new
+position, which is the one the picker's Move Up and Move Down need and the one
+that could not be written at all until 1.2.0 -- `removeAt` then `insertAt`
+drops the note, each of them correctly, and walking the new order down the list
+with `setAt` keeps every note against its *position*, so a move would leave
+`# me` written against somebody else's city.
+
+The plan is made in three passes over a list of a handful, which is not a
+number worth being clever about: take out what is no longer wanted, then walk
+the wanted order and either move the zone that belongs there up to it or insert
+it if it is new. `keeping` counts duplicates rather than testing membership, so
+two of the same zone are two zones.
+
+-}
+zonesIn : Maybe (Array String) -> Maybe (Array String) -> Toml.Document -> Toml.Document
+zonesIn wanted current document =
+    when wanted is
+        -- `Nothing` is "never configured", which is the absence of the key
+        -- rather than an empty array -- TOML has no null and neither does the
+        -- decoder above.
+        Nothing ->
+            Edit.remove [ "timezones" ] document
+
+        Just want ->
+            when current is
+                -- No list in the file yet, so there is no formatting to keep
+                -- and this is the one write that is a whole array. It is also
+                -- the only place the explanation is written, which is what
+                -- `introduce` is for.
+                Nothing ->
+                    Edit.introduce [ "timezones" ]
+                        { blankBefore = True
+                        , leading =
+                            [ " The time zones the time converter shows, in the order it"
+                            , " shows them. Delete the key to go back to this machine's own"
+                            , " zone; an empty list shows UTC and POSIX alone."
+                            ]
+                        , trailing = Nothing
+                        }
+                        (Edit.array (Array.map Edit.string want))
+                        document
+
+                Just have ->
+                    let
+                        thinned =
+                            keeping have want
+                    in
+                    document
+                        -- Highest index first, so that taking one out does not
+                        -- move the next one out from under its own index.
+                        |> (\started ->
+                                Array.foldr
+                                    (\index sofar -> Edit.removeAt [ "timezones" ] index sofar)
+                                    started
+                                    thinned.dropping
+                           )
+                        |> placing want 0 thinned.keeping
+
+
+{-| Which of the zones already in the file are still wanted, and which indices
+are not.
+
+Counted rather than tested: `left` is what is still unaccounted for, and a zone
+matching one of them consumes it. Two copies of the same zone are therefore two
+zones, and the second is dropped when only one is wanted -- which membership
+would have got wrong in the direction that loses somebody's note.
+-}
+keeping : Array String -> Array String -> { keeping : Array String, dropping : Array Int }
+keeping have want =
+    Array.foldl
+        (\zone state ->
+            when Array.findFirst (\it -> it == zone) state.left is
+                Just found ->
+                    { state
+                        | at = state.at + 1
+                        , left = without found.index state.left
+                        , keeping = Array.pushLast zone state.keeping
+                    }
+
+                Nothing ->
+                    { state
+                        | at = state.at + 1
+                        , dropping = Array.pushLast state.at state.dropping
+                    }
+        )
+        { at = 0, left = want, keeping = [], dropping = [] }
+        have
+        |> (\state -> { keeping = state.keeping, dropping = state.dropping })
+
+
+{-| Put the zones that are left into the order they are wanted in, one position
+at a time, carrying the file along with the model of it.
+
+Nothing can be earlier than the position being filled: everything before it is
+already the zone that belongs there, and `keeping` has consumed one wanted
+entry per zone kept. So a zone that is not here either is further down the list
+and moves up, or is not in the file at all and is inserted.
+-}
+placing : Array String -> Int -> Array String -> Toml.Document -> Toml.Document
+placing want index have document =
+    when Array.get index want is
+        Nothing ->
+            document
+
+        Just zone ->
+            if Array.get index have == Just zone then
+                placing want (index + 1) have document
+
+            else
+                when Array.findFirst (\it -> it == zone) (Array.dropFirst (index + 1) have) is
+                    Just found ->
+                        let
+                            from =
+                                index + 1 + found.index
+                        in
+                        placing want
+                            (index + 1)
+                            (into index zone (without from have))
+                            (Edit.moveAt [ "timezones" ] from index document)
+
+                    Nothing ->
+                        placing want
+                            (index + 1)
+                            (into index zone have)
+                            (Edit.insertAt [ "timezones" ] index (Edit.string zone) document)
+
+
+{-| The array without the element at an index. Written out because
+`Array.removeAt` does not exist and `Array.get -1` is the last element, so
+nothing here may be handed a negative one.
+-}
+without : Int -> Array a -> Array a
+without index items =
+    Array.takeFirst index items ++ Array.dropFirst (index + 1) items
+
+
+{-| The array with an element put in at an index.
+-}
+into : Int -> a -> Array a -> Array a
+into index item items =
+    Array.takeFirst index items ++ Array.pushFirst item (Array.dropFirst index items)
+
+
 {-| The config as changes to a document, which may be a document with nothing
 in it.
+
+Exposed for `tests/`, which is the only caller outside this module and the
+reason it can be tested at all: everything else here is a `Task`, and this is
+the whole of what predc decides to write. What a driver can reach through the
+user interface is a small and lopsided sample of what this has to get right.
 
 `Toml.Edit.introduce` rather than `set`, because a key predc invents should
 arrive with a sentence saying what it is for -- and should arrive with it
@@ -268,22 +454,11 @@ apply config document =
             , trailing = Nothing
             }
             (Edit.string (Theme.toKey config.theme))
-        |> (when config.timezones is
-                Just zones ->
-                    Edit.introduce [ "timezones" ]
-                        { blankBefore = True
-                        , leading =
-                            [ " The time zones the time converter shows, in the order it"
-                            , " shows them. Delete the key to go back to this machine's own"
-                            , " zone; an empty list shows UTC and POSIX alone."
-                            ]
-                        , trailing = Nothing
-                        }
-                        (Edit.array (Array.map Edit.string zones))
-
-                Nothing ->
-                    Edit.remove [ "timezones" ]
-           )
+        -- The zone list is the one key predc changes *part* of, so it is the
+        -- one that reads the document before writing it: what is already there
+        -- decides which elements have to move. Everything above and below
+        -- writes a whole value and needs to know nothing.
+        |> zonesIn config.timezones (reading document)
         -- Written only when it is not the default, which is `timezones`'s rule
         -- rather than `theme`'s and is the right one here. predc's bargain with
         -- a hand-written file is that it changes the one thing it was asked to
@@ -308,46 +483,34 @@ apply config document =
                         }
                         (Edit.string (Week.toKey other))
            )
-        -- **Introduced or set, never removed**, which is not the rule the two
-        -- keys above follow and is the right one for a key you can toggle with
-        -- a keystroke.
+        -- The same rule as the weeks, and for the same reason: the chart opens
+        -- in the grid unless somebody said otherwise, so a key saying `grid`
+        -- is a key that says nothing. Choosing the list writes it with the
+        -- sentence that explains it; choosing the grid back takes both away
+        -- and the file is as it was.
         --
-        -- `introduce` with `blankBefore = True` adds a blank line above the
-        -- block and `remove` does not take it away again, so the pair is not a
-        -- round trip: every list-then-grid cycle leaves one more empty line in
-        -- somebody's config file. `weeks` has the same hole and gets away with
-        -- it because it is changed from a menu once in a blue moon; `chart` is
-        -- `Tab`, and a file that grew a blank line every time somebody
-        -- compared the two charts would be predc doing exactly what this
-        -- module exists to promise it does not. The bug is `gren-toml`'s and
-        -- is written up there; when it is fixed this can become the same
-        -- `remove` the others use.
-        --
-        -- So: choosing the list writes the key with its explanation, and
-        -- choosing the grid back writes `grid` into the key that is already
-        -- there. `member` is what keeps the promise -- a file that has never
-        -- had a `chart` key does not get one for a chart nobody switched --
-        -- and a file that has one has it because somebody pressed the key, so
-        -- it is not a setting they never asked about.
-        |> (\document_ ->
-                when config.chart is
-                    Chart.Grid ->
-                        if Edit.member [ "chart" ] document_ then
-                            Edit.set [ "chart" ] (Edit.string (Chart.toKey Chart.Grid)) document_
+        -- **That last clause is only true as of gren-toml 1.2.0.** Before it,
+        -- `introduce` wrote the blank line above the block and `remove` left
+        -- it behind, so this pair added one empty line to the file per cycle
+        -- -- which `weeks` got away with, being a menu entry somebody touches
+        -- once in a blue moon, and this key would not have, being `Tab`. The
+        -- workaround was to never remove it: `Edit.member` to choose between
+        -- `introduce` and `set`, which was stable and left a defaulted key in
+        -- the file. `remove` takes the blank line now and the workaround is
+        -- gone.
+        |> (when config.chart is
+                Chart.Grid ->
+                    Edit.remove [ "chart" ]
 
-                        else
-                            document_
-
-                    other ->
-                        Edit.introduce [ "chart" ]
-                            { blankBefore = True
-                            , leading =
-                                [ " Which form the ASCII chart opens in: grid (sixteen by"
-                                , " eight, the concise table) or list (one code per line,"
-                                , " with names, the way man ascii prints it)."
-                                ]
-                            , trailing = Nothing
-                            }
-                            (Edit.string (Chart.toKey other))
-                            document_
+                other ->
+                    Edit.introduce [ "chart" ]
+                        { blankBefore = True
+                        , leading =
+                            [ " Which form the ASCII chart opens in: grid (sixteen by"
+                            , " eight, the concise table) or list (one code per line,"
+                            , " with names, the way man ascii prints it)."
+                            ]
+                        , trailing = Nothing
+                        }
+                        (Edit.string (Chart.toKey other))
            )

@@ -17,12 +17,14 @@ the highlighted one.
 `drive_time_moves.py` picks up where this stops; see `time_common.py`.
 """
 
+import os
 import sys
+import tempfile
 
 from time_common import (
-    Checks, WHEN, click_button, click_in, config_of, config_path, find_text,
-    launch, pane, pane_point, pin_instant, posix_at, retype, space_on,
-    type_in_find,
+    Checks, LAUNCHER, Pty, ROOT, WHEN, click_button, click_in, config_of,
+    config_path, find_text, launch, node_argv, open_picker, pane, pane_point,
+    pin_instant, posix_at, retype, space_on, type_in_find,
 )
 
 
@@ -169,8 +171,86 @@ def main():
           == ["America/Chicago", "Asia/Katmandu", "Asia/Seoul"],
           str(config_of(home)))
 
+    app.send(b"\x1bx", settle=1.0)
+    app.wait(timeout=8)
 
-    return check.report(app)
+    # ---- a list somebody arranged by hand survives being changed ----------
+    #
+    # The file is TOML so that it can be commented, and until gren-toml 1.1.0
+    # predc could not keep the comments on this key: `Edit.set` writes a whole
+    # array, a new array has no formatting, so the first zone you added
+    # flattened four lines and three notes onto one. `Edit.appendTo` and
+    # `Edit.removeAt` change one element and leave the rest of the text where
+    # it is, and `Config.zonesIn` is the diff that decides which.
+    hand = ('# predc, my way\n'
+            'theme = "midnight"\n'
+            '\n'
+            '# The time zones the time converter shows, in the order it\n'
+            '# shows them.\n'
+            'timezones = [\n'
+            '  "Asia/Seoul",      # them\n'
+            '  "America/Chicago", # me\n'
+            '  "Europe/Oslo",     # the other office\n'
+            ']\n')
+    kept = tempfile.mkdtemp(prefix="predc-home-")
+    os.makedirs(os.path.join(kept, ".config", "predc"))
+    written = os.path.join(kept, ".config", "predc", "config.toml")
+    with open(written, "w") as out:
+        out.write(hand)
+
+    env = dict(os.environ, TERM="xterm-256color", TZ="America/Chicago", HOME=kept)
+    env.pop("XDG_CONFIG_HOME", None)
+    byhand = Pty(node_argv(LAUNCHER) + ["time"], env, cwd=ROOT)
+    byhand.pump(3.0)
+    open_picker(byhand)
+
+    click_in(byhand, "Displaying", "America/Chicago")
+    click_button(byhand, "<< Remove")
+    byhand.pump(1.0)
+    body = open(written).read()
+    check("taking a zone out takes the note written against it",
+          "# me" not in body and "America/Chicago" not in body, body)
+    check("and leaves the others on their own lines, aligned as they were",
+          '  "Asia/Seoul",      # them\n' in body
+          and '  "Europe/Oslo",     # the other office\n' in body,
+          body)
+
+    type_in_find(byhand, "Auckland", clear=True)
+    space_on(byhand, "Pacific/Auckland")
+    byhand.pump(1.0)
+    body = open(written).read()
+    check("and a zone added arrives on a line of its own rather than "
+          "flattening the list onto one",
+          '  "Pacific/Auckland",\n' in body and body.count("\n  \"") == 3, body)
+    check("with every other note still against its own zone",
+          "# them" in body and "# the other office" in body, body)
+    check("and the rest of the file untouched",
+          body.startswith('# predc, my way\ntheme = "midnight"\n'), body)
+
+    # **Move Up is the one that could not be written before gren-toml 1.2.0.**
+    # `removeAt` then `insertAt` loses the note, each of them correctly, and
+    # walking the new order down the list with `setAt` keeps every note against
+    # its *position* -- so a move would leave `# me` written against somebody
+    # else's city, silently. `moveAt` carries the value and its note together,
+    # and this is the check that says so: after the move, every note is still
+    # on the line of the zone it was written for.
+    click_in(byhand, "Displaying", "Pacific/Auckland")
+    click_button(byhand, "Move Up")
+    byhand.pump(1.2)
+    body = open(written).read()
+    check("moving a zone carries the note written against it, and leaves the "
+          "notes of the zones it moved past on their own",
+          '  "Asia/Seoul",      # them\n' in body
+          and '  "Europe/Oslo",     # the other office\n' in body
+          and '  "Pacific/Auckland",\n' in body,
+          body)
+    check("and the order really did change",
+          body.index("Pacific/Auckland") < body.index("Europe/Oslo"), body)
+
+    byhand.send(b"\x1bx", settle=1.0)
+    check("and it exits cleanly", byhand.wait(timeout=8) == 0, "exit")
+
+    return check.report(byhand)
 
 
 if __name__ == "__main__":
