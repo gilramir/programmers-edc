@@ -101,6 +101,17 @@ case-sensitivity toggle.
 and both declined.
 
 
+# v4
+
+## Notes
+
+Many independent free-form notes, each with a name: a list down the left and an
+editor pane beside it. A very small OneNote, and no more than that -- no
+folders, no tags, no formatting, no search across notes.
+
+**Done** -- see "Notes" below.
+
+
 # Building and running
 
     devbox run predc                    # build and run
@@ -953,6 +964,100 @@ made of them.
 
 That was also the thing standing in front of testing anything translated, so
 i18n is one step less expensive than it was.
+
+## Notes
+
+**Alt-Q**, or `predc notes`, or `predc notes "Release checklist"` for one in
+particular. A list of note names down the left and an editor beside it: `Space`
+opens the one the highlight is on, `Ctrl-N` makes one, `F2` saves, `F4` goes
+back to the list, and **Note | Rename** and **Note | Delete** do the rest.
+
+Everything else about it follows from two facts.
+
+### The editor owns the buffer, so switching notes is a round trip
+
+Every other tool in predc renders what it holds. An editor cannot work that
+way -- `view` runs on every tick of every subscription, and a document has no
+business in a render message once a second -- so `gren-tvision`'s `Editor` owns
+its text and the model owns the file. `examples/edit` holds one document, and
+the document crosses twice: in through `setEditorText`, out through
+`readEditor`.
+
+This holds many, which makes *switching* a third crossing. The model has no
+copy of what you have just typed, so the outgoing note has to come back before
+the incoming one can go out, and the whole of `Pending` in `src/Tool/Notes.gren`
+is the bookkeeping for that one sentence.
+
+**Which is why `Space` opens a note and the arrow keys do not.** A highlight
+that opened notes would start a read on every row it passed through, and each
+answer would arrive with a different note already open -- so the text of one
+note would be written into another, silently, and the bug would eat somebody's
+writing rather than crash. Committing an entry is `Space` or a double click,
+which is what `TListViewer` has always meant by choosing a row.
+
+**And the same race has a second ending, which the first version got wrong.**
+A rename does not change a character of the document, and the obvious way to
+write it -- move the file, re-read the directory, open the note under its new
+name -- puts what is *on disk* back into the editor and throws away everything
+typed since the last autosave. So a rename moves the highlight and leaves the
+editor holding exactly what it was already holding. `Wanted` is a three-way
+answer rather than a `Maybe String` because of it.
+
+### It saves as you type, because it cannot save when you leave
+
+`"quit"` is a built-in command: `TApplication` handles it and the model is
+never told. `WindowClosed` is no help either, because by the time it arrives
+the editor is gone and there is nothing left to read. There is no last moment,
+so there is no save-on-exit to write.
+
+What there is instead: an `Edited` event sets a flag, and a subscription that
+exists **only while that flag is set** ticks once a second, asks for the text,
+and writes it if it differs from what is on disk. A notes window nobody is
+typing in subscribes to nothing -- which matters for exactly the reason above,
+since a subscription is a repaint of the whole desktop.
+
+The comparison is not an optimisation. `Edited` fires when the caret moves as
+well as when the text changes, and `TEditor`'s modified flag never goes back
+down once it is up, so without it every arrow key in an old note would rewrite
+the file.
+
+A save that happens says so -- "Saved Alpha" along the foot -- because with no
+save-on-exit to rely on, that sentence is the only reassurance the window can
+offer, and it appears once per burst of typing rather than once per keystroke.
+`F2` is the same path with one difference: it says something even when there
+was nothing left to write, because a save key that sometimes produces no
+visible answer is a save key nobody believes.
+
+### A note is a file
+
+`$XDG_DATA_HOME/predc/notes/<name>.md`, one file each, and the name you type is
+the file name. Not a second TOML file with the notes inside it -- and the
+reason is not that TOML cannot hold text. It is that one file for everything
+means a whole-file rewrite on every autosave, so a bad write loses every note
+instead of the one being typed. One file each is also `grep`-able, `$EDITOR`-able
+and committable, which for a tool aimed at programmers is most of the value.
+
+That is why names are validated rather than escaped: a slash, a leading dot or
+an empty name is refused with a sentence saying so. A list that is not the
+directory would be a lie about where your writing is.
+
+### Two things about the keys
+
+`Tab` cannot leave the editor. `TEditor` inserts `charCode 9` as a character
+(`teditor1.cpp:588`), so the tab ring stops at the editor the way it stops at a
+focused canvas -- which is what `F4` is for.
+
+And the menu's accelerators are picked against `TEditor`'s keymap rather than
+for looks. The menu bar is `ofPreProcess` and is offered every keystroke
+*before* the focused view is, so an accelerator here is taken away from the
+editor underneath -- and `teditor1.cpp:47` binds nearly every `Ctrl` letter,
+`Ins` and `Del` to a WordStar command. A **Delete** entry on `Del` would have
+quietly stopped `Del` deleting a character.
+
+`Alt-Q` is the tool's key because it is the last free letter in the program,
+and `Tool.Random` had already argued against it -- `Q` beside an `Alt-X` reads
+as a second way to quit. It is **Quick notes** on the menu so that the letter
+means the word, and the failure mode is a window rather than a lost session.
 
 ## Colors
 

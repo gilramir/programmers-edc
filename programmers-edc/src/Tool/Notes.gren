@@ -1,0 +1,1290 @@
+module Tool.Notes exposing
+    ( Model
+    , Msg
+    , Step
+    , command
+    , init
+    , menu
+    , menuItem
+    , receive
+    , subscriptions
+    , update
+    , view
+    , where_
+    , windowId
+    )
+
+{-| Notes: many small free-form documents, one window, one editor.
+
+A place to put the paragraph you are going to need again in twenty minutes and
+do not want in a scratch buffer that dies with the terminal. Every other tool
+in predc answers a question; this one is the only one that *keeps* something,
+and almost every decision below follows from that difference.
+
+**One window with a list in it, and not a window per note.** The shell's own
+`menuBar` says why: nothing tells the model which window is in front. There is
+no event for it, so a **Note** menu -- Rename, Delete -- attached to a window
+per note could not say which note it meant. With one window the question does
+not arise: the note this tool is editing is a field, and the menu acts on that.
+
+**The editor owns the buffer and the model owns the file**, which is the rule
+`gren-tvision`'s `Editor` view is built on, and here it has a second
+consequence that example did not have. `examples/edit` holds one document, so
+its only crossing is a file being opened or saved. This holds many, so
+*switching* is a crossing too: the outgoing note has to come back through
+[`Tui.readEditor`](Tui#readEditor) before the incoming one can go out through
+[`Tui.setEditorText`](Tui#setEditorText), because the model has no copy of what
+you just typed. `Pending` is the whole of that machinery -- what the next
+`EditorText` event is the answer to.
+
+**So `Space` opens a note and moving the highlight does not.** That is not a
+preference. A highlight that opened notes would start a read on every row the
+arrow keys pass through, and each read answers *after* the highlight has moved
+on -- so the text of one note would arrive with another note already open and
+be written into it. The bug would be silent and would eat somebody's writing.
+Committing an entry is `Space` or a double click, which is what `TListViewer`
+has always meant by choosing a row; `Enter` is not it.
+
+**It saves as you type, because it cannot save when you leave.** `"quit"` is a
+built-in: `TApplication` handles it and the model is never told, so there is no
+last moment in which to flush the buffer. `WindowClosed` is no better -- by the
+time it arrives the editor is gone and there is nothing left to read. The only
+shape available is therefore a small autosave: an `Edited` event sets `dirty`,
+a subscription that exists **only while `dirty` is set** ticks once a second,
+the tick asks for the text, and the answer is written if it differs from what
+is on disk. A quiet window subscribes to nothing, which matters because `view`
+runs on every tick of every subscription -- a notes window left open all
+afternoon must not repaint the desktop once a second for nothing.
+
+`F2` forces the same path, for the same reason every editor since 1983 has a
+save key even when it does not need one.
+
+**A note is a file.** `$XDG_DATA_HOME/predc/notes/<name>.md`, one file each.
+Not a TOML file with the notes in it, and the reason is not that TOML cannot
+hold text: it is that one file for everything means a whole-file rewrite on
+every autosave, so a half-written save loses every note rather than the one
+being typed. One file each also makes them `grep`-able, `$EDITOR`-able and
+committable, which is the difference between a notes feature and a notes
+*directory* -- and this is a tool for programmers, who already have things that
+work on files.
+
+The name is the filename, and that is the point rather than an implementation
+detail: a directory listing should be the list you see here. So names are
+validated rather than escaped -- see [`trouble`](#trouble) -- and a name predc
+would have to mangle is refused with a sentence saying so.
+
+-}
+
+import Array exposing (Array)
+import Bytes
+import Dict exposing (Dict)
+import FileSystem
+import FileSystem.Path as Path exposing (Path)
+import Json.Decode
+import Task exposing (Task)
+import Time
+import Tui exposing (MenuItem(..), View(..))
+
+
+-- NAMES
+
+
+command : String
+command =
+    "tool.notes"
+
+
+windowId : String
+windowId =
+    "notes"
+
+
+listId : String
+listId =
+    "notes.list"
+
+
+{-| The editor. One id, one editor, for the life of the window -- the document
+in it changes and the view never does.
+-}
+bodyId : String
+bodyId =
+    "notes.body"
+
+
+statusId : String
+statusId =
+    "notes.status"
+
+
+newDialogId : String
+newDialogId =
+    "notes.new.dialog"
+
+
+renameDialogId : String
+renameDialogId =
+    "notes.rename.dialog"
+
+
+deleteDialogId : String
+deleteDialogId =
+    "notes.delete.dialog"
+
+
+nameFieldId : String
+nameFieldId =
+    "notes.name"
+
+
+{-| `Alt-Q`, which is the last free letter in the program and was argued
+against once before it was taken.
+
+`Tool.Random` counted the Alt keys when it took `Alt-V` and wrote down that `Q`
+"in a program with an `Alt-X` would be read as a second way to quit". That was
+a fair worry and it is why `Q` outlasted `J`, `K` and `V`. It is taken now
+because there is nothing else -- every other letter is claimed by a menu bar
+title, a tool's accelerator, or a button caption in a window that can be open
+(`~N~ow` and `~S~top clock` in the converter are why `N` and `S` are not free).
+
+What makes it survivable is the title: **Quick notes**, so `Q` is the word's
+own letter rather than an arbitrary key, and the Tools menu teaches it. And the
+failure mode is mild in a way a real conflict would not be -- somebody who
+meant to quit gets a window, and `Alt-F3` closes it.
+-}
+menuItem : MenuItem
+menuItem =
+    Item { title = "~Q~uick notes", cmd = command, key = "Alt-Q", shortcut = "Alt-Q" }
+
+
+{-| The tool's own menu, and **its title carries no underlined letter on
+purpose** -- a menu *bar* title claims its Alt key for as long as the menu is
+on the bar, which is exactly as long as this window is open. `Tool.Encode` and
+`Tool.Env` say the same thing for the same reason.
+
+The keys are chosen against `TEditor`'s keymap rather than for looks. The bar
+is `ofPreProcess` and is offered every keystroke **before** the focused view
+is, so an accelerator here is taken away from the editor underneath -- and
+`teditor1.cpp:47` binds nearly every `Ctrl` letter, `Ins` and `Del` to a
+WordStar command. A **Delete** entry on `Del` would have quietly stopped `Del`
+deleting a character. `F2`, `F4` and `Ctrl-N` are outside that map.
+
+`F4` exists because there is no other way back. `TEditor` inserts `charCode 9`
+as a character (`teditor1.cpp:588`), so `Tab` cannot leave the editor for the
+list the way it would leave any other view.
+-}
+menu : MenuItem
+menu =
+    SubMenu
+        { title = "Note"
+        , key = ""
+        , items =
+            [ Item { title = "~N~ew...", cmd = "notes.new", key = "Ctrl-N", shortcut = "Ctrl-N" }
+            , Item { title = "~O~pen", cmd = "notes.open", key = "", shortcut = "Space" }
+            , Tui.Separator
+            , Item { title = "~S~ave now", cmd = "notes.save", key = "F2", shortcut = "F2" }
+            , Item { title = "~R~ename...", cmd = "notes.rename", key = "", shortcut = "" }
+            , Item { title = "~D~elete...", cmd = "notes.delete", key = "", shortcut = "" }
+            , Tui.Separator
+            , Item { title = "Go to the ~l~ist", cmd = "notes.tolist", key = "F4", shortcut = "F4" }
+            ]
+        }
+
+
+-- WHERE THEY LIVE
+
+
+{-| `$XDG_DATA_HOME/predc/notes`, or `~/.local/share/predc/notes` when that is
+not set.
+
+`data` and not `config`, which is the distinction the XDG base directory
+specification draws and the right one here: a config file is something the user
+writes and predc edits around, and a note is something the user wrote and predc
+stores. `Config.where_` is the same function for the other half.
+
+`Nothing` when neither variable is set -- a process with no environment at all
+-- and that answer is carried all the way into the window rather than being
+papered over with a relative path. Writing somebody's notes into whatever
+directory predc happened to be started from is worse than saying there is
+nowhere to put them.
+-}
+where_ : Dict String String -> Maybe Path
+where_ env =
+    let
+        base =
+            when Dict.get "XDG_DATA_HOME" env is
+                Just dir ->
+                    if String.isEmpty dir then
+                        Maybe.map (\home -> home ++ "/.local/share") (Dict.get "HOME" env)
+
+                    else
+                        Just dir
+
+                Nothing ->
+                    Maybe.map (\home -> home ++ "/.local/share") (Dict.get "HOME" env)
+    in
+    Maybe.map (\dir -> Path.fromPosixString (dir ++ "/predc/notes")) base
+
+
+{-| The extension every note has, and the only one this tool will list.
+
+`.md` because a note is prose and every editor on the machine already knows
+what to do with it, and because filtering the listing means the notes directory
+can hold a `README` or an editor's swap file without either turning up as a
+note.
+-}
+extension : String
+extension =
+    "md"
+
+
+fileFor : Path -> String -> Path
+fileFor dir name =
+    Path.appendPosixString (name ++ "." ++ extension) dir
+
+
+-- MODEL
+
+
+type alias Model =
+    { permission : FileSystem.Permission
+    -- `Nothing` when the environment said nothing about where a home
+    -- directory is; every command that would touch the disk refuses, and the
+    -- status line says why.
+    , dir : Maybe Path
+    -- The names, sorted, which is both the list's items and the model's idea
+    -- of what is on disk. Read from the directory rather than remembered, so
+    -- a note somebody added from a shell turns up the next time the window is
+    -- opened.
+    , notes : Array String
+    -- The list's highlight, mirrored from the `Focused` events the user's
+    -- arrow keys send. This is *not* which note is open: browsing the list
+    -- while a note stays in the editor is a thing to be able to do.
+    , focused : Int
+    -- The note the editor is showing, and the file an autosave writes to.
+    , open : Maybe String
+    -- What that file said the last time it was read or written. The autosave
+    -- compares against it, so a caret that moved and a document that did not
+    -- change cost a round trip and no write.
+    , saved : String
+    -- The editor has reported a change since the last read. The only thing
+    -- that makes this tool subscribe to anything.
+    , dirty : Bool
+    , pending : Pending
+    -- What the next directory listing is for. `Made`, `Renamed` and `Removed`
+    -- each finish by re-reading the directory, and each has a different
+    -- opinion about where the user should end up afterwards.
+    , wanted : Wanted
+    , message : String
+    , desktop : { cols : Int, rows : Int }
+    }
+
+
+{-| What the next [`EditorText`](Tui#Event) event is the answer to.
+
+`readEditor` is a request whose answer arrives later as an ordinary event, and
+by then the reason for asking has to be written down somewhere. It also has to
+name the note it was asked *for*: a delete or a rename can land in between, and
+a flush that wrote the answer to `model.open` without checking would recreate a
+file the user had just deleted.
+-}
+type Pending
+    = Idle
+    | Flushing { note : String, next : Next }
+
+
+{-| What a flush is for.
+
+`Quietly` and `Announce` do the same work and differ in one case only: what to
+say when there was **nothing to write**. A write that happens announces itself
+either way -- "Saved *name*" in the foot of the window is the only reassurance
+a program with no save-on-exit can offer, and it appears once per burst of
+typing rather than once per keystroke, because the text is compared before
+anything is written.
+
+The difference is the empty case. The autosave finding nothing to do is the
+ordinary state of a window somebody is reading rather than typing in, and it
+must say nothing at all. `F2` finding nothing to do has to say so, because a
+save key that sometimes produces no visible answer is a save key nobody
+believes -- and "already saved" is a different sentence from silence.
+-}
+type Next
+    = Quietly
+    | Announce
+    | Open String
+
+
+{-| What to do once the directory has been read.
+
+`Highlight` is the one worth naming, and it exists because the obvious spelling
+of a rename lost work. A rename does not change a single character of the
+document, so re-reading the file it moved would replace the buffer with what
+was on disk -- and throw away everything typed since the last autosave, which
+is up to a second of somebody's writing, for an operation that was not about
+the text at all. So a rename moves the *highlight* and leaves the editor
+holding exactly what it was already holding.
+-}
+type Wanted
+    = Nowhere
+    | Note String
+    | Highlight String
+
+
+type alias Step =
+    { model : Model, command : Cmd Msg }
+
+
+{-| A Gren variant takes at most one parameter, so each of these is a record --
+which is no loss: `Renamed { from, to, ok }` cannot be given its two names the
+wrong way round, and a rename that went backwards would be the kind of bug that
+loses a note.
+-}
+type Msg
+    = Listed (Result String (Array String))
+    | Opened { name : String, text : Result String String }
+    | Wrote { name : String, text : String, ok : Result String {} }
+    | Made { name : String, ok : Result String {} }
+    | Renamed { from : String, to : String, ok : Result String {} }
+    | Removed { name : String, ok : Result String {} }
+    -- The autosave's heartbeat, and the only message here that is not a task
+    -- coming back.
+    | Tick
+
+
+{-| `wanted` is `predc notes <name>` -- the note to land on once the directory
+has been read. `Nothing` opens the first one, which is what the Tools menu
+asks for.
+-}
+init : FileSystem.Permission -> Maybe Path -> Maybe String -> { cols : Int, rows : Int } -> Step
+init permission dir wanted desktop =
+    let
+        model =
+            { permission = permission
+            , dir = dir
+            , notes = []
+            , focused = 0
+            , open = Nothing
+            , saved = ""
+            , dirty = False
+            , pending = Idle
+            , wanted =
+                when wanted is
+                    Just name ->
+                        Note name
+
+                    Nothing ->
+                        Nowhere
+            , message =
+                when dir is
+                    Just _ ->
+                        ""
+
+                    Nothing ->
+                        "No HOME and no XDG_DATA_HOME: there is nowhere to keep notes."
+            , desktop = desktop
+            }
+    in
+    { model = model, command = scan model }
+
+
+{-| Make the directory if it is not there, then read it.
+
+The two are one task because the first is what makes the second meaningful on a
+machine that has never run this tool: an empty listing and a missing directory
+should look the same from here, and they do. A `makeDirectory` that fails
+because the directory already exists is the ordinary case, so the error is
+swallowed and the listing decides.
+-}
+scan : Model -> Cmd Msg
+scan model =
+    when model.dir is
+        Nothing ->
+            Cmd.none
+
+        Just dir ->
+            FileSystem.makeDirectory model.permission { recursive = True } dir
+                |> Task.onError (\_ -> Task.succeed dir)
+                |> Task.andThen (\_ -> FileSystem.listDirectory model.permission dir)
+                |> Task.map named
+                |> Task.mapError FileSystem.errorToString
+                |> Task.map Ok
+                |> Task.onError (\it -> Task.succeed (Err it))
+                |> Task.perform Listed
+
+
+{-| The note names in a directory listing: the files whose extension is ours,
+their stems, sorted.
+
+`Path` splits a filename from its extension itself, which is what makes the
+name-is-the-filename rule cost nothing in either direction.
+
+Sorted by the lower-cased name so that `Ideas` and `ideas` are neighbours
+rather than a screen apart, which is what somebody scanning a list expects and
+is not what a byte-order sort does with ASCII.
+-}
+named : Array { path : Path, entityType : FileSystem.EntityType } -> Array String
+named entries =
+    entries
+        |> Array.keepIf (\it -> it.entityType == FileSystem.File)
+        |> Array.mapAndKeepJust
+            (\it ->
+                if it.path.extension == extension && it.path.filename /= "" then
+                    Just it.path.filename
+
+                else
+                    Nothing
+            )
+        |> Array.sortBy String.toLower
+
+
+-- WHAT A NAME MAY BE
+
+
+{-| What is wrong with a name, or `Nothing` if nothing is.
+
+The rules are the ones that keep the filename and the name the same string.
+Nothing here is about taste: every one of these is a name that would have to be
+mangled to become a file, and a tool whose whole claim is that the list you see
+is the directory you have cannot afford to mangle anything quietly.
+-}
+trouble : Array String -> String -> Maybe String
+trouble taken name =
+    if String.isEmpty name then
+        Just "A note needs a name."
+
+    else if String.contains "/" name then
+        Just "A name cannot contain a slash: it is a file name."
+
+    else if String.startsWith "." name then
+        Just "A name cannot start with a dot: the file would be hidden."
+
+    else if String.contains "\u{0000}" name then
+        Just "A name cannot contain a null byte."
+
+    else if String.count name > 64 then
+        Just "That name is longer than 64 characters."
+
+    else if Array.member name taken then
+        Just ("There is already a note called " ++ name ++ ".")
+
+    else
+        Nothing
+
+
+-- UPDATE, THE TURBO VISION HALF
+
+
+update : Tui.Ports Msg -> Tui.Event -> Model -> Step
+update ports event model =
+    when event is
+        Tui.Resized size ->
+            still { model | desktop = size }
+
+        Tui.Focused it ->
+            if it.id == listId then
+                still { model | focused = it.index }
+
+            else
+                still model
+
+        -- `Space` or a double click, which is what committing a row means to
+        -- `TListViewer`. Not `Enter`, which presses nothing in Turbo Vision.
+        Tui.Selected it ->
+            if it.id == listId then
+                openNote ports it.text { model | focused = it.index }
+
+            else
+                still model
+
+        -- Three numbers per keystroke instead of a document. All this does is
+        -- remember that there is something to save, which is what turns the
+        -- subscription on.
+        Tui.Edited it ->
+            if it.id == bodyId && it.isModified then
+                still { model | dirty = True }
+
+            else
+                still model
+
+        Tui.EditorText it ->
+            if it.id == bodyId then
+                flushed ports it.text model
+
+            else
+                still model
+
+        Tui.DialogClosed closed ->
+            if closed.id == newDialogId then
+                answerNew closed model
+
+            else if closed.id == renameDialogId then
+                answerRename closed model
+
+            else if closed.id == deleteDialogId then
+                answerDelete ports closed model
+
+            else
+                still model
+
+        Tui.Command cmd ->
+            if cmd == "notes.new" then
+                { model = quiet model, command = Tui.dialog ports (nameDialog model newDialogId "New note" "") }
+
+            else if cmd == "notes.open" then
+                when Array.get model.focused model.notes is
+                    Just name ->
+                        openNote ports name model
+
+                    Nothing ->
+                        still model
+
+            else if cmd == "notes.save" then
+                saveNow ports model
+
+            else if cmd == "notes.rename" then
+                when model.open is
+                    Just name ->
+                        { model = quiet model
+                        , command = Tui.dialog ports (nameDialog model renameDialogId "Rename note" name)
+                        }
+
+                    Nothing ->
+                        still { model | message = "No note is open." }
+
+            else if cmd == "notes.delete" then
+                when model.open is
+                    Just name ->
+                        { model = quiet model, command = Tui.dialog ports (deleteDialog model name) }
+
+                    Nothing ->
+                        still { model | message = "No note is open." }
+
+            else if cmd == "notes.tolist" then
+                { model = model, command = Tui.focus ports listId }
+
+            else
+                still model
+
+        _ ->
+            still model
+
+
+still : Model -> Step
+still model =
+    { model = model, command = Cmd.none }
+
+
+{-| The model with the last message cleared, which is what starting a new
+action means: the sentence along the foot belongs to the thing that just
+happened and not to the thing before it.
+-}
+quiet : Model -> Model
+quiet model =
+    { model | message = "" }
+
+
+-- SWITCHING, WHICH IS THE WHOLE MECHANISM
+
+
+{-| Open a note, flushing the one that is there first.
+
+Three cases, and the middle one is the reason this function is not two lines.
+The note is already open: do nothing but put the caret back in it. There is
+another note open: it has to come back before this one can go out, so the
+switch is *recorded* and finished in `flushed` when the answer arrives. There
+is nothing open: load straight away.
+
+A read is already in flight -- somebody chose two rows quickly -- and the
+second choice is dropped rather than queued. Queueing would mean two documents
+in the air at once with one editor to put them in, which is exactly the race
+this design exists to avoid.
+-}
+openNote : Tui.Ports Msg -> String -> Model -> Step
+openNote ports name model =
+    if model.open == Just name then
+        { model = quiet model, command = Tui.focus ports bodyId }
+
+    else
+        when model.pending is
+            Flushing _ ->
+                still model
+
+            Idle ->
+                when model.open is
+                    Just current ->
+                        { model =
+                            { model
+                                | pending = Flushing { note = current, next = Open name }
+                                , dirty = False
+                                , message = ""
+                            }
+                        , command = Tui.readEditor ports bodyId
+                        }
+
+                    Nothing ->
+                        load ports name (quiet model)
+
+
+{-| The document came back. Write it if it changed, then do whatever the read
+was for.
+
+The check that it changed is not an optimisation. `Edited` fires when the caret
+moves as well as when the text does, and `TEditor`'s modified flag never goes
+back down once it is up -- there is no "mark saved" to send it -- so without
+comparing, every arrow key in a note that was edited an hour ago would rewrite
+the file.
+
+`known` is the other check: an answer can arrive after the note it was asked
+for has been deleted, and writing it then would put the file straight back. A
+rename is the same race with a different ending -- there the *request* is moved
+to the new name as the file is, so the answer still lands.
+-}
+flushed : Tui.Ports Msg -> String -> Model -> Step
+flushed ports text model =
+    when model.pending is
+        Idle ->
+            still model
+
+        Flushing it ->
+            let
+                -- Is this still the note in the editor? Which is the exact
+                -- question, and `Array.member` was the approximate one: a
+                -- delete leaves `open` at `Nothing` and a rename moves it, so
+                -- an answer that arrives after either has to be dropped or it
+                -- writes a file back into existence under its old name.
+                known =
+                    model.open == Just it.note
+
+                changed =
+                    known && text /= model.saved
+
+                write =
+                    if changed then
+                        writeNote model it.note text
+
+                    else
+                        Cmd.none
+
+                settled =
+                    { model
+                        | pending = Idle
+                        , saved =
+                            if model.open == Just it.note then
+                                text
+
+                            else
+                                model.saved
+                    }
+            in
+            when it.next is
+                Quietly ->
+                    { model = settled, command = write }
+
+                Announce ->
+                    { model =
+                        if changed then
+                            settled
+
+                        else
+                            { settled | message = it.note ++ " is already saved." }
+                    , command = write
+                    }
+
+                Open name ->
+                    let
+                        step =
+                            load ports name settled
+                    in
+                    { model = step.model, command = Cmd.batch [ write, step.command ] }
+
+
+{-| Read a note off the disk. The window does not change until the answer
+arrives, which is right: a note that cannot be read should leave the one you
+were looking at alone.
+-}
+load : Tui.Ports Msg -> String -> Model -> Step
+load ports name model =
+    when model.dir is
+        Nothing ->
+            still model
+
+        Just dir ->
+            { model = model
+            , command =
+                FileSystem.readFile model.permission (fileFor dir name)
+                    |> Task.mapError FileSystem.errorToString
+                    |> Task.andThen
+                        (\bytes ->
+                            when Bytes.toString bytes is
+                                Just text ->
+                                    Task.succeed text
+
+                                Nothing ->
+                                    Task.fail "it is not UTF-8 text"
+                        )
+                    |> Task.map Ok
+                    |> Task.onError (\it -> Task.succeed (Err it))
+                    |> Task.perform (\it -> Opened { name = name, text = it })
+            }
+
+
+writeNote : Model -> String -> String -> Cmd Msg
+writeNote model name text =
+    when model.dir is
+        Nothing ->
+            Cmd.none
+
+        Just dir ->
+            FileSystem.writeFile model.permission (Bytes.fromString text) (fileFor dir name)
+                |> Task.map (\_ -> Ok {})
+                |> Task.onError (\it -> Task.succeed (Err (FileSystem.errorToString it)))
+                |> Task.perform (\it -> Wrote { name = name, text = text, ok = it })
+
+
+{-| `F2`. Asks for the text whether or not anything changed, because a save key
+that sometimes does nothing is a save key nobody believes.
+-}
+saveNow : Tui.Ports Msg -> Model -> Step
+saveNow ports model =
+    when model.open is
+        Nothing ->
+            still { model | message = "No note is open." }
+
+        Just name ->
+            when model.pending is
+                Flushing _ ->
+                    still model
+
+                Idle ->
+                    { model =
+                        { model
+                            | pending = Flushing { note = name, next = Announce }
+                            , dirty = False
+                            , message = ""
+                        }
+                    , command = Tui.readEditor ports bodyId
+                    }
+
+
+-- UPDATE, THE TASK HALF
+
+
+receive : Tui.Ports Msg -> Msg -> Model -> Step
+receive ports msg model =
+    when msg is
+        Tick ->
+            -- The autosave. `dirty` is cleared *here* rather than when the
+            -- write lands, so an edit made while the answer is in the air sets
+            -- it again and gets its own tick.
+            when model.open is
+                Just name ->
+                    when model.pending is
+                        Flushing _ ->
+                            still model
+
+                        Idle ->
+                            { model =
+                                { model
+                                    | pending = Flushing { note = name, next = Quietly }
+                                    , dirty = False
+                                }
+                            , command = Tui.readEditor ports bodyId
+                            }
+
+                Nothing ->
+                    still { model | dirty = False }
+
+        Listed (Err why) ->
+            still { model | message = "Cannot read the notes directory: " ++ why }
+
+        Listed (Ok names) ->
+            let
+                found =
+                    { model | notes = names, wanted = Nowhere }
+            in
+            when model.wanted is
+                Note name ->
+                    if Array.member name names then
+                        let
+                            step =
+                                load ports name found
+                        in
+                        { model = { step.model | focused = indexOf name names }
+                        , command = step.command
+                        }
+
+                    else
+                        still { found | message = "There is no note called " ++ name ++ "." }
+
+                Highlight name ->
+                    still { found | focused = indexOf name names }
+
+                Nowhere ->
+                    -- Nothing asked for in particular, so open the first note
+                    -- if the editor has none. A window that opens on a blank
+                    -- editor beside a list of notes reads as though the notes
+                    -- had not been found -- and after a delete, the next note
+                    -- is what somebody wants to be looking at.
+                    when { open = model.open, first = Array.first names } is
+                        { open = Nothing, first = Just name } ->
+                            load ports name found
+
+                        _ ->
+                            still found
+
+        Opened it ->
+            when it.text is
+                Err why ->
+                    still { model | message = "Cannot open " ++ it.name ++ ": " ++ why }
+
+                Ok text ->
+                    { model =
+                        { model
+                            | open = Just it.name
+                            , saved = text
+                            , dirty = False
+                            , focused = indexOf it.name model.notes
+                            , message = ""
+                        }
+                    , command =
+                        Cmd.batch
+                            [ Tui.setEditorText ports bodyId text
+                            -- Into the text, because choosing a note is
+                            -- asking to write in it. `Tab` cannot make this
+                            -- trip afterwards -- `TEditor` inserts a tab
+                            -- character -- so a caret left in the list would
+                            -- need `F4`'s opposite, which does not exist.
+                            , Tui.focus ports bodyId
+                            ]
+                    }
+
+        Wrote it ->
+            when it.ok is
+                Err why ->
+                    still { model | message = "Cannot save " ++ it.name ++ ": " ++ why }
+
+                Ok _ ->
+                    still
+                        { model
+                            | saved =
+                                if model.open == Just it.name then
+                                    it.text
+
+                                else
+                                    model.saved
+                            , message = "Saved " ++ it.name ++ "."
+                        }
+
+        Made it ->
+            when it.ok is
+                Err why ->
+                    still { model | message = "Cannot make " ++ it.name ++ ": " ++ why }
+
+                Ok _ ->
+                    { model = { model | wanted = Note it.name, message = "" }
+                    , command = scan model
+                    }
+
+        Renamed it ->
+            when it.ok is
+                Err why ->
+                    still { model | message = "Cannot rename " ++ it.from ++ ": " ++ why }
+
+                Ok _ ->
+                    -- The editor keeps its buffer -- a rename does not touch
+                    -- the text -- so `open` moves to the new name and the next
+                    -- autosave writes to the new file, which is what happened
+                    -- on the disk too.
+                    { model = { model | open = Just it.to, wanted = Highlight it.to, message = "" }
+                    , command = scan model
+                    }
+
+        Removed it ->
+            when it.ok is
+                Err why ->
+                    still { model | message = "Cannot delete " ++ it.name ++ ": " ++ why }
+
+                Ok _ ->
+                    { model = { model | wanted = Nowhere, message = "Deleted " ++ it.name ++ "." }
+                    , command = scan model
+                    }
+
+
+{-| Where a note sits in the list, and `0` when it is not in it.
+
+`0` rather than `-1`, and that is not defensive: `Array.get -1` in Gren is the
+*last* element, so a stray negative index here would put the highlight on some
+other note rather than on none at all.
+-}
+indexOf : String -> Array String -> Int
+indexOf name names =
+    when Array.findFirst (\it -> it == name) names is
+        Just it ->
+            it.index
+
+        Nothing ->
+            0
+
+
+-- SUBSCRIPTIONS
+
+
+{-| A tick a second, and **only while there is something to save**.
+
+`view` runs on every tick of every subscription, so a subscription that was
+always on would repaint the whole desktop once a second for as long as this
+window was open. `dirty` is set by an `Edited` event and cleared by the read it
+causes, so the subscription exists for about one second after each burst of
+typing and not otherwise.
+-}
+subscriptions : Model -> Sub Msg
+subscriptions model =
+    if model.dirty then
+        Time.every 1000 (\_ -> Tick)
+
+    else
+        Sub.none
+
+
+-- DIALOGS
+
+
+{-| One dialog for New and for Rename, because they ask the same question and
+differ only in what is already in the field.
+-}
+nameDialog : Model -> String -> String -> String -> Tui.DialogSpec
+nameDialog model id title value =
+    let
+        width =
+            clamp 30 model.desktop.cols 52
+
+        height =
+            clamp 8 model.desktop.rows 9
+
+        left =
+            max 0 ((model.desktop.cols - width) // 2)
+
+        top =
+            max 0 ((model.desktop.rows - height) // 2)
+    in
+    { id = id
+    , title = title
+    , rect = { x1 = left, y1 = top, x2 = left + width, y2 = top + height }
+    , views =
+        -- The field before its label: a `Label` names a view that has to be
+        -- listed already, and the other order throws out of the builder and
+        -- takes the dialog with it.
+        [ InputLine
+            { id = nameFieldId
+            , rect = { x1 = 9, y1 = 2, x2 = width - 3, y2 = 3 }
+            , maxLen = 64
+            , value = value
+            , allowed = Nothing
+            }
+        , Tui.Label
+            { id = "notes.name.label"
+            , rect = { x1 = 3, y1 = 2, x2 = 9, y2 = 3 }
+            , text = "~N~ame"
+            , for = nameFieldId
+            }
+        , StaticText
+            { id = "notes.name.hint"
+            , rect = { x1 = 3, y1 = 4, x2 = width - 3, y2 = 5 }
+            , text = "It is the file name, so no slashes."
+            }
+        , Tui.Button
+            { id = "notes.name.ok"
+            , rect = { x1 = width - 28, y1 = height - 4, x2 = width - 16, y2 = height - 2 }
+            , title = "~O~K"
+            , cmd = "ok"
+            , isDefault = True
+            , takesFocus = True
+            }
+        , Tui.Button
+            { id = "notes.name.cancel"
+            , rect = { x1 = width - 15, y1 = height - 4, x2 = width - 3, y2 = height - 2 }
+            , title = "Cancel"
+            , cmd = "cancel"
+            , isDefault = False
+            , takesFocus = True
+            }
+        ]
+    }
+
+
+{-| Deleting is the one thing here that cannot be undone -- there is no
+wastebasket and a note is a file -- so it asks, and **Cancel is the default
+button**, which is the only place in predc where the safe answer is the one
+`Enter` presses.
+-}
+deleteDialog : Model -> String -> Tui.DialogSpec
+deleteDialog model name =
+    let
+        width =
+            clamp 30 model.desktop.cols 52
+
+        height =
+            clamp 8 model.desktop.rows 9
+
+        left =
+            max 0 ((model.desktop.cols - width) // 2)
+
+        top =
+            max 0 ((model.desktop.rows - height) // 2)
+    in
+    { id = deleteDialogId
+    , title = "Delete note"
+    , rect = { x1 = left, y1 = top, x2 = left + width, y2 = top + height }
+    , views =
+        [ StaticText
+            { id = "notes.delete.what"
+            , rect = { x1 = 3, y1 = 2, x2 = width - 3, y2 = 4 }
+            , text = "Delete " ++ name ++ "? The file goes with it."
+            }
+        , Tui.Button
+            { id = "notes.delete.no"
+            , rect = { x1 = width - 28, y1 = height - 4, x2 = width - 16, y2 = height - 2 }
+            , title = "Cancel"
+            , cmd = "cancel"
+            , isDefault = True
+            , takesFocus = True
+            }
+        , Tui.Button
+            { id = "notes.delete.yes"
+            , rect = { x1 = width - 15, y1 = height - 4, x2 = width - 3, y2 = height - 2 }
+            , title = "~D~elete"
+            , cmd = "ok"
+            , isDefault = False
+            , takesFocus = True
+            }
+        ]
+    }
+
+
+answerNew : { id : String, cmd : String, values : Json.Decode.Value } -> Model -> Step
+answerNew closed model =
+    if closed.cmd /= "ok" then
+        still model
+
+    else
+        let
+            name =
+                String.trim (Tui.text nameFieldId closed.values)
+        in
+        when trouble model.notes name is
+            Just why ->
+                still { model | message = why }
+
+            Nothing ->
+                when model.dir is
+                    Nothing ->
+                        still model
+
+                    Just dir ->
+                        { model = { model | message = "" }
+                        , command =
+                            FileSystem.writeFile model.permission (Bytes.fromString "") (fileFor dir name)
+                                |> Task.map (\_ -> Ok {})
+                                |> Task.onError (\it -> Task.succeed (Err (FileSystem.errorToString it)))
+                                |> Task.perform (\it -> Made { name = name, ok = it })
+                        }
+
+
+answerRename : { id : String, cmd : String, values : Json.Decode.Value } -> Model -> Step
+answerRename closed model =
+    if closed.cmd /= "ok" then
+        still model
+
+    else
+        when { open = model.open, dir = model.dir } is
+            { open = Just from, dir = Just dir } ->
+                let
+                    to =
+                        String.trim (Tui.text nameFieldId closed.values)
+                in
+                if to == from then
+                    still model
+
+                else
+                    when trouble model.notes to is
+                        Just why ->
+                            still { model | message = why }
+
+                        Nothing ->
+                            { model =
+                                { model
+                                    | message = ""
+                                    -- A read that is already in the air was
+                                    -- asked for under the old name, and
+                                    -- `flushed` refuses an answer that is not
+                                    -- for the note in the editor. Moving it
+                                    -- with the file is what keeps the second
+                                    -- of typing between the last autosave and
+                                    -- the rename.
+                                    , pending =
+                                        when model.pending is
+                                            Flushing it ->
+                                                if it.note == from then
+                                                    Flushing { it | note = to }
+
+                                                else
+                                                    model.pending
+
+                                            Idle ->
+                                                Idle
+                                }
+                            , command =
+                                -- `move` takes the new path first and the old
+                                -- one second, which reads backwards and is
+                                -- what makes it pipeable. Getting it the wrong
+                                -- way round renames the note out of existence.
+                                FileSystem.move model.permission (fileFor dir to) (fileFor dir from)
+                                    |> Task.map (\_ -> Ok {})
+                                    |> Task.onError (\it -> Task.succeed (Err (FileSystem.errorToString it)))
+                                    |> Task.perform (\it -> Renamed { from = from, to = to, ok = it })
+                            }
+
+            _ ->
+                still model
+
+
+answerDelete : Tui.Ports Msg -> { id : String, cmd : String, values : Json.Decode.Value } -> Model -> Step
+answerDelete ports closed model =
+    if closed.cmd /= "ok" then
+        still model
+
+    else
+        when { open = model.open, dir = model.dir } is
+            { open = Just name, dir = Just dir } ->
+                { model =
+                    -- Everything about the open note goes at once, `pending`
+                    -- included: a flush still in the air would write the file
+                    -- straight back, and `Flushing` names the note precisely
+                    -- so that `flushed` can refuse it too.
+                    { model
+                        | open = Nothing
+                        , saved = ""
+                        , dirty = False
+                        , pending = Idle
+                        , message = ""
+                    }
+                , command =
+                    Cmd.batch
+                        [ Tui.setEditorText ports bodyId ""
+                        , FileSystem.remove model.permission { recursive = False } (fileFor dir name)
+                            |> Task.map (\_ -> Ok {})
+                            |> Task.onError (\it -> Task.succeed (Err (FileSystem.errorToString it)))
+                            |> Task.perform (\it -> Removed { name = name, ok = it })
+                        ]
+                }
+
+            _ ->
+                still model
+
+
+-- VIEW
+
+
+{-| No `Inks`, unlike every other tool's `view`, and the reason is that there
+is nothing here to colour: a list, an editor and a line of text are all views
+the palette already dresses. A `Span` is what an ink is for, and this window
+draws none.
+-}
+view : Model -> Tui.Window
+view model =
+    let
+        width =
+            max 46 model.desktop.cols
+
+        height =
+            max 12 model.desktop.rows
+
+        -- A ListBox draws its scroll bar in the column immediately to the
+        -- right of its rectangle, so column 22 is left empty for it and the
+        -- editor starts at 23.
+        listRight =
+            21
+
+        acrossTheFoot =
+            { left = False, top = True, right = True, bottom = True }
+    in
+    { id = windowId
+    , title =
+        when model.open is
+            Just name ->
+                "Notes - " ++ name
+
+            Nothing ->
+                "Notes"
+    , rect = { x1 = 0, y1 = 0, x2 = width, y2 = height }
+    , resize = Tui.resizable
+    , palette = Tui.BlueWindow
+    , canClose = True
+    , canMove = True
+    , views =
+        -- The list first, so it holds the caret when the window opens: a note
+        -- has to be chosen before there is anything to type into, and the
+        -- first selectable view is the one Turbo Vision focuses.
+        [ Grows
+            { grow = Tui.stretchHeight
+            , view =
+                ListBox
+                    { id = listId
+                    , rect = { x1 = 1, y1 = 1, x2 = listRight, y2 = height - 3 }
+                    , items = model.notes
+                    , focused = model.focused
+                    , chooses = ""
+                    , columns = 1
+                    , top = 0
+                    }
+            }
+        , Grows
+            { grow = Tui.stretch
+            , view =
+                Editor
+                    { id = bodyId
+                    , rect = { x1 = listRight + 2, y1 = 1, x2 = width - 1, y2 = height - 3 }
+                    , autoIndent = False
+                    }
+            }
+        , Grows
+            { grow = acrossTheFoot
+            , view =
+                StaticText
+                    { id = statusId
+                    , rect = { x1 = 1, y1 = height - 2, x2 = width - 1, y2 = height - 1 }
+                    , text = status model
+                    }
+            }
+        ]
+    }
+
+
+{-| The line along the foot: what just happened, or what to do when nothing
+has.
+-}
+status : Model -> String
+status model =
+    if model.message /= "" then
+        model.message
+
+    else if model.dir == Nothing then
+        "Nowhere to keep notes."
+
+    else if Array.isEmpty model.notes then
+        "No notes yet.  Ctrl-N makes one."
+
+    else
+        when model.open is
+            Just _ ->
+                String.fromInt (Array.length model.notes)
+                    ++ (if Array.length model.notes == 1 then
+                            " note.  "
+
+                        else
+                            " notes.  "
+                       )
+                    ++ "F4 for the list, Space opens one, F2 saves now."
+
+            Nothing ->
+                "Space opens the note the highlight is on."

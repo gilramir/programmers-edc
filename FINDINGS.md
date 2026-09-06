@@ -966,6 +966,24 @@ keyboard mask depends on `ofSelectable`.
 Two of the canvases already written wanted `False` in hindsight -- the palette
 example paints two pictures and reads nothing.
 
+**An editor traps the caret the same way, and has no `takesFocus` to turn it
+off.** `TEditor::handleEvent` accepts `charCode 9` alongside the printable
+range (`teditor1.cpp:588`) and inserts it, so `Tab` never reaches the group and
+an editor is the end of its window's tab ring. Unlike a canvas that is only
+there to be looked at, that is not a mistake to be corrected -- a tab is a
+character an editor is supposed to be able to type -- so the answer is not a
+flag but a key: a window with an editor *and* another focusable view needs a
+command of its own answered with `focus`, and predc's notes window uses `F4`
+for it.
+
+Which makes the choice of key part of the same finding. The menu bar is
+`ofPreProcess` and is offered every keystroke before the focused view is, so an
+accelerator on that menu is taken *away* from the editor underneath, in
+silence. `teditor1.cpp:47` is a WordStar keymap claiming nearly every `Ctrl`
+letter, plus `kbIns` and `kbDel` -- so the obvious **Delete** entry on `Del`
+would have stopped `Del` deleting a character, and looked like a bug in the
+editor.
+
 ### Two clicks, and the setting that decides they are one
 
 `TClickTester` reacts to `meDoubleClick`, so `Clicked` grew `isDouble`. The

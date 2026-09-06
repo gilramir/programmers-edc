@@ -35,6 +35,12 @@ type Command
     | Calendar
     | Encode
     | Env
+    -- `Nothing` is `predc notes`, which opens the window on whichever note
+    -- comes first; a name opens that one, and says so if there is no such
+    -- note rather than inventing it. Making a note is `Ctrl-N` in the window,
+    -- because a command line that creates files as a side effect of a typo is
+    -- not what anybody means by opening a notes app.
+    | Notes (Maybe String)
     | Random
     | Time
     | Unicode
@@ -111,6 +117,23 @@ parser =
                 , summary = "The `env` command opens the environment variables predc's own process has:"
                 , example = PP.words "predc env"
                 , builder = \_args _flags -> Env
+                }
+            |> Parser.withCommand
+                { word = "notes"
+                , arguments =
+                    Parser.optionalArg
+                        { value = Parser.stringParser
+                        , help = "The note to open, if you already know which one"
+                        }
+                , flags = Parser.noFlags
+                , commonDescription = Just "Open the notes."
+                , summary = "The `notes` command opens the notes window, on a note if you name one:"
+                , example =
+                    PP.verticalBlock
+                        [ PP.words "predc notes"
+                        , PP.words "predc notes \"Release checklist\""
+                        ]
+                , builder = \name _flags -> Notes name
                 }
             |> Parser.withCommand
                 { word = "random"

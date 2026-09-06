@@ -994,6 +994,18 @@ first for a week, because `Array.append fst second` makes `fst` the *postfix*.
     time the terminal changes size. The window's own rectangle is safe: that
     one is patched rather than rebuilt.
 
+    **`Tab` cannot leave it.** `TEditor` inserts a tab character rather than
+    passing the key on (`teditor1.cpp:588` accepts `charCode 9` along with the
+    printable range), so an editor is the end of its window's tab ring exactly
+    as a focused [`Canvas`](#View) is. A window with an editor *and* something
+    else to focus therefore needs a key of its own to get back — a command on
+    the menu answered with [`focus`](#focus) is the shape — and it must not be
+    one `TEditor` has already claimed, which is nearly every `Ctrl` letter plus
+    `Ins` and `Del` (`teditor1.cpp:47`). The menu bar is `ofPreProcess` and is
+    offered every keystroke *before* the focused view, so a menu accelerator
+    that collides takes the key away from the editor underneath and nothing
+    reports it.
+
     Everything Turbo Vision's editor does, it does here: insert and overwrite,
     selection, one level of undo, a clipboard shared between editors, auto
     indent, word-left and word-right, and the block and line commands from

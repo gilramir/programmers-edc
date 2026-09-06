@@ -47,6 +47,7 @@ import Tool.Calendar
 import Tool.Encode
 import Tool.Env
 import Tool.Hex
+import Tool.Notes
 import Tool.Random
 import Tool.Time
 import Tool.Unicode
@@ -87,6 +88,14 @@ dialog, and a dialog is a command whose answer comes back as an event.
 -}
 calendarPorts : Tui.Ports Tool.Calendar.Msg
 calendarPorts =
+    { toJs = tuiOut, fromJs = tuiIn }
+
+
+{-| The notes tool's, which needs one for both of those reasons at once: it
+opens dialogs, and it reads and writes files.
+-}
+notesPorts : Tui.Ports Tool.Notes.Msg
+notesPorts =
     { toJs = tuiOut, fromJs = tuiIn }
 
 
@@ -156,6 +165,7 @@ type alias Model =
     , env : Maybe Tool.Env.Model
     , random : Maybe Tool.Random.Model
     , hex : Maybe Tool.Hex.Model
+    , notes : Maybe Tool.Notes.Model
     , time : Maybe Tool.Time.Model
     , unicode : Maybe Tool.Unicode.Model
     -- The help window, which is a window like a tool's and is not one: it is
@@ -196,6 +206,7 @@ type Msg
     -- first tool that needed either.
     | FromCalendar Tool.Calendar.Msg
     | FromHex Tool.Hex.Msg
+    | FromNotes Tool.Notes.Msg
     | FromRandom Tool.Random.Msg
     | FromTime Tool.Time.Msg
     -- The config file was written, or was not. Either way there is nothing to
@@ -316,6 +327,7 @@ init env =
                     , env = Nothing
                     , random = Nothing
                     , hex = Nothing
+                    , notes = Nothing
                     , time = Nothing
                     , unicode = Nothing
                     , help = Nothing
@@ -416,6 +428,19 @@ open command shell =
         -- The one command that starts a task, other than the hex viewer with
         -- a path: the window is not worth opening empty, so the first draw is
         -- already on its way before the first frame is.
+        Cli.Notes name ->
+            let
+                step =
+                    Tool.Notes.init shell.permission
+                        (Tool.Notes.where_ shell.environment)
+                        name
+                        shell.desktop
+            in
+            Node.startProgram
+                { model = Tui.Start { shell | notes = Just step.model }
+                , command = Cmd.map FromNotes step.command
+                }
+
         Cli.Random ->
             let
                 step =
@@ -553,6 +578,20 @@ update msg model =
                     in
                     { model = { model | time = Just step.model }
                     , command = Cmd.map FromTime step.command
+                    }
+
+                Nothing ->
+                    { model = model, command = Cmd.none }
+
+        FromNotes sub ->
+            when model.notes is
+                Just notes ->
+                    let
+                        step =
+                            Tool.Notes.receive notesPorts sub notes
+                    in
+                    { model = { model | notes = Just step.model }
+                    , command = Cmd.map FromNotes step.command
                     }
 
                 Nothing ->
@@ -709,6 +748,16 @@ handleEvent event model =
                         , command = Tui.focus tui Tool.Hex.windowId
                         }
 
+            else if cmd == Tool.Notes.command then
+                when model.notes is
+                    Nothing ->
+                        openNotes Nothing model
+
+                    Just _ ->
+                        { model = model
+                        , command = Tui.focus tui Tool.Notes.windowId
+                        }
+
             else if cmd == Tool.Time.command then
                 when model.time is
                     Nothing ->
@@ -790,6 +839,9 @@ handleEvent event model =
             else if id == Tool.Hex.windowId then
                 { model = { model | hex = Nothing }, command = Cmd.none }
 
+            else if id == Tool.Notes.windowId then
+                { model = { model | notes = Nothing }, command = Cmd.none }
+
             else if id == Tool.Time.windowId then
                 { model = { model | time = Nothing }, command = Cmd.none }
 
@@ -824,6 +876,28 @@ openTime model =
     in
     { model = { model | time = Just step.model }
     , command = Cmd.map FromTime step.command
+    }
+
+
+{-| The notes window, which needs the environment to know where notes live and
+the file system permission to read them -- both of which are `Init.Task`s and
+so are the shell's, exactly as the hex viewer's permission is.
+
+`Tool.Notes.where_` is called here rather than held on the model beside
+`configPath`, because unlike the config file it is wanted only when the window
+opens and it is two `Dict` lookups.
+-}
+openNotes : Maybe String -> Model -> { model : Model, command : Cmd Msg }
+openNotes wanted model =
+    let
+        step =
+            Tool.Notes.init model.permission
+                (Tool.Notes.where_ model.environment)
+                wanted
+                model.desktop
+    in
+    { model = { model | notes = Just step.model }
+    , command = Cmd.map FromNotes step.command
     }
 
 
@@ -917,6 +991,9 @@ toTools event model =
         env =
             Maybe.map (Tool.Env.update tui event) model.env
 
+        notes =
+            Maybe.map (Tool.Notes.update notesPorts event) model.notes
+
         moved =
             { model
                 | ascii = Maybe.map (Tool.Ascii.update event) model.ascii
@@ -924,6 +1001,7 @@ toTools event model =
                 , encode = Maybe.map (Tool.Encode.update event) model.encode
                 , calc = Maybe.map .model calc
                 , hex = Maybe.map .model hex
+                , notes = Maybe.map .model notes
                 , random = Maybe.map .model random
                 , env = Maybe.map .model env
                 , time = Maybe.map .model time
@@ -1041,6 +1119,12 @@ toTools event model =
 
                 Nothing ->
                     Cmd.none
+            , when notes is
+                Just step ->
+                    Cmd.map FromNotes step.command
+
+                Nothing ->
+                    Cmd.none
             , if wrote then
                 saveSettings { model | timezones = chosen }
 
@@ -1060,12 +1144,24 @@ land on, and the tool that asked for it is gone.
 -}
 subscriptions : Model -> Sub Msg
 subscriptions model =
-    when model.time is
-        Just it ->
-            Sub.map FromTime (Tool.Time.subscriptions timeWiring it)
+    Sub.batch
+        [ when model.time is
+            Just it ->
+                Sub.map FromTime (Tool.Time.subscriptions timeWiring it)
 
-        Nothing ->
-            Sub.none
+            Nothing ->
+                Sub.none
+        -- The notes tool's autosave, which subscribes only while it has
+        -- something to write. `view` runs on every tick of every subscription,
+        -- so a tool that ticked whenever its window was open would repaint the
+        -- desktop once a second for as long as somebody left it there.
+        , when model.notes is
+            Just it ->
+                Sub.map FromNotes (Tool.Notes.subscriptions it)
+
+            Nothing ->
+                Sub.none
+        ]
 
 
 -- VIEW
@@ -1188,6 +1284,16 @@ view model =
                     Nothing ->
                         []
                )
+            -- The one tool whose view takes no `Inks`: a list, an editor and a
+            -- line of text are all views the palette dresses, and it draws no
+            -- `Span` for an ink to reach.
+            ++ (when model.notes is
+                    Just notes ->
+                        [ Tool.Notes.view notes ]
+
+                    Nothing ->
+                        []
+               )
             -- The only tool that answers with more than one window: its zone
             -- picker is a second window of its own rather than a modal, and
             -- `Tool.Time` says why.
@@ -1246,6 +1352,7 @@ menuBar model =
             , Tool.Encode.menuItem
             , Tool.Random.menuItem
             , Tool.Env.menuItem
+            , Tool.Notes.menuItem
             ]
         }
     ]
@@ -1402,6 +1509,13 @@ toolMenus model =
         ++ (when model.unicode is
                 Just _ ->
                     [ Tool.Unicode.menu ]
+
+                Nothing ->
+                    []
+           )
+        ++ (when model.notes is
+                Just _ ->
+                    [ Tool.Notes.menu ]
 
                 Nothing ->
                     []
