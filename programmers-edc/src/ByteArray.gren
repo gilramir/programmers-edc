@@ -1,0 +1,68 @@
+module ByteArray exposing (fromBytes, fromString)
+
+{-| `Bytes` as an `Array Int`, which is how both tools that deal in bytes hold
+them.
+
+`Bytes` is a good thing to be handed and a bad thing to index. Every byte the
+hex viewer draws and every byte the environment tool sends it is looked up by
+offset, and `Bytes.Decode` answers a *range* rather than a position -- so both
+tools want the whole buffer as numbers once, and want it to cost what one pass
+costs.
+
+This was `Tool.Hex.toByteArray` until `Tool.Env` needed the same thing to read
+`/proc/self/environ`. It is here rather than exposed from the hex viewer
+because a tool exposing a byte utility to another tool is a dependency between
+two things that have nothing to do with each other.
+
+@docs fromBytes, fromString
+
+-}
+
+import Array.Builder as Builder
+import Bytes exposing (Bytes)
+import Bytes.Decode as Decode
+
+
+{-| Every byte, in order.
+
+`Array.Builder` and not `Array.pushLast`: `pushLast` is `toSpliced`, a copy of
+the whole array, so building sixteen thousand of them one at a time is sixteen
+thousand copies -- a hundred and thirty million element writes for one scroll.
+The builder is the reason a chunk can be sixteen kilobytes.
+-}
+fromBytes : Bytes -> Array Int
+fromBytes bites =
+    Decode.decode (decoder (Bytes.length bites)) bites
+        |> Maybe.withDefault []
+
+
+{-| The UTF-8 encoding of a string, as bytes.
+
+Which is the answer to "what bytes did this string come from" *only* when the
+string came from bytes that decoded -- `Bytes.toString` is a round trip and
+`Bytes.fromString` is the other half of it. A string that was decoded lossily
+has no such answer, and the caller is the one that has to know which it holds.
+-}
+fromString : String -> Array Int
+fromString text =
+    fromBytes (Bytes.fromString text)
+
+
+decoder : Int -> Decode.Decoder (Array Int)
+decoder count =
+    Decode.loop
+        { left = count, sofar = Builder.empty count }
+        (\state ->
+            if state.left <= 0 then
+                Decode.succeed (Decode.Done (Builder.toArray state.sofar))
+
+            else
+                Decode.map
+                    (\byte ->
+                        Decode.Loop
+                            { left = state.left - 1
+                            , sofar = Builder.pushLast byte state.sofar
+                            }
+                    )
+                    Decode.unsignedInt8
+        )

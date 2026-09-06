@@ -1,4 +1,4 @@
-module Tool.Hex exposing (Model, Msg, command, init, menu, menuItem, openFile, receive, update, view, windowId)
+module Tool.Hex exposing (Model, Msg, command, init, menu, menuItem, openBytes, openFile, receive, update, view, windowId)
 
 {-| The hex dump viewer: offsets, sixteen bytes a row, and the printable
 rendering beside them.
@@ -90,6 +90,7 @@ more bytes come from".
 import Array exposing (Array)
 import Array.Builder as Builder
 import Ascii
+import ByteArray
 import Bytes exposing (Bytes)
 import Bytes.Decode as Decode
 import Char
@@ -434,6 +435,12 @@ say which it is dealing with. A `Maybe Path` would let a missing path mean
 Everything else about them is the same, and that is the useful half: the model
 holds a size and one chunk of bytes either way, so the dump, the scrolling, the
 marking and the copying were all written once and did not notice this arriving.
+
+`Pasted` names a mechanism and not a provenance, which is why it did not have
+to grow a third variant when [`openBytes`](#openBytes) arrived: an environment
+variable's value is a buffer whose every byte is already here, and that is the
+only thing this union is ever asked. Where the bytes came *from* is `name`,
+which is what the title bar shows.
 -}
 type alias Source =
     { name : String, size : Int, from : Origin }
@@ -536,6 +543,23 @@ openFile permission desktop path =
             init permission desktop
     in
     { model = model, command = statFile model path }
+
+
+{-| The same viewer, already holding bytes that were never a file.
+
+`Tool.Env` sends an environment variable's value here, which is the one place
+in predc where the bytes a person wants to look at exist only in memory. It
+costs nothing because the paste work already did it: a buffer whose every byte
+is in the chunk is a source `covers` says yes to, so nothing below this reads.
+
+`name` is what the title bar says, and it is the caller's job to make it say
+where the bytes came from -- `$LS_COLORS` rather than "some bytes". The viewer
+is a tool that never guesses what it is looking at; it should not have to guess
+what it was handed either.
+-}
+openBytes : FileSystem.Permission -> { cols : Int, rows : Int } -> String -> Array Int -> Step
+openBytes permission desktop name bytes =
+    showBytes bytes name (init permission desktop)
 
 
 still : Model -> Step
@@ -2515,35 +2539,14 @@ fetch answer permission path range =
 {-| `Bytes` cannot be indexed, so a chunk is decoded into numbers once rather
 than a byte at a time on every render.
 
-`Array.Builder` and not `Array.pushLast`: `pushLast` is `toSpliced`, a copy of
-the whole array, so building sixteen thousand of them one at a time is sixteen
-thousand copies -- a hundred and thirty million element writes for one scroll.
-The builder is the reason a chunk can be this size.
+The `Array.Builder` that makes a sixteen-kilobyte chunk affordable is in
+`ByteArray`, which is where this moved when `Tool.Env` needed the same thing to
+read `/proc/self/environ`. This name stays because it reads better at the
+sixteen call sites below than the qualified one does.
 -}
 toByteArray : Bytes -> Array Int
-toByteArray bites =
-    Decode.decode (byteArray (Bytes.length bites)) bites
-        |> Maybe.withDefault []
-
-
-byteArray : Int -> Decode.Decoder (Array Int)
-byteArray count =
-    Decode.loop
-        { left = count, sofar = Builder.empty count }
-        (\state ->
-            if state.left <= 0 then
-                Decode.succeed (Decode.Done (Builder.toArray state.sofar))
-
-            else
-                Decode.map
-                    (\byte ->
-                        Decode.Loop
-                            { left = state.left - 1
-                            , sofar = Builder.pushLast byte state.sofar
-                            }
-                    )
-                    Decode.unsignedInt8
-        )
+toByteArray =
+    ByteArray.fromBytes
 
 
 byteAt : Model -> Int -> Maybe Int

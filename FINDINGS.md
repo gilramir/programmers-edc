@@ -7003,3 +7003,188 @@ names", and after this it still is not. Nothing in the API changed, thirty
 `Tui.Window` literals did not have to grow a field, and predc's environment
 list gets a working zoom box for free, as does every other window anybody
 builds. **The cheapest capability is the one that turns out to be a default.**
+
+## The value the environment tool could not show you
+
+`predc env` lists every environment variable this process has. Asked to send
+one to the hex viewer -- because a value turned out to be EUC-KR and the list
+was showing four question marks -- the feature looked like an afternoon: the
+hex viewer already takes bytes that were never a file, since `p` pastes the
+clipboard into it. The bytes were the problem. There were none.
+
+### `process.env` is a decoding, and the bytes do not survive it
+
+`Node.getEnvironmentVariables` is `process.env`, which Node hands over as
+strings. A value that is not valid UTF-8 has already been through a lossy
+decode by the time any Gren sees it, and the loss is total:
+
+| | bytes |
+| --- | --- |
+| in the environment | `b0 a1 b0 a2` |
+| `process.env` | `fffd fffd fffd fffd` |
+| `/proc/self/environ` | `b0 a1 b0 a2` |
+
+Every byte becomes `U+FFFD` on its own, so not even the count survives in
+general. **Sending "the value" to the hex viewer would have shown
+`EF BF BD EF BF BD ...` -- the encoding of the damage, offered as the answer to
+"what is actually in there".** That is worse than not having the feature, and
+it is the sort of wrong a hex viewer exists to not be.
+
+The obvious workaround is worse than it looks too. `predc hex
+/proc/self/environ` opens **`environ (0 bytes)`** and an empty dump: procfs
+answers `stat` with a size of zero and then hands over thirteen kilobytes, and
+the viewer is size-driven by design -- `metadata` for the size, then a window
+read. So the file a person would reach for is exactly the file that tool cannot
+open.
+
+### So the tool reads the block itself, and gains a fact it did not have
+
+`/proc/self/environ` is what `execve` handed the process, `NAME=value` records
+separated by NUL. `Main` reads it in the `Init.Task` chain and hands it to the
+tool, recovering to `Nothing` rather than reporting: there is nothing a person
+can do about a machine with no `/proc`, and the tool has a complete answer for
+it.
+
+`Bytes.toString` turned out to be the entire decoder. It is `TextDecoder` with
+`fatal: true` (`Gren/Kernel/Bytes.js`), so `Nothing` *is* the answer to "can
+this be shown as text", asked once per value with nothing hand-written. That
+made the type write itself:
+
+```gren
+type Value
+    = Exact String        -- the bytes decode, and this is all of what they say
+    | Opaque (Array Int)  -- they do not, so only the bytes are true
+    | Reported String     -- no byte source here; process.env's word for it
+```
+
+**The third variant is why this is a union and not a `Maybe (Array Int)`.**
+"I have no bytes" and "the bytes are not text" are different facts, and only
+the first of them means the hex viewer cannot be offered -- so `x` on a mac
+says *No raw bytes on this machine* rather than doing nothing, which is the
+difference between a limitation and a bug.
+
+An `Opaque` value is drawn the way a hex dump draws its printable column: the
+ASCII as itself, everything else as `.`, in the alert ink. A path with one
+Korean directory in it reads as `/home/..../docs` rather than as four
+identical blobs -- **which says where the trouble is, and the hex viewer is
+what says what it is.** The tool did not have that distinction before; it had
+replacement characters and no way to tell them from a value that genuinely
+contained them.
+
+### The cursor was the real work, and it is a cursor over variables
+
+The list had none. `Up` and `Down` scrolled, `y` copied the whole filtered set,
+and that was coherent while filtering was the entire interaction -- nothing
+needed one variable rather than the set. A byte view needs exactly one.
+
+Neither of the tool's recorded decisions is about a cursor (the search
+*filters* rather than jumps; there is no Refresh), so this re-opened nothing.
+What it did force is the difference between a cursor and a scroll position:
+**`top` counts display lines and `cursor` counts variables**, because a `PATH`
+that wraps onto nine lines is one stop and not nine. The two are joined by
+`laidOut`, which already tagged every line with the variable it belongs to, so
+finding the cursor's lines is a filter over an array the view was about to
+build anyway.
+
+Three things fell out of that and all three are the kind that only show up in
+use. The cursor goes back to the top on every keystroke in the filter, because
+keeping it on the same *variable* where it survives makes the highlight jump
+around the screen while you type toward the row you are aiming at. Scrolling to
+follow the cursor has to put the *last* line of a wrapped value on screen, or
+the value is selected and invisible -- and when a value has more lines than the
+window has rows, the first line wins, which is the answer `less` gives. And the
+cursor is painted the full width of the canvas rather than the width of its
+text, or it is a ragged patch as long as whatever that variable happens to say.
+
+### A cursor changes what the keys around it mean
+
+`y` copied the whole filtered set, which was the only thing it could mean while
+nothing was selected. With a cursor it means the value under it -- the value
+alone, because a copy of one is about to be pasted where the value goes, while
+a copy of many is written `NAME=value` or it says nothing about which is which.
+`Y` is what `y` was.
+
+**And a value that is not text refuses rather than copying its rendering.** The
+dots on the screen are a rendering, a clipboard holds text, and there is no
+text here to hold -- so copying what is displayed would put a plausible lie
+somewhere the user is about to paste it. The message names `x` instead. That is
+the same rule the tool is built on, applied to the other key: what cannot be
+shown honestly is not shown.
+
+`Y` cannot refuse the same way -- a copy of a filtered set is useless if one
+binary entry kills it -- so it writes `ZZ_BYTES=<4 bytes, not text>`: something
+that cannot be mistaken for a value, with the size, in the line where the value
+would have been. Leaving the variable out was the other candidate and is worse.
+**A copy of everything shown that quietly is not everything shown is the kind
+of wrong nobody checks**, whereas a placeholder is read by the person who
+pastes it.
+
+Two things about testing it are worth keeping. **The clipboard cannot be read
+back, but the copy is on the wire**: with no `DISPLAY` and no
+`WAYLAND_DISPLAY`, TVision writes an `OSC 52` with the text base64'd into it,
+so a driver can decode the payload and check *what* was copied rather than that
+something was. And it has to *decode* rather than search: base64 is grouped in
+threes, so the encoding of a substring is not a substring of the encoding, and
+looking for a short string on the wire finds it only when it is the whole
+payload -- which is precisely the difference between checking `y` and checking
+`Y`.
+
+The refusal is checked by counting `OSC 52`s across the keystroke rather than
+by looking at what the last one held. A refusal that copied something else
+would pass "the clipboard does not have the dots in it".
+
+### What it cost the rest of the program: almost nothing
+
+`Tool.Hex` grew `openBytes` and no new `Origin`. `Pasted` names a *mechanism* --
+every byte is already here, so `covers` says yes and nothing reads -- and an
+environment variable's value is exactly that. Where the bytes came from is
+`name`, which is what the title bar shows, and it says `$ZZ_BYTES` because a
+tool that never guesses what it is looking at should not have to guess what it
+was handed.
+
+The handoff is a field on the tool's step rather than a `Cmd`, and the reason
+generalises: **a `Cmd` asks the runtime for something, and opening a window
+that belongs to another tool is not the runtime's to give.** The shell owns
+both models and is the only thing that can put one in front of the other; it
+already reads every step to take its model, so this is one more field on the
+same read. It is the first time in predc that one tool opens another.
+
+`toByteArray` moved out of the hex viewer into `ByteArray`, because a tool
+exposing a byte utility to another tool is a dependency between two things that
+have nothing to do with each other.
+
+### Testing it needed a way to put bytes Python calls invalid into an environment
+
+`os.execvpe` encodes a `str` with the filesystem encoding and the
+`surrogateescape` handler, so `U+DCB0` goes back out as the single byte `0xB0`.
+That is how `drive_env.py` plants a value no shell would produce by accident
+and no test could otherwise write down. **A driver that can only plant text can
+only test text**, and every check here is about what happens when the value is
+not.
+
+### The check that a cursor made environment-dependent
+
+`Down scrolls the list` sent three `Down`s and compared the top row. That was a
+fair test while every `Down` scrolled by one. With a cursor the list moves only
+when the cursor would leave it, so how many keystrokes that takes depends on
+how many lines the variables above it wrapped onto -- **which depends on the
+environment the driver is running in.** It passed everywhere except under
+`--asan`, where the wrapper adds four variables, the third `Down` landed on a
+short one instead of on `PATH`, and nothing had to scroll.
+
+The three checks that replaced it are about what `Down` now means and do not
+count keystrokes to get there: it does not scroll while the cursor is on
+screen, the list follows when the cursor leaves, and it stops at the end rather
+than scrolling past. **A check whose arithmetic runs through the environment is
+a check that passes on the machine it was written on**, and the only reason
+this one was caught is that one configuration runs with a different environment
+on purpose.
+
+**And then it happened again, in the next block written.** `and the cursor
+decides which one` pressed `Down` once from `AA_FIRST` and expected `HOME` --
+which is true here and false under `--asan`, where `ASAN_OPTIONS` sorts between
+them. Writing the rule down did not prevent making the same mistake ten minutes
+later, so the fix is structural rather than careful: the copy checks filter to
+`ZZ_` first, and nothing else in any environment begins that way. **A check
+that names a position in a list has to name a list the driver decides the whole
+of.**

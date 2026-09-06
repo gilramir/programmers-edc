@@ -29,7 +29,7 @@ import Cli
 import Config
 import Dict exposing (Dict)
 import FileSystem
-import FileSystem.Path exposing (Path)
+import FileSystem.Path as Path exposing (Path)
 import Help
 import Init
 import Json.Decode as Decode
@@ -37,7 +37,7 @@ import Json.Encode as Encode
 import Node
 import Stream
 import Stream.Log
-import Task
+import Task exposing (Task)
 import Terminal
 import Theme
 import Time
@@ -141,6 +141,10 @@ type alias Model =
     -- this is a snapshot from before the first frame -- which is why
     -- `Tool.Env` has no Refresh and does not need one.
     , environment : Dict String String
+    -- The same environment as bytes, when this machine has a `/proc` to read
+    -- it from. `Nothing` on anything that does not, and `Tool.Env` does
+    -- without the byte view rather than pretending: see the note in `init`.
+    , environ : Maybe Bytes
     -- One field per tool, `Nothing` when its window is not open. A field
     -- rather than a list because the tools do not share a model type and
     -- should not be made to: what they share is the shape of the three
@@ -200,8 +204,27 @@ type Msg
     | Saved
 
 
-{-| Four awaits, and the order is the only thing about them worth saying: the
-file system permission is an `Init.Task` and therefore has to be first,
+{-| `/proc/self/environ`, or `Nothing` where there is none.
+
+`readFile` and not `readFileStream`: procfs answers `stat` with a size of zero
+and then hands over thirteen kilobytes, so anything that sizes a read first
+reads nothing at all. That is also why the hex viewer cannot simply be pointed
+at this path -- it is size-driven by design.
+
+The failure is recovered rather than reported. There is nothing a person could
+do about a machine with no `/proc`, and the tool has a complete answer for it.
+-}
+environBlock : FileSystem.Permission -> Task Never (Maybe Bytes)
+environBlock permission =
+    FileSystem.readFile permission (Path.fromPosixString "/proc/self/environ")
+        |> Task.map Just
+        |> Task.onError (\_ -> Task.succeed Nothing)
+
+
+{-| Five awaits, and the order is the only thing about them worth saying: the
+file system permission is an `Init.Task` and therefore has to be first, and it
+has to be first for a second reason now -- reading the environment block is a
+file read and cannot happen before there is a permission to do one.
 `Terminal.initialize` answers whether anything is watching (it reads
 `process.stdout` and touches nothing, so it is safe to ask before Turbo Vision
 has the terminal), the environment says where the config file is, and the
@@ -229,6 +252,29 @@ init env =
                 Config.where_ vars
         in
         Init.awaitTask (Config.load permission path) <| \config ->
+        -- The environment again, and this time as bytes.
+        --
+        -- `Node.getEnvironmentVariables` is `process.env`, which Node has
+        -- already decoded as UTF-8: a value that is not valid UTF-8 arrives as
+        -- one `U+FFFD` per byte and the bytes are gone. A `LANG` of
+        -- `ko_KR.euc-kr` with EUC-KR bytes in a value is a real thing to have,
+        -- and `Tool.Env` was showing replacement characters with nothing to
+        -- say so -- and could not have sent them to the hex viewer, because by
+        -- then the only bytes left were the ones the damage is encoded in.
+        --
+        -- `/proc/self/environ` is the block `execve` handed this process. It
+        -- is Linux only, and it is read here rather than by the tool because
+        -- an `Init.Task` is the one place a tool can be handed something it
+        -- cannot go and fetch. `Task.onError` rather than a check: the
+        -- question is not whether the platform has `/proc` but whether this
+        -- read worked, and a `Nothing` is a complete answer to it -- the tool
+        -- falls back to `vars` and does without the byte view.
+        --
+        -- It cannot be `Tool.Hex`'s own path either: procfs reports size zero
+        -- from `stat`, and the viewer is size-driven, so `predc hex
+        -- /proc/self/environ` opens an empty dump. The obvious workaround is
+        -- the one that does not work.
+        Init.awaitTask (environBlock permission) <| \environ ->
         -- Which zone this machine is in, and it costs no port: `Time.here` is
         -- the useless one -- its own doc comment says it can never answer
         -- `America/New_York` and will hand back `Etc/GMT-5` instead -- but
@@ -262,6 +308,7 @@ init env =
                                 { cols = 80, rows = 23 }
                     , permission = permission
                     , environment = vars
+                    , environ = environ
                     , ascii = Nothing
                     , calc = Nothing
                     , calendar = Nothing
@@ -356,7 +403,7 @@ open command shell =
 
         Cli.Env ->
             Node.startProgram
-                { model = Tui.Start { shell | env = Just (Tool.Env.init shell.environment shell.desktop) }
+                { model = Tui.Start { shell | env = Just (Tool.Env.init shell.environ shell.environment shell.desktop) }
                 , command = Cmd.none
                 }
 
@@ -625,7 +672,7 @@ handleEvent event model =
             else if cmd == Tool.Env.command then
                 when model.env is
                     Nothing ->
-                        { model = { model | env = Just (Tool.Env.init model.environment model.desktop) }
+                        { model = { model | env = Just (Tool.Env.init model.environ model.environment model.desktop) }
                         , command = Cmd.none
                         }
 
@@ -903,16 +950,56 @@ toTools event model =
 
         wrote =
             chosen /= Nothing && chosen /= model.timezones
+
+        -- The environment tool asking for the hex viewer, which is the only
+        -- place in predc where one tool opens another.
+        --
+        -- It is a field on the step rather than a `Cmd` because a `Cmd` asks
+        -- the *runtime* for something, and a window belonging to `Tool.Hex` is
+        -- not the runtime's to give -- the shell owns both models and is the
+        -- only thing that can put one in front of the other. `Main` already
+        -- reads every step to take its model; this is one more field on the
+        -- same read.
+        --
+        -- The viewer is rebuilt rather than handed the bytes: whatever it had
+        -- open was a different thing, and the alternative is a viewer that is
+        -- sometimes showing what you asked for and sometimes not.
+        handed =
+            Maybe.andThen .send env
+
+        withHex =
+            when handed is
+                Just it ->
+                    let
+                        step =
+                            Tool.Hex.openBytes moved.permission moved.desktop it.name it.bytes
+                    in
+                    { model = { moved | hex = Just step.model }
+                    , command = Cmd.map FromHex step.command
+                    }
+
+                Nothing ->
+                    { model = moved, command = Cmd.none }
+
+        moved2 =
+            withHex.model
     in
     { model =
         if wrote then
-            { moved | timezones = chosen }
+            { moved2 | timezones = chosen }
 
         else
-            moved
+            moved2
     , command =
         Cmd.batch
-            [ when hex is
+            [ withHex.command
+            , when handed is
+                Just _ ->
+                    Tui.focus tui Tool.Hex.windowId
+
+                Nothing ->
+                    Cmd.none
+            , when hex is
                 Just step ->
                     Cmd.map FromHex step.command
 

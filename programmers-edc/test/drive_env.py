@@ -20,6 +20,7 @@ consumes its keys). `/` is the way back to the box, and that is checked here
 rather than left to the hint that says so.
 """
 
+import base64
 import os
 import subprocess
 import sys
@@ -37,8 +38,17 @@ from harness import Pty, Checks, node_argv
 # have, and a machine that happened to export one more variable would otherwise
 # move them. Very nearly, and not quite -- see `child_env_size`, which is why no
 # count below is written as `len(env)`.
+# EUC-KR for two Hangul syllables, and a path with one of them in it. Written
+# as lone surrogates because `os.execvpe` encodes a str with the filesystem
+# encoding and the `surrogateescape` handler, so `U+DCB0` goes back out as the
+# single byte `0xB0` -- which is the only way a test can put bytes in an
+# environment that Python itself refuses to call text.
+KR = "\udcb0\udca1\udcb0\udca2"
+
 PLANTED = {
     "TERM": "xterm-256color",
+    "ZZ_BYTES": KR,
+    "ZZ_INSIDE": "/home/" + KR + "/docs",
     "ZZ_ALPHA": "one",
     "ZZ_BETA": "two ALPHA three",
     "ZZ_EMPTY": "",
@@ -155,6 +165,49 @@ def child_env_size(env):
     return int(out.stdout.strip())
 
 
+def last_copy(app):
+    """What the most recent copy put on the clipboard.
+
+    A copy is an `OSC 52` on the wire with the text base64'd into it, and it is
+    only there because the environment this driver builds has no `DISPLAY` and
+    no `WAYLAND_DISPLAY` -- with either of them TVision would try `wl-copy` and
+    friends first and write nothing this can read (and would set the real
+    clipboard, which a test must not).
+
+    Decoded rather than matched against, because base64 is grouped in threes:
+    the encoding of a substring is not a substring of the encoding, so
+    searching the wire for a short string finds it only when it is the whole
+    payload. That is exactly the difference between checking `y` and checking
+    `Y`.
+    """
+    marker = b"\x1b]52;;"
+    at = app.buf.rfind(marker)
+    if at < 0:
+        return ""
+    rest = app.buf[at + len(marker):]
+    end = rest.find(b"\x07")
+    if end < 0:
+        return ""
+    return base64.b64decode(rest[:end]).decode("utf-8", "replace")
+
+
+def cursor_row(app, left):
+    """Which screen row the cursor bar is on, by its background.
+
+    The cursor is an ink and not a character -- it is a bar of the selected
+    colours across the whole width, which is what makes it findable: no other
+    row in the list is painted to the right of its text. So the test is a cell
+    well past the longest value, and the answer is the row where that cell
+    stops being the window's own background.
+    """
+    where = app.display()
+    ordinary = where.bg_at(left + 60, 3)
+    for row, line in enumerate(app.render().split("\n")):
+        if line[left:left + 1] == "\u2551" and where.bg_at(left + 60, row) != ordinary:
+            return row
+    return None
+
+
 def main():
     check = Checks()
     home = tempfile.mkdtemp(prefix="predc-home-")
@@ -259,11 +312,30 @@ def main():
           box(app) == "" and status(app).startswith(f"{total} variables"),
           (box(app), status(app)))
 
-    # Scrolling. The list is taller than the window with ZZ_LONG in it.
+    # Scrolling, which is now a consequence of the cursor rather than the thing
+    # the arrow keys do.
+    #
+    # **A fixed number of `Down`s is not a test any more.** It was, while every
+    # `Down` scrolled by one; now the list moves only when the cursor would
+    # leave it, so how many keystrokes that takes depends on how many lines the
+    # variables above it wrapped onto -- which depends on the environment. This
+    # check used to send three and passed, until `--asan` ran it in an
+    # environment with four more variables in it and the third `Down` landed
+    # somewhere that did not need to scroll. So: enough to reach the end from
+    # anywhere, and the assertion is that it *stopped* there.
     app.send(b"\t\t", settle=0.7)
     first = listed(app)[0]
-    app.send(b"\x1b[B" * 3, settle=0.9)
-    check("Down scrolls the list", listed(app)[0] != first, (first, listed(app)[0]))
+    app.send(b"\x1b[B", settle=0.7)
+    check("Down does not scroll while the cursor is still on screen",
+          listed(app)[0] == first, (first, listed(app)[0]))
+    app.send(b"\x1b[B" * 60, settle=1.2)
+    bottom = listed(app)[0]
+    check("but the list follows the cursor off the end of the window",
+          bottom != first, (first, bottom))
+    app.send(b"\x1b[B" * 10, settle=0.9)
+    check("and stops there rather than scrolling past it",
+          listed(app)[0] == bottom and listed(app)[-1].strip() != "",
+          (bottom, listed(app)[0]))
     app.send(b"\x1b[H", settle=0.9)
     check("Home comes back to the top", listed(app)[0] == first, listed(app)[0])
     app.send(b"\x1b[F", settle=0.9)
@@ -271,11 +343,153 @@ def main():
           listed(app)[0] != first and listed(app)[-1].strip() != "", listed(app)[-3:])
     app.send(b"\x1b[H", settle=0.9)
 
-    # Copy. What is on the clipboard cannot be read back here, so what is
-    # checked is that the tool asked and heard an answer -- the shape the
-    # calculator and the random tool both settle for.
+    # Copy, and what got copied.
+    #
+    # The clipboard cannot be read back, but the copy itself is on the wire:
+    # with no DISPLAY and no WAYLAND_DISPLAY -- which the environment this
+    # driver builds has neither of -- TVision writes an `OSC 52` with the text
+    # base64'd into it. So this checks the bytes rather than the status line,
+    # which is the difference between "it copied" and "it copied *that*".
+    # Filtered to the planted set before any of this, because **which variable
+    # is second depends on the environment** -- `--asan` exports four of its
+    # own and `ASAN_OPTIONS` sorts between `AA_FIRST` and `HOME`. That is the
+    # same mistake as the `Down` counting above, and it was made again in the
+    # very next block, so the rule is worth stating twice: a check that names a
+    # position in this list has to name a list this driver decides the whole
+    # of. Nothing else here begins `ZZ_`.
+    app.send(b"/", settle=0.6)
+    app.send(b"ZZ_A", settle=1.2)
+    app.send(b"\t\t", settle=0.7)
     app.send(b"y", settle=1.2)
-    check("y copies what is shown", status(app).startswith("Copied"), status(app))
+    check("y copies the value under the cursor", status(app).startswith("Copied"),
+          status(app))
+    check("and it is the value alone, not the whole line",
+          last_copy(app) == "one", last_copy(app))
+
+    app.send(b"/", settle=0.6)
+    app.send(b"\x08" * 8, settle=0.6)
+    app.send(b"ZZ_B", settle=1.2)
+    app.send(b"\t\t", settle=0.7)
+    app.send(b"y", settle=1.2)
+    check("and the cursor decides which one",
+          last_copy(app) == "two ALPHA three", last_copy(app))
+
+    # Y is the old behaviour, kept because a filtered set is worth copying and
+    # a list of bare values would say nothing about which is which. The filter
+    # is what makes the expected text writable at all.
+    app.send(b"Y", settle=1.2)
+    copy = last_copy(app)
+    check("Y copies everything shown, as NAME=value",
+          copy.startswith("ZZ_BETA=two ALPHA three\n"), repr(copy))
+    # And it names the one it cannot write rather than writing the dots off the
+    # screen -- which would be the same lie `y` refuses, in a form nobody would
+    # check. Leaving the variable out was the other candidate and is worse: a
+    # copy of everything shown that quietly is not everything shown.
+    check("and names a value it cannot write, with the byte count",
+          copy.endswith("ZZ_BYTES=<4 bytes, not text>"), repr(copy))
+
+    # A value that is not text refuses rather than copying its own rendering:
+    # the dots on the screen are not what is in the variable, and a clipboard
+    # holds text.
+    app.send(b"/", settle=0.6)
+    app.send(b"ZZ_BYTES", settle=1.2)
+    app.send(b"\t\t", settle=0.7)
+    before = app.buf.count(b"\x1b]52;;")
+    app.send(b"y", settle=1.0)
+    check("y refuses a value that is not text, and says where to look",
+          "not text" in status(app) and "hex" in status(app), status(app))
+    # Nothing new on the wire at all, which is a stronger claim than "not the
+    # dots": a refusal that copied something else would pass that one.
+    check("and puts nothing on the clipboard",
+          app.buf.count(b"\x1b]52;;") == before,
+          (before, app.buf.count(b"\x1b]52;;")))
+    clear(app)
+
+    # ---------------------------------------------------------------- #
+    #  Values that are bytes rather than text                           #
+    # ---------------------------------------------------------------- #
+
+    # The whole point of reading `/proc/self/environ`. `process.env` would have
+    # handed predc one `U+FFFD` per byte and nothing else, so a check that the
+    # dots are dots is a check that the raw block is what the list is built
+    # from -- there is no other way for those four bytes to become four of
+    # anything.
+    clear(app)
+    app.send(b"ZZ_", settle=1.2)
+    body = listed(app)
+    check("a value that is not UTF-8 is shown as bytes, not as damage",
+          any(row.startswith("ZZ_BYTES") and row.split()[1] == "...." for row in body),
+          body)
+    # Four dots for four bytes, and the slashes still slashes: a path with one
+    # Korean directory in it still reads as a path.
+    check("and the ASCII around it survives, which is what makes it readable",
+          any(row.startswith("ZZ_INSIDE") and "/home/..../docs" in row for row in body),
+          body)
+
+    # The mark is the ink and not a character, so this is the only way to see
+    # it. Compared against a plain row rather than against a constant: what
+    # matters is that the two differ, and every theme answers that differently.
+    where = app.display()
+    left, _, _ = frame(app)
+    lines = app.render().split("\n")
+
+    def row_of(name):
+        return next(i for i, line in enumerate(lines)
+                    if line[left + 1:].startswith(name + " "))
+
+    bytes_row = row_of("ZZ_BYTES")
+    plain_row = row_of("ZZ_ALPHA")
+    # The first dot is where the bytes are, and the same column on the plain
+    # row is inside its value. Read off the screen rather than computed,
+    # because the name column is a third of a window of any width.
+    value_col = lines[bytes_row].index("....")
+    check("a value it cannot show is drawn in a different ink from one it can",
+          where.fg_at(value_col, bytes_row) != where.fg_at(value_col, plain_row),
+          (where.fg_at(value_col, bytes_row), where.fg_at(value_col, plain_row)))
+
+    # ---------------------------------------------------------------- #
+    #  The cursor, and the hex viewer it exists for                     #
+    # ---------------------------------------------------------------- #
+
+    app.send(b"\t\t", settle=0.7)
+    first = cursor_row(app, left)
+    check("the list has a cursor, and it starts at the top of what is shown",
+          first is not None
+          and app.render().split("\n")[first][left + 1:].startswith("ZZ_ALPHA"),
+          first)
+    app.send(b"\x1b[B", settle=0.6)
+    second = cursor_row(app, left)
+    check("Down moves it to the next variable",
+          second is not None
+          and app.render().split("\n")[second][left + 1:].startswith("ZZ_BETA"),
+          second)
+    app.send(b"\x1b[A", settle=0.6)
+    check("and Up comes back", cursor_row(app, left) == first, cursor_row(app, left))
+
+    # `ZZ_LONG` wraps onto four lines, so it is the check that the cursor
+    # counts variables and not rows: one Down off it lands on the variable
+    # after it rather than on its own second line.
+    app.send(b"\x1b[B" * 4, settle=0.8)
+    on = cursor_row(app, left)
+    check("a value that wraps is one stop and not four",
+          on is not None
+          and app.render().split("\n")[on][left + 1:].startswith("ZZ_INSIDE"),
+          app.render().split("\n")[on][left + 1:left + 30] if on else None)
+
+    # The reason all of it exists. Narrowed to the one variable so the check
+    # is about the bytes rather than about where the cursor happened to be.
+    app.send(b"/", settle=0.6)
+    app.send(b"BYTES", settle=1.2)
+    app.send(b"\t\t", settle=0.7)
+    app.send(b"x", settle=1.5)
+    check("x sends the value under the cursor to the hex viewer",
+          "Hex Dump" in app.render() and "$ZZ_BYTES" in app.render(),
+          app.render().split("\n")[1])
+    check("and the bytes are the ones that were really in the environment",
+          "B0 A1 B0 A2" in app.render(), app.render())
+    check("with the size the value really had, not the size of its damage",
+          "(4 bytes)" in app.render(), app.render().split("\n")[1])
+
 
     app.send(b"\x1bx", settle=1.0)
     code = app.wait(timeout=6)
