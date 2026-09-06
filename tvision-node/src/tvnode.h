@@ -1111,14 +1111,30 @@ public:
     TRect threeQuarters(TPoint minSize, TPoint maxSize) const;
 
     // A stored rectangle made to fit the desktop it is being restored onto.
-    // `TView::locate` (tview.cpp:585) clamps the *size* against sizeLimits and
-    // leaves the origin alone, so a window zoomed on a wide terminal and
-    // un-zoomed on a narrow one comes back the right size and hanging off the
-    // right-hand edge. Upstream does that too; it is one line to not.
+    // `TWindow::zoom` hands `zoomRect` straight to `TView::locate`, which
+    // clamps the *size* against sizeLimits and takes the origin as given -- so
+    // a window zoomed on a wide terminal and un-zoomed on a narrow one comes
+    // back the right size and hanging off the right-hand edge, or beside the
+    // desktop entirely.
+    //
+    // `locate` is *not* where that belongs, though it looks like it: TView's
+    // own `moveGrow` clamps the origin itself against `dragMode`'s limit bits,
+    // and the default `dragMode` is `dmLimitLoY` alone, so a window may
+    // deliberately be dragged off three of the four edges -- and `dragView`'s
+    // Esc path restores exactly such a rectangle. The stale rectangle is the
+    // window's, so the fit is the window's. Upstream has the same hole;
+    // reported in doc/upstream-zoomrect-origin.md and patched on the fork's
+    // `fix/zoomrect-origin`, and this stays until that lands.
+    //
+    // `drive_drag.py`'s `restore_checks` is what says this still matters: it
+    // is the only place in the suite that zooms and resizes *in that order*,
+    // and until it was written this function was load-bearing and unasserted.
     TRect fittedToDesktop(TRect r, TPoint minSize, TPoint maxSize) const;
 
-    // The terminal changing size, which turns out to be the same defect one
-    // more time.
+    // The terminal changing size, which produces the same *symptom* as the
+    // one above -- and not, as it turned out, by the same fix: the origin goes
+    // unchecked in two places reached by two routes, and only one of them is
+    // `calcBounds`.
     //
     // `TView::calcBounds` scales a `gfGrowRel` window's coordinates with the
     // desktop and then calls `fitToLimits` (tview.cpp:158), which clamps the

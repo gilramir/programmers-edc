@@ -862,7 +862,8 @@ void JsWindow::zoom()
 
     // Only the restoring branch needs anything. Maximizing stores the
     // rectangle the window actually has, which is always a rectangle it
-    // actually had.
+    // actually had -- and always one that fits, which is exactly what stops
+    // being true the moment the terminal is resized underneath it.
     if (size == maxSize)
         {
         TRect back = fittedToDesktop(zoomRect, minSize, maxSize);
@@ -880,6 +881,13 @@ void JsWindow::zoom()
 // clamps in the same order, ending at the same `locate`. Reproduced rather
 // than approximated, because these are the rules that keep a window from being
 // dragged entirely off the desktop and they are not obvious.
+//
+// Note what they *permit*, which is the reason `locate` must go on leaving the
+// origin alone: one column on the desktop is enough, and beyond that the limit
+// bits decide -- and the default `dragMode` sets only `dmLimitLoY`. A window
+// three-quarters of the way off the right-hand edge is a position the user
+// asked for, so nothing downstream of here may quietly correct it. See
+// `JsWindow::fittedToDesktop`, which is the place that clamp does belong.
 static void moveGrowInto(TView *view, TPoint p, TPoint s, const TRect &limits,
                          TPoint minSize, TPoint maxSize, uchar mode)
 {

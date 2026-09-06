@@ -6953,7 +6953,10 @@ when the un-zoom happened. `TView::locate` (`tview.cpp:585`) clamps the *size*
 against `sizeLimits` and leaves the origin alone, so the window came back the
 right size and hanging twelve columns off the right-hand edge. **A rectangle
 computed once against a desktop is stale the moment the desktop changes**, and
-the desktop is a terminal somebody can drag.
+the desktop is a terminal somebody can drag. Upstream's own `TWindow::zoom` has
+the same hole, and it is written up and reported under "The rectangle a window
+remembers is about a desktop that is gone"; `locate` is not the place to fix
+it, for reasons that section gives.
 
 So it is computed at zoom time instead, and the rule is the failure condition
 itself: **if restoring would leave the window exactly where it is, there is
@@ -7501,8 +7504,9 @@ comes back a different size is defensible. A window that comes back outside its
 owner is not.
 
 `JsWindow::calcBounds` calls the base and then `fittedToDesktop`, which existed
-already: it was written for `zoom`, for the same defect in `TView::locate`,
-and it clamps the origin as well as the size. `TGroup::changeBounds` sets its
+already: it was written for `zoom`, for the sibling omission written up under
+"The rectangle a window remembers is about a desktop that is gone", and it
+clamps the origin as well as the size. `TGroup::changeBounds` sets its
 own bounds before walking its subviews, so `owner->size` inside `calcBounds` is
 already the *new* desktop, which is what makes this one line.
 
@@ -7628,3 +7632,127 @@ have one: the highlight moved to row 7, the field says `written`, the box says
 records what the runtime asked the binding to do, which is the wrong end: the
 `quiet` flag is in C++ and what is being asked is what comes *back*. This is
 the layer where it has to be tested, and 11.7s is what that costs.
+
+## The rectangle a window remembers is about a desktop that is gone
+
+`TView::calcBounds` was the terminal resize itself, and it is filed as
+[#235][i235]. This is the other half of the same shape, reached by a different
+route: a rectangle *remembered across* a resize.
+
+`TWindow::zoom` records the window's bounds in `zoomRect` when it maximizes,
+and restores them by handing them straight back:
+
+```cpp
+    else
+        locate( zoomRect );
+```
+
+If the terminal changed size in between, that rectangle describes a desktop
+that no longer exists. `TView::locate` (`tview.cpp:585` on `master`) clamps the
+*size* against `sizeLimits` and takes the origin as given, so nothing anywhere
+compares the stored origin against the desktop it is being restored onto.
+
+We have known that since `JsWindow::zoom` was written -- the note under
+`fittedToDesktop` has said so for weeks. What it did not have was a
+reproduction in a program that is not ours, which is what separates an
+observation about somebody's code from a report they can act on. It has one
+now, and the diagnosis changed while it was being made.
+
+### `locate` is not the place to fix it, and the earlier note was wrong
+
+The closing paragraph of the `fix/calcbounds-origin` commit guessed that
+`TView::locate` "probably wants the same treatment" as `calcBounds`. It does
+not, and its callers are the reason:
+
+  - **`TView::moveGrow` has already clamped the origin itself** -- against
+    `dragMode`'s limit bits rather than against the owner. The default
+    `dragMode` is `dmLimitLoY` *alone* (`tview.cpp:60`), so a window may
+    deliberately be dragged off the left, the right and the bottom, and
+    `moveGrow` stops the origin only at `limits.b - 1`.
+  - **`TView::dragView`'s Esc path calls `locate(saveBounds)`** to put the
+    window back where the gesture started, and `saveBounds` may be one of those
+    deliberately-overhanging rectangles.
+
+A clamp inside `locate` would make both impossible. So `locate`'s contract --
+the caller owns the origin -- is right, and the stale rectangle belongs to
+`TWindow`, which is where the reconciliation goes. That is the same conclusion
+this port reached by accident: `fittedToDesktop` has always been called from
+`JsWindow::zoom` and never from a `locate` override.
+
+The distinction matters beyond the patch. Two views can share a symptom and not
+share a fix, and "the same omission one more time" is a description of the
+symptom.
+
+### The one window in tvdemo that can show it
+
+Same hunt as [#235][i235] and a better answer. `TDialog`'s constructor sets
+`growMode = 0`, and tvdemo's `TWindow`s mostly set it to 0 explicitly -- so the
+Event Viewer was the only candidate last time, and it has to be dragged off the
+left edge before a *scaled* origin is nonzero.
+
+This one does not need a scaled origin, only a remembered one, and there is a
+second window with a default `growMode` that the earlier hunt missed:
+**`TFileWindow`**. `fileview.cpp:47` sets `gfGrowHiX | gfGrowHiY`, which is what
+made it look excluded -- but that line is on `TFileViewer`, the `TScroller`
+*inside* the window. `TFileWindow` itself (`fileview.h:80`) sets nothing and
+keeps `TWindow`'s `gfGrowAll | gfGrowRel`. And `tvdemo` opens one for any file
+named on its command line, so the reproduction starts with an argument rather
+than with a file dialog.
+
+Shrink it to 40x18 and park it flush against the right-hand edge of a 100x30
+terminal -- columns 60..100, an ordinary place to put a window -- then F5,
+resize, F5:
+
+| terminal | while zoomed | restored to | desktop is |
+|---|---|---|---|
+| 80x20 | 0..80 | 60..100 | 0..80 |
+| 60x20 | 0..60 | 60..100 | 0..60 |
+| 50x20 | 0..50 | 60..100 | 0..50 |
+| 40x20 | 0..40 | 60..100 | 0..40 |
+
+At 60 columns and below there is no overlap at all: the window is not clipped,
+it is **off the screen**. It is still alive and still the active window -- the
+Windows menu is fully populated -- and `Ctrl-F5` followed by holding `Left`
+walks it back into view, which is not a thing anyone would guess. With the
+patch the same runs restore to 40..80, 20..60, 10..50 and 0..40: the same size,
+still flush right, on the screen.
+
+The report is `doc/upstream-zoomrect-origin.md` until it has a number. The
+patch is `fix/zoomrect-origin`, one commit off `master` like the other four,
+cherry-picked onto `patches`.
+
+### The suite could not see this, which is the part worth keeping
+
+The four-combination control that made [#235][i235] credible needs a check that
+fails in the *neither* row, and running it here found that there wasn't one.
+`drive_drag.py` zooms and un-zooms, and `tiny_common.py` resizes sixteen
+programs -- but nothing did the two **in that order**, so `fittedToDesktop`
+inside `JsWindow::zoom` was load-bearing and unasserted. It had been since the
+day it was written.
+
+`restore_checks` in `drive_drag.py` is that order: zoom on eighty columns,
+resize to forty while maximized, un-zoom. Six checks. With them:
+
+| library fix | `JsWindow::zoom` fit | result |
+|---|---|---|
+| no | no | **FAILS** — 2 checks, a top border with no corner on the end |
+| no | yes | passes — what we shipped |
+| yes | no | passes |
+| yes | yes | passes |
+
+The first row is the whole point, and it is the row that did not exist an hour
+earlier. A control experiment whose failing case cannot fail proves that the
+suite stopped looking, and it says it in the same words as success.
+
+### A build trap that hid the third row for a while
+
+`(cd tvision-node && npx node-gyp build)` does **not** relink when only
+`build-tvision/libtvision.a` has changed -- the generated makefile does not
+carry the static archive as a dependency of the `.node`. So the third row above
+first came back identical to the first, which reads exactly like "the library
+fix does nothing". Touch a file under `tvision-node/src/` after `devbox run
+lib`, or the addon you are testing is the one you built before. Deleting
+`build/Release/tvision.node` is not enough either: it is a hard link, and the
+copy step restores it from `obj.target` without relinking.
+
+[i235]: https://github.com/magiblot/tvision/issues/235

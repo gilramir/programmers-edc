@@ -227,7 +227,7 @@ checkout on a detached HEAD, which is a poor place to write the next fix —
 so a clone needs no key; the checkout's own `origin` is the ssh one, and
 `git submodule sync` will overwrite that if you ever run it.
 
-Four commits sit on `patches` today:
+Five commits sit on `patches` today:
 
   - a `delete`/`delete[]` mismatch that kills any AddressSanitizer build
     ([#230][i230]);
@@ -236,18 +236,27 @@ Four commits sit on `patches` today:
   - `TMenuView::findHotKey` following a null `subMenu`, which segfaults on
     the next keystroke after a menu gains an item with no command
     ([#234][i234]);
-  - and `TView::calcBounds` clamping a view's size against the desktop and
+  - `TView::calcBounds` clamping a view's size against the desktop and
     never its origin, so shrinking a terminal and growing it back can leave a
-    window hanging off the right or the bottom edge ([#235][i235]).
+    window hanging off the right or the bottom edge ([#235][i235]);
+  - and `TWindow::zoom` restoring the rectangle it stored at zoom time without
+    checking it against the desktop it is restoring onto, so a window zoomed on
+    a wide terminal and un-zoomed on a narrow one comes back beside the desktop
+    rather than on it — often entirely off the screen. Not filed yet;
+    `doc/upstream-zoomrect-origin.md` is the report, and that file goes away
+    once it has a number.
 
 FINDINGS has the story of each.
 
-The last of those is the only one with no pull request behind it yet. The issue
-went first on purpose: the fix has a judgement call in it — which views the
-origin may be moved for — that the maintainer may want to make differently, and
-a patch that presumes the answer is a worse way to ask. The port also still
-works around it in `JsWindow::calcBounds`, which the patch makes redundant and
-which comes out once upstream has settled on a shape.
+The last two are the only ones with no pull request behind them. For `#235` the
+issue went first on purpose: the fix has a judgement call in it — which views
+the origin may be moved for — that the maintainer may want to make differently,
+and a patch that presumes the answer is a worse way to ask. The same is true of
+the fifth, where the call is *where* the clamp goes: `TView::locate` looks like
+the obvious place and is the wrong one, because `moveGrow` and `dragView`'s Esc
+path both depend on it leaving the origin alone. The port works around both, in
+`JsWindow::calcBounds` and `JsWindow::zoom`; the first is redundant once
+upstream settles on a shape, and the second stays until the fifth lands.
 
 [i230]: https://github.com/magiblot/tvision/issues/230
 [i233]: https://github.com/magiblot/tvision/issues/233

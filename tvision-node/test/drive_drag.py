@@ -254,6 +254,7 @@ def main():
     check("exit code 0", code == 0, f"exit={code}")
 
     zoom_checks(check, env)
+    restore_checks(check, env)
 
     return check.report(app)
 
@@ -317,6 +318,58 @@ def zoom_checks(check, env):
 
         app.send(b"\x1bx", settle=1.0)
         check("the maximized one exits cleanly too", app.wait(timeout=6) == 0)
+    finally:
+        app.kill()
+
+
+def restore_checks(check, env):
+    """Un-zooming onto a desktop narrower than the one the window was zoomed on.
+
+    `TWindow::zoom` records the window's bounds in `zoomRect` when it maximizes
+    and restores them verbatim. `TView::locate` clamps the *size* against
+    `sizeLimits` and takes the origin as given -- which is what its other
+    callers need, since `moveGrow` has already done its own clamping and the
+    Esc path deliberately restores bounds that may hang off an edge. So nothing
+    reconciles a rectangle recorded against one desktop with the desktop it is
+    being restored onto, and a window zoomed on a wide terminal and un-zoomed
+    on a narrow one comes back beside the desktop instead of on it.
+
+    Upstream does this too, and this is the only place the suite looks at zoom
+    and resize *in that order* -- which is to say it is the only thing standing
+    between `JsWindow::zoom`'s `fittedToDesktop` and quietly not mattering.
+    """
+    app = Pty(node_argv(os.path.join(HERE, "regress_drag.js")), env, cwd=ROOT)
+    try:
+        app.pump(2.0)
+        row, col, _ = frame(app)
+        check("the window opens away from the left edge",
+              col == 20 and _window_width(app) == 40,
+              f"at {row},{col}, {_window_width(app)} wide")
+
+        app.send(F5, settle=0.8)
+        check("F5 fills the desktop with it", _window_width(app) == 80,
+              f"{_window_width(app)} wide")
+
+        # Half the columns, while it is maximized. It has to follow the
+        # terminal down, or the un-zoom below would be a re-zoom instead.
+        app.resize(40, 25)
+        check("and it follows the terminal down to half the width",
+              _window_width(app) == 40, f"{_window_width(app)} wide")
+
+        # The stored rectangle is columns 20..60 of a desktop that is now 40
+        # wide. Restored as recorded it would start at column 20 and run twenty
+        # columns off the right-hand side -- a top border with no corner on the
+        # end of it, which is exactly the hole tiny_common.py looks for.
+        app.send(F5, settle=0.8)
+        back_row, back_col, _ = frame(app)
+        line = app.display().text().splitlines()[back_row] if back_row is not None else ""
+        check("un-zooming puts it back inside the smaller desktop",
+              back_col == 0, f"at {back_row},{back_col}: {line!r}")
+        check("the same size it was, whole, with both corners on screen",
+              _window_width(app) == 40, f"{_window_width(app)} wide: {line!r}")
+
+        app.send(b"\x1bx", settle=1.0)
+        check("and it exits cleanly", app.wait(timeout=6) == 0)
     finally:
         app.kill()
 

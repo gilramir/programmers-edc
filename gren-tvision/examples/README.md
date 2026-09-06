@@ -1117,6 +1117,21 @@ filed as [magiblot/tvision#235](https://github.com/magiblot/tvision/issues/235),
 and `fix/calcbounds-origin` in the fork is a patch that makes this override
 redundant.
 
+**And it survives being zoomed on one terminal and un-zoomed on another.**
+`TWindow::zoom` stores the window's bounds when it maximizes and restores them
+verbatim, so a window zoomed at eighty columns and un-zoomed at forty comes
+back beside the desktop rather than on it -- gone from the screen entirely, if
+it was over on the right. `TView::locate` looks like where that should be
+clamped and is not: `moveGrow` and `dragView`'s Esc path both need it to leave
+the origin alone, since a window dragged three-quarters off the right-hand edge
+is a position the user asked for. The stale rectangle is `TWindow`'s, so
+`JsWindow::zoom` is where the fit goes. Report in
+`doc/upstream-zoomrect-origin.md`, patch in `fix/zoomrect-origin`. What is
+worth remembering is that the port had this right for weeks with **nothing
+asserting it** -- `drive_drag.py` zoomed, `tiny_common.py` resized, and nothing
+did the two in that order until `restore_checks` was written to be the failing
+row of a control experiment.
+
 **And the loops that remain no longer spin.** `eventTimeoutMs` is 0 so the pump
 never blocks, which meant every nested loop in the library polled without
 sleeping and burned a whole core: the menu bar, the close box, and the mouse
