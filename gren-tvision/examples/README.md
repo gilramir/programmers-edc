@@ -1113,9 +1113,9 @@ the scaling put it -- so a shrink and a re-grow could leave a window running off
 the right of the screen, with no right border and no bottom border.
 `JsWindow::calcBounds` fits the result to the desktop, origin included, with
 the same `fittedToDesktop` the zoom box already used. It is upstream's defect,
-filed as [magiblot/tvision#235](https://github.com/magiblot/tvision/issues/235);
-`doc/upstream-calcbounds-origin.md` is the report, and `fix/calcbounds-origin`
-in the fork is a patch that makes this override redundant.
+filed as [magiblot/tvision#235](https://github.com/magiblot/tvision/issues/235),
+and `fix/calcbounds-origin` in the fork is a patch that makes this override
+redundant.
 
 **And the loops that remain no longer spin.** `eventTimeoutMs` is 0 so the pump
 never blocks, which meant every nested loop in the library polled without

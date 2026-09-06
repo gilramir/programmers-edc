@@ -7507,8 +7507,8 @@ own bounds before walking its subviews, so `owner->size` inside `calcBounds` is
 already the *new* desktop, which is what makes this one line.
 
 It is upstream's bug rather than ours, and it is now reported:
-[magiblot/tvision#235](https://github.com/magiblot/tvision/issues/235), written
-up in `doc/upstream-calcbounds-origin.md`. The nearest existing issue is
+[magiblot/tvision#235](https://github.com/magiblot/tvision/issues/235), which
+carries the reproduction and the reasoning below. The nearest existing issue is
 [#63](https://github.com/magiblot/tvision/issues/63), "Layout/resizing console
 window in Windows - will become broken", which is open, undiagnosed, and may
 well be this.

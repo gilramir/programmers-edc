@@ -227,28 +227,32 @@ checkout on a detached HEAD, which is a poor place to write the next fix —
 so a clone needs no key; the checkout's own `origin` is the ssh one, and
 `git submodule sync` will overwrite that if you ever run it.
 
-Three commits sit on `patches` today:
+Four commits sit on `patches` today:
 
   - a `delete`/`delete[]` mismatch that kills any AddressSanitizer build
     ([#230][i230]);
   - a double-width character that TVision draws and then erases
     ([#233][i233]);
-  - and `TMenuView::findHotKey` following a null `subMenu`, which segfaults on
+  - `TMenuView::findHotKey` following a null `subMenu`, which segfaults on
     the next keystroke after a menu gains an item with no command
-    ([#234][i234]).
+    ([#234][i234]);
+  - and `TView::calcBounds` clamping a view's size against the desktop and
+    never its origin, so shrinking a terminal and growing it back can leave a
+    window hanging off the right or the bottom edge ([#235][i235]).
 
 FINDINGS has the story of each.
 
-A fourth is diagnosed and not filed: `TView::calcBounds` clamps a view's size
-against the desktop and never its origin, so shrinking a terminal and growing
-it back can leave a window hanging off the right or the bottom edge. The port
-works around it in `JsWindow::calcBounds`;
-[`doc/upstream-calcbounds-origin.md`](doc/upstream-calcbounds-origin.md) is the
-report to file.
+The last of those is the only one with no pull request behind it yet. The issue
+went first on purpose: the fix has a judgement call in it — which views the
+origin may be moved for — that the maintainer may want to make differently, and
+a patch that presumes the answer is a worse way to ask. The port also still
+works around it in `JsWindow::calcBounds`, which the patch makes redundant and
+which comes out once upstream has settled on a shape.
 
 [i230]: https://github.com/magiblot/tvision/issues/230
 [i233]: https://github.com/magiblot/tvision/issues/233
 [i234]: https://github.com/magiblot/tvision/issues/234
+[i235]: https://github.com/magiblot/tvision/issues/235
 
 **The first build needs network twice**: `gren make` fills `~/.cache/gren` with
 `gren-lang/core`, `gren-lang/node`, `gren-lang/url`, `gilramir/gren-argparse`
