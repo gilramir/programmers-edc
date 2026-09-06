@@ -728,8 +728,9 @@ one-second freeze. FINDINGS has the measurement and the argument.
 What *was* fixed is the cost of the waiting. `eventTimeoutMs` is 0 so the pump
 never blocks, so this loop used to poll without ever sleeping — a stopped
 program and a busy core at the same time. The pump raises the timeout for the
-duration of its own `handleEvent` call, which every nested loop in the library
-is reached from and nothing else is. Measured on the same demo: a pull-down
+duration of its own `handleEvent` call, which almost every nested loop in the
+library is reached from -- the status line is the exception, and takes the same
+guard itself. Measured on the same demo: a pull-down
 open was 100 CPU ticks a second and is now 0.4, with the clock still frozen at
 5 → 5 and still jumping the moment `Esc` is pressed. **The freeze is the
 limitation; the spin was a bug on top of it.**
@@ -1101,10 +1102,21 @@ the answer turned out to be a default rather than a field.
 never blocks, which meant every nested loop in the library polled without
 sleeping and burned a whole core: the menu bar, the close box, and the mouse
 tracking in every stock widget. The pump now lifts the timeout to 20ms for
-exactly the duration of its own `handleEvent` call, which is the only place any
-of those loops is reached from. A pull-down open went from 100 CPU ticks a
-second to 0.4, and holding the close box from 100 to 0. They still stop the
-program; they no longer heat the room while doing it.
+exactly the duration of its own `handleEvent` call. A pull-down open went from 100 CPU
+ticks a second to 0.4, and holding the close box from 100 to 0. They still stop
+the program; they no longer heat the room while doing it.
+
+**Except one, which that call could not reach.** `TProgram::getEvent`
+dispatches a mouse-down on the status line itself (`tprogram.cpp:153`), inside
+the pump's own `getEvent` and above the scope -- so holding the status line went
+on spinning at 99 ticks a second until `JsStatusLine::handleEvent` took the
+guard for itself. Adding that second guard then broke the first, because it
+restored the timeout to zero rather than to what it found and an `evBroadcast`
+reaches the status line in the middle of somebody else's gesture. Both are
+fixed and `tvision-node/test/drive_loops.py` holds one of every widget that
+tracks a button, asking of each whether it spins, whether letting go quiets it,
+and -- because a press that missed is quiet too -- whether the press was heard
+at all.
 
 ## What predc's command line changed
 

@@ -139,6 +139,14 @@ palette and reads the same either way. A disabled **menu entry** is checked by
 its colour, compared against an enabled entry's, because an entry is only ever
 looked at, so how it looks is what it does.
 
+**A gesture that missed is quiet, and quiet is what a CPU or liveness check is
+looking for.** `drive_loops.py` holds a button, a check box, a list, a scroll
+bar and the status line and asks whether each spins a core — and a press that
+landed on the desktop instead would have passed every one of those. So the
+fixture counts the callbacks it heard, and each hold asserts that number went
+up. The same rule applied to the earlier drivers would have caught two aims
+that were simply wrong.
+
 **Every driver already checks that nothing it saw was invisible**, and it costs
 nothing to keep. `Pty.display` scans each screen it replays for a glyph drawn
 in the colour behind it, and `Checks.report` fails on what accumulated — so a

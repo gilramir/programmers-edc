@@ -653,11 +653,58 @@ public:
     }
 };
 
+// `eventTimeoutMs` is 0 so that the pump's own poll never blocks, which is
+// ruinous inside one of Turbo Vision's nested `getEvent` loops: the poll
+// returns instantly and the loop spins a core for as long as the gesture
+// lasts. This raises it for the duration of one call and puts it back. It is a
+// global, so the whole job of this type is making sure it is a global that is
+// only ever 20 inside a scope that has already stopped Node.
+struct NestedLoopTimeout {
+    // Saved and restored rather than set and zeroed, because these nest, and
+    // they nest in a way that is not obvious from either call site. A guard
+    // that put the timeout back to 0 rather than to what it found would take
+    // the sleep away from the loop it was nested *inside* -- and the moment
+    // there were two of them that is what happened: holding a check box went
+    // from quiet to 101 ticks a second, because `TGroup::handleEvent`
+    // distributes an `evBroadcast` to every subview, the status line is one,
+    // and a broadcast arriving mid-gesture ran the guard below and zeroed the
+    // timeout the cluster's own loop was relying on. Measured: `what=0200`,
+    // three times, with the timeout at 20 when it arrived.
+    int saved;
+
+    NestedLoopTimeout() : saved(TProgram::eventTimeoutMs)
+    {
+        TProgram::eventTimeoutMs = 20;
+    }
+
+    ~NestedLoopTimeout() { TProgram::eventTimeoutMs = saved; }
+};
+
 class JsStatusLine : public TStatusLine {
 public:
     JsStatusLine(const TRect &bounds, TStatusDef &aDefs) noexcept
         : TStatusLine(bounds, aDefs)
     {
+    }
+
+    // The one nested loop the pump's scope could not reach.
+    //
+    // `TStatusLine::handleEvent` tracks a held button in `TView::mouseEvent`
+    // like every other stock widget -- and unlike every other one it is not
+    // reached through `TGroup::handleEvent`. `TProgram::getEvent` dispatches a
+    // mouse-down on the status line *itself* (tprogram.cpp:153), inside the
+    // pump's own `getEvent` call and therefore outside the scope that raises
+    // `eventTimeoutMs` around `target->handleEvent`. So this one loop went on
+    // polling with a zero timeout and spun a core flat for as long as the
+    // button was held: 99 ticks a second, measured, which is the same defect
+    // `dragView` had in the one place the fix for it could not see.
+    //
+    // Here rather than at the call site because there are two call sites and
+    // only one of them is ours.
+    void handleEvent(TEvent &event) override
+    {
+        NestedLoopTimeout sleepsIfItLoops;
+        TStatusLine::handleEvent(event);
     }
 
     void replace(TStatusDef *newDefs)

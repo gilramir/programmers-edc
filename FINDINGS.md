@@ -6902,6 +6902,11 @@ sitting on top of it, and only one of the two was ever written down.**
 caller calls**, and the cheapest place to say so is the one call that reaches
 all of them.
 
+*Two of the sentences above are wrong, and were found to be wrong by
+measuring: the status line is **not** reached from that call, and the guard as
+written did **not** nest. See "The loop the fix for the loops could not reach"
+below.*
+
 ## The one window that could not be un-maximized
 
 `predc env` opens filling the terminal, which is what the environment list
@@ -7360,3 +7365,81 @@ promises.
 The suite is 61.1s -- sixth, behind `programmers-edc/encode` at 93.2s -- so it
 stays one file. Most of it is the nine open-and-close rounds, and the settles
 are already where trimming them further buys a flake rather than a second.
+
+## The loop the fix for the loops could not reach
+
+`dragView` was rewritten because it was a nested `getEvent` loop that read as a
+hang, and the commit that did it named what it was deliberately leaving alone:
+a button, a check box, a scroll bar, a list viewer, an input line, the editor,
+the status line and the close box, all of them `TView::mouseEvent`, all of them
+ending when the finger comes up. What they must not do, it said, is spin -- and
+one scope fixed that, `NestedLoopTimeout` around the pump's own
+`target->handleEvent(event)`, "because every one of those loops is reached from
+inside this call and nowhere else".
+
+That sentence is false, and `drive_loops.py` is what says so. Holding the
+status line spun a core at **99 ticks a second**, exactly as `cmResize` used
+to, in the only widget the scope cannot see.
+
+### `TProgram::getEvent` dispatches to the status line itself
+
+`tprogram.cpp:153`. Before returning an event, `getEvent` checks whether it is
+a key or a mouse-down over the status line, and if so calls
+`statusLine->handleEvent(event)` right there. So a click on the status line
+never travels through `TGroup::handleEvent` at all -- it is handled inside the
+pump's *own* `g_app->getEvent(event)` call, which is above the scope and has to
+be, because 20ms of sleeping added to a pump tick that had not stopped Node is
+the one thing the whole file is arranged to prevent.
+
+The fix is therefore not at the call site, because there are two call sites and
+only one of them is ours. `JsStatusLine::handleEvent` takes the guard itself.
+
+### And then the guard turned out not to nest
+
+Adding that override made **holding a check box** spin, at 101 ticks a second,
+having been quiet a minute earlier. `NestedLoopTimeout` set the timeout to 20
+and its destructor set it to **0** -- not to what it found -- so an inner guard
+finishing put the timeout back to zero underneath the loop it was nested
+inside.
+
+Which needed the nesting to be real, and it is not obvious that it would be.
+`TGroup::handleEvent` distributes an `evBroadcast` to *every* subview, the
+status line is a subview of the application, and a broadcast arriving in the
+middle of somebody's gesture therefore runs the status line's handler while the
+cluster's own `mouseEvent` loop is turning. Logged: `what=0200`, three times per
+gesture, with `eventTimeoutMs` at 20 when it arrived.
+
+So the guard saves and restores. The original comment already worried about
+exactly the right thing -- "`eventTimeoutMs` is a global, so this exists to make
+sure it is a global that is only ever 20 inside one call" -- and a set-and-zero
+guard is the version of that which is correct only while there is one of them.
+**A RAII guard over a global has to restore, not reset, the first time a second
+one exists, and there is no warning on the day it starts to matter.**
+
+### What else the fixture asks, and the lead that came to nothing
+
+`regress_loops.js` is a window with one of everything that tracks a held
+button, plus the two instruments `regress_drag.js` established: `ticks:` from a
+plain setInterval, which says whether Node is getting a turn, and
+`/proc/<pid>/stat`, which says whether a core is being burned. A frozen program
+and a live one draw the identical screen, so neither question can be answered
+by looking.
+
+It also carries `heard:`, a count of every callback a gesture produces, and
+that is not a formality. **A press that missed its widget entirely is quiet,
+and quiet is what these checks are looking for** -- so a hold that reached
+nothing would pass every one of them. The first version of the driver did
+exactly that twice over: it aimed at `▼`, which on that screen was a scroll
+bar's arrow rather than the history icon (`▐↓▌`), and it held `Alt-X Exit` on
+the status line, whose command ends the program, so the gesture "worked" and
+there was nothing left to measure.
+
+The lead that started all this was `THistoryWindow`. `TGroup::execView` is a
+nested loop of a second kind -- the menu bar and the context menu run in one
+and are documented -- and `thistory.cpp:101` opens a drop-down with
+`owner->execView()`, which nothing in this repo had written down. It turned out
+to be already handled: `JsHistory::openDropDown` calls `openLocalModal`, and
+the comment above it says the model keeps running behind the list. Nothing had
+ever checked that it does, and nothing could see it either way, so the checks
+stay: the drop-down does not spin, the counter climbs while it is open, and
+resizing the terminal underneath one does not stop the program.

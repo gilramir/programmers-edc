@@ -1518,13 +1518,6 @@ static Napi::Value Start(const Napi::CallbackInfo &info)
     return env.Undefined();
 }
 
-// See the note at its one use, in Step. `eventTimeoutMs` is a global, so this
-// exists to make sure it is a global that is only ever 20 inside one call.
-struct NestedLoopTimeout {
-    NestedLoopTimeout() { TProgram::eventTimeoutMs = 20; }
-    ~NestedLoopTimeout() { TProgram::eventTimeoutMs = 0; }
-};
-
 // tv.step() -- one turn of TGroup::execute(), hoisted out of the library.
 // Returns the number of events handled, or -1 once the application has quit
 // (at which point the terminal has already been restored).
