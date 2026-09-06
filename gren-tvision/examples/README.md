@@ -1098,6 +1098,14 @@ would do nothing: three-quarters of the desktop, centred, in whichever
 dimensions [`Resize`](#Resize) left free. Nothing in the API changed, because
 the answer turned out to be a default rather than a field.
 
+**A scroll bar the model owns no longer echoes the model's own writes.** A
+`TScrollBar` notifies through `scrollDraw`, which runs for any change of value
+-- so a bar declared as `value = 5` told the model "the user scrolled to 5"
+before the first frame, and every `setValue` came straight back. Same loop the
+list's highlight had, same fix: silent for a write the bar could honour, and
+reported for one it could not. `tvision-node/test/drive_echo.py` asks the same
+question of every widget the model can write to.
+
 **A window survives the terminal being made small and large again.**
 `TView::calcBounds` scales a `gfGrowRel` window's coordinates with the desktop
 and then clamps its *size* against `sizeLimits` while leaving the origin where

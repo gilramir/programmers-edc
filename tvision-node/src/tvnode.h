@@ -400,9 +400,48 @@ public:
         options |= ofSelectable | ofFirstClick;
     }
 
+    // The model's own writes, silenced -- the same rule and the same reason as
+    // `JsListBox::setFocused`.
+    //
+    // `scrollDraw` is the only notification a `TScrollBar` has, and it runs for
+    // *any* change of value: a drag on the thumb and a `setParams` from the
+    // builder are indistinguishable inside it. So a bar the model declared with
+    // `value: 5` told the model "the user scrolled to 5" before the first
+    // frame was on the screen, and `tv.setValue(bar, 12)` came straight back
+    // as `scroll bar=12`. Held together, like the list's highlight was, only by
+    // the two values agreeing -- and they agree until a burst arrives and the
+    // model is several renders behind.
+    //
+    // Named rather than shadowing `setValue` and `setParams`, which are not
+    // virtual: a call through a `TScrollBar*` -- and `TListViewer` makes those
+    // for the bar it owns -- would silently get the base and none of this.
+    void setValueFromModel(int wanted)
+    {
+        quiet = true;
+        setValue(wanted);
+        quiet = false;
+        tellModelIfItCouldNot(wanted);
+    }
+
+    void setParamsFromModel(int wanted, int aMin, int aMax, int aPgStep,
+                            int aArStep)
+    {
+        quiet = true;
+        setParams(wanted, aMin, aMax, aPgStep, aArStep);
+        quiet = false;
+        tellModelIfItCouldNot(wanted);
+    }
+
     virtual void scrollDraw() override;
 
 private:
+    // A write the bar could not honour is reported, because that is a
+    // disagreement rather than an action: the model asked for a value outside
+    // the range it also set, the bar clamped, and a model that heard nothing
+    // would go on believing the number it asked for. It settles in one round.
+    void tellModelIfItCouldNot(int wanted);
+
+    bool quiet = false;
     std::string viewId;
 };
 

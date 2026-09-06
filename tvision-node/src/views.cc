@@ -746,7 +746,14 @@ void PaneScrollBar::handleEvent(TEvent &event)
 void JsScrollBar::scrollDraw()
 {
     TScrollBar::scrollDraw();
-    noteScrolled(viewId, value);
+    if (!quiet)
+        noteScrolled(viewId, value);
+}
+
+void JsScrollBar::tellModelIfItCouldNot(int wanted)
+{
+    if (value != wanted)
+        noteScrolled(viewId, value);
 }
 
 void JsCanvas::setCursorAt(int x, int y, bool visible)
@@ -1563,7 +1570,7 @@ TView *buildItems(const Napi::Env &env, TGroup *win, const Napi::Value &value,
             // setParams in one go: TScrollBar clamps the value against the
             // range, so setting them separately can leave the thumb somewhere
             // neither side asked for.
-            bar->setParams(getInt(it, "value", 0), getInt(it, "min", 0),
+            bar->setParamsFromModel(getInt(it, "value", 0), getInt(it, "min", 0),
                            getInt(it, "max", 100), getInt(it, "pageStep", 10),
                            getInt(it, "arrowStep", 1));
             made = bar;
@@ -2112,7 +2119,8 @@ static Napi::Value SetValue(const Napi::CallbackInfo &info)
         }
     if (ref->kind == "scrollBar")
         {
-        ((JsScrollBar *) ref->view)->setValue(info[1].ToNumber().Int32Value());
+        ((JsScrollBar *) ref->view)
+            ->setValueFromModel(info[1].ToNumber().Int32Value());
         return Napi::Boolean::New(env, true);
         }
     return Napi::Boolean::New(env, false);

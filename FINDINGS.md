@@ -7540,3 +7540,73 @@ Two suites over `tiny_common.py`, split alphabetically, because sixteen
 programs resized three times each is 107.8s and the slowest suite in the repo
 is 93.2s. The split is by name and means nothing: every program here costs the
 same, since the cost is sleeping while a terminal settles.
+
+## The other five widgets nobody asked, and the bar that echoed itself
+
+The wheel bug produced a rule -- *a field the model writes must not come back
+as the event that means the user did something* -- and a fix in one place,
+`JsListBox::setFocused`. Nothing checked any of the others, and there was no
+reason to expect them to be right: the failure is silent, it takes a burst to
+show, and every screen involved looks correct throughout.
+
+`regress_echo.js` does one programmatic write per keystroke and counts every
+callback it hears. `drive_echo.py` presses a key and reads the counter. Seven
+writes were silent, as they should be -- a list's highlight, its top row, a
+shortened list under a highlight that survives it, an input line's text, a
+check box's ticks, a view's enabled flag, a view's visible flag -- and one was
+not.
+
+### A scroll bar told the model the user had scrolled, before the first frame
+
+`scrollDraw` is the only notification `TScrollBar` has, and it runs for *any*
+change of value: a drag on the thumb and a `setParams` from the builder are the
+same call. So a bar the model declared as `value: 5` reported `scroll bar=5`
+before anything was on the screen, and `tv.setValue(bar, 12)` came straight back
+as `scroll bar=12`.
+
+Exactly the loop the list had, one widget over, and held together by exactly
+the same coincidence -- the model writes 5, hears 5, stores 5, writes 5. It
+survives an arrow key and it does not survive a burst, which is how the list's
+version was found: from a real terminal, with 935 green checks behind it. The
+model-owned bar in `predc hex` drives a canvas by exactly this route.
+
+`JsScrollBar` gains the `quiet` flag and the same two entry points the list
+has, `setValueFromModel` and `setParamsFromModel`, with the exception intact:
+a value the bar could not honour -- outside the range the model set in the same
+breath -- **is** reported, because that is a disagreement rather than an action.
+
+They are named rather than shadowing `setValue` and `setParams`, which are not
+virtual: `TListViewer` calls both on the bar it owns, through a `TScrollBar*`,
+and a shadow would silently be skipped there. The bar a list owns is a plain
+`PaneScrollBar` with no id and notifies nothing, so this is only ever the bar
+the model asked for by name -- which is the only one the model can be confused
+about.
+
+### Two ways to ask a list for a row it has not got, and both report
+
+`k` sets two items and then asks for row eight: the list lands on row one and
+says so. `g` then `i` sets the highlight to row seven and then hands over four
+rows: the highlight cannot survive, and that is reported too. Both are the
+documented exception rather than the bug, and asserting them is what stops a
+future "silence everywhere" from looking like an improvement.
+
+### Three things about writing the fixture that are the finding
+
+**A key that reaches nothing is quiet, and quiet is what these checks are
+looking for.** The first sequence put `setViewVisible` in the middle, and every
+check after it passed while every key after it went nowhere.
+`setViewVisible(true)` ends in `TView::setState(sfVisible)`, which calls
+`owner->resetCurrent()` -- so showing a selectable view re-chooses the caret and
+eats the next keystroke. It is last in the sequence now, with the reason
+written beside it.
+
+**`tv.setText` does not write an input line.** `setValue` does; `setText` is for
+a static text, and on a field it silently does nothing -- which is why the check
+beside each silent write asserts that the write *happened*. Six of the eight
+have one: the highlight moved to row 7, the field says `written`, the box says
+`[X] one`. A sweep of writes that were never made would be perfectly quiet.
+
+**And the fake binding cannot answer this question at all.** `diff.test.js`
+records what the runtime asked the binding to do, which is the wrong end: the
+`quiet` flag is in C++ and what is being asked is what comes *back*. This is
+the layer where it has to be tested, and 11.7s is what that costs.
