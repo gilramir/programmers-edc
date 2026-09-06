@@ -978,8 +978,12 @@ i18n is one step less expensive than it was.
 
 ## The ASCII chart has two of it
 
-`Tab` toggles, and **Chart | Grid** / **Chart | List** name the two on the
-menu. The grid is the concise sixteen-by-eight table predc always had; the list
+`Tab` toggles, and **Options | ASCII chart** names the two -- which is also
+where the mode is remembered from, since it is a setting like the colour scheme
+and the week numbering rather than something the tool owns. The window says
+`Tab, or Options, shows the long list` along its foot, because a key nothing on
+the screen mentions is a key nobody presses; that line is why the mode was hard
+to find in the first version. The grid is the concise sixteen-by-eight table predc always had; the list
 is what `man ascii` prints -- one code per line, dec/hex/oct, the mnemonic, and
 for the third of the table with no glyph the meaning, the control chord and the
 C escape all on the same line.
@@ -995,7 +999,10 @@ jump to its code is the best thing the chart does, so `g` and `l` are 103 and
 108 and cannot also be commands. `Tab` is free precisely *because* the chart is
 a focused canvas: `JsCanvas::handleEvent` consumes every key it is given, so
 nothing else in predc could ever have wanted it, and there is nowhere in the
-window to tab to.
+window to tab to. It is not written in the Options menu's shortcut column
+either, and that is the same fact from the other side: `Tab` reaches the chart
+only while the chart has the caret, and a program-wide menu saying otherwise
+would be wrong more often than right. The window is where it belongs.
 
 **Switching modes rebuilds the window, and that is the right trade.** Almost
 everything about the two layouts could have been patched -- a window's

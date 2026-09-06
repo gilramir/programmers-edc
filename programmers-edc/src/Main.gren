@@ -657,6 +657,12 @@ handleEvent event model =
         Command "weeks.us" ->
             chooseWeeks Week.Us model
 
+        Command "chart.grid" ->
+            chooseChart Chart.Grid model
+
+        Command "chart.list" ->
+            chooseChart Chart.List model
+
         -- Opening a tool that is already open raises its window instead of
         -- doing nothing, which is what the user meant by asking for it twice.
         -- `Tui.focus` is the only way to say it: which windows exist is the
@@ -953,6 +959,31 @@ chooseWeeks rule model =
         let
             chosen =
                 { model | weeks = rule }
+        in
+        { model = chosen, command = saveSettings chosen }
+
+
+{-| The same shape as the two above, with one line they do not need: the chart
+is a *window* as well as a setting, so an open one has to be told.
+
+Without that the tick on the menu and the chart on the screen would disagree,
+which is the failure mode a setting with two ways in always has. The other
+direction is already covered -- `Tab` moves the tool's own mode and `toTools`
+reads it back by comparison -- and the two meet here, because after this the
+tool and the shell agree and that comparison finds nothing to save.
+-}
+chooseChart : Chart.Mode -> Model -> { model : Model, command : Cmd Msg }
+chooseChart mode model =
+    if mode == model.chart then
+        { model = model, command = Cmd.none }
+
+    else
+        let
+            chosen =
+                { model
+                    | chart = mode
+                    , ascii = Maybe.map (Tool.Ascii.show mode) model.ascii
+                }
         in
         { model = chosen, command = saveSettings chosen }
 
@@ -1424,6 +1455,18 @@ menuBar model =
                         , key = ""
                         , items = Array.map (weekItem model.weeks) Week.all
                         }
+                    -- The chart's own mode, on the settings menu rather than
+                    -- on a menu of the tool's, which is where predc puts a
+                    -- setting: the colour scheme and the week numbering are
+                    -- both here and neither is on the window it changes. It
+                    -- earns the place twice over -- this is the half that can
+                    -- be reached when the chart is closed, and it is where
+                    -- somebody looks for a thing they can change.
+                    , SubMenu
+                        { title = "~A~SCII chart"
+                        , key = ""
+                        , items = Array.map (chartItem model.chart) Chart.all
+                        }
                     ]
                 }
            ]
@@ -1477,6 +1520,31 @@ themeItem current name =
         }
 
 
+{-| The chart's two forms, ticked like the themes and the week rules.
+
+No `shortcut` on either, and `Tab` is deliberately not written here: `Tab`
+reaches the chart only while the chart has the caret, and a shortcut column on
+a program-wide menu that said otherwise would be wrong more often than right.
+The window says it instead, on a line of its own, which is where somebody
+looking at the chart will see it.
+-}
+chartItem : Chart.Mode -> Chart.Mode -> MenuItem
+chartItem current mode =
+    Item
+        { title =
+            (if mode == current then
+                "√ "
+
+             else
+                "  "
+            )
+                ++ Chart.title mode
+        , cmd = "chart." ++ Chart.toKey mode
+        , key = ""
+        , shortcut = ""
+        }
+
+
 {-| The same tick as the themes, and the same reason: Turbo Vision has no
 checkable menu item, so the mark is a character in the title.
 
@@ -1503,20 +1571,13 @@ weekItem current rule =
 
 toolMenus : Model -> Array MenuItem
 toolMenus model =
-    (when model.ascii is
-        Just ascii ->
-            [ Tool.Ascii.menu ascii ]
+    (when model.calc is
+        Just calc ->
+            [ Tool.Calc.menu calc ]
 
         Nothing ->
             []
     )
-        ++ (when model.calc is
-                Just calc ->
-                    [ Tool.Calc.menu calc ]
-
-                Nothing ->
-                    []
-           )
         ++ (when model.hex is
                 Just _ ->
                     [ Tool.Hex.menu ]

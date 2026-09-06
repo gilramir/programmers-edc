@@ -300,10 +300,19 @@ def main():
     check("back on a printable code before switching",
           numbers(app.render())["dec"] == 0x2A, str(numbers(app.render())))
 
+    check("the window says which key switches charts, because a key nothing "
+          "on the screen mentions is a key nobody presses",
+          "Tab, or Options, shows the long list" in app.render(),
+          [r for r in app.render().split("\n") if "Tab" in r])
+
     app.send(b"\t", settle=1.5)
     rows = listed(app.render())
     check("Tab switches to the long list", "ASCII Chart - list" in app.render(),
           app.render().split("\n")[1])
+    check("and the line says how to get back, whole -- a StaticText is cut "
+          "off at its rectangle without saying so, and the first wording was",
+          "Tab, or Options, shows the grid" in app.render(),
+          [r for r in app.render().split("\n") if "Tab" in r])
     check("which is what man ascii prints: dec, hex, oct, and a name",
           "Dec  Hex  Oct  Sym   Name" in app.render(),
           [r for r in app.render().split("\n") if "Dec" in r])
@@ -348,19 +357,27 @@ def main():
     check("and a resize handle at its foot",
           any("└─" in row for row in app.render().split("\n")), app.render())
 
-    # The menu is the other way in, and the only place the mode is *named*.
-    # Turbo Vision has no checkable item, so the tick is a character.
+    # **Options is the other way in**, and it is on the settings menu rather
+    # than on a menu of the tool's -- which is where predc puts a setting, and
+    # is the half that can be reached when the chart is closed.
     bar = app.render().split("\n")[0]
-    app.click(bar.index("Chart") + 1, 1, settle=0.8)
+    check("the chart adds no menu of its own to the bar",
+          "Chart" not in bar, bar)
+    app.click(bar.index("Options") + 1, 1, settle=0.8)
+    for row, line in enumerate(app.render().split("\n")):
+        if "ASCII chart" in line and "│" in line:
+            app.click(line.index("ASCII chart") + 1, row + 1, settle=1.0)
+            break
     box = app.render()
-    check("the Chart menu ticks the mode you are in",
+    check("Options | ASCII chart ticks the mode you are in",
           "√ List" in box and "√ Grid" not in box,
           [r for r in box.split("\n") if "Grid" in r or "List" in r])
     for row, line in enumerate(box.split("\n")):
         if "Grid" in line and "│" in line:
             app.click(line.index("Grid") + 1, row + 1, settle=1.5)
             break
-    check("and choosing the other one from the menu switches too",
+    check("and choosing the other one there switches the open window too, so "
+          "the tick and the chart cannot disagree",
           "ASCII Chart - list" not in app.render(), app.render().split("\n")[1])
 
     app.send(b"\t", settle=1.5)

@@ -1,4 +1,4 @@
-module Tool.Ascii exposing (Model, command, init, menu, menuItem, mode, update, view, windowId)
+module Tool.Ascii exposing (Model, command, init, menuItem, mode, show, update, view, windowId)
 
 {-| The ASCII chart: 128 codes in a grid you can walk around in, and a line
 underneath saying what the selected one is in every base a programmer asks for.
@@ -75,48 +75,14 @@ scrollId =
     "ascii.scroll"
 
 
+hintId : String
+hintId =
+    "ascii.hint"
+
+
 menuItem : MenuItem
 menuItem =
     Item { title = "~A~SCII chart", cmd = command, key = "Alt-A", shortcut = "Alt-A" }
-
-
-{-| The tool's own menu, and **its title carries no underlined letter**: a menu
-*bar* title claims its Alt key for as long as the menu is on the bar, which is
-as long as this window is open, and there are none left.
-
-The tick is a character in the title, because Turbo Vision has no checkable
-menu item -- the same answer the theme and week menus give.
-
-Neither entry carries a `key`. A menu accelerator would be claimed
-program-wide, and `Tab` is only free *here*: the chart is a focused canvas,
-which consumes every key it is given, so nothing else in predc could have
-wanted it. The entries name it as a `shortcut`, which is a label rather than a
-binding.
--}
-menu : Model -> MenuItem
-menu model =
-    SubMenu
-        { title = "Chart"
-        , key = ""
-        , items = Array.map (modeItem model.mode) Chart.all
-        }
-
-
-modeItem : Mode -> Mode -> MenuItem
-modeItem current it =
-    Item
-        { title =
-            (if it == current then
-                "√ "
-
-             else
-                "  "
-            )
-                ++ Chart.title it
-        , cmd = "ascii." ++ Chart.toKey it
-        , key = ""
-        , shortcut = "Tab"
-        }
 
 
 -- MODEL
@@ -225,11 +191,11 @@ listBox model =
 
 {-| Rows of list on screen.
 
-Six of the window's rows are not list -- the two frame rows, the header, the
-two lines that spell the selected code out, and the blank between them -- and
-this is the same arithmetic `WindowResized` does to a rectangle somebody
-dragged, which is why both are written against the rectangle rather than one
-against the desktop.
+Seven of the window's rows are not list: the two frame rows, the header, the
+blank line, the two that spell the selected code out, and the one that says
+which key switches charts. This is the same arithmetic `WindowResized` does to
+a rectangle somebody dragged, which is why both are written against the
+rectangle rather than one against the desktop.
 -}
 listRows : Model -> Int
 listRows model =
@@ -237,7 +203,7 @@ listRows model =
         box =
             listBox model
     in
-    clamp 3 codes (box.y2 - box.y1 - 6)
+    clamp 3 codes (box.y2 - box.y1 - 7)
 
 
 {-| The window in each mode, which is the only reason this tool knows how big
@@ -363,6 +329,18 @@ update event model =
 
         _ ->
             model
+
+
+{-| Set the mode from outside, which is what **Options | ASCII chart** does.
+
+The same setting has two ways in and they have to agree: `Tab` moves it here
+and the shell reads it back, Options moves it in the shell and the shell tells
+the window. Without this the tick on the menu and the chart on the screen could
+say different things.
+-}
+show : Mode -> Model -> Model
+show =
+    showing
 
 
 {-| Change mode, and put the selection back on screen for the mode being
@@ -774,6 +752,11 @@ view inks model =
                     , rect = { x1 = 2, y1 = 12, x2 = 46, y2 = 13 }
                     , text = Ascii.naming model.code
                     }
+                , StaticText
+                    { id = hintId
+                    , rect = { x1 = 2, y1 = 13, x2 = 46, y2 = 14 }
+                    , text = hint model
+                    }
                 ]
 
             List ->
@@ -791,7 +774,7 @@ view inks model =
                                 { x1 = 2
                                 , y1 = 1
                                 , x2 = paneWidth model - 3
-                                , y2 = foot - 2
+                                , y2 = foot - 3
                                 }
                             , lines = list inks model
                             , cursor = cursorAt model
@@ -807,7 +790,7 @@ view inks model =
                                 { x1 = paneWidth model - 3
                                 , y1 = 1
                                 , x2 = paneWidth model - 2
-                                , y2 = foot - 2
+                                , y2 = foot - 3
                                 }
                             , value = model.top
                             , min = 0
@@ -817,7 +800,8 @@ view inks model =
                             , for = ""
                             }
                     }
-                -- The same two lines the grid has, in the same order, kept
+                -- The same three lines the grid has, in the same order. The
+                -- first two are kept
                 -- rather than dropped as redundant: a row of the list is
                 -- necessarily terse, and the code you are on is worth spelling
                 -- out in full in the one place it is always in the same
@@ -827,7 +811,7 @@ view inks model =
                     , view =
                         StaticText
                             { id = "ascii.bases"
-                            , rect = { x1 = 2, y1 = foot - 1, x2 = paneWidth model - 2, y2 = foot }
+                            , rect = { x1 = 2, y1 = foot - 2, x2 = paneWidth model - 2, y2 = foot - 1 }
                             , text = Ascii.bases model.code
                             }
                     }
@@ -836,12 +820,51 @@ view inks model =
                     , view =
                         StaticText
                             { id = "ascii.naming"
-                            , rect = { x1 = 2, y1 = foot, x2 = paneWidth model - 2, y2 = foot + 1 }
+                            , rect = { x1 = 2, y1 = foot - 1, x2 = paneWidth model - 2, y2 = foot }
                             , text = Ascii.naming model.code
+                            }
+                    }
+                , Grows
+                    { grow = acrossTheFoot
+                    , view =
+                        StaticText
+                            { id = hintId
+                            , rect = { x1 = 2, y1 = foot, x2 = paneWidth model - 2, y2 = foot + 1 }
+                            , text = hint model
                             }
                     }
                 ]
     }
+
+
+{-| **Where the user is told that `Tab` does anything.**
+
+A key nothing on the screen mentions is a key nobody presses, and this one had
+been written down only in a menu you had to open to find it. It is not on the
+status line -- that bar belongs to the program and this is one window's key --
+and it is not a menu accelerator, because that would claim `Tab` program-wide
+for a window that can already reach it. So it is a line in the window, and it
+names the *other* chart rather than the one you are looking at: what somebody
+wants to know is where the key goes.
+
+Options is named beside it because the same choice lives there, which is the
+half that works when this window is closed -- and when the caret is somewhere
+else, since `Tab` reaches the chart only while the chart has it.
+
+**Short enough for the grid**, which is the constraint that shaped the wording:
+a `StaticText` is cut off at its rectangle without saying so, the grid's window
+is forty-eight columns and fixed, and the first version of this line lost the
+words `| ASCII chart` off the end and read as though Options alone did it. The
+driver checks the sentence arrives whole.
+-}
+hint : Model -> String
+hint model =
+    when model.mode is
+        Grid ->
+            "Tab, or Options, shows the long list"
+
+        List ->
+            "Tab, or Options, shows the grid"
 
 
 {-| Both horizontal edges and both vertical ones follow, so a line stays the
