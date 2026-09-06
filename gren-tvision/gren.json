@@ -3,7 +3,7 @@
     "platform": "node",
     "name": "gilramir/gren-tvision",
     "summary": "Turbo Vision terminal UIs, as the Elm architecture",
-    "license": "BSD-3-Clause",
+    "license": "ISC",
     "version": "1.0.0",
     "exposed-modules": [
         "Tui"

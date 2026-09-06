@@ -1,6 +1,7 @@
 {
   "name": "gren-tvision",
   "version": "0.0.1",
+  "license": "ISC",
   "private": true,
   "description": "Runs a Gren program's UI on Turbo Vision: the diff layer between the Tui port protocol and the native binding.",
   "main": "tui.js",

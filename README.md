@@ -271,3 +271,20 @@ and `gilramir/gren-bignum`, and node-gyp downloads node's headers.
 `local:../gren-tvision`, each example's lists `"../../src"`, and the two npm
 packages depend on each other by `file:` path — so `programmers-edc/` cannot be
 built on its own, and the directories have to keep their relative positions.
+
+## Licence
+
+ISC, in `LICENSE` at the root and beside each package that is meant to be
+published. `gren-tvision/gren.json` and the three `package.json`s say the same.
+
+**What ships alongside it is not ours and does not become ours.** `tvision-node`
+links `libtvision.a` statically, so anything built from it carries Turbo Vision
+with it, and Turbo Vision is three layers of terms in one file
+(`tvision/COPYRIGHT`, 119 lines): Borland's 1994 public-source disclaimer on the
+original code, magiblot's MIT licence on everything since, and the MIT notices
+of the third-party pieces vendored into it — Milo Yip's `utoa`, Bjoern
+Hoehrmann's UTF-8 decoder, and the rest. All of them require the notice to
+travel with the binary. **A published `tvision-node` has to include
+`tvision/COPYRIGHT` in its tarball**, which is a packaging job that has not been
+done yet, because how the C++ gets to a consumer at all is still open — see the
+`binding.gyp` note under Building.

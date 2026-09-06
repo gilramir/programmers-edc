@@ -33,13 +33,18 @@ moment hex stopped being it. Both are split now -- four drivers over
 in three of seventeen phases) and wanted four files; time was flat (36s, then
 72s spread over six picker sections, then 18s) and wanted three.
 
-**And know when to stop.** At 37 suites on 16 cores the run is no longer just
-its slowest member: the sum matters again, and 972.8s over 16 cores puts a
-60.8s floor under it that no further splitting goes below. 93.9s against a
-71.9s slowest driver is most of the way there, so the next win is a *cheaper*
-driver rather than a smaller one -- and `pump()` sleeping its whole duration
-whether or not the app has gone quiet is where that would come from. That
-script can also be run directly, which is what to do while working on one:
+**And know when to stop, because that point has been passed.** Past about
+thirty suites on sixteen cores the run is no longer its slowest member: the sum
+matters again, and it puts a floor under the wall clock that no amount of
+further splitting goes below. At 51 suites (2026-09-06) the sum is 1629.5s,
+which over 16 cores is a **101.8s floor** against a 141.5s run and a 93.1s
+slowest driver (`programmers-edc/encode`). Splitting `encode` would buy
+essentially nothing -- it is already under the floor. **The only win left is a
+*cheaper* driver, not a smaller one**, and `pump()` sleeping its whole duration
+whether or not the app has gone quiet is where that would come from. Re-measure
+the sum before believing any of these numbers; they were 972.8s and a 60.8s
+floor at 37 suites. That script can also be run directly, which is what to do
+while working on one:
 
 ```sh
 devbox run -- python3 tools/run_tests.py entries   # just this one
@@ -49,6 +54,18 @@ devbox run -- python3 tools/run_tests.py -j1       # one at a time
 `check` and `test` must both be green before a commit, and `test:asan` too for
 anything that touches C++. After editing `tvision-node/src/`, rebuild with
 `(cd tvision-node && npx node-gyp build)` inside devbox.
+
+**That rebuild does not relink when only `build-tvision/libtvision.a` changed.**
+The generated makefile does not carry the static archive as a dependency of the
+`.node`, so after a `devbox run lib` the addon under test is still the one built
+before it -- which looks exactly like the library change having no effect.
+Deleting `build/Release/tvision.node` does not help either: it is a hard link
+and the copy step restores it. Touch a file under `tvision-node/src/`.
+
+**The check count is `grep -cE "^ok|✓"` over `devbox run test`'s output** --
+the pty drivers *plus* the JS tests `check` runs first. Counting only lines
+beginning `ok` misses the second group and reads as a regression against the
+numbers in `git log`.
 
 Format Gren sources after editing them, especially after scripted edits — those
 reliably produce indentation the compiler accepts and a person would not.

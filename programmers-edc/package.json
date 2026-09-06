@@ -1,6 +1,7 @@
 {
   "name": "predc",
   "version": "0.1.0",
+  "license": "ISC",
   "private": true,
   "description": "The programmer's every-day carry: small tools, one terminal window.",
   "bin": {

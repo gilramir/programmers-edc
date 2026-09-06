@@ -1,6 +1,7 @@
 {
   "name": "tvision-node",
   "version": "0.0.1",
+  "license": "ISC",
   "private": true,
   "description": "Turbo Vision (magiblot/tvision) bound to Node through N-API. Experiment, milestones 1-2.",
   "main": "index.js",
