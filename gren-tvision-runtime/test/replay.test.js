@@ -334,7 +334,11 @@ test('the program is given a directory of its own, and the recorded config in it
   let sawHome = null;
   let sawConfig = null;
   const a = render(1);
+  // With `XDG_CONFIG_HOME` among the names the recording had, so the replay
+  // sets one: where the recording had none, the file goes under the scratch
+  // `HOME` instead, which is where the program's own default rule looks.
   const t = tape([expected(10, a), { t: 20, end: 'exit' }], {
+    envNames: ['HOME', 'XDG_CONFIG_HOME'],
     extra: { config: { path: '/home/somebody/.config/p/config.toml', contents: 'theme = "gren"\n' } },
   });
   const realHome = process.env.HOME;
@@ -530,4 +534,48 @@ test('a message can go in one step early when what came out is exactly right', a
     ]))
   );
   assert.equal(result.ok, true, JSON.stringify(result.divergence));
+});
+
+test('a tick on the tape is fired where the tape has it, and not inferred', async () => {
+  // The clock reading a tick takes is a signature and not a fact -- a reading
+  // between a message going in and the render it produced belongs to that
+  // update. A tape written by a recorder that watches `setInterval` says which
+  // is which, and the driver fires the timer at that line rather than working
+  // out where one must have gone off.
+  const a = render(1);
+  const b = render(2);
+  const tock = render(3);
+  let fired = 0;
+  const result = await replay(
+    program({
+      onInit: (emit) => {
+        // Subscribed before the first render goes out, which is the order a
+        // Gren program has: emitting first would drive the whole tape from
+        // inside this call, reaching the tick before the timer exists.
+        setInterval(() => {
+          fired += 1;
+          emit(tock);
+        }, 1000);
+        emit(a);
+      },
+      onMessage: (m, emit) => {
+        // An update that reads the clock and then renders: the reading in
+        // front of *this* render must not be taken for a timer.
+        Date.now();
+        emit(b);
+      },
+    }),
+    session(tape([
+      expected(10, a),
+      { t: 20, in: { type: 'command', cmd: 'x' } },
+      { t: 21, now: START + 21 },
+      expected(22, b),
+      { t: 1010, tick: 1000 },
+      { t: 1011, now: START + 1011 },
+      expected(1012, tock),
+      { t: 1020, end: 'exit' },
+    ]))
+  );
+  assert.equal(result.ok, true, JSON.stringify(result.divergence));
+  assert.equal(fired, 1, 'exactly the one tick the tape has');
 });

@@ -9120,3 +9120,53 @@ That is one narrow question away from an answer rather than a mystery, which is
 a better place to leave it than the last two commits managed. Still
 `TVNODE_TAPES=1`, because one flap is one too many for a check every commit has
 to pass.
+
+## Recording the tick, which was the last thing being guessed at
+
+A replay has to fire `Time.every` itself -- the wall clock is not the
+program's -- and until now it worked out *where* from the clock reading each
+tick takes on its way. That is a signature rather than a fact, and it was
+wrong twice: `demo` timestamps every event it logs, so a reading between a
+message going in and the render it produced belongs to that update, and firing
+a timer into the middle of one draws a second that never passed. Every attempt
+to separate the two by *when* they happened failed, because a tick eight
+milliseconds after a resize and a second render three milliseconds after a
+message are the same distance apart as makes no difference.
+
+**`setInterval` is the seam, and in a running gren-tvision program it is an
+exact one.** The only caller is the Gren kernel's `_Time_setInterval`, which is
+what `Time.every` is made of: the binding's own pump is a `setTimeout` that
+reschedules itself, and nothing else in the runtime uses either. So the
+recorder wraps it, writes a line when a tick goes off, and the tape now says
+where each one was and -- which is what this was for -- **how many the model
+had been sent by any point in it**.
+
+A tick is a step in the replay's script now, beside the messages: the driver
+fires it when the cursor reaches it, with the interval the tape names, because
+a program with two subscriptions has two timers and the tape knows which of
+them went off. Nothing is inferred and nothing is waited for, since the program
+can never produce a tick's render on its own.
+
+### And a variable a replay invents is a variable on the screen
+
+The other half of what was left. A replay gets `HOME` and the XDG variables
+pointed into a directory of its own so that what the program writes lands
+somewhere safe -- and it was exporting all five, including ones the recording
+never had. predc's environment tool draws the variables it was given, so a
+helpfully-invented `XDG_CACHE_HOME` is a row on the screen and a divergence the
+tape cannot explain.
+
+It sets only the ones the recording had now, and seeds a recorded file under
+the scratch `HOME` where the program's own default rule will look for it
+instead. What cannot be fixed is `HOME` itself: its value has to change, and
+`drive_hotkeys.py` opens the environment tool, so that driver is marked with
+the reason like the other five.
+
+### Where this leaves it
+
+37 of 37 on two runs in three, and the third loses two -- always the time
+converter, still the `out focus` that is asked for on the reply only when
+`restoring` is set. The tape now carries everything that was being guessed at,
+so whatever is left is a difference in what the *model* did rather than in what
+the driver assumed, which is a much smaller place to look than it was two
+commits ago.

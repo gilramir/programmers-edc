@@ -156,8 +156,11 @@ under `extra`, and a path under `.config`, `.local/share`, `.local/state` or
 has its ticks at 1017, 2017, 3018; a replay firing its own at 1000, 2000, 3000
 draws a clock a second out the moment the offset crosses one, and fires ticks
 in places the recording has none — a timer due at 42032 is due whether or not
-the program was awake for it. So a tick goes off only where the tape has a
-render with no message under it, stamped with that render's own time.
+the program was awake for it. **So the recorder records them**, by wrapping
+`setInterval`, whose only caller in a gren-tvision program is the kernel behind
+`Time.every` — the binding's pump is a `setTimeout` that reschedules itself. A
+tick is a line on the tape and a step in the replay: fired where the tape has
+it, with the interval the tape names, and never inferred.
 
 **What a tape can and cannot hold a program to.** An inbound message is a
 barrier: nothing recorded after one can have been produced before it was sent.
@@ -194,12 +197,13 @@ for every session a pty driver runs, and `Checks.report` runs each tape back
 through the program with no terminal. There is nothing to add to a driver: the
 variable is the runtime's own, so fifty-odd drivers became fifty-odd replay
 tests for nothing. It is **off by default** — `TVNODE_TAPES=1` turns it on —
-because 38 of 38 replay exactly on a clean run and one of them -- the time
-converter -- still fails on about one run in two under sixteen-way load. Five
+because 37 of 37 replay exactly on two runs in three, and the third loses the
+time converter. Six
 drivers are marked as never replayable and say why: `watch` spawns child
 processes and watches a directory, `dir` lists one, `notes` reads and writes
-files, `edit` saves the document it opened, and `viewer` is pointed at a file
-each case rewrites — all Tasks rather than messages, and on no tape. A driver
+files, `edit` saves the document it opened, `viewer` is pointed at a file
+each case rewrites, and `hotkeys` opens the environment tool — whose rows
+include the one variable a replay has to change, `HOME`. A driver
 that knows it cannot replay says so with `Checks(replays="...")`, with the
 reason.
 

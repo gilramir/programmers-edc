@@ -41,6 +41,7 @@ const ADDED_IN = {
   3: "the terminal's colour depth and the flags init was given",
   4: 'which compiled module it was, so a replay needs no second argument',
   5: 'every reading the program took of the clock',
+  6: 'every Time.every tick the model was sent',
 };
 
 /**
@@ -463,6 +464,7 @@ function describeOther(ev) {
   }
   if (ev.end !== undefined) return `ended (${ev.end})`;
   if (ev.truncated !== undefined) return `TRUNCATED at ${ev.truncated} bytes`;
+  if (ev.tick !== undefined) return `a Time.every ${ev.tick}ms went off`;
   if (ev.now !== undefined) return `clock read: ${new Date(ev.now).toISOString()}`;
   if (ev.rng !== undefined) {
     const what = `${ev.n} ${ev.n === 1 ? 'byte' : 'bytes'} from ${ev.rng}`;

@@ -53,7 +53,7 @@ const path = require('path');
 const realNow = Date.now;
 
 /** Bumped when a reader would get the wrong answer from an older tape. */
-const TAPE = 5;
+const TAPE = 6;
 
 /** Stop before filling somebody's disk. The header says when this happened. */
 const MAX_BYTES = 16 * 1024 * 1024;
@@ -378,6 +378,22 @@ function createRecorder(opts = {}) {
       put({ t: realNow() - began, now: value });
     },
 
+    /**
+     * A `Time.every` going off.
+     *
+     * The last thing about a tape that was inferred rather than recorded. A
+     * replay has to fire these itself -- the wall clock is not the program's
+     * -- and it worked out where from the clock reading each tick takes on its
+     * way, which is a signature and not a fact: a reading between a message
+     * going in and the render it produced belongs to that update, and `demo`
+     * timestamps every event it logs. Recording the tick says which is which,
+     * and says how many the model has been sent, which is the number the time
+     * converter's behaviour turned out to depend on.
+     */
+    tick(interval) {
+      put({ t: realNow() - began, tick: interval });
+    },
+
     /** Anything the launcher knows that the protocol does not. */
     note(kind, data) {
       put({ t: realNow() - began, note: kind, ...(data === undefined ? {} : { data }) });
@@ -440,6 +456,40 @@ function createRecorder(opts = {}) {
  * randomness to make it reproducible would be the wrong trade in any program
  * and an absurd one in a program whose randomness is the feature.
  */
+let tickRecorder = null;
+let tickPatched = false;
+
+/**
+ * Record every `Time.every` the model is sent.
+ *
+ * `setInterval` is the seam and it is an exact one *here*: in a running
+ * gren-tvision program the only caller is the Gren kernel's `_Time_setInterval`,
+ * which is what `Time.every` is made of. The binding's own pump is a
+ * `setTimeout` that reschedules itself (`tvision-node/index.js`), and nothing
+ * else in the runtime uses either.
+ */
+function recordTicks(recorder) {
+  tickRecorder = recorder || null;
+  if (tickPatched || !recorder) return;
+  tickPatched = true;
+  const realSetInterval = global.setInterval;
+  global.setInterval = function (fn, interval, ...args) {
+    return realSetInterval.call(
+      global,
+      function (...fired) {
+        try {
+          if (tickRecorder) tickRecorder.tick(interval);
+        } catch {
+          /* a tape that cannot describe a tick must not stop the tick */
+        }
+        return fn.apply(this, fired);
+      },
+      interval,
+      ...args
+    );
+  };
+}
+
 let clockRecorder = null;
 let clockPatched = false;
 
@@ -617,6 +667,7 @@ module.exports = {
   createRecorder,
   fingerprint,
   recordClock,
+  recordTicks,
   recordRandomness,
   takeRecordFlags,
   installCrashHandlers,

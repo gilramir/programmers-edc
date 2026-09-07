@@ -97,16 +97,16 @@ function working() {
  * shaped by a rule this cannot guess, and saying so beats planting the file
  * somewhere the program will not look.
  */
-function seedPath(recorded, scratch) {
+function seedPath(recorded, roots) {
   const marks = [
     ['/.config/', 'config'],
     ['/.local/share/', 'data'],
     ['/.local/state/', 'state'],
     ['/.cache/', 'cache'],
   ];
-  for (const [mark, where] of marks) {
+  for (const [mark, kind] of marks) {
     const at = recorded.indexOf(mark);
-    if (at >= 0) return path.join(scratch, where, recorded.slice(at + mark.length));
+    if (at >= 0) return path.join(roots[kind], recorded.slice(at + mark.length));
   }
   return null;
 }
@@ -224,27 +224,41 @@ function install(session, options) {
   // that reproduces a bug and one that diverges on the first render for a
   // reason nobody can see.
   const scratch = options.inPlace ? null : fs.mkdtempSync(path.join(os.tmpdir(), 'gren-replay-'));
+  // Where each kind of file goes inside it. An XDG variable is set only when
+  // the recording had one: **a variable the replay invents is a variable on
+  // the screen**, and predc's environment tool draws the lot -- so a sandbox
+  // that helpfully exported `XDG_CACHE_HOME` made that tool's render differ
+  // for a reason that had nothing to do with the program. Where the recording
+  // had none, the file goes where the program's own default rule will look for
+  // it, under the scratch `HOME`.
+  const had = new Set(header.envNames || []);
+  const roots = {};
   if (scratch) {
-    for (const [name, where] of [
-      ['HOME', ''],
-      ['XDG_CONFIG_HOME', 'config'],
-      ['XDG_DATA_HOME', 'data'],
-      ['XDG_STATE_HOME', 'state'],
-      ['XDG_CACHE_HOME', 'cache'],
+    for (const [name, kind, fallback] of [
+      ['XDG_CONFIG_HOME', 'config', '.config'],
+      ['XDG_DATA_HOME', 'data', '.local/share'],
+      ['XDG_STATE_HOME', 'state', '.local/state'],
+      ['XDG_CACHE_HOME', 'cache', '.cache'],
     ]) {
-      const dir = where ? path.join(scratch, where) : scratch;
-      fs.mkdirSync(dir, { recursive: true });
+      roots[kind] = path.join(scratch, had.has(name) ? kind : fallback);
+      if (!had.has(name)) continue;
       const was = process.env[name];
-      process.env[name] = dir;
+      process.env[name] = roots[kind];
       undo.push(() => {
         if (was === undefined) delete process.env[name];
         else process.env[name] = was;
       });
     }
+    const wasHome = process.env.HOME;
+    process.env.HOME = scratch;
+    undo.push(() => {
+      if (wasHome === undefined) delete process.env.HOME;
+      else process.env.HOME = wasHome;
+    });
     undo.push(() => fs.rmSync(scratch, { recursive: true, force: true }));
     for (const [name, value] of Object.entries(header.extra || {})) {
       if (!value || typeof value.path !== 'string' || typeof value.contents !== 'string') continue;
-      const at = seedPath(value.path, scratch);
+      const at = seedPath(value.path, roots);
       if (!at) {
         notes.push(`the ${name} file was recorded at ${value.path}, which is not a path this can place`);
         continue;
@@ -292,6 +306,19 @@ function install(session, options) {
           ', and whatever the program decided from it will differ'
       );
     }
+  }
+
+  // And the other way round, which is the one that shows on a screen: predc's
+  // environment tool draws what it was given, so a variable this replay
+  // invented is a difference the program is right about and the tape cannot
+  // explain.
+  const invented = Object.keys(process.env).filter((n) => !had.has(n));
+  if (had.size && invented.length) {
+    notes.push(
+      `${invented.length} variable(s) are set here that the recording did not have ` +
+        `(${invented.slice(0, 4).join(', ')}${invented.length > 4 ? ', …' : ''}), which a ` +
+        'program that draws its own environment will draw'
+    );
   }
 
   const missing = (header.envNames || []).filter((n) => process.env[n] === undefined);
@@ -432,10 +459,14 @@ function install(session, options) {
      * called from inside a port subscription: a tick's render comes back
      * through the same subscription and is matched like any other.
      */
-    tickAt(t) {
+    tickAt(t, interval) {
       virtualNow = startMs + t;
       let soonest = null;
       for (const [, timer] of timers) {
+        // By interval when the tape says which -- a program with two
+        // `Time.every` subscriptions has two timers, and the tape knows which
+        // of them went off.
+        if (interval !== undefined && timer.ms !== interval) continue;
         if (!soonest || timer.due < soonest.due) soonest = timer;
       }
       if (!soonest) return false;
@@ -463,16 +494,20 @@ function install(session, options) {
 /**
  * The tape as a list of things to do, in order.
  *
- * An inbound message is something to send; an outbound one is something to
- * expect. Everything else -- a note, a draw, the end -- is context the driver
- * walks past, having already taken what it needed from it.
+ * An inbound message is something to send, an outbound one is something to
+ * expect, and a tick is a timer to fire. Everything else -- a note, a draw --
+ * is context the driver walks past, having already taken what it needed.
  */
 function script(session) {
   const steps = [];
   for (const ev of session.events || []) {
     if (ev.in) steps.push({ kind: 'send', t: ev.t, at: ev.at, message: ev.in, port: ev.port });
     else if (ev.out) steps.push({ kind: 'expect', t: ev.t, at: ev.at, expected: ev, port: ev.port });
-    else if (ev.end !== undefined) steps.push({ kind: 'end', t: ev.t, at: ev.at, reason: ev.end });
+    else if (ev.tick !== undefined) {
+      steps.push({ kind: 'tick', t: ev.t, at: ev.at, interval: ev.tick });
+    } else if (ev.end !== undefined) {
+      steps.push({ kind: 'end', t: ev.t, at: ev.at, reason: ev.end });
+    }
   }
   return steps;
 }
@@ -549,6 +584,7 @@ async function replay(grenModule, session, options = {}) {
     .filter((e) => e.now !== undefined)
     .map((e) => e.at);
   const readAfter = (from, before) => readingLines.some((l) => l > from && l < before);
+  const hasTicks = (session.events || []).some((e) => e.tick !== undefined);
   const stage = install(session, options);
   warnings.push(...stage.notes);
   const withheldDraws = stage.draws.filter((d) => d.value === undefined).length;
@@ -624,6 +660,17 @@ async function replay(grenModule, session, options = {}) {
           ended = true;
           done = allMet();
           return;
+        }
+        // A tick is fired rather than waited for, because the program can
+        // never produce one on its own: the timer belongs to the driver. The
+        // tape says exactly where each went off, so there is nothing to infer
+        // and nothing to wait for.
+        if (step.kind === 'tick') {
+          cursor += 1;
+          if (step.done) continue;
+          step.done = true;
+          stage.tickAt(step.t, step.interval);
+          continue;
         }
         if (step.kind !== 'send') return;
         cursor += 1;
@@ -879,7 +926,9 @@ async function replay(grenModule, session, options = {}) {
         pump();
         continue;
       }
-      if (readAfter(atLine, want.at)) {
+      // Only for a tape written before ticks were recorded: on one of those
+      // the clock reading a tick takes is the only sign it went off.
+      if (!hasTicks && readAfter(atLine, want.at)) {
         // Reset, so that a tape wanting two ticks in a row gets two: each
         // stall fires one, and a `Time.every` with more than one interval on
         // it can need several before the render the tape has comes out.

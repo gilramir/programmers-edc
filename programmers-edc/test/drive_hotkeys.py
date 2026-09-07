@@ -61,7 +61,14 @@ def open_menu(app, name, settle=0.5):
 
 
 def main():
-    check = Checks()
+    check = Checks(
+        replays=(
+            "it opens the environment tool, which draws the variables this "
+            "process was given -- and the one a replay has to change, HOME, "
+            "so that what the program writes lands somewhere safe, is one of "
+            "the rows on the screen"
+        )
+    )
     env = dict(os.environ, TERM="xterm-256color",
                HOME=tempfile.mkdtemp(prefix="predc-keys-"))
     env.pop("XDG_CONFIG_HOME", None)

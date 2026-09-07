@@ -15,6 +15,7 @@ const {
   installCrashHandlers,
   recordClock,
   recordRandomness,
+  recordTicks,
 } = require('./record');
 
 // Bumped in lockstep with Tui.protocolVersion on the Gren side. A Gren package
@@ -97,6 +98,7 @@ function run(grenModule, options = {}) {
   if (recorder) {
     recordRandomness(recorder);
     recordClock(recorder);
+    recordTicks(recorder);
   }
   if (recorder) process.on('exit', () => recorder.farewell());
 
