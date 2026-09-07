@@ -685,6 +685,15 @@ async function replay(grenModule, session, options = {}) {
           return;
         }
         if (options.trace) options.trace('<-', step.port || 'tui', { in: step.message.type, at: step.at });
+
+        // Fed from here, inside whatever subscription brought the cursor to
+        // it, which is a decision with a measured alternative behind it. See
+        // **the re-entrancy** in FINDINGS: feeding the binding's port a turn
+        // later instead makes the replay perfectly deterministic and wrong
+        // about thirteen drivers, because a recording's messages are coupled
+        // to the program's own progress -- Turbo Vision's pump delivers the
+        // next event only once the last render has been applied -- and a free
+        // turn is not.
         app.ports[name].send(step.message);
       }
       ended = true;
@@ -741,6 +750,7 @@ async function replay(grenModule, session, options = {}) {
       for (const i of deferred) {
         const step = steps[i];
         if (step.done || (step.port || 'tui') !== port) continue;
+        if (options.trace) options.trace('..', 'late', { line: step.at });
         if (step.expected.out !== actual.out) continue;
         if (actual.out === 'render' && step.expected.hash !== actual.hash) continue;
         step.done = true;
@@ -792,7 +802,20 @@ async function replay(grenModule, session, options = {}) {
       // Sending that message early is safe when what has just arrived is
       // exactly what the tape has on the other side of it: the terminal did
       // not wait for us either.
-      if (found < 0 && end < steps.length && steps[end].kind === 'send') {
+      // ...but never over an unmet expectation on the port the message is
+      // going in on. A request and its reply are the same port, so sending one
+      // early while the request it answers has not come out yet is handing the
+      // program an answer to a question it has not asked -- and everything
+      // after that belongs to a conversation neither side is having. It cost a
+      // driver one replay in three.
+      const overtakes =
+        end < steps.length &&
+        steps[end].kind === 'send' &&
+        steps
+          .slice(cursor, end)
+          .some((step) => !step.done && (step.port || 'tui') === (steps[end].port || 'tui'));
+
+      if (found < 0 && !overtakes && end < steps.length && steps[end].kind === 'send') {
         for (let i = end + 1; i < steps.length && steps[i].kind === 'expect'; i += 1) {
           const step = steps[i];
           if (step.done || (step.port || 'tui') !== port) continue;
@@ -805,6 +828,7 @@ async function replay(grenModule, session, options = {}) {
           if (actual.out === 'render') lastHash = actual.hash;
           matched += 1;
           deferred.push(i);
+          if (options.trace) options.trace('..', 'ahead', { line: steps[end].at });
           pumpFrom(end);
           // And on with the rest: the cursor is still standing behind the
           // message that was just sent out of turn, and nothing else moves it.
@@ -933,6 +957,7 @@ async function replay(grenModule, session, options = {}) {
         // stall fires one, and a `Time.every` with more than one interval on
         // it can need several before the render the tape has comes out.
         idle = 0;
+        if (options.trace) options.trace('..', 'tick', { line: want.at });
         stage.tickAt(want.t);
         continue;
       }
@@ -945,6 +970,24 @@ async function replay(grenModule, session, options = {}) {
       // match, and then reports the message as never arriving at all.
       if (waited < 30) continue;
       waited = 0;
+
+      // Never past a message on the port the missing one was expected on.
+      //
+      // This is the whole of the root cause of a driver that lost a replay on
+      // one run in three. `node`'s idea of what is outstanding cannot see work
+      // queued inside the Gren scheduler, so "the program has gone quiet" is
+      // sometimes wrong -- and when it was wrong here the driver set aside the
+      // `atInstant` the time converter was about to send and fed it the `rows`
+      // answering it. **An answer to a question that has not been asked**, and
+      // every message after it belongs to a conversation neither side is
+      // having.
+      //
+      // A request and its reply are the same port by construction, so this
+      // costs nothing anywhere else: the ordering deferral exists for -- an
+      // `init` chain's render arriving after the terminal's next message -- is
+      // two different ports every time.
+      const nextIn = steps.slice(cursor).find((step) => step.kind === 'send');
+      if (nextIn && (nextIn.port || 'tui') === (want.port || 'tui')) continue;
 
       // Not a tick, and node says there is nothing outstanding: the program
       // has said everything it is going to say, and the tape still has a
@@ -960,6 +1003,7 @@ async function replay(grenModule, session, options = {}) {
       // conversation carries on, it stays matchable, and one still set aside
       // at the end is a real absence rather than a late arrival.
       idle = 0;
+      if (options.trace) options.trace('..', 'aside', { line: steps[cursor].at });
       deferred.push(cursor);
       cursor += 1;
       while (cursor < steps.length && steps[cursor].kind === 'expect' && steps[cursor].done) {

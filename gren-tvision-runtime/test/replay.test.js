@@ -117,15 +117,17 @@ test('a render that differs is reported, with the message fed last', async () =>
   assert.equal(result.divergence.after.message.cmd, 'tool.hex');
 });
 
-test('a message is fed the moment the cursor reaches it, not a turn later', async () => {
-  // The case that decided the design. `predc time` put the terminal's first
-  // `resized` *between* two steps of init's own chain: after its first render
-  // and before it asked node for the zones. A driver that waits and then sends
-  // cannot reproduce that, and every render afterwards differs for a reason
-  // that is not a bug.
+test('a message is fed the moment the cursor reaches it', async () => {
+  // From inside the subscription that brought the cursor to it, which is a
+  // decision with a measured alternative behind it: feeding the binding's port
+  // a turn later instead makes a replay perfectly deterministic and wrong
+  // about a third of the drivers, because a recording's messages are coupled
+  // to the program's own progress -- Turbo Vision's pump delivers the next
+  // event only once the last render has been applied -- and a free turn is
+  // not. FINDINGS has the numbers.
+  const order = [];
   const first = render(1);
   const second = render(2);
-  const order = [];
   const t = tape([
     expected(10, first),
     { t: 11, in: { type: 'resized', cols: 100, rows: 28 } },
@@ -137,8 +139,9 @@ test('a message is fed the moment the cursor reaches it, not a turn later', asyn
     program({
       onInit: (emit) => {
         emit(first);
-        // Init's chain continues *after* the render, in the same turn. The
-        // resize has to have landed in between.
+        // Init's chain continues after the render, in the same turn: the
+        // resize has to have landed in between, which is where the recording
+        // this was taken from has it.
         order.push('init continued');
         emit({ type: 'atInstant' }, 'intlOut');
       },

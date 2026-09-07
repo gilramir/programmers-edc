@@ -9226,3 +9226,67 @@ copy of one that the program is merely *late* with is what shifts the rest.
 That is the next thing to look at, and it is a smaller thing than it was: not
 the program, not the clock, not the ticks, and not the environment -- the
 bookkeeping in one loop.
+
+## The re-entrancy, which is where the flap comes from
+
+`time_picker` lost a replay on about one run in three, and the last two commits
+guessed at the cause twice. This is the measurement.
+
+**The same tape gives different answers.** Ten replays of one file: eight
+passing, two not. That alone settles where to look -- a replay is a function of
+a tape, so a replay that is not a function of a tape is a bug in the replayer,
+whatever the recording did.
+
+**And the program is not the one being inconsistent.** Fed its own tape's
+messages plainly -- in order, twelve milliseconds apart, with no driver logic
+at all -- predc emits exactly the same sequence three runs out of three, and
+`atInstant` before the render every time.
+
+**What differs is the driver's feed point.** Two traces of the same tape, with
+the driver's own decisions printed alongside, differ first here:
+
+    passing:   <- select   -> intl atInstant   <- intl rows   -> render
+    failing:   <- select   -> render           -> intl atInstant   <- intl rows
+
+No tick fired, nothing was set aside, nothing was fed early -- the two runs
+made *no decisions at all* between the last agreement and the divergence. The
+program simply delivered one update's two effects in the other order.
+
+It can do that because the driver feeds a message **from inside the
+subscription that brought the cursor to it**. That re-enters the Gren
+scheduler mid-dispatch, where `_Scheduler_enqueue` sees `_Scheduler_working`
+and queues rather than runs, and what is queued comes back interleaved with
+what was already going out. Whether the driver is inside a dispatch when it
+feeds depends on whether the message before it was observed synchronously,
+which depends on the machine.
+
+### The fix that works and is wrong
+
+Feeding the binding's port a turn later instead -- `setTimeout(0)`, the way
+Turbo Vision's own pump delivers -- makes the replayer **perfectly
+deterministic**: three full runs of the suite, the same thirteen drivers
+failing each time, byte for byte. It also makes it wrong about twelve of them,
+where the synchronous feed is right.
+
+The reason is worth writing down, because it is the shape of the whole
+problem. A recording's messages are not free-running: TVision's pump delivers
+the next event only once the last render has been applied, so a tape's message
+arrives *coupled to the program having finished with the one before*. Feeding
+from inside the subscription models that coupling and gets the interleaving
+right; feeding on a free turn breaks the coupling and lets the program's own
+chains get ahead. Determinism was bought by being wrong in a repeatable way.
+
+So the answer is neither, and it is now a sharp question rather than a hunt:
+**how does a driver hand a Gren program a message at the same logical point
+without re-entering its scheduler?** Everything else about the replay is
+already a function of the tape.
+
+### Two guards that are right either way
+
+Both found while chasing this and both keep their place. A message must never
+be fed out of turn over an unmet expectation **on its own port** -- a request
+and its reply are the same port by construction, so doing that hands the
+program an answer to a question it has not asked, and everything after belongs
+to a conversation neither side is having. The rule now applies in both places
+that can feed early: the one-step lookahead past a barrier, and the
+set-aside.
