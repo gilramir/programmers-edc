@@ -11,15 +11,19 @@ current screen contents -- which is what we want for "did this ever appear"
 and for watching a value change over time.
 """
 
+import atexit
 import errno
 import fcntl
 import os
 import pty
 import re
 import select
+import shutil
 import signal
 import struct
+import subprocess
 import sys
+import tempfile
 import termios
 import time
 import unicodedata
@@ -41,6 +45,48 @@ ANSI = re.compile(
 # drew. A driver that opens two applications -- `drive_env.py` opens a second
 # one at a different size -- gets both swept without saying so.
 _ptys = []
+
+# Every session a driver runs is recorded, and `Checks.report` runs each tape
+# back through the program with no terminal at all. There is nothing to add to
+# a driver for this: `TUI_RECORD` is the runtime's own environment variable and
+# every program built on gren-tvision honours it, so pointing it at a scratch
+# file here turns fifty-odd pty drivers into fifty-odd replay tests for free.
+#
+# What it checks is not what the driver checks. A driver asserts on the screen;
+# a replay asserts that the same messages fed into the same program produce the
+# same renders, which is the claim the whole recorder rests on -- that the port
+# boundary is total. Every place a program reaches around it shows up here as a
+# tape that will not run again, and it shows up on the driver that happened to
+# touch it rather than on somebody's afternoon.
+#
+# **`TVNODE_TAPES=1` turns it on, and it is off by default**, which is not the
+# ambition and is the honest state. On a full run 43 of 53 drivers replay
+# exactly; the ten that do not are three kinds. Three of them reach outside the
+# port boundary through Tasks -- `watch` spawns child processes and watches a
+# directory, `dir` lists one, `notes` reads and writes files -- and those are
+# marked below and will never replay without recording somebody's disk. The
+# rest are races: the same driver replays on one run and not the next, because
+# a recording captures one interleaving of the program's own chains with the
+# terminal's messages and a replay reproduces a different legal one. **A check
+# that flaps is worse than no check**, so this waits until it does not.
+_TAPES = os.environ.get("TVNODE_TAPES") == "1"
+_tape_dir = None
+_replay = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                       "..", "..", "gren-tvision-runtime", "bin", "gren-replay.js")
+
+
+def _tapes_go():
+    """A scratch directory for this driver's tapes, made once and thrown away.
+
+    Kept when `TVNODE_KEEP_TAPES` is set, which is what to do when a replay
+    fails and the question is what the program actually said.
+    """
+    global _tape_dir
+    if _tape_dir is None:
+        _tape_dir = tempfile.mkdtemp(prefix="tvnode-tapes-")
+        if not os.environ.get("TVNODE_KEEP_TAPES"):
+            atexit.register(shutil.rmtree, _tape_dir, True)
+    return _tape_dir
 
 
 def same_colour(fg, bg):
@@ -83,6 +129,23 @@ class Pty:
         # the whole screen afterwards, so nothing stale survives.
         self.cols, self.rows = cols, rows
         self.widest, self.tallest = cols, rows
+        self.cwd = cwd
+        # A tape of this session, unless the caller is already recording one
+        # of its own -- `drive_record.py` passes `--record`, and two recorders
+        # writing the same program's messages would be one tape too many.
+        self.tape = None
+        if _TAPES and "TUI_RECORD" not in env and not any(
+            a in ("--record", "--record-verbatim") for a in argv
+        ):
+            self.tape = os.path.join(_tapes_go(), f"pty{len(_ptys)}.tape")
+            # Verbatim, which is the one place that is right. A tape withholds
+            # documents because they are the user's; a driver's clipboard and
+            # notes are the driver's own strings, and a `clipboardText` reduced
+            # to a length and a hash is a message the program cannot act on
+            # twice -- so a redacted tape of a paste can never replay, and the
+            # check would be measuring the redaction rather than the program.
+            env = dict(env, TUI_RECORD_VERBATIM=self.tape)
+        self.env = env
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
             fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
@@ -377,8 +440,14 @@ def asan_enabled():
 
 
 class Checks:
-    def __init__(self):
+    def __init__(self, replays=True):
         self.failures = []
+        # A driver whose program reaches outside the port boundary cannot be
+        # replayed, and says so here with the reason rather than being left to
+        # fail. `replays` is either True or the sentence explaining why not,
+        # which is printed where the check would have been -- a to-do that
+        # nobody has to go looking for.
+        self.replays = replays
 
     def __call__(self, name, ok, detail=""):
         print(f"{'ok  ' if ok else 'FAIL'}  {name}" + (f"   ({detail})" if detail and not ok else ""))
@@ -410,8 +479,47 @@ class Checks:
         self("nothing was drawn in the colour behind it", not seen,
              "; ".join(seen[:6]) + (f" ... and {len(seen) - 6} more" if len(seen) > 6 else ""))
 
+    def tapes(self):
+        """One check, per driver, that every session it ran runs again.
+
+        One rather than one per tape, for the same reason `ink` is one: a
+        program that reaches around the port boundary does it once, and a
+        driver that opened six windows through it has not found six of them.
+
+        A tape with nothing on it is skipped rather than failed. `--help` and
+        a bad command never start Turbo Vision at all, which is the behaviour
+        `drive_cli.py` exists to pin, and a tape of that is a header and an
+        end line.
+        """
+        if not _TAPES:
+            return
+        if self.replays is not True:
+            print(f"--    these sessions are not replayable: {self.replays}")
+            return
+        problems, replayed = [], 0
+        for pty in _ptys:
+            if not pty.tape or not os.path.exists(pty.tape):
+                continue
+            with open(pty.tape) as f:
+                events = sum(1 for line in f if line.strip()) - 1
+            if events < 2:
+                continue
+            done = subprocess.run(node_argv(_replay, pty.tape), env=pty.env,
+                                  cwd=pty.cwd or os.getcwd(),
+                                  capture_output=True, timeout=180)
+            if done.returncode == 0:
+                replayed += 1
+            else:
+                said = (done.stdout or done.stderr).decode(errors="replace")
+                problems.append(" ".join(said.split())[:220])
+        if replayed or problems:
+            self(f"every session this driver recorded replays ({replayed} of "
+                 f"{replayed + len(problems)})", not problems,
+                 " | ".join(problems[:2]))
+
     def report(self, app=None, extra=None):
         self.ink()
+        self.tapes()
         print()
         if extra:
             print(extra)

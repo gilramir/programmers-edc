@@ -39,6 +39,8 @@ const UNPROMPTED_MS = 200;
 const ADDED_IN = {
   2: "the random values the program drew, and the machine's time zone",
   3: "the terminal's colour depth and the flags init was given",
+  4: 'which compiled module it was, so a replay needs no second argument',
+  5: 'every reading the program took of the clock',
 };
 
 /**
@@ -461,6 +463,7 @@ function describeOther(ev) {
   }
   if (ev.end !== undefined) return `ended (${ev.end})`;
   if (ev.truncated !== undefined) return `TRUNCATED at ${ev.truncated} bytes`;
+  if (ev.now !== undefined) return `clock read: ${new Date(ev.now).toISOString()}`;
   if (ev.rng !== undefined) {
     const what = `${ev.n} ${ev.n === 1 ? 'byte' : 'bytes'} from ${ev.rng}`;
     return `random: ${what}, ${ev.value === undefined ? `withheld (sha ${short(ev.sha)})` : 'kept'}`;

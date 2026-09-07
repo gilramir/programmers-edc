@@ -153,7 +153,12 @@ def dropdown(app):
 
 
 def main():
-    check = Checks()
+    check = Checks(
+        replays=(
+            "the tree it draws is read off the disk through Tasks, and a tape "
+            "carries what crossed a port rather than what a directory held"
+        )
+    )
     root = tempfile.mkdtemp(prefix="tvdir-")
     try:
         build_fixture(root)

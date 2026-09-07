@@ -27,6 +27,10 @@ is the only way to watch it — the terminal belongs to Turbo Vision.
 gren-tui main.js --record /tmp/bug.tape     # or TUI_RECORD=/tmp/bug.tape
 ```
 
+`TUI_RECORD_VERBATIM=/tmp/bug.tape` is the same with the withholding off. It is
+for a *test*, which owns the documents it pastes, and not for a user, who does
+not.
+
 A **tape** is what somebody who hit a bug can send you instead of describing
 it. The port boundary is total — a Gren program here is a pure function of what
 `init` read and what arrived on `tuiIn` — so a file with those two things in it
@@ -81,12 +85,16 @@ differently because they need different things:
     own randomness; only the recorder is any the wiser. The bytes are
     **withheld like a document**, because the whole purpose of a random value
     is that somebody is about to use it for something.
-  - **The clock is not recorded, it is reconstructed.** Every line is stamped
-    with milliseconds since the header, the header carries the instant it
-    began, and `runtime.timeZone` says where the machine thought it was — which
-    is enough for a replayer to answer `Time.now` with what it answered then.
-    Recording the calls instead would mean intercepting `Date.now` for the
-    whole process, and there is no way to tell the program's reads from node's.
+  - **Every reading of the clock is recorded too**, which was argued out and
+    back in. Reconstruction — every line is stamped, the header carries the
+    instant it began — is enough for a program that *displays* the time and not
+    for one that seeds something with it: `examples/puzzle` shuffles its board
+    from `Time.now`, and a board is not nearly the same when the seed is nearly
+    the same. The argument against was that `Date.now` cannot be intercepted
+    for one caller; measured rather than assumed, a running gren-tvision
+    program has exactly two, the Gren kernel and this file's own stamps.
+    `runtime.timeZone` is on the header for the same reason — `Time.getZoneName`
+    reads `Intl` and crosses nothing.
 
 Two things a tape still cannot reach: it sits above Turbo Vision, so a key that
 decoded wrong or a paint that came out wrong is invisible to it; and the values
@@ -144,11 +152,40 @@ A launcher that wants its own state replayed records it as `{path, contents}`
 under `extra`, and a path under `.config`, `.local/share`, `.local/state` or
 `.cache` is placed where the matching XDG variable will find it.
 
+`Time.every` is driven from the tape rather than from arithmetic. A recording
+has its ticks at 1017, 2017, 3018; a replay firing its own at 1000, 2000, 3000
+draws a clock a second out the moment the offset crosses one, and fires ticks
+in places the recording has none — a timer due at 42032 is due whether or not
+the program was awake for it. So a tick goes off only where the tape has a
+render with no message under it, stamped with that render's own time.
+
+**What a tape can and cannot hold a program to.** An inbound message is a
+barrier: nothing recorded after one can have been produced before it was sent.
+*Between* two of them the order of two different ports is not the program's —
+predc's request to node for its time zones lands either side of a render
+depending on which chain the recording machine finished first — and neither is
+the order of two different kinds of message on one port. What is asserted is
+that each happened, that there were exactly this many of each, and that the
+renders were these renders.
+
 What it cannot put back is what the tape does not carry: the values of
 environment variables (names only, on purpose — `--env` is for the two that
 mattered) and any file the program read that its launcher did not record. Both
 are reported before the first message is fed, because the failure they cause
 looks exactly like a bug in the program.
+
+## Every driver as a replay
+
+`tvision-node/test/harness.py` points `TUI_RECORD_VERBATIM` at a scratch file
+for every session a pty driver runs, and `Checks.report` runs each tape back
+through the program with no terminal. There is nothing to add to a driver: the
+variable is the runtime's own, so fifty-odd drivers became fifty-odd replay
+tests for nothing. It is **off by default** — `TVNODE_TAPES=1` turns it on —
+because 43 of 53 replay exactly and the ten that do not are not all the same
+kind. Three reach outside the port boundary through Tasks and never will; the
+rest are races that pass on one run and fail on the next, and a check that
+flaps is worse than no check. A driver that knows it cannot replay says so:
+`Checks(replays="...")`, with the reason.
 
 ## Reading a tape
 

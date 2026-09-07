@@ -8853,3 +8853,112 @@ makes a divergence unreadable.
 The pattern is the one this file keeps finding. Writing the program that needs
 a capability is what finds the gaps in it; staring at the recorder found none
 of these three, and one afternoon of replaying found all of them.
+
+## Every driver as a tape, and the four walls between here and that
+
+`TUI_RECORD` is the runtime's own environment variable, so pointing it at a
+scratch file from `harness.py` turns fifty-three pty drivers into fifty-three
+replay tests with **nothing added to a driver**. That is the whole of the
+mechanism, and it is the same shape as the ink sweep: the harness does it for
+every session, `Checks.report` makes one check of what accumulated, and there
+is no list anywhere.
+
+It costs nothing in wall clock. 153.9s with the replays against 153.4s without,
+because a replay is milliseconds and a pty driver is mostly asleep. What it
+does *not* buy is speed: a replay checks render hashes and a driver checks the
+screen, so it can never replace one. It buys the claim -- that a tape is the
+input -- checked continuously against every interaction the suite has.
+
+Getting there hit four walls, and each was a real defect rather than a
+difficulty.
+
+### A launcher's metadata belonged to the flag
+
+predc named itself and put its config file on the tape inside the object it
+passed as `record`, which is built only when `--record` was *typed*. Recording
+turned on by the environment variable got neither -- so every tape the suite
+recorded lacked the file predc reads its theme, its week rule and its chart
+mode out of, and every one of them replayed into a differently coloured
+program. Four drivers failed on their first render for this reason and it read
+like a bug in the replayer.
+
+**Metadata does not belong to the switch that started the recorder.** It is
+`options.recording` now, beside `options.record`, and it goes on a tape however
+one was asked for.
+
+### A redacted document cannot replay
+
+`clipboardText` reduced to a length and a hash is a message the program cannot
+act on twice, and neither is `editorText`. Nine drivers diverged the moment
+they pasted something. The withholding is right for a user and wrong for a
+suite, which owns every document it pastes -- so `TUI_RECORD_VERBATIM` is the
+same variable with the withholding off, and the harness uses it. The exit
+notice is suppressed there too: it is for a person who asked for a recording,
+and it was landing in the middle of whatever the driver was reading.
+
+### The clock had to be recorded after all
+
+The previous commit argued the clock out of the tape: every line is stamped, so
+a replay can reconstruct what `Time.now` answered, and `Date.now` cannot be
+intercepted for one caller anyway. Both halves were wrong.
+
+`examples/puzzle` seeds its shuffle from `Time.now` -- deliberately, and
+documented in its own source as the thing a `srand(time(0))` in a C++
+constructor forced into the model. **A board is not nearly the same when the
+seed is nearly the same.** Reconstruction gets the millisecond wrong and the
+board is unrecognisable; nothing on the tape said which millisecond it was.
+
+And the interception argument was assumed rather than measured. Measured -- by
+replacing `Date.now` with one that records its caller and running an example
+under a pty -- a running gren-tvision program has **exactly two** callers: the
+Gren kernel's `_Time_now`, and `record.js`'s own stamps. tvision-node does not
+call it and neither does node. So the recorder captures `Date.now` at load into
+`realNow`, uses that for its own stamps, and records everything the program
+asks for.
+
+**Served by position on the tape, not by call number.** A queue handed out in
+order is a queue that one missed reading knocks out of step for the whole run,
+and a tick that fired a moment differently is exactly that missed reading. Each
+reading carries the line it was written on; anything recorded before where the
+replay has got to is dropped rather than handed over late.
+
+### A tick fires where the tape says, not where the arithmetic says
+
+`Time.every 1000` does not fire on the thousand. A recording has its ticks at
+1017, 2017, 3018, and a replay firing at 1000, 2000, 3000 draws a clock one
+second out the moment the offset crosses a boundary. Worse, it fires ticks in
+places the recording has none -- a timer due at 42032 is due whether or not the
+program was awake for it, and a render that nobody recorded is a divergence
+that cannot be explained.
+
+So the tape decides *when* and the interval arithmetic decides only *which*: a
+tick goes off where the tape has a render with no message under it, with the
+clock set to that render's own stamp, and only after the program has been quiet
+for two turns -- one is not enough, because a program waiting on a file read is
+quiet too. `entries`, a forty-five-second session with a clock in it, replays
+all eighty-nine of its messages exactly.
+
+### What a tape can hold a program to, and what it cannot
+
+An inbound message is a **barrier**: nothing recorded after one can have been
+produced before it was sent. Between two of them, two things are not the
+program's and are not asserted -- the order of two different ports, and the
+order of two different kinds of message on one port. What is asserted is that
+each happened, that there were this many of each, and that the renders were
+these renders.
+
+### Which is where it stops, and why it is off by default
+
+43 of 53 drivers replay exactly. Three of the ten will never: `watch` spawns
+child processes and watches a directory, `dir` lists one, `notes` reads and
+writes files, and all of that is Tasks rather than messages -- outside the port
+boundary, on no tape, and only recordable by recording somebody's disk. Those
+say so in their own `Checks(replays="...")`, with the reason.
+
+The other seven are races, and the set is not the same twice: a driver replays
+on one run and not the next, because a recording captures one interleaving of
+the program's own chains with the terminal's messages and a replay reproduces a
+different legal one. **A check that flaps is worse than no check**, so the
+whole thing is behind `TVNODE_TAPES=1` until it does not. The mechanism, the
+numbers and the reasons are written down here so that the next person to look
+starts where this stopped rather than where it started.

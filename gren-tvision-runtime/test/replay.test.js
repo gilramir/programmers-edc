@@ -164,8 +164,38 @@ test('a program that goes quiet is a divergence, and says what was wanted', asyn
 });
 
 test('a program with more to say than the tape has says so', async () => {
+  // Two renders where the tape has one, with something still expected after
+  // it -- which is what makes this an extra rather than the recorder having
+  // stopped writing.
   const a = render(1);
-  const t = tape([expected(10, a), { t: 20, end: 'exit' }]);
+  const t = tape([
+    expected(10, a),
+    { t: 11, out: 'atInstant', port: 'intl' },
+    { t: 20, in: { type: 'command', cmd: 'x' } },
+    expected(30, render(2)),
+    { t: 40, end: 'exit' },
+  ]);
+  const result = await replay(
+    program({
+      onInit: (emit) => {
+        emit(a);
+        emit(render(99)); // one the tape does not have
+        emit({ type: 'atInstant' }, 'intlOut');
+      },
+      onMessage: (m, emit) => emit(render(2)),
+    }),
+    session(t)
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.extra.length, 1);
+  assert.equal(result.extra[0].port, 'tui');
+});
+
+test('but what it says after the tape stops is the recorder stopping', async () => {
+  // The `end` line is written as the process leaves. Whatever the program said
+  // on its way out was never written down, and holding a replay to it would be
+  // holding it to the recorder's timing rather than the program's.
+  const a = render(1);
   const result = await replay(
     program({
       onInit: (emit) => {
@@ -173,10 +203,39 @@ test('a program with more to say than the tape has says so', async () => {
         emit(render(2));
       },
     }),
+    session(tape([expected(10, a), { t: 20, end: 'exit' }]))
+  );
+  assert.equal(result.ok, true, JSON.stringify(result.divergence || result.extra));
+  assert.match(result.warnings.join('\n'), /after the tape's last line/);
+});
+
+test('two ports may swap places between an input and the next', async () => {
+  // Init's own chain and the terminal's messages interleave differently on
+  // two runs of the same session -- `predc time` records both orders. Within
+  // one port the order is the program's and is asserted; across two it is the
+  // recording machine's disk and is not.
+  const a = render(1);
+  const b = render(2);
+  const t = tape([
+    expected(10, a),
+    { t: 20, in: { type: 'resized', cols: 100, rows: 28 } },
+    expected(30, b),
+    { t: 31, out: 'atInstant', port: 'intl' },
+    { t: 40, end: 'exit' },
+  ]);
+  const result = await replay(
+    program({
+      onInit: (emit) => emit(a),
+      onMessage: (m, emit) => {
+        // The other way round from the tape.
+        emit({ type: 'atInstant' }, 'intlOut');
+        emit(b);
+      },
+    }),
     session(t)
   );
-  assert.equal(result.ok, false);
-  assert.equal(result.extra.length, 1);
+  assert.equal(result.ok, true, JSON.stringify(result.divergence));
+  assert.equal(result.matched, 3);
 });
 
 test('the clock is the tape\'s, and it moves with the messages', async () => {

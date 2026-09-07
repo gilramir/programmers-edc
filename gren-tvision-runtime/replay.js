@@ -98,8 +98,28 @@ function install(session, options) {
   let virtualNow = startMs;
 
   // --- the clock ---------------------------------------------------------
+  //
+  // The readings the program took, in the order it took them, and the virtual
+  // clock underneath for when it takes one the recording did not -- which is
+  // either an older tape or a program that has started asking a new question,
+  // and both want an answer rather than a crash.
+  // Kept with the line each was written on, and handed out by *position on the
+  // tape* rather than by call number. A queue served purely in order is a
+  // queue one missed reading knocks out of step for the rest of the run --
+  // and a tick that fired a moment differently is exactly that missed
+  // reading. Anything recorded before where the replay has got to is dropped
+  // rather than handed over late.
+  const readings = (session.events || [])
+    .filter((e) => e.now !== undefined)
+    .map((e) => ({ at: e.at, value: e.now }));
+  let readAt = 0;
+  const position = options.position || (() => 0);
   const realNow = Date.now;
-  Date.now = () => virtualNow;
+  Date.now = () => {
+    const here = position();
+    while (readAt < readings.length && readings[readAt].at < here) readAt += 1;
+    return readAt < readings.length ? readings[readAt++].value : virtualNow;
+  };
   undo.push(() => {
     Date.now = realNow;
   });
@@ -342,34 +362,65 @@ function install(session, options) {
     notes,
     startMs,
     draws,
+    get clockReadings() {
+      return readings.length;
+    },
+    get clockServed() {
+      return readAt;
+    },
     get withheldServed() {
       return withheldServed;
     },
     /**
-     * Move the clock to `t`, firing whatever fell due on the way.
+     * Move the clock to `t` without firing anything.
      *
-     * Synchronous, because it is called from inside the driver's pump, which
-     * is called from inside a port subscription. A tick's render comes back
+     * Used before each message goes in, so that a `Time.now` inside the update
+     * answers with what it answered then.
+     */
+    clockAt(t) {
+      virtualNow = startMs + t;
+    },
+
+    /**
+     * Fire one due timer, as of `t`.
+     *
+     * **The tape says when a tick happened, and that is better than working it
+     * out.** A `Time.every 1000` does not fire on the thousand: the recording
+     * has its ticks at 1017, 2017, 3018, and a replay that fired its own at
+     * 1000, 2000, 3000 draws a clock one second out the moment the offset
+     * crosses a boundary -- and, worse, fires ticks in places the recording
+     * has none, because a timer due at 42032 is due whether or not the program
+     * was awake for it.
+     *
+     * So a tick is fired only where the tape has a render with no message
+     * under it, and the clock is set to *that render's* stamp before it goes.
+     * The interval arithmetic decides which timer, and the tape decides when.
+     *
+     * Synchronous, because it is called from the driver's pump, which is
+     * called from inside a port subscription: a tick's render comes back
      * through the same subscription and is matched like any other.
      */
-    advanceTo(t) {
-      const target = startMs + t;
-      for (let guard = 0; guard < 100000; guard += 1) {
-        let soonest = null;
-        for (const [, timer] of timers) {
-          if (timer.due <= target && (!soonest || timer.due < soonest.due)) soonest = timer;
-        }
-        if (!soonest) break;
-        virtualNow = soonest.due;
-        soonest.due += soonest.ms;
-        try {
-          soonest.fn(...(soonest.args || []));
-        } catch {
-          /* a tick that throws is the program's business, and the divergence
-             that follows is what says so */
-        }
+    tickAt(t) {
+      virtualNow = startMs + t;
+      let soonest = null;
+      for (const [, timer] of timers) {
+        if (!soonest || timer.due < soonest.due) soonest = timer;
       }
-      virtualNow = target;
+      if (!soonest) return false;
+      // Fired whether or not the arithmetic says it is due, because the tape
+      // says it is: the caller only asks when the program has gone quiet with
+      // an unexplained render still expected, and a recording's ticks are 1016
+      // and 2015 apart rather than 1000 and 2000. Holding a timer to its own
+      // sums against a stamp somebody else wrote is how a replay stalls one
+      // millisecond short of a tick.
+      soonest.due = virtualNow + soonest.ms;
+      try {
+        soonest.fn(...(soonest.args || []));
+      } catch {
+        /* a tick that throws is the program's business, and the divergence
+           that follows is what says so */
+      }
+      return true;
     },
     undo() {
       while (undo.length) undo.pop()();
@@ -455,7 +506,10 @@ async function replay(grenModule, session, options = {}) {
     );
   }
 
-  const stage = install(session, options);
+  // Where on the tape the replay has got to, which the clock needs: see
+  // `install`.
+  let atLine = 0;
+  const stage = install(session, { ...options, position: () => atLine });
   warnings.push(...stage.notes);
   const withheldDraws = stage.draws.filter((d) => d.value === undefined).length;
   if (withheldDraws) {
@@ -500,7 +554,8 @@ async function replay(grenModule, session, options = {}) {
         if (step.kind !== 'send') return;
         cursor += 1;
         lastSent = step;
-        stage.advanceTo(step.t);
+        atLine = step.at;
+        stage.clockAt(step.t);
         const name = inboundPort(step.port);
         if (!app.ports[name]) {
           stop(`the program has no ${name} port to send this to`, step);
@@ -512,25 +567,68 @@ async function replay(grenModule, session, options = {}) {
       done = true;
     };
 
+    /**
+     * How far ahead an outbound message may be matched: to the next message
+     * going *in*, and no further.
+     *
+     * An inbound message is a barrier -- nothing recorded after it can have
+     * been produced before it was sent -- and between two of them the order of
+     * two *different* ports is not the program's. `predc time` shows both
+     * orderings on two tapes of the same session: init's request to node for
+     * the time zones lands either side of the render the terminal's first
+     * resize produced, depending on which of two chains the recording machine
+     * finished first. Asserting on that is asserting on somebody's disk.
+     *
+     * Within one port the order is asserted, and it is the whole check.
+     */
+    const barrier = (from) => {
+      let i = from;
+      while (i < steps.length && steps[i].kind === 'expect') i += 1;
+      return i;
+    };
+
     const observe = (label) => (message) => {
       const actual = fingerprint(message);
       if (options.trace) options.trace('->', label || 'tui', actual);
       if (divergence) return;
-      const want = steps[cursor];
-      if (!want || want.kind !== 'expect') {
-        extra.push({ ...actual, port: label || 'tui' });
+      const port = label || 'tui';
+      const end = barrier(cursor);
+      // By type first, and only then by position. Between two inputs a model
+      // may emit a render and a `focus` in either order -- they are one
+      // `Cmd.batch` on one port, and which of them the recorder saw first is
+      // not something a tape can hold anybody to. What it *can* hold them to
+      // is that both happened, that there were exactly this many of each, and
+      // that the renders were these renders.
+      let found = -1;
+      let fallback = -1;
+      for (let i = cursor; i < end; i += 1) {
+        if (steps[i].done || (steps[i].port || 'tui') !== port) continue;
+        if (steps[i].expected.out === actual.out) {
+          found = i;
+          break;
+        }
+        if (fallback < 0) fallback = i;
+      }
+      if (found < 0) found = fallback;
+      if (found < 0) {
+        // Nothing on this port was expected here. After the tape's last step
+        // that is ordinary -- the recorder's `end` line is written as the
+        // process leaves, and whatever the program said on the way out was
+        // never written down.
+        extra.push({ ...actual, port, afterEnd: cursor >= steps.length });
         return;
       }
-      const wanted = (want.port || 'tui') === (label || 'tui');
-      const why = !wanted
-        ? `the tape has this on ${want.port || 'tui'} and the program said it on ${label || 'tui'}`
-        : difference(want.expected, actual);
+      const why = difference(steps[found].expected, actual);
       if (why) {
-        stop(why, want, actual);
+        stop(why, steps[found], actual);
         return;
       }
-      cursor += 1;
+      steps[found].done = true;
+      atLine = steps[found].at;
       matched += 1;
+      while (cursor < steps.length && steps[cursor].kind === 'expect' && steps[cursor].done) {
+        cursor += 1;
+      }
       pump();
     };
 
@@ -547,6 +645,7 @@ async function replay(grenModule, session, options = {}) {
     pump();
     const started = process.hrtime.bigint();
     let was = cursor;
+    let idle = 0;
     while (!done) {
       if (Number(process.hrtime.bigint() - started) / 1e6 > timeoutMs) {
         const want = steps[cursor];
@@ -561,27 +660,45 @@ async function replay(grenModule, session, options = {}) {
       await turn();
       if (cursor !== was) {
         was = cursor;
+        idle = 0;
         continue;
       }
-      // Nothing arrived, and the tape says something should have. If it is a
-      // render with no message under it, it is a `Time.every` tick, and the
-      // clock has to be moved to it -- a replay that waited for the wall would
-      // take as long as the recording did, which for a tool with a clock in it
-      // is the difference between a test and an afternoon.
+      // Two quiet turns, not one: a program waiting on a file read is quiet
+      // too, and firing a tick into that would put a render where the tape has
+      // none.
+      idle += 1;
+      if (idle < 2) continue;
+      idle = 0;
+      // Nothing arrived, and the tape says something should have. A render
+      // with no message under it is a `Time.every` tick, so one is fired, at
+      // the moment the tape stamped it. A replay that waited for the wall
+      // instead would take as long as the recording did, which for a tool with
+      // a clock in it is the difference between a test and an afternoon.
       const want = steps[cursor];
-      if (want && want.kind === 'expect') stage.advanceTo(want.t);
+      if (want && want.kind === 'expect') {
+        atLine = want.at;
+        stage.tickAt(want.t);
+      }
     }
     // A last turn or two, so that anything the program was about to say is
     // said before the extras are counted.
     await turn();
     await turn();
 
+    const unexpected = extra.filter((e) => !e.afterEnd);
+    if (extra.length > unexpected.length) {
+      warnings.push(
+        `${extra.length - unexpected.length} message(s) came after the tape's last line, ` +
+          'which is where a recorder stops rather than where a program does'
+      );
+    }
+
     return {
-      ok: !divergence && !extra.length && cursor >= steps.length,
+      ok: !divergence && !unexpected.length && cursor >= steps.length,
       matched,
       total: steps.filter((s) => s.kind === 'expect').length,
       divergence,
-      extra,
+      extra: unexpected,
       warnings,
       withheldServed: stage.withheldServed,
     };

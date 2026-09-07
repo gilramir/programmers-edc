@@ -10,7 +10,12 @@
 // scroll position to lose.
 
 const { createDiffer } = require('./diff');
-const { createRecorder, installCrashHandlers, recordRandomness } = require('./record');
+const {
+  createRecorder,
+  installCrashHandlers,
+  recordClock,
+  recordRandomness,
+} = require('./record');
 
 // Bumped in lockstep with Tui.protocolVersion on the Gren side. A Gren package
 // and an npm package version independently, and they will skew; refusing an
@@ -21,7 +26,12 @@ const PROTOCOL = 22;
  * Drive a compiled Gren program's UI.
  *
  * @param grenModule  the module `gren make Main --output=main.js` produced
- * @param options     {flags, moduleName, outPort, inPort, tv, record, crashLog}
+ * @param options     {flags, moduleName, modulePath, outPort, inPort, tv, record,
+ *                    recording, crashLog}. `recording` is what the launcher
+ *                    knows and the runtime does not -- its name and version,
+ *                    and the files it read -- and it goes on a tape however
+ *                    the recording was asked for. `modulePath` is where `grenModule` was loaded
+ *                    from: it goes on a tape so a replay knows what to run.
  */
 function run(grenModule, options = {}) {
   const tv = options.tv || require('tvision-node');
@@ -40,13 +50,35 @@ function run(grenModule, options = {}) {
   //
   // `record` is a path or {path, verbatim, program, extra}; TUI_RECORD is the
   // same thing for a program whose launcher has no flag for it, which is every
-  // example.
-  const asked = options.record || process.env.TUI_RECORD;
+  // example. TUI_RECORD_VERBATIM is that with the withholding off, which a
+  // *test* wants and a user never does: the documents on a suite's tape are
+  // the suite's own strings, and a tape that withheld them is a tape that
+  // cannot be replayed -- a `clipboardText` reduced to its length and its hash
+  // is a message the program cannot act on twice.
+  const asked =
+    options.record ||
+    (process.env.TUI_RECORD_VERBATIM
+      ? // Quiet as well: the notice on the way out is for a person who asked
+        // for a recording, and a suite that set the variable itself is not one
+        // -- it lands in the middle of whatever the driver was reading.
+        { path: process.env.TUI_RECORD_VERBATIM, verbatim: true, quiet: true }
+      : process.env.TUI_RECORD);
   const recorder = asked
     ? createRecorder({
+        // The launcher's own knowledge first, so that it survives however the
+        // recording was *asked for*. It used to live inside `options.record`,
+        // which meant predc named itself and put its config file on the tape
+        // when somebody typed `--record` and did neither when the environment
+        // variable was what turned recording on -- so the tapes a test suite
+        // records were the ones missing the file the program reads its theme
+        // out of, and every one of them replayed into a differently coloured
+        // program. Metadata does not belong to the switch that started the
+        // recorder.
+        ...(options.recording || {}),
         ...(typeof asked === 'string' ? { path: asked } : asked),
         protocol: PROTOCOL,
         flags: options.flags || {},
+        modulePath: options.modulePath,
       })
     : null;
   // Unconditional: the whole difficulty with a crash is that it lands on the
@@ -54,14 +86,18 @@ function run(grenModule, options = {}) {
   installCrashHandlers({
     recorder,
     crashLog: options.crashLog,
-    program: options.record && options.record.program,
+    program: (options.recording && options.recording.program) ||
+      (options.record && options.record.program),
   });
   // Before the program is started, and only when there is a tape to write it
   // on: `Crypto` never crosses a port, so a draw is invisible to everything
   // else here and a replay without it regenerates different numbers. After the
   // crash handlers rather than before, because everything from here on is
   // allowed to be reported and nothing is allowed to be fatal.
-  if (recorder) recordRandomness(recorder);
+  if (recorder) {
+    recordRandomness(recorder);
+    recordClock(recorder);
+  }
   if (recorder) process.on('exit', () => recorder.farewell());
 
   let started = false;

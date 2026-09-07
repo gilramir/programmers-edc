@@ -171,7 +171,12 @@ def entry(app, label, settle=1.0):
 
 
 def main():
-    check = Checks()
+    check = Checks(
+        replays=(
+            "the notes are files, read and written through Tasks, and a tape "
+            "records neither -- deliberately, since they are the user's"
+        )
+    )
 
     # ---- the ordinary window, on a directory that already has notes -------
     home = plant({"Alpha.md": "first note\n", "Beta.md": "second note\n"})

@@ -84,7 +84,13 @@ def counters(app):
 
 
 def main():
-    check = Checks()
+    check = Checks(
+        replays=(
+            "the commands it spawns and the directory it watches are Tasks "
+            "rather than messages: a child process's output crosses no port, "
+            "so it is on no tape"
+        )
+    )
     watched = tempfile.mkdtemp(prefix="tvwatch-")
     try:
         with open(os.path.join(watched, "seed.txt"), "w") as f:

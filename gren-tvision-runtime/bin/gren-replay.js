@@ -26,11 +26,13 @@ args.forEach((a, i) => {
 });
 const files = args.filter((a, i) => !a.startsWith('-') && !values.has(i));
 
-if (files.length !== 2 || flags.has('-h') || flags.has('--help')) {
+if (files.length < 1 || files.length > 2 || flags.has('-h') || flags.has('--help')) {
   process.stderr.write(
-    'usage: gren-replay FILE.tape MODULE.js [--session=N] [--json] [--quiet]\n' +
-      '  the module is what `gren make Main --output=main.js` produced,\n' +
-      '  not the launcher that runs it.\n' +
+    'usage: gren-replay FILE.tape [MODULE.js] [--session=N] [--json] [--quiet]\n' +
+      '  the module is what `gren make Main --output=main.js` produced, not\n' +
+      '  the launcher that runs it. A tape written by a launcher that said\n' +
+      '  which module it loaded carries the path, and the argument is then\n' +
+      '  only for replaying a tape against a different build.\n' +
       '  --env NAME=VALUE   plant a variable the tape kept only the name of\n' +
       '                     (repeatable)\n' +
       '  --in-place         let the program write where it wrote when it was\n' +
@@ -68,11 +70,20 @@ if (!sessions.length) {
 }
 const session = sessions[which] || sessions[0];
 
+const module_ = moduleFile || (session.header.program && session.header.program.module);
+if (!module_) {
+  process.stderr.write(
+    'gren-replay: this tape does not say which module it was, so name one:\n' +
+      `  gren-replay ${tapeFile} path/to/main.js\n`
+  );
+  process.exit(2);
+}
+
 let grenModule;
 try {
-  grenModule = require(path.resolve(process.cwd(), moduleFile));
+  grenModule = require(path.resolve(process.cwd(), module_));
 } catch (err) {
-  process.stderr.write(`gren-replay: cannot load ${moduleFile}: ${err.message}\n`);
+  process.stderr.write(`gren-replay: cannot load ${module_}: ${err.message}\n`);
   process.exit(2);
 }
 

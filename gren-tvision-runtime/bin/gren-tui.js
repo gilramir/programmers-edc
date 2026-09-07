@@ -30,4 +30,5 @@ if (!target) {
   process.exit(2);
 }
 
-run(require(path.resolve(process.cwd(), target)), { record: record || undefined });
+const compiled = path.resolve(process.cwd(), target);
+run(require(compiled), { record: record || undefined, modulePath: compiled });

@@ -96,9 +96,14 @@ try {
 }
 
 const app = run(main, {
-  record: record
-    ? { ...record, program: { name: 'predc', version }, extra: { config: configFile() } }
-    : undefined,
+  modulePath: compiled,
+  record: record || undefined,
+  // Not inside `record`: this is true of a recording however one was asked
+  // for, and putting it there meant a tape started by `TUI_RECORD` -- which is
+  // how the test suite records every session it runs -- had neither predc's
+  // name nor the config file it reads its theme, its week rule and its chart
+  // mode out of. See `tui.js`.
+  recording: { program: { name: 'predc', version }, extra: { config: configFile() } },
   crashLog: crashLog(),
 });
 

@@ -47,8 +47,13 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
+// The clock as it was before anything here touched it. Every stamp this file
+// writes goes through it, so that a recorder which is *watching* `Date.now`
+// does not record its own looking.
+const realNow = Date.now;
+
 /** Bumped when a reader would get the wrong answer from an older tape. */
-const TAPE = 3;
+const TAPE = 5;
 
 /** Stop before filling somebody's disk. The header says when this happened. */
 const MAX_BYTES = 16 * 1024 * 1024;
@@ -196,7 +201,7 @@ function createRecorder(opts = {}) {
   // 'a', not 'w': two runs recording to the same name is a mistake worth
   // surviving, and the header line tells the reader where the second one began.
   const fd = fs.openSync(file, 'a');
-  const began = Date.now();
+  const began = realNow();
   let written = 0;
   let truncated = false;
   let farewelled = false;
@@ -209,11 +214,11 @@ function createRecorder(opts = {}) {
     } catch (err) {
       // A message that will not serialise is itself worth knowing about, and
       // must not be the thing that takes the program down.
-      line = JSON.stringify({ t: Date.now() - began, unserialisable: String(err) }) + '\n';
+      line = JSON.stringify({ t: realNow() - began, unserialisable: String(err) }) + '\n';
     }
     if (written + line.length > maxBytes) {
       truncated = true;
-      line = JSON.stringify({ t: Date.now() - began, truncated: maxBytes }) + '\n';
+      line = JSON.stringify({ t: realNow() - began, truncated: maxBytes }) + '\n';
     }
     written += line.length;
     try {
@@ -238,6 +243,13 @@ function createRecorder(opts = {}) {
       // an input, and an input a replay has to guess at is an input that makes
       // a divergence unreadable.
       flags: opts.flags === undefined ? {} : opts.flags,
+      // Which compiled module this was. `argv` names the *launcher*, and a
+      // launcher is not the thing a replay runs: `gren-tui main.js` and
+      // `predc` resolve their module differently and neither rule is
+      // recoverable from the arguments. With this a tape says what to replay
+      // it against, which is the difference between `gren-replay bug.tape` and
+      // a person guessing at a path.
+      ...(opts.modulePath ? { module: opts.modulePath } : {}),
     },
     protocol: opts.protocol,
     runtime: {
@@ -297,7 +309,7 @@ function createRecorder(opts = {}) {
 
     /** A message on its way *into* the Gren program: the tape's whole point. */
     inbound(message, port = 'tui') {
-      put({ t: Date.now() - began, in: verbatim ? message : redact(message), ...(port === 'tui' ? {} : { port }) });
+      put({ t: realNow() - began, in: verbatim ? message : redact(message), ...(port === 'tui' ? {} : { port }) });
     },
 
     /**
@@ -311,7 +323,7 @@ function createRecorder(opts = {}) {
      */
     outbound(message, port = 'tui') {
       put({
-        t: Date.now() - began,
+        t: realNow() - began,
         ...fingerprint(message),
         ...(port === 'tui' ? {} : { port }),
       });
@@ -339,21 +351,41 @@ function createRecorder(opts = {}) {
       const buffer = Buffer.from(bytes || []);
       const encoded = buffer.toString('base64');
       put({
-        t: Date.now() - began,
+        t: realNow() - began,
         rng: kind,
         n: buffer.length,
         ...(verbatim ? { value: encoded } : { sha: digest(encoded) }),
       });
     },
 
+    /**
+     * A reading of the clock, as the program saw it.
+     *
+     * The one thing on a tape that was argued out of it and back in. The
+     * argument for reconstructing it -- every line is stamped, so a replay can
+     * work out what `Time.now` should answer -- holds right up until a program
+     * *seeds* something with a millisecond: `examples/puzzle` shuffles its
+     * board from `Time.now`, and a board is not nearly the same when the seed
+     * is nearly the same. Nothing on the tape said which millisecond it was.
+     *
+     * The argument against recording it was that `Date.now` cannot be
+     * intercepted for one caller. Measured rather than assumed, a running
+     * gren-tvision program has exactly two: the Gren kernel, and this file's
+     * own stamps -- which is why `realNow` exists a few lines up. tvision-node
+     * does not call it and neither does node.
+     */
+    clock(value) {
+      put({ t: realNow() - began, now: value });
+    },
+
     /** Anything the launcher knows that the protocol does not. */
     note(kind, data) {
-      put({ t: Date.now() - began, note: kind, ...(data === undefined ? {} : { data }) });
+      put({ t: realNow() - began, note: kind, ...(data === undefined ? {} : { data }) });
     },
 
     /** The last line a tape gets when something went wrong. */
     crash(where, err) {
-      put({ t: Date.now() - began, crash: where, error: describe(err) });
+      put({ t: realNow() - began, crash: where, error: describe(err) });
       try {
         fs.fsyncSync(fd);
       } catch {
@@ -362,7 +394,7 @@ function createRecorder(opts = {}) {
     },
 
     close(reason) {
-      put({ t: Date.now() - began, end: reason || 'exit' });
+      put({ t: realNow() - began, end: reason || 'exit' });
       try {
         fs.closeSync(fd);
       } catch {
@@ -380,7 +412,7 @@ function createRecorder(opts = {}) {
     notice,
 
     farewell() {
-      if (farewelled) return;
+      if (farewelled || opts.quiet) return;
       farewelled = true;
       try {
         fs.writeSync(2, notice);
@@ -408,6 +440,31 @@ function createRecorder(opts = {}) {
  * randomness to make it reproducible would be the wrong trade in any program
  * and an absurd one in a program whose randomness is the feature.
  */
+let clockRecorder = null;
+let clockPatched = false;
+
+/**
+ * Record every reading of the clock the program takes.
+ *
+ * The same shape as `recordRandomness`: aimed by a variable, patched once, and
+ * a pass-through -- the program gets the real answer and the tape gets a copy.
+ * Passing null aims it at nothing.
+ */
+function recordClock(recorder) {
+  clockRecorder = recorder || null;
+  if (clockPatched || !recorder) return;
+  clockPatched = true;
+  Date.now = function () {
+    const value = realNow();
+    try {
+      if (clockRecorder) clockRecorder.clock(value);
+    } catch {
+      /* a tape that cannot describe a reading must not stop the reading */
+    }
+    return value;
+  };
+}
+
 let randomnessRecorder = null;
 let randomnessPatched = false;
 
@@ -559,6 +616,7 @@ module.exports = {
   SAFE_ENV,
   createRecorder,
   fingerprint,
+  recordClock,
   recordRandomness,
   takeRecordFlags,
   installCrashHandlers,
