@@ -523,6 +523,11 @@ private:
 // tv.dialog() uses -- see openLocalModal.
 class JsHistoryViewer : public THistoryViewer {
 public:
+    // A single click chooses. THistoryViewer wants a double click or Enter,
+    // which is the convention for a list somebody might be browsing; a
+    // drop-down is not being browsed. See the definition.
+    virtual void handleEvent(TEvent &event) override;
+
     JsHistoryViewer(const TRect &bounds, TScrollBar *hScroll,
                     TScrollBar *vScroll,
                     const std::vector<std::string> &theItems) noexcept;

@@ -256,6 +256,38 @@ JsHistoryViewer::JsHistoryViewer(const TRect &bounds, TScrollBar *hScroll,
     hScrollBar->setRange(0, widest - size.x + 3);
 }
 
+// A single click on a row chooses it.
+//
+// `THistoryViewer::handleEvent` wants a double click or `Enter`, which is the
+// convention for a list somebody might be *browsing* -- a file list, where the
+// click that moves the highlight and the one that opens a file have to be
+// different gestures. A drop-down is not being browsed. It was opened to
+// answer one question, it is closed either way by the next click, and the
+// click that lands on the answer is the answer: nobody opens a list of twelve
+// month names to look at it.
+//
+// `THistoryViewer::handleEvent` still runs first, so the highlight moves, the
+// drag-to-scroll gesture still works, and a double click is still handled as
+// one -- ending the modal twice is harmless, since `TGroup::endModal` writes
+// `endState` and the second write is the same value. What the guard is really
+// for is a click the list did *not* take: an unhandled event is still sitting
+// in `event.what`, and a click on nothing should not choose anything.
+//
+// `meTripleClick` is in the test with `meDoubleClick` because a third click
+// arrives with both flags set (`tevent.cpp:157`), and a triple click is two
+// people disagreeing about how many clicks this needs -- which is exactly the
+// person this change is for.
+void JsHistoryViewer::handleEvent(TEvent &event)
+{
+    Boolean single = event.what == evMouseDown &&
+                     (event.mouse.eventFlags & (meDoubleClick | meTripleClick)) == 0;
+
+    THistoryViewer::handleEvent(event);
+
+    if (single && event.what == evNothing)
+        endModal(cmOK);
+}
+
 void JsHistoryViewer::getText(char *dest, short item, short maxLen)
 {
     if (item < 0 || (size_t) item >= items.size())
@@ -308,64 +340,54 @@ void JsHistory::handleEvent(TEvent &event)
 
 void JsHistory::openDropDown()
 {
-    if (owner == nullptr || link == nullptr || TProgram::deskTop == nullptr)
+    if (owner == nullptr || link == nullptr)
         return;
 
-    // Borland's rectangle is a column wider than the field on either side and
-    // then two constants, both of which are wrong for a list the model owns.
+    // Borland's rectangle (thistory.cpp:89-98) with one constant replaced.
     //
-    // `r.b.y += 7` (thistory.cpp:93) is a *fixed* seven rows, so the drop-down
-    // shows six items whether the list holds three or thirty and whatever the
-    // terminal is. That number made sense for what THistory was for -- a
-    // recent-values buffer, capped at whatever fits a global block -- and it
-    // makes none for a list a program hands over: predc's calendar offers the
-    // twelve months and could show half of them.
+    // `r.b.y += 7` is a *fixed* seven rows, so the drop-down shows six items
+    // whether the list holds three or thirty. That made sense for what
+    // THistory was for -- a recent-values buffer capped at whatever fits a
+    // global block -- and makes none for a list a program hands over. It is
+    // sized from `items` now, so a two-entry list is a four-row window and a
+    // twelve-entry one asks for fourteen.
     //
-    // `r.intersect(owner->getExtent())` is the other one, and it is the reason
-    // sizing to the list is not enough on its own. `owner` is the *dialog*, so
-    // Borland's drop-down cannot leave the box it belongs to -- which means a
-    // program wanting to show twelve of anything would have to make its dialog
-    // fourteen rows taller than its contents and leave the difference blank,
-    // to give a transient window somewhere to be. That is the tail wagging the
-    // dog, and it is not what a drop-down does anywhere else: it opens over
-    // whatever is behind it.
+    // **Asks for.** The clip is Borland's and stays Borland's: `owner` is the
+    // dialog, so the drop-down cannot leave the box it belongs to, and a list
+    // longer than the room below its field is cut off rather than spilling
+    // over the desktop.
     //
-    // So: as many rows as there are items, clipped to the desktop, and opened
-    // on the desktop. Which is what the context menu already does a few
-    // hundred lines away -- `openLocalModal(TProgram::deskTop, popup, ...)` in
-    // app.cc with a rectangle out to the desktop's own extent -- so this is
-    // the binding agreeing with itself rather than a new idea.
+    // That was tried, and it is why this comment is long. Opening the window
+    // on `TProgram::deskTop` -- or on the application -- does give a
+    // fourteen-row drop-down over an eleven-row dialog, and it draws *wrong*:
+    // the list comes out in `TListViewer`'s unfocused colours with no
+    // highlight on the selected row, and choosing an entry takes two clicks
+    // because `TView` spends the first one selecting a view that is not
+    // focused. The states are right at the moment `beginModal` returns --
+    // `sfSelected | sfActive | sfFocused`, checked -- and wrong by the time it
+    // draws, because `beginModal` clears `ofSelectable` the way `execView`
+    // does, and `execView` gets away with it by *blocking* in `p->execute()`
+    // where nothing else can run. Here the pump keeps going, so any
+    // `TGroup::resetCurrent` on the host picks the first selectable view and
+    // the drop-down is not one. A dialog is short-lived and has nothing
+    // inserted into it, so nothing calls `resetCurrent` there; the desktop and
+    // the application are long-lived and things do.
+    //
+    // Fixing that means giving the local-modal stack a way to hold a
+    // selection it has deliberately made unselectable, which is a change to
+    // how every modal in this binding works and not a drop-down's business.
+    // Until then a drop-down lives in the dialog it drops out of, which is
+    // also where Turbo Vision puts it.
     TRect r = link->getBounds();
     r.a.x--;
     r.b.x++;
     r.a.y--;
     r.b.y += (int) items.size() + 1;
-
-    // Into the desktop's coordinates, since that is what it opens in now.
-    TRect desk(TProgram::deskTop->makeLocal(owner->makeGlobal(r.a)),
-               TProgram::deskTop->makeLocal(owner->makeGlobal(r.b)));
-    TRect room = TProgram::deskTop->getExtent();
-
-    // Above the field instead, when it does not fit below and does fit above.
-    // The rule every drop-down has, and worth having here rather than only
-    // clipping: a field near the foot of the desktop is exactly where a list
-    // clipped to two rows is least usable, and the room is right there.
-    if (desk.b.y > room.b.y)
-        {
-        int wanted = desk.b.y - desk.a.y;
-        int below = room.b.y - desk.a.y;
-        // The field's own top edge, which is one row below where `r` starts.
-        int fieldTop = desk.a.y + 1;
-        if (fieldTop - room.a.y > below)
-            desk = TRect(desk.a.x, std::max((int) room.a.y, fieldTop - wanted),
-                         desk.b.x, fieldTop);
-        }
-
-    desk.intersect(room);
-    desk.b.y--;
+    r.intersect(owner->getExtent());
+    r.b.y--;
 
     g_pendingHistoryItems = &items;
-    JsHistoryWindow *window = new JsHistoryWindow(desk);
+    JsHistoryWindow *window = new JsHistoryWindow(r);
     g_pendingHistoryItems = nullptr;
 
     // Captured by id rather than by `this`. The model keeps running behind a
@@ -374,7 +396,7 @@ void JsHistory::openDropDown()
     // would be a dangling pointer by the time the list answered. ~JsWindow
     // clears the registry, so a lookup that finds nothing is the whole check.
     std::string id = viewId;
-    openLocalModal(TProgram::deskTop, window, [id](TView *view, ushort result) {
+    openLocalModal(owner, window, [id](TView *view, ushort result) {
         ViewRef *ref = g_views.find(id);
         if (ref != nullptr && ref->kind == "history")
             ((JsHistory *) ref->view)

@@ -8148,15 +8148,75 @@ difference blank, to give a transient window somewhere to be -- the tail wagging
 the dog, and not what a drop-down does anywhere else. It opens over whatever is
 behind it.
 
-So: as many rows as there are items, clipped to the desktop, opened on the
-desktop, and flipped above the field when it does not fit below and does fit
-above. Which is what the *context menu* has always done, a few hundred lines
-away in `app.cc` -- `openLocalModal(TProgram::deskTop, popup, ...)` with a
-rectangle out to the desktop's own extent -- so this is the binding agreeing
-with itself rather than a new idea.
+So: as many rows as there are items. **And then the clip stayed Borland's**,
+which is not where this ended up first -- see the section below.
 
-predc changed not at all for this. Its dialog is the same eleven rows, with
-nothing blank in it, and the drop-down now spills past the frame.
+### The drop-down was opened on the desktop for an afternoon, and it was wrong
+
+Sizing it from the list is not enough on its own, because of the second
+constant. So the first version of this opened the window on `TProgram::deskTop`
+-- and then on `TProgram::application` -- with the rectangle in that group's
+coordinates, so a fourteen-row drop-down could hang over an eleven-row dialog.
+All twelve months appeared. It shipped, and the first person to look at it said
+the list was grey on grey and that choosing a month took two clicks.
+
+Both were true and both were the same bug, and the measurement is the useful
+part:
+
+| | items | selected row | one click |
+|---|---|---|---|
+| in the dialog | `fg 97 bg 44` | `fg 97 bg 42` | — |
+| on the desktop | `fg 36 bg 44` | *no highlight* | does nothing |
+
+The **background did not change**. That is what says it is not a palette
+problem: `TListViewer::draw` picks `getColor(1)` and a highlight when
+`(state & (sfSelected | sfActive)) == (sfSelected | sfActive)` and `getColor(2)`
+with none otherwise, and `TView` spends the first click on a view that is not
+focused *selecting* it. One missing state bit, two symptoms.
+
+The states are right at the moment `beginModal` returns -- logged, to be sure:
+`sfSelected | sfActive | sfFocused` on the viewer -- and wrong by the time it
+draws. `beginModal` clears `ofSelectable` because `TGroup::execView` does, and
+`execView` gets away with that by **blocking** in `p->execute()` where nothing
+else can run. This binding's whole point is that it does not block: the pump
+keeps going, so any `TGroup::resetCurrent` on the host picks the first
+selectable view and the drop-down is deliberately not one. A dialog is
+short-lived and has nothing inserted into it, so nothing calls `resetCurrent`
+there. The desktop and the application are long-lived and things do.
+
+Fixing that means giving the local-modal stack a way to hold a selection it has
+deliberately made unselectable, which is a change to how every modal in this
+binding works and not a drop-down's business. So the clip went back to Borland's
+and predc gets seven months instead of six -- the number is the list's now
+rather than a constant, which is the part worth keeping.
+
+**Neither symptom had a check.** Every driver drove this drop-down with arrow
+keys and `Enter`, and asserted on the text; nothing asserted that the row you
+are on is painted, and nothing clicked a row. Both are the first thing a person
+does and neither was tested, which is why an afternoon's regression reached
+somebody's eyes. `drive_calendar.py` has both now.
+
+### And a single click chooses, which it never did
+
+The second half of that report was not a regression -- it was checked against
+the build from before any of this, and behaves identically. `THistoryViewer`
+wants a double click or `Enter`, which is the 1990 convention for a list
+somebody might be *browsing*: the click that moves the highlight and the one
+that acts have to be different gestures. A drop-down is not being browsed. It
+was opened to answer one question, the next click closes it either way, and the
+click that lands on the answer is the answer.
+
+`JsHistoryViewer::handleEvent` runs Borland's first -- so the highlight still
+moves, drag-to-scroll still works, a double click is still a double click --
+and then ends the modal with `cmOK` if the event was a plain click the list
+took. The guard is `event.what == evNothing`: an event the list did not take is
+still sitting there, and a click that landed on nothing should choose nothing.
+
+The first attempt at *reporting* this was wrong in a way worth keeping too. A
+probe said one click already worked before the change, because it checked
+whether "December" had gone from the screen -- and a six-item list starting at
+January never had a December in it. A check that passes by looking for something
+that was never there is the same failure as a suite that passes by not running.
 
 ### Two drivers counted six because six was all there had ever been
 
@@ -8168,6 +8228,14 @@ window is what broke them: the slice ran past the bottom border and picked up
 the horizontal scroll bar as a list row. Both find the closing frame now, which
 is what they should always have done and what nothing forced until the window
 stopped being one size.
+
+A third driver check went the same way and is worth naming because it failed
+about a screen it was not looking at. The new colour assertion found its rows
+with `next(r for r, line in ... if "January" in line)` -- and the calendar
+*behind* the dialog was showing **January 2021**, eight rows higher. It compared
+that heading against the list's February, found both in the window colour, and
+reported the highlight missing on a build where it was fine. It counts back one
+row from February now, which is unique on that screen.
 
 ### And the calendar was guessing the desktop
 

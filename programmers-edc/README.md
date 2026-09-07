@@ -313,8 +313,8 @@ another, counting as you go, with the heading to re-read after each. `g` asks
 for a month and a year instead, prefilled with what is on screen — so "same
 month, other year" is one edit.
 
-**The month field has a drop-down on it**: the `▼` opens all twelve names at
-once and picking one writes it into the field, so nobody has to remember whether
+**The month field has a drop-down on it**: the `▼` opens the month names and a
+single click picks one into the field, so nobody has to remember whether
 September is 9 or 10. Typing still works and a number is the short way — `9`,
 `sep` and `September` are the same month. It is a drop-down rather than a list
 beside the field because a dialog's views are built once and nothing patches an
@@ -323,15 +323,17 @@ open modal, so a list and a field could never have been kept in step; one that
 year it cannot draw are refused separately, since those are different mistakes
 and one message for both would send you to check the field that was fine.
 
-It showed six of the twelve until 2026-09-06, and the fix was in `tvision-node`
-rather than here. Borland sizes a history drop-down at a fixed seven rows below
-its field and clips it to the *dialog*, so it showed six items whatever the list
-held and whatever the terminal was — and no dialog could have fixed that without
-being fourteen rows taller than its contents, to give a transient window
-somewhere to live. It is sized from the list now and opens on the desktop, so it
-spills over whatever is behind it the way a drop-down does everywhere else, and
-falls back to as many as fit on a terminal without the room. This dialog did not
-change a line for it.
+It showed six of the twelve until 2026-09-06 and shows seven now, which is as
+many as this dialog has room for: Borland sizes a history drop-down at a fixed
+seven rows below its field, and `tvision-node` sizes it from the list instead.
+It is still clipped to the dialog it drops out of. Showing all twelve would mean
+a dialog fourteen rows taller than its contents with the difference left blank,
+which is the tail wagging the dog — see FINDINGS for the version of this that
+opened on the desktop instead, and what that cost.
+
+**A single click picks a month.** Turbo Vision wants a double click or `Enter`,
+which is right for a list somebody might be browsing and wrong for one opened to
+answer a single question. Both still work.
 
 Years run 1 to 9999. That is where the arithmetic was checked — Zeller's
 congruence and the ISO week formula against Python's `datetime`, five dates in

@@ -838,13 +838,18 @@ first for a week, because `Array.append fst second` makes `fst` the *postfix*.
     arrives as an ordinary [`Changed`](#Event) event *on the field*, because
     that is what happened.
 
-    **The list opens as tall as it is**, capped by the desktop, and above the
-    field when there is no room below it. Borland gives one a fixed seven rows
-    and clips it to the *dialog* (`thistory.cpp:93`), which shows six items
-    whatever the list holds and whatever the terminal is -- and leaves a
-    program that wants twelve visible no way to get them but to make its dialog
-    fourteen rows taller than its contents. So this one is sized from `items`
-    and opens on the desktop, and spills over whatever is behind it.
+    **The list opens as tall as it is**, up to the room the dialog leaves
+    below the field. Borland gives one a fixed seven rows (`thistory.cpp:93`),
+    which shows six items whatever the list holds; this one is sized from
+    `items`, so a short list is a short window and a long one gets as much of
+    the dialog as there is. It cannot leave the dialog -- that is Borland's
+    clip and it stays -- so a list longer than the room below its field is
+    scrolled rather than shown whole. **Leave room under a field whose
+    drop-down should be read at a glance.**
+
+    **A single click chooses.** Turbo Vision wants a double click or `Enter`,
+    which is the convention for a list somebody might be browsing; a drop-down
+    is not being browsed. Both still work.
 
     `items` is the model's array and nothing else writes to it. Turbo Vision
     remembers the field for you, in one buffer shared by the whole program;

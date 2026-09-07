@@ -264,42 +264,64 @@ def main():
     check("the month field has a drop-down on it", arrow is not None, app.render())
     app.click(arrow[0], arrow[1], settle=1.4)
     listed = app.render()
-    #     All twelve at once, which is the point and was six for a long time.
-    #     Borland sizes this window `field.b.y + 7` and clips it to the dialog
-    #     (`thistory.cpp:89-98`), so it showed six items whatever the list held
-    #     and whatever the terminal was -- and no dialog could fix that without
-    #     being fourteen rows taller than its contents to give a transient
-    #     window somewhere to live. `JsHistory::openDropDown` sizes it from the
-    #     list and opens it on the desktop instead, so it spills over whatever
-    #     is behind it the way a drop-down does everywhere else.
     months = ("January", "February", "March", "April", "May", "June", "July",
               "August", "September", "October", "November", "December")
-    check("the drop-down lists all twelve months at once",
-          all(m in listed for m in months),
-          [m for m in months if m not in listed])
-    #     And it is bigger than the dialog it belongs to, which is the half
-    #     that could not be done by making the dialog taller.
-    rows_of = lambda text: [r for r, line in enumerate(app.render().split("\n"))
-                            if text in line]
-    bottom = next(r for r, line in enumerate(app.render().split("\n"))
-                  if "\u2514" in line or "\u255a" in line)
-    check("and it reaches below the dialog that opened it",
-          rows_of("December")[0] > bottom,
-          f"December on row {rows_of('December')}, a frame closed on {bottom}")
+    check("the drop-down lists the months", all(m in listed for m in months[:3]),
+          listed)
+    #     As many rows as the list asks for, rather than Borland's fixed seven
+    #     (`thistory.cpp:93`), which showed six items whatever the list held
+    #     and whatever the terminal was. It is still clipped to the dialog it
+    #     drops out of, so twelve do not all fit in an eleven-row dialog --
+    #     but the number is the list's now and not a constant.
+    shown = [m for m in months if m in listed]
+    check("as many of them as the dialog has room for, not Borland's six",
+          len(shown) > 6, f"only {len(shown)}: {shown}")
+
+    #     Two things a person notices before a test does, and both were broken
+    #     for an afternoon by opening this window on the desktop instead of on
+    #     the dialog: `TListViewer` draws an unfocused list in its dim palette
+    #     entry with no highlight on the selected row, and `TView` spends the
+    #     first click on selecting a view that is not focused.
+    d = app.display()
+    lines = app.render().split("\n")
+    #     Found from February and counted back one, because the calendar behind
+    #     this dialog is showing *January 2021* and searching the screen for
+    #     "January" finds its heading eight rows higher. That is what the first
+    #     version of this check did, and it compared the heading with the list
+    #     and reported both colours the same -- a check failing about a screen
+    #     it was not looking at.
+    second = next(r for r, line in enumerate(lines) if "February" in line)
+    first = second - 1
+    on, off = (d.bg_at(lines[first].index("January"), first),
+               d.bg_at(lines[second].index("February"), second))
+    check("the row the list is on is painted, so it can be seen which it is",
+          on != off, f"January {on}, February {off}")
+    #     One click, not two, and it goes first because it needs the list that
+    #     is already open -- once something has been picked the arrow is where
+    #     the list was and clicking it again would be a different gesture.
+    #
+    #     Turbo Vision's `THistoryViewer` wants a double click or `Enter`,
+    #     which is the convention for a list somebody might be *browsing*. A
+    #     drop-down is not being browsed: it was opened to answer one question,
+    #     and the click that lands on the answer is the answer.
+    #     `JsHistoryViewer::handleEvent` is where that is decided.
+    row = next(r for r, line in enumerate(app.render().split("\n")) if "May" in line)
+    at = app.render().split("\n")[row].index("May")
+    app.click(at + 1, row + 1, settle=1.2)
+    #     The list is gone and the field has what was clicked. "February" is
+    #     the evidence the list closed and "May" that it answered -- not
+    #     "January", which the calendar behind is showing and always will be.
+    after = app.render()
+    check("one click on a month is enough to choose it",
+          "February" not in after and "May" in after,
+          [l for l in after.split("\n") if "Month" in l])
+
+    #     Arrows and Enter still work, which is the other way in.
+    app.click(arrow[0], arrow[1], settle=1.4)
     app.send(b"\x1b[B" * 2, settle=0.5)
     app.send(b"\r", settle=1.2)
-    check("and picking one writes it into the field",
+    check("and picking one with the keys writes it into the field too",
           "March" in app.render(), app.render())
-    #     The far end of the list is the one that could not be reached without
-    #     scrolling before, so it is the one worth picking.
-    app.click(arrow[0], arrow[1], settle=1.4)
-    app.send(b"\x1b[B" * 11, settle=0.6)
-    app.send(b"\r", settle=1.2)
-    check("including the last one, with no scrolling to get to it",
-          "December" in app.render(), app.render())
-    app.click(arrow[0], arrow[1], settle=1.4)
-    app.send(b"\x1b[B" * 2, settle=0.5)
-    app.send(b"\r", settle=1.2)
     app.send(b"\t", settle=0.3)
     app.send(b"\x1b[3~" * 6, settle=0.3)
     app.send(b"2019", settle=0.4)
