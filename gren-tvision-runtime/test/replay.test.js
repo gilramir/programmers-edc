@@ -160,7 +160,9 @@ test('a program that goes quiet is a divergence, and says what was wanted', asyn
     timeoutMs: 200,
   });
   assert.equal(result.ok, false);
-  assert.match(result.divergence.why, /produced nothing in 200ms/);
+  // Set aside first, in case it was only late, and reported when the tape ran
+  // out with it still outstanding.
+  assert.match(result.divergence.why, /produced nothing at all/);
 });
 
 test('a program with more to say than the tape has says so', async () => {

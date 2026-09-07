@@ -194,7 +194,8 @@ for every session a pty driver runs, and `Checks.report` runs each tape back
 through the program with no terminal. There is nothing to add to a driver: the
 variable is the runtime's own, so fifty-odd drivers became fifty-odd replay
 tests for nothing. It is **off by default** — `TVNODE_TAPES=1` turns it on —
-because 38 of 40 replay exactly and the two that do not still flap. Five
+because 38 of 38 replay exactly on a clean run and one of them -- the time
+converter -- still fails on about one run in two under sixteen-way load. Five
 drivers are marked as never replayable and say why: `watch` spawns child
 processes and watches a directory, `dir` lists one, `notes` reads and writes
 files, `edit` saves the document it opened, and `viewer` is pointed at a file

@@ -45,8 +45,17 @@ const path = require('path');
 const { digest, fingerprint, TAPE } = require('./record');
 const { PROTOCOL } = require('./tui');
 
-/** How long to wait for output the tape says is coming. */
-const DEFAULT_TIMEOUT_MS = 5000;
+/**
+ * The last resort, for a program that has genuinely stopped.
+ *
+ * Generous on purpose. Waiting is no longer how the driver decides anything --
+ * `working` answers that, and an expectation nothing is coming for is set
+ * aside rather than waited on -- so this only fires for a program stuck for
+ * good, and a replay that has finished exits the moment it does. Five seconds
+ * was enough on an idle machine and not with sixteen drivers running, which is
+ * the last place the wall clock could still change the answer.
+ */
+const DEFAULT_TIMEOUT_MS = 10000;
 
 
 
@@ -126,23 +135,23 @@ function install(session, options) {
   // clock underneath for when it takes one the recording did not -- which is
   // either an older tape or a program that has started asking a new question,
   // and both want an answer rather than a crash.
-  // Kept with the line each was written on, and handed out by *position on the
-  // tape* rather than by call number. A queue served purely in order is a
-  // queue one missed reading knocks out of step for the rest of the run --
-  // and a tick that fired a moment differently is exactly that missed
-  // reading. Anything recorded before where the replay has got to is dropped
-  // rather than handed over late.
+  // Handed out in order, one per call, with the virtual clock underneath for
+  // a call the recording did not make.
+  //
+  // In order is right *because* the ticks are fired from the tape rather than
+  // from arithmetic: the program asks for the clock exactly as often as it did
+  // when this was recorded, so the queue cannot get out of step. It used to be
+  // handed out by position on the tape instead, to resynchronise after a tick
+  // that fired a moment differently -- and that was the thing stopping predc's
+  // time converter from replaying, because a reading its `init` took before
+  // the first render was thrown away when the program asked for it a moment
+  // later than the recording did. The compensation outlived the problem.
   const readings = (session.events || [])
     .filter((e) => e.now !== undefined)
-    .map((e) => ({ at: e.at, value: e.now }));
+    .map((e) => e.now);
   let readAt = 0;
-  const position = options.position || (() => 0);
   const realNow = Date.now;
-  Date.now = () => {
-    const here = position();
-    while (readAt < readings.length && readings[readAt].at < here) readAt += 1;
-    return readAt < readings.length ? readings[readAt++].value : virtualNow;
-  };
+  Date.now = () => (readAt < readings.length ? readings[readAt++] : virtualNow);
   undo.push(() => {
     Date.now = realNow;
   });
@@ -529,13 +538,10 @@ async function replay(grenModule, session, options = {}) {
     );
   }
 
-  // Where on the tape the replay has got to, which the clock needs. It moves
-  // only at an inbound message, because an inbound message is the only barrier
-  // there is: everything recorded between two of them -- a `Time.now` inside
-  // the update, the one a `Task` took a moment later, the one a tick took --
-  // belongs to that stretch and is handed out in order within it. Moving it at
-  // every render instead throws away the reading a task was about to ask for,
-  // which is a timestamp one second wrong in a log nobody was looking at.
+  // Where on the tape the replay has got to, which the tick test needs: a
+  // reading between here and the render being waited for is what says that
+  // render is a timer going off. It moves only at an inbound message, which is
+  // the only barrier there is.
   let atLine = 0;
   // The lines the program's readings of the clock were written on. Used to
   // tell a tick from the second render of one update: see the wait loop.
@@ -543,7 +549,7 @@ async function replay(grenModule, session, options = {}) {
     .filter((e) => e.now !== undefined)
     .map((e) => e.at);
   const readAfter = (from, before) => readingLines.some((l) => l > from && l < before);
-  const stage = install(session, { ...options, position: () => atLine });
+  const stage = install(session, options);
   warnings.push(...stage.notes);
   const withheldDraws = stage.draws.filter((d) => d.value === undefined).length;
   if (withheldDraws) {
@@ -577,6 +583,13 @@ async function replay(grenModule, session, options = {}) {
     // called a difference -- see the wait loop.
     const deferred = [];
     let done = false;
+    // The tape's last line reached, which is not the same as being finished: a
+    // message set aside earlier may still be on its way, and stopping at the
+    // `end` line with one outstanding is how a `Cmd` that resolves four
+    // milliseconds after the render beside it gets reported as never having
+    // arrived at all.
+    let ended = false;
+    const allMet = () => !deferred.some((i) => !steps[i].done);
     const extra = [];
 
     const stop = (why, step, actual) => {
@@ -608,7 +621,8 @@ async function replay(grenModule, session, options = {}) {
         const step = steps[cursor];
         if (step.kind === 'end') {
           cursor += 1;
-          done = true;
+          ended = true;
+          done = allMet();
           return;
         }
         if (step.kind !== 'send') return;
@@ -626,7 +640,8 @@ async function replay(grenModule, session, options = {}) {
         if (options.trace) options.trace('<-', step.port || 'tui', { in: step.message.type, at: step.at });
         app.ports[name].send(step.message);
       }
-      done = true;
+      ended = true;
+      done = allMet();
     };
 
     /**
@@ -684,6 +699,7 @@ async function replay(grenModule, session, options = {}) {
         step.done = true;
         if (actual.out === 'render') lastHash = actual.hash;
         matched += 1;
+        if (ended) done = allMet();
         pump();
         return;
       }
@@ -786,12 +802,15 @@ async function replay(grenModule, session, options = {}) {
     const started = process.hrtime.bigint();
     let was = cursor;
     let idle = 0;
+    let waited = 0;
     while (!done) {
       if (Number(process.hrtime.bigint() - started) / 1e6 > timeoutMs) {
-        const want = steps[cursor];
+        // Something set aside and never met is the better thing to report:
+        // the cursor by then is wherever the conversation carried on to.
+        const want = deferred.map((i) => steps[i]).find((step) => !step.done) || steps[cursor];
         stop(
           want && want.kind === 'expect'
-            ? `${difference(want.expected, null)} in ${timeoutMs}ms`
+            ? `${difference(want.expected, null)} at all`
             : 'the program stopped before the tape did',
           want
         );
@@ -804,8 +823,10 @@ async function replay(grenModule, session, options = {}) {
       if (cursor !== was) {
         was = cursor;
         idle = 0;
+        waited = 0;
         continue;
       }
+      waited += 1;
       // Quiet means node says nothing is outstanding, not that some number of
       // milliseconds went by: see `working`. A few such turns rather than one,
       // since a task can sit between its resolution and its continuation with
@@ -866,6 +887,36 @@ async function replay(grenModule, session, options = {}) {
         stage.tickAt(want.t);
         continue;
       }
+
+      // Setting an expectation aside is the one decision here that cannot be
+      // taken back, so it waits for both answers: node saying nothing is
+      // outstanding, *and* a good many turns since anything last moved.
+      // Waiting longer than necessary only costs time, and only in the one
+      // place this is reached; setting one aside a moment too early costs the
+      // match, and then reports the message as never arriving at all.
+      if (waited < 30) continue;
+      waited = 0;
+
+      // Not a tick, and node says there is nothing outstanding: the program
+      // has said everything it is going to say, and the tape still has a
+      // message it has not. **That is an ordering, not an absence.** predc's
+      // time converter records in two shapes on the same session -- the
+      // render its first `resized` produces comes out either before the
+      // request it sends node for the zones or after the answer -- because a
+      // `Task` issued from `init` resolves where it likes against messages
+      // arriving from a terminal. Both are the same renders in a different
+      // order.
+      //
+      // So the expectation is set aside rather than waited for: the
+      // conversation carries on, it stays matchable, and one still set aside
+      // at the end is a real absence rather than a late arrival.
+      idle = 0;
+      deferred.push(cursor);
+      cursor += 1;
+      while (cursor < steps.length && steps[cursor].kind === 'expect' && steps[cursor].done) {
+        cursor += 1;
+      }
+      pump();
     }
     // A last turn or two, so that anything the program was about to say is
     // said before the extras are counted.

@@ -511,7 +511,7 @@ class Checks:
                 replayed += 1
             else:
                 said = (done.stdout or done.stderr).decode(errors="replace")
-                problems.append(" ".join(said.split())[:220])
+                problems.append(" ".join(said.split())[:400])
         if replayed or problems:
             self(f"every session this driver recorded replays ({replayed} of "
                  f"{replayed + len(problems)})", not problems,

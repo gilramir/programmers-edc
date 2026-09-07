@@ -9063,3 +9063,60 @@ each case rewrites. All of that is Tasks rather than messages.
 Still `TVNODE_TAPES=1` rather than on by default, because two that flap are two
 too many for something every commit has to pass. The distance from seven to two
 was six defects and one honest limit, which is a better ratio than it looked.
+
+## The last two, and the compensation that outlived its problem
+
+Two drivers were left flapping, both the time converter, both diverging just
+after the reply comes back from node with the zone rows. Recording the same
+session three times settled what they were: **`predc time` records in two
+shapes.**
+
+    now      render   [resized]  atInstant  [rows]  render render render render
+    render   [resized]   now     render     atInstant  [rows]  render render render
+
+The same messages and the same renders, with `init`'s reading of the clock and
+the render its first `resized` produces on either side of each other --
+because a `Task` issued from `init` resolves where it likes against messages
+arriving from a terminal, and `Tool.Calendar` says so in its own
+documentation: *"waiting for the clock is visible"*, and the first render
+happens before it has answered.
+
+### Readings in order, because the tick fix made position pointless
+
+The first shape would not replay, and the reason was a compensation left
+behind. Clock readings were handed out **by position on the tape** -- anything
+recorded before where the replay had got to was dropped -- and that was there
+to resynchronise after a tick that fired a moment differently. Ticks are fired
+from the tape now, so the program asks for the clock exactly as often as it
+did when the tape was written, and the queue cannot get out of step.
+
+What the compensation was doing instead was throwing away the reading `init`
+took *before* the first render, because the replay's program asked for it a
+moment later than the recording did. Serving them plainly, one per call, made
+all three shapes replay. **A fix that is still there after its problem has gone
+is a fix that has become a bug**, and this one was three weeks old.
+
+### And an expectation set aside is not one that has arrived
+
+A `Cmd` that resolves through a Task comes out four milliseconds after the
+render beside it. The driver sets such an expectation aside when node says
+nothing is outstanding, and carries on -- and then walked straight into the
+tape's `end` line, called itself finished, and reported the message that was
+four milliseconds away as never having arrived at all. Reaching the end of the
+tape is not the same as being finished when something is still outstanding.
+
+### Where this stops, honestly
+
+**38 of 38 on a clean run, and one of them fails on about one run in two under
+sixteen-way load** -- always the time converter, always an `out focus` the tape
+has and the replay does not produce. That focus is asked for on the *reply*
+rather than with the request, and only when `restoring` is set, for the
+ordering reason `Tool/Time.gren` documents at length. Whether it is set when
+the reply lands depends on how many `Time.every` ticks the model saw first,
+which is the one thing about a tick a tape still does not pin: it says when
+each one fired and not how many the model had counted by then.
+
+That is one narrow question away from an answer rather than a mystery, which is
+a better place to leave it than the last two commits managed. Still
+`TVNODE_TAPES=1`, because one flap is one too many for a check every commit has
+to pass.
