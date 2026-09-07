@@ -88,5 +88,23 @@ eq("zone list size", zs.zones.length > 400, true);
 const arg = tz.answer({type:"atInstant", posix: 1788291120, zones:["America/Argentina/Ushuaia"]});
 eq("ushuaia", arg.rows[0].offset, -180);
 
+// The caller's own marker, carried back untouched.
+//
+// This side does not look at `restore` and that is the point of it: several
+// requests can be in flight at once -- a clock tick asks for the same rows
+// once a second -- and the converter has to tell the reply to the zone
+// picker's request from the reply to a tick's. It used to keep a flag and
+// clear it on "the answer", where the answer was whichever came back first,
+// so whether the caret went home after choosing a zone depended on how many
+// seconds had gone by. A reply that describes itself needs no such
+// bookkeeping.
+const marked = tz.answer({type:"atInstant", posix: 1788291120, zones:["UTC"], restore: true});
+eq("the marker comes back on the reply", marked.restore, true);
+eq("and the answer is the same answer", marked.rows[0].offset, 0);
+const plain = tz.answer({type:"atInstant", posix: 1788291120, zones:["UTC"]});
+eq("a request without it gets a reply without it", plain.restore, undefined);
+const markedParts = tz.answer({type:"fromParts", zone:"UTC", y:2026,mo:9,d:1,h:19,mi:32,s:0, zones:["UTC"], restore: true});
+eq("and it is the request's, not one kind of request's", markedParts.restore, true);
+
 console.log(fails ? "\n" + fails + " FAILED" : "\nall checks passed");
 process.exit(fails ? 1 : 0);

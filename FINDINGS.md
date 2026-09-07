@@ -9170,3 +9170,59 @@ converter, still the `out focus` that is asked for on the reply only when
 so whatever is left is a difference in what the *model* did rather than in what
 the driver assumed, which is a much smaller place to look than it was two
 commits ago.
+
+## The reply that describes itself, and the flag that did not
+
+`Tool.Time` put the caret back in the zone picker after a zone was added, and
+whether it did depended on how many seconds had gone by. The mechanism was a
+flag: `restoring` set when the picker changed the list, cleared *"when the
+answer arrives"* -- and **the answer** is the part that was wrong. The
+converter asks `bin/timezones.js` for the same rows once a second while a clock
+is running, so whichever reply came back first cleared the flag. A tick's reply
+in between took the focus meant for the picker's; the picker's own reply then
+found the flag clear and did nothing, and the window that had just been rebuilt
+stayed in front of the picker that chose the zone.
+
+The fix was three fields up in the same file. `Reply.asked` already carries
+what a `fromParts` request asked for, with the reason written next to it:
+
+> It is here rather than remembered on this side because several requests can
+> be in flight at once and a reply that describes itself needs no bookkeeping
+> to match up.
+
+That is exactly the rule the flag broke, so `restore` is a marker on the
+request the picker sends, echoed back on its reply and on no other.
+`bin/timezones.js` does not look at it -- `answer` carries the caller's own
+marker through, which is a `respond` and a two-line wrapper -- and the model
+has no flag at all any more: `if reply.restore then Tui.focus`. **The
+bookkeeping a comment had already argued against was three fields below the
+comment.**
+
+### Where it can be checked, which is not where it happens
+
+The effect is a message on a port, and there is no screen for it: with the
+focus deliberately broken the picker still sits in front, the caret still lands
+in the same cell, and a driver check written against either passes both ways.
+That was checked rather than assumed -- the check was written, the fix was
+taken out, and the check went on passing, so it was deleted rather than kept.
+
+What has teeth is the echo, and `timezones.checks.js` tests it directly:
+marked in, marked out; unmarked in, unmarked out; and the answer itself
+unchanged either way. The other half is visible on a tape, where `out focus
+id=time.zones` follows the picker's reply and no other -- which is what the
+replay comparison already checks whenever `TVNODE_TAPES=1`.
+
+### And it was not what made time_picker flap
+
+Stated plainly because the last commit predicted otherwise. The driver still
+loses a replay on about one run in three, with the same shape -- an `out focus`
+the tape has and the replay does not produce -- and the cause is in the
+matcher rather than in the program: the number of repeated renders walked past
+varies between runs (the note says one on one run and three on another), and
+with it which expectation each message is matched against. The rule that a
+render identical to the one before it is a no-op is right; consuming the tape's
+copy of one that the program is merely *late* with is what shifts the rest.
+
+That is the next thing to look at, and it is a smaller thing than it was: not
+the program, not the clock, not the ticks, and not the environment -- the
+bookkeeping in one loop.

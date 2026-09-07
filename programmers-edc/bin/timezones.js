@@ -207,7 +207,23 @@ function nothing(posix, problem) {
   return { type: 'rows', posix, rows: [], adjusted: false, unknown: [], problem };
 }
 
+/**
+ * Answer a request, carrying the caller's own marker back on the reply.
+ *
+ * `restore` is the model's, and this side does not look at it: the time
+ * converter sets it on the request the zone picker sends so that the reply it
+ * belongs to can be told from the ones a clock tick asks for meanwhile. Echoed
+ * rather than remembered on the Gren side because several requests can be in
+ * flight at once and **a reply that describes itself needs no bookkeeping to
+ * match up** -- which is what `Reply.asked` already says, and what the flag
+ * this replaced got wrong.
+ */
 function answer(message) {
+  const reply = respond(message);
+  return message && message.restore ? { ...reply, restore: true } : reply;
+}
+
+function respond(message) {
   switch (message.type) {
     case 'zoneList':
       return { type: 'zones', zones: Intl.supportedValuesOf('timeZone') };

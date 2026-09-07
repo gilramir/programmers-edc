@@ -131,22 +131,6 @@ type alias Model =
     , editing : Maybe { id : String, text : String }
     , message : String
     , picker : Maybe Picker
-    -- Set when the picker changed the list, cleared when the answer arrives.
-    --
-    -- It exists because of an ordering that took a port trace to see. Adding a
-    -- zone does not make the table taller *then*; it makes it taller when the
-    -- reply comes back with a row in it, one update later. That render rebuilds
-    -- the converter -- a window whose view list changed is rebuilt rather than
-    -- patched -- and a rebuilt window arrives in front of the picker that
-    -- chose the zone. `Tui.focus` sent with the request is spent by then: the
-    -- runtime re-applies a pending focus after the render it came with, and
-    -- this is the render after that one.
-    --
-    -- So the focus is asked for on the *reply*, and a flag rather than "always
-    -- refocus the picker" because the user may have clicked down to the
-    -- converter on purpose, and a reply that yanked the caret away from where
-    -- they put it would be worse than the bug.
-    , restoring : Bool
     -- Clock mode: the window is a wall clock rather than a converter. The
     -- instant is the machine's own and follows it, the fields are read-only
     -- because there is nothing to type into a clock, and `Zones...` still
@@ -275,7 +259,6 @@ init configured local =
         , editing = Nothing
         , message = ""
         , picker = Nothing
-        , restoring = False
         , clock = False
         }
     , command = Task.perform Began Time.now
@@ -321,6 +304,18 @@ type alias Reply =
     -- can be in flight at once and a reply that describes itself needs no
     -- bookkeeping to match up.
     , asked : Maybe { zone : String, y : Int, mo : Int, d : Int, h : Int, mi : Int }
+    -- Set on the reply to the request the zone picker sent, because that is
+    -- the one whose answer should put the caret back where the user left it.
+    --
+    -- It is the same rule as `asked` one field up, applied to the thing that
+    -- got it wrong. This used to be a flag on the model -- set when the picker
+    -- changed the list, cleared when "the answer" arrived -- and *the answer*
+    -- is the part that was wrong: a clock tick asks for the same rows once a
+    -- second, so whichever reply came back first cleared the flag, and whether
+    -- the caret went home depended on how many ticks had gone by in between.
+    -- Sometimes it did and sometimes it did not, which is the worst way for a
+    -- thing like this to behave.
+    , restore : Bool
     }
 
 
@@ -383,14 +378,23 @@ replyDecoder =
             , unknown = rest.unknown
             , problem = rest.problem
             , asked = request
+            , restore = rest.restore
             }
         )
         (Decode.field "posix" Decode.int)
         (Decode.field "rows" (Decode.array rowDecoder))
         (Decode.field "adjusted" Decode.bool)
-        (Decode.map2 (\unknown problem -> { unknown = unknown, problem = problem })
+        (Decode.map3
+            (\unknown problem restore ->
+                { unknown = unknown, problem = problem, restore = restore }
+            )
             (Decode.field "unknown" (Decode.array Decode.string))
             (Decode.field "problem" Decode.string)
+            -- Absent on every reply but the picker's, and absent altogether
+            -- from a tape recorded before this existed.
+            (Decode.map (Maybe.withDefault False)
+                (Decode.maybe (Decode.field "restore" Decode.bool))
+            )
         )
         (Decode.maybe (Decode.field "asked" askedDecoder))
 
@@ -453,12 +457,35 @@ so it can never collide with something the user chose.
 -}
 atInstant : Ports msg -> Int -> Array String -> Cmd msg
 atInstant ports posix wanted =
+    instantRequest ports posix wanted False
+
+
+{-| The same request, marked so that its reply can be told from the others.
+
+The zone picker sends this one, and the reply to it is the one that puts the
+caret back in the picker. Nothing about the answer differs; `bin/timezones.js`
+carries the marker back untouched. See `Reply.restore` for what it replaced.
+-}
+atInstantRestoring : Ports msg -> Int -> Array String -> Cmd msg
+atInstantRestoring ports posix wanted =
+    instantRequest ports posix wanted True
+
+
+instantRequest : Ports msg -> Int -> Array String -> Bool -> Cmd msg
+instantRequest ports posix wanted restore =
     ports.toJs <|
         Encode.object
-            [ { key = "type", value = Encode.string "atInstant" }
-            , { key = "posix", value = Encode.int posix }
-            , { key = "zones", value = Encode.array Encode.string (wanted ++ [ "UTC" ]) }
-            ]
+            ([ { key = "type", value = Encode.string "atInstant" }
+             , { key = "posix", value = Encode.int posix }
+             , { key = "zones", value = Encode.array Encode.string (wanted ++ [ "UTC" ]) }
+             ]
+                ++ (if restore then
+                        [ { key = "restore", value = Encode.bool True } ]
+
+                    else
+                        []
+                   )
+            )
 
 
 {-| The parameter is `request` rather than the `asked` it wants to be called,
@@ -561,8 +588,7 @@ receive wiring msg model =
         Answered reply ->
             { model =
                 { model
-                    | restoring = False
-                    , posix = reply.posix
+                    | posix = reply.posix
                     -- A reply with no rows is a reply that failed, and the
                     -- table keeps what it was showing rather than emptying
                     -- itself: the message line says what went wrong, and the
@@ -577,7 +603,25 @@ receive wiring msg model =
                     , message = explain reply
                 }
             , command =
-                if model.restoring then
+                -- The reply to the picker's own request, and not merely the
+                -- next reply to arrive.
+                --
+                -- The focus is asked for here rather than with the request
+                -- because of an ordering that took a port trace to see. Adding
+                -- a zone does not make the table taller *then*; it makes it
+                -- taller when the reply comes back with a row in it, one
+                -- update later. That render rebuilds the converter -- a window
+                -- whose view list changed is rebuilt rather than patched --
+                -- and a rebuilt window arrives in front of the picker that
+                -- chose the zone. A `Tui.focus` sent with the request is spent
+                -- by then: the runtime re-applies a pending focus after the
+                -- render it came with, and this is the render after that one.
+                --
+                -- And on the picker's reply rather than on every reply,
+                -- because the user may have clicked down to the converter on
+                -- purpose and a clock tick that yanked the caret back would be
+                -- worse than the bug.
+                if reply.restore then
                     Tui.focus wiring.tui pickerId
 
                 else
@@ -947,8 +991,8 @@ withPicker wiring act step =
                         acted
 
                     else
-                        { model = { acted.model | zones = after.chosen, restoring = True }
-                        , command = atInstant wiring.intl acted.model.posix after.chosen
+                        { model = { acted.model | zones = after.chosen }
+                        , command = atInstantRestoring wiring.intl acted.model.posix after.chosen
                         }
 
                 Nothing ->
