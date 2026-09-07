@@ -828,8 +828,7 @@ display inks model =
                 max 1 (model.rows - (Array.length tail + 1))
 
             values =
-                model.draw
-                    |> Array.map (spell model.kind)
+                shown model
                     |> Array.mapAndFlatten wrapped
 
             hidden =
@@ -838,6 +837,71 @@ display inks model =
         Array.takeFirst room values
             ++ wrappedIn inks.ruler (summary model hidden)
             ++ tail
+
+
+{-| The values as they are *drawn*, which is not always as they are spelled.
+
+Integers are right-justified and nothing else is, because nothing else varies:
+hex is two characters a byte, base64 is four for every three, and a UUID is a
+UUID. A decimal number is the one spelling here whose length is a property of
+the draw rather than of the width, so a column of them was ragged down its left
+edge -- which is the edge a column of numbers is read down.
+
+**Padded to what the width can produce, not to the longest one on screen.**
+The largest value `wide` bytes can hold is `2^(8 * wide) - 1` and that is what
+the column is set to, so the digits sit in the same place before and after
+*Again*. Padding to the longest of the current draw would have been a column
+that moved every time you rolled, which is the thing right-justifying them is
+supposed to stop.
+
+**And the padding is display only.** `copyAll` spells the same values without
+it, because leading spaces are exactly what a number pasted into the
+calculator, a shell or a config file does not want. What is on the screen is a
+column; what leaves the program is a number.
+
+The guard is the one case where a column cannot exist: sixty-four bytes is a
+hundred and fifty-five digits and the canvas is seventy-six columns, so every
+value wraps and there is no left edge to line up. Padding there would put the
+spaces on the *first* row of a value whose last row is where it ends, which is
+worse than not padding at all.
+-}
+shown : Model -> Array String
+shown model =
+    let
+        spelled =
+            Array.map (spell model.kind) model.draw
+    in
+    when model.kind is
+        Integer ->
+            let
+                room =
+                    digitsIn (asked model).wide
+            in
+            if room > lineWidth then
+                spelled
+
+            else
+                Array.map (String.padLeft room ' ') spelled
+
+        _ ->
+            spelled
+
+
+{-| How many decimal digits `wide` bytes can run to.
+
+Computed rather than approximated. `floor(8 * wide * log10 2) + 1` is the same
+answer and is one rounding away from being the wrong one at a power of ten,
+which for a number nobody can check by eye is the kind of off-by-one that
+survives. `BigInt` is already here for the spelling, and this is the largest
+value those bytes can hold, written out and counted.
+-}
+digitsIn : Int -> Int
+digitsIn wide =
+    BigInt.one
+        |> BigInt.shiftLeftBy (8 * wide)
+        |> BigInt.subBy BigInt.one
+        |> BigInt.toString
+        |> String.count
 
 
 summary : Model -> Int -> String

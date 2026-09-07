@@ -513,6 +513,16 @@ goes through `BigInt`, and why it is exact rather than a double's idea of the
 number. It is also the one of the four with no shell one-liner behind it, which
 is most of the argument for having it.
 
+They are **right-justified**, which is the one spelling that needs it: hex is
+two characters a byte and base64 four for every three, so only a decimal number
+has a length that depends on the draw. The column is set to what the *width*
+can produce rather than to the longest number currently on screen, so the digits
+stay in the same place across an *Again* — a column that moved every time you
+rolled would be the thing right-justifying them is meant to stop. The padding is
+the screen's and not the value's: *Copy* takes the numbers without it, because
+leading spaces are what a number pasted into the calculator or a shell does not
+want.
+
 It is deliberately *not* "a random number between 1 and 100". That is a
 different question with a real trap in it — the modulo of a uniform draw is not
 uniform unless the range divides the draw — and answering it badly would be

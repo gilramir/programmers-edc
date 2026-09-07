@@ -8313,6 +8313,58 @@ with a real trap in it -- the modulo of a uniform draw is not uniform unless
 the range divides the draw -- and it was left out rather than answered badly.
 This tool spells a draw; a range would be a tool that shapes one.
 
+### Right-justified, and to what
+
+A column of decimal numbers was ragged down its left edge, which is the edge a
+column of numbers is read down. Integer is also the only spelling here that
+*can* be ragged: hex is two characters a byte, base64 is four for every three,
+and a UUID is a UUID -- a decimal number is the one whose length is a property
+of the draw rather than of the width.
+
+**Padded to what the width can produce, not to the longest one on screen.**
+The largest value `wide` bytes can hold is `2^(8 * wide) - 1`, and that is what
+the column is set to, so the digits sit in the same place before and after an
+*Again*. Padding to the longest of the current draw would have produced a column
+that moved every time you rolled, which is what right-justifying them is
+supposed to stop.
+
+`digitsIn` computes that rather than approximating it. `floor(8 * wide * log10 2)
++ 1` is the same answer and is one rounding away from being the wrong one at a
+power of ten -- and for a number nobody can check by eye, that is the sort of
+off-by-one that survives. `BigInt` is already there for the spelling; the
+largest value is written out and its digits counted.
+
+**The padding is the display's, and `copyAll` does not get it.** It spells the
+draw again rather than copying what is drawn, because leading spaces are exactly
+what a number pasted into the calculator, a shell or a config file does not
+want. What is on the screen is a column; what leaves the program is a number.
+
+The guard is the case where a column cannot exist: sixty-four bytes is a hundred
+and fifty-five digits against a canvas of seventy-six, so every value wraps and
+there is no left edge to line up. Padding there would put the spaces on the
+*first* row of a value whose last row is where it ends.
+
+### A check that must not need luck
+
+Asserting that a column is right-justified wants a short value to appear, and
+what the tool produces is random. Seven one-byte values are 97% likely to
+include one under a hundred -- which means a regression would go unnoticed one
+run in thirty-six, and a test that reports success three per cent of the time it
+should not is worse than no test.
+
+So the assertion is not "a short value was padded". It is that **every drawn row
+is `digitsIn(wide)` characters wide**, which is a claim about the column rather
+than about the draw and cannot fail for what was rolled -- and it is made three
+times with a fresh roll between, so twenty-one draws would have to contain no
+value under a hundred for the check to pass on a build where padding was gone.
+That is one run in fifty thousand rather than one in thirty-six.
+
+The copy check is the deterministic half, and it caught the tool working: the
+"Copied" message takes a canvas row of its own, so one fewer value fits than
+fitted a moment earlier while *Copy* takes the whole draw. The screen's values
+are a *prefix* of the copied ones, which is the same fact the footer's "N more
+below" states from the other side.
+
 ### The comment that was right, and the row it did not account for
 
 The radio cluster carried this:

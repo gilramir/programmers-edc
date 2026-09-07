@@ -56,9 +56,11 @@ def inside(app):
 def parts(app):
     """(values, footer, message).
 
-    The canvas starts at the fifth row inside the frame -- three for the radio
-    cluster and a blank -- and the footer is the row that names what the values
-    are. Anything after the footer is the message line. Found by what the rows
+    The canvas starts below the radio cluster and the blank row under it, and
+    the footer is the row that names what the values are. `[4:]` rather than
+    the exact offset because blank rows are skipped below anyway -- which is
+    what kept this working when a fourth radio button pushed the canvas down a
+    row. Anything after the footer is the message line. Found by what the rows
     say rather than by counting them, because the count of values is the thing
     half these checks are about.
     """
@@ -201,6 +203,58 @@ def main():
           values)
     check("and the footer says what decides the range",
           "3 unsigned integers, 16 bytes wide" in footer, footer)
+
+    # Right-justified, which is the one spelling that needs it: hex is two
+    # characters a byte and base64 four for every three, and only a decimal
+    # number has a length that depends on the draw.
+    #
+    # One byte wide, so the values run 1 to 3 digits and the padding is the
+    # whole of what makes them line up. The assertion is that every drawn row
+    # is `digitsIn(wide)` wide -- 3 for a byte -- which is a claim about the
+    # *column* and cannot fail because of what was rolled. Three rolls because
+    # a check that needs a short value to appear is a check that passes for the
+    # wrong reason when none does, and twenty-one draws with no value under a
+    # hundred is a one-in-fifty-thousand run.
+    put(app, "How many", "7")
+    put(app, "Bytes each", "1")
+    widest = len(str(256 ** 1 - 1))
+    for roll in range(3):
+        drawn = [row for row in inside(app)[4:]
+                 if row.strip() and not any(phrase in row for phrase in FOOTER)]
+        check(f"the integers are a column, not a ragged edge (roll {roll + 1})",
+              len(drawn) > 0 and all(len(row) == widest for row in drawn),
+              [f"{len(row)}:{row!r}" for row in drawn])
+        menu(app, "Generate")
+        entry(app, "Again")
+
+    # ...and the padding is the screen's, not the value's. A number pasted into
+    # the calculator, a shell or a config file does not want leading spaces, so
+    # `copyAll` spells the draw again rather than copying what is drawn.
+    mark = len(app.buf)
+    menu(app, "Generate")
+    entry(app, "Copy them all")
+    copied = re.findall(rb"\x1b\]52;;([A-Za-z0-9+/=]*)\x07", app.buf[mark:])
+    lines = (base64.b64decode(copied[-1]).decode().split("\n") if copied else [])
+    check("what is copied is the numbers, without the column's padding",
+          len(lines) == 7 and all(line == line.strip() for line in lines), lines)
+    #     Through `parts` and not `inside`, because by now there is a "Copied"
+    #     message under the footer and it is not a value. `parts` strips, which
+    #     is what makes this a comparison of numbers rather than of columns --
+    #     the columns are the check above.
+    #     A *prefix* of them, not all of them, and that is the tool working
+    #     rather than a weakened check: the "Copied" message takes a canvas row
+    #     of its own, so one fewer value fits than fitted a moment ago -- while
+    #     Copy takes the whole draw, which is what Copy means. The footer's
+    #     "N more below" is the same fact said the other way round.
+    on_screen, _, _ = parts(app)
+    check("and they are the numbers that were on the screen",
+          len(on_screen) <= len(lines)
+          and [int(line) for line in lines[:len(on_screen)]]
+          == [int(v) for v in on_screen],
+          (lines, on_screen))
+
+    put(app, "How many", "3")
+    put(app, "Bytes each", "16")
 
     # The width, reached the long way round the Tab ring -- count, width,
     # cluster, Again, Copy -- which is four Tabs from the cluster and arrives
