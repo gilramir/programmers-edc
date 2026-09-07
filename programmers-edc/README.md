@@ -159,6 +159,9 @@ Two things about it are temporary, and both are temporary for the same reason
     predc --help          what the commands are
     predc --version
 
+    predc --record FILE COMMAND           record the session, for a bug report
+    predc --record-verbatim FILE COMMAND  ... keeping documents too
+
 A command is a shortcut through the Tools menu and nothing more: the program it
 opens is the same program, every other tool is still one menu away, and there is
 no batch mode. `predc hex dump.bin` exists because somebody who already knows
@@ -168,6 +171,38 @@ the dump is where you are looking, so that is where the complaint belongs. A
 name that is a *directory* opens the file dialog standing in it, which nobody
 designed: the command line asks the same question the dialog asks, so it gets
 the same answer.
+
+## Reporting a bug
+
+    predc --record /tmp/bug.tape hex dump.bin
+
+writes every event the program saw into a file, so a bug that is easier to hit
+than to describe can be sent rather than explained. It works because the port
+boundary is total: predc is a pure function of what `init` read and what
+arrived on `tuiIn`, so the file is the *input* that produced the failure and
+not an account of it. What is on it, and what deliberately is not, is in
+[the runtime's README](../gren-tvision-runtime/README.md#recording-a-session)
+and in FINDINGS.md.
+
+The short version, because a person deciding whether to send a file deserves
+it in one paragraph: **the file has everything you typed in it.** Notes,
+clipboard contents and the values of your environment variables are left out --
+which variables exist is recorded, what is in them is not -- and no screen is
+recorded, only a fingerprint of each one. The program tells you all of this on
+the way out and asks you to look at the file before you send it, which you
+should. `--record-verbatim` keeps the notes and clipboard too, and is only
+worth using if somebody asked you for it.
+
+The two flags belong to `bin/predc.js` and are taken off the command line
+before `Cli.gren` ever sees them -- a parser that answers an unknown word with
+an exit cannot also be where a launcher's flag is declared -- which is why they
+are documented in the help text's prose rather than in its generated list.
+
+Crashes are separate and need no flag. An exception with no Turbo Vision
+callback under it kills the process with the alternate screen still up, which
+looks like a terminal that hung; predc puts the terminal back, prints the
+error, and appends it to `$XDG_STATE_HOME/predc/crash.log` (or
+`~/.local/state/predc/crash.log`). That file is worth sending too.
 
 The parsing is `gilramir/gren-argparse`, but not its `Argparse.Program` runner,
 which is a `Node.SimpleProgram` and therefore the wrong thing to be when the
@@ -191,7 +226,8 @@ takes it. FINDINGS.md has the story.
     src/Ascii.gren    what ASCII says about a byte, shared by two of the tools
     src/Theme.gren    the three colour schemes, and the inks the tools paint with
     src/Config.gren   the one thing predc remembers between runs
-    test/drive_*.py   one pty driver per tool, plus the shell, the themes and the CLI
+    test/drive_*.py   one pty driver per tool, plus the shell, the themes, the
+                      CLI and the session recorder
 
 ## The calculator's numbers
 

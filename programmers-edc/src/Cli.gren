@@ -65,7 +65,29 @@ parser =
                     ++ "tools are still one menu away."
                 )
             ]
-    , outro = PP.empty
+    -- Two words this parser never sees, documented by the only thing that
+    -- can document them. `--record` belongs to `bin/predc.js` and is spliced
+    -- out of the argument list before Gren is handed it, because a parser
+    -- that answers an unknown word with an exit cannot also be the place a
+    -- launcher's flag is declared. That is a fine trade until somebody has
+    -- to be *told* the flag exists, which is exactly when they need it: they
+    -- have hit something, and the help text is where they will look.
+    , outro =
+        PP.verticalBlock
+            [ PP.words "Reporting a bug:"
+            , PP.empty
+            , PP.words
+                ("predc --record FILE COMMAND writes every event the program saw "
+                    ++ "into FILE, so a bug that is easier to hit than to describe can "
+                    ++ "be sent rather than explained. That file has everything you "
+                    ++ "typed in it. Look at it before you send it."
+                )
+            , PP.empty
+            , PP.words
+                ("Clipboard and editor contents are left out. --record-verbatim FILE "
+                    ++ "keeps those too, and is only worth using if you were asked for it."
+                )
+            ]
     , commands =
         Parser.defineGroup
             |> Parser.withCommand

@@ -278,10 +278,12 @@ function answer(message) {
 function attach(app, options = {}) {
   const outPort = options.outPort || 'intlOut';
   const inPort = options.inPort || 'intlIn';
+  const record = options.record || null;
   if (!app.ports || !app.ports[outPort] || !app.ports[inPort]) {
     throw new Error(`predc: the program must declare ports named ${outPort} and ${inPort}.`);
   }
   app.ports[outPort].subscribe((message) => {
+    if (record) record.outbound(message, 'intl');
     // A belt to `outOfReach`'s braces. Nothing here should throw any more, but
     // an exception out of a port subscription kills the process with the
     // terminal still in its alternate screen -- which is the worst possible
@@ -299,6 +301,10 @@ function attach(app, options = {}) {
         problem: String((err && err.message) || err),
       };
     }
+    // The answer is what a replay needs: `answer()` reads node's own `Intl`,
+    // which is a different database on a different machine, so re-deriving it
+    // is exactly what must not happen.
+    if (record) record.inbound(reply, 'intl');
     app.ports[inPort].send(reply);
   });
 }

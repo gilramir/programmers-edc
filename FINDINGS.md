@@ -8397,3 +8397,191 @@ and `int()` was handed a sentence.
 The phrases are a named list now, one per branch of `Tool.Random.summary`, so
 a fifth kind has one place to fail to update rather than a condition buried in
 a loop.
+
+## The bug report you cannot describe, and the boundary that was already total
+
+Every bug in this repo so far was found by somebody who could reproduce it. The
+question that started this was the other case: predc is about to be given to
+people, and the next TUI bug will be hit by somebody who cannot say what they
+did -- "the window went funny after I resized it" is a real report and it is
+also nothing.
+
+The obvious answer is a log of events, which is what tvdemo's event viewer
+shows and what `TUI_DEBUG` here has always half been. The better answer is one
+step past it, and it is a property of this architecture rather than an idea:
+**the port boundary is total**. A Gren program here cannot reach the terminal,
+the clock or the disk except through a port; it is a pure function of what
+`init` read and what arrived on `tuiIn`. So a file with those two things in it
+is not an account of what happened. It is the input that made it happen, and
+feeding it back into a fresh `main.js` gives you their program on your machine
+with nobody having had to describe anything.
+
+That is worth saying because it changes what goes on the file. A log is chosen
+for readability; a tape is chosen for replay, and the two disagree about the
+most expensive item.
+
+### Renders are the output, so they are fingerprinted and not written
+
+A render is the whole UI description, every time -- that is the bargain the
+differ exists to make -- and it is the thing a reader would most want to see.
+It is also the thing a replay *regenerates*, so keeping it is keeping the
+answer next to the question.
+
+The sizes settle it on their own. predc's idle render is 4.0 KB of JSON, and
+one open window is 7.0 KB; a render fires per `Time.every` tick, so an open
+clock is 4 KB a second for as long as the program is up. But the argument that
+actually decided it is not about size:
+
+```
+$ AWS_SECRET_ACCESS_KEY=hunter2-do-not-log predc env
+secret present in render: true
+```
+
+**A render carries whatever the tools are showing.** The environment tool shows
+the environment, so the render payload of `predc env` has the user's
+credentials in it verbatim -- measured, not assumed. A recorder that logged
+renders would be a recorder that mails you other people's secrets, and no
+amount of care about the *header* would have helped. What goes on the tape is
+a 16-character hash of the render, the window ids it drew and the overlay
+count. That is enough to check a replay against -- same tape, same build, same
+fingerprints, and the first one that differs is where to look -- and not enough
+to leak anything.
+
+The same rule handles outbound messages that are not renders: type and id, no
+payload. "The model asked to focus `w3` and nothing happened" is a complete bug
+report; "the model set the editor text to the following forty kilobytes" is a
+liability.
+
+### Inbound is not innocent either, and the split is document versus gesture
+
+The tape has to keep what came *in*, or it does not replay. But two inbound
+messages are documents rather than gestures: `editorText` is a whole note and
+`clipboardText` is whatever was on the clipboard. Both are reduced to a length
+and a hash by default, with the rest of the message -- crucially the `id` --
+kept, because which editor it was is the bug and the diary is not.
+
+`--record-verbatim` is the same run with the withholding off, for the case
+where the document *is* the bug and it was asked for explicitly.
+
+Keystrokes are the line that cannot be drawn. Redacting them is redacting the
+bug, so they are kept and **the program says so on the way out** -- where the
+file is, that everything typed is in it, and to look before sending it. That
+notice is not decoration. It is the thing that makes the feature honest, and it
+is checked by the driver like anything else.
+
+The environment goes on the header **by name only**, with a short allow-list of
+values (`TERM`, `COLORTERM`, `LANG`, the terminal-multiplexer ones) that decide
+how a terminal behaves and cannot be secrets. Which variables are set is
+frequently the answer; what is in them never is.
+
+### The header is the half a keystroke log does not have
+
+A tape of events without it replays into a different program: a different
+terminal size, a different theme, a different tool on the command line. So the
+first line carries argv (with the recorder's own flag already spliced out), the
+working directory, the terminal's columns and rows and TTY-ness, the node and
+OS versions, the protocol number both halves were speaking -- and, for predc,
+**the config file as text**.
+
+That last one is the only field the runtime cannot know, and it is not
+optional: predc decides its theme, its week numbering, its chart mode and its
+zone list out of that file during `init`, before the first frame. It is
+recorded as text rather than as a decoded value, because a value that
+round-tripped through a decoder is a value whose decoding is no longer under
+test -- and a corrupt config file is a case worth being able to reproduce. The
+path rule is `Config.where_`'s restated in JavaScript, which is a real coupling;
+the header records the path it actually read, so a skew shows up as a wrong
+path rather than as a silent lie.
+
+### A flag the parser must never see
+
+`--record FILE` is the launcher's, not the program's. predc parses its own
+command line in Gren, through `Argparse.Parser.run`, and that parser answers a
+word it has never heard of with an error and an exit -- so a flag the launcher
+owns has to be **spliced out of `process.argv`** before Gren is handed it.
+`Node.Environment.args` is read when `init` runs rather than when the module
+loads, so there is room to do it; the splice happens before the compiled module
+is even required, so there is no window at all.
+
+The cost is that `--help` cannot list it, because the thing that generates
+`--help` is the parser that does not know it exists. That is a fine trade right
+up until somebody has to be *told* the flag is there -- which is exactly when
+they need it, having just hit something. So the two words are written into
+`Cli.gren`'s `outro`, which was `PP.empty`: the only part of the help text that
+is prose rather than generated, and therefore the only place a launcher's flag
+can be declared.
+
+### The crash is the report you can do nothing with, and it was the cheap fix
+
+The binding is better at this than it looks. A callback that throws
+synchronously is caught in C++, which shuts the application down and rethrows
+*once the terminal is restored* -- so `onError`'s `console.error` was always
+visible, and the critique that started this was wrong about that path.
+
+What nothing covered is an exception with no callback under it: a `setTimeout`
+in application code, the Gren runtime's own scheduler. The process dies, the
+alternate screen stays up, the cursor stays hidden, and the user's terminal
+appears to have hung. There is no message, and if there were one it would be on
+a screen about to be thrown away.
+
+So `uncaughtException` and `unhandledRejection` are handled, and the handler
+does three things in an order that matters: put the terminal back, write the
+crash to the tape and to a crash log, then say it out loud. The restore is by
+escape sequence rather than by asking the binding, because the binding's
+`quit()` only sets a flag for the next `step()` and there may not be one --
+`\x1b[?1049l` and its neighbours are each a no-op if the mode was not set, which
+is what makes them safe to write from a handler that is already unwinding.
+
+**And the crash log is written whether or not anybody asked for a tape**, at
+`$XDG_STATE_HOME/predc/crash.log`. That is the whole point of it: a crash
+happens on the run where nobody thought to record. State and not config, which
+means predc now follows two XDG directories instead of one -- the price of
+reading the specification rather than the nearest existing line of code.
+
+### Where the tape stops, which the documentation says out loud
+
+Three holes, and pretending otherwise would be worse than having them.
+
+**`Time.every`, `Time.now` and `Crypto` do not cross a port.** They are Gren
+runtime internals, so a replay gets different ticks and different random bytes.
+Fine for the layout, focus and wrong-value bugs that are most of them; not fine
+for the rate-dependent class -- and this repo has had exactly one of those, the
+wheel that dragged the list back. Every event is stamped with milliseconds
+since the header so a replay can at least be paced and a gap can be seen.
+Virtualising time is not phase one.
+
+**The tape sits above Turbo Vision.** A key that decoded wrong, or a paint that
+came out wrong from correct instructions, is invisible to it: the tape shows
+the event we already agree on. Recording raw stdin bytes would cover that and
+would feed straight into `test/harness.py`, but TVision reads the terminal in
+C++, so it is a binding change and not ten lines. It waits until a tape
+actually points there.
+
+**A program with ports of its own has a second inbound stream.** predc's time
+converter answers over `intlOut`/`intlIn` from node's `Intl`, which is a
+different database on a different machine, so re-deriving those answers on
+replay is exactly what must not happen. `run()` hands the recorder back with
+the app for the launcher to tee -- and a tape missing that stream is a tape the
+converter will not replay from, which is the kind of thing that is obvious once
+and invisible forever after.
+
+### Where the tests went, and the one that could not be a driver
+
+The rules live in `gren-tvision-runtime/test/record.test.js`, beside the
+differ's, for the reason that file already argues: what a recorder must *not*
+write is a far bigger set than what a person can be driven into typing, and the
+most important assertion is a negative one. There is no keystroke that proves a
+secret did not reach a file.
+
+`drive_record.py` is about the seams the unit tests cannot see -- that the flag
+comes off the command line before the parser does, that a real session through
+a real pty puts real events on a real file, that the same secret in a real
+environment does not come out the other end. The pair that makes it worth
+having is `--record` and `--record-verbatim` over the same note: one check that
+the text is absent would pass just as well on a recorder that wrote nothing at
+all.
+
+Two of the crash checks run in a subprocess, because what they are testing ends
+in `process.exit(1)` and that is the behaviour rather than an accident. They
+assert the escape sequences on stdout, which is the only way to state "the
+user's terminal came back" as a claim rather than a hope.

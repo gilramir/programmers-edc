@@ -10,6 +10,7 @@
 // scroll position to lose.
 
 const { createDiffer } = require('./diff');
+const { createRecorder, installCrashHandlers } = require('./record');
 
 // Bumped in lockstep with Tui.protocolVersion on the Gren side. A Gren package
 // and an npm package version independently, and they will skew; refusing an
@@ -20,7 +21,7 @@ const PROTOCOL = 22;
  * Drive a compiled Gren program's UI.
  *
  * @param grenModule  the module `gren make Main --output=main.js` produced
- * @param options     {flags, moduleName, outPort, inPort, tv}
+ * @param options     {flags, moduleName, outPort, inPort, tv, record, crashLog}
  */
 function run(grenModule, options = {}) {
   const tv = options.tv || require('tvision-node');
@@ -30,6 +31,31 @@ function run(grenModule, options = {}) {
     ? (dir, what) =>
         require('fs').appendFileSync(process.env.TUI_DEBUG, `${dir} ${JSON.stringify(what)}\n`)
     : () => {};
+
+  // The tape, if one was asked for. Opened *before* the Gren program is
+  // started, for two reasons: a path that cannot be written has to fail while
+  // there is still an ordinary terminal to say so on, and a program that
+  // crashes in `init` -- reading a config file, say -- is exactly the crash
+  // worth having a recording of.
+  //
+  // `record` is a path or {path, verbatim, program, extra}; TUI_RECORD is the
+  // same thing for a program whose launcher has no flag for it, which is every
+  // example.
+  const asked = options.record || process.env.TUI_RECORD;
+  const recorder = asked
+    ? createRecorder({
+        ...(typeof asked === 'string' ? { path: asked } : asked),
+        protocol: PROTOCOL,
+      })
+    : null;
+  // Unconditional: the whole difficulty with a crash is that it lands on the
+  // run where nobody thought to record. See record.js.
+  installCrashHandlers({
+    recorder,
+    crashLog: options.crashLog,
+    program: options.record && options.record.program,
+  });
+  if (recorder) process.on('exit', () => recorder.farewell());
 
   let started = false;
   // The theme last handed to the binding, as JSON, so a render that did not
@@ -56,10 +82,14 @@ function run(grenModule, options = {}) {
 
   const send = (message) => {
     trace('<-', message);
+    // Before the send and not after: if the program throws on this message,
+    // the message that killed it is the one thing the tape must have.
+    if (recorder) recorder.inbound(message);
     app.ports[inPort].send(message);
   };
 
   app.ports[outPort].subscribe((message) => {
+    if (recorder) recorder.outbound(message);
     trace(
       '->',
       message.type === 'render'
@@ -143,8 +173,20 @@ function run(grenModule, options = {}) {
               differ.valueChanged(id, value);
               send({ type: 'changed', id, value });
             },
-            onExit: () => process.exit(0),
+            onExit: () => {
+              if (recorder) recorder.close('exit');
+              process.exit(0);
+            },
+            // The terminal is already back by the time this runs -- a callback
+            // that throws synchronously is caught in C++, which shuts the
+            // application down and rethrows once it has restored it -- so the
+            // message here is visible. What it was not, before the tape, was
+            // keepable.
             onError: (err) => {
+              if (recorder) {
+                recorder.crash('onError', err);
+                recorder.close('error');
+              }
               console.error(err);
               process.exit(1);
             },
@@ -313,9 +355,17 @@ function run(grenModule, options = {}) {
     }
   });
 
+  // The app is handed back so that a program with ports of its own can
+  // subscribe to them -- the runtime claims `tuiOut` and `tuiIn` and nothing
+  // else. A program that does that has a second inbound stream, and a tape
+  // missing it is a tape that will not replay, so the recorder goes back with
+  // it. Non-enumerable: this is a Gren value and nobody should find a
+  // JavaScript object while walking its ports.
+  Object.defineProperty(app, 'tuiRecorder', { value: recorder, enumerable: false });
   return app;
 }
 
 module.exports = run;
 module.exports.run = run;
 module.exports.PROTOCOL = PROTOCOL;
+module.exports.record = require('./record');

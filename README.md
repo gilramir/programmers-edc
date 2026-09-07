@@ -55,6 +55,7 @@ gren-tvision/      the Gren package: gilramir/gren-tvision
   test/              a pty driver per example
 gren-tvision-runtime/  the npm half: the diff layer + the `gren-tui` bin
   diff.js            one UI description -> calls on the binding (unit tested)
+  record.js          --record: the session, on a file, for a bug report
   test/              node:test, against a fake binding
 tools/             cross-language consistency checks
 build-tvision/     libtvision.a, built PIC (generated)
