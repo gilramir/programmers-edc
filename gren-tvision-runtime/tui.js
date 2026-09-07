@@ -10,7 +10,7 @@
 // scroll position to lose.
 
 const { createDiffer } = require('./diff');
-const { createRecorder, installCrashHandlers } = require('./record');
+const { createRecorder, installCrashHandlers, recordRandomness } = require('./record');
 
 // Bumped in lockstep with Tui.protocolVersion on the Gren side. A Gren package
 // and an npm package version independently, and they will skew; refusing an
@@ -55,6 +55,12 @@ function run(grenModule, options = {}) {
     crashLog: options.crashLog,
     program: options.record && options.record.program,
   });
+  // Before the program is started, and only when there is a tape to write it
+  // on: `Crypto` never crosses a port, so a draw is invisible to everything
+  // else here and a replay without it regenerates different numbers. After the
+  // crash handlers rather than before, because everything from here on is
+  // allowed to be reported and nothing is allowed to be fatal.
+  if (recorder) recordRandomness(recorder);
   if (recorder) process.on('exit', () => recorder.farewell());
 
   let started = false;

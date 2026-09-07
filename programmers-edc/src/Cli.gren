@@ -84,8 +84,9 @@ parser =
                 )
             , PP.empty
             , PP.words
-                ("Clipboard and editor contents are left out. --record-verbatim FILE "
-                    ++ "keeps those too, and is only worth using if you were asked for it."
+                ("Clipboard and editor contents are left out, and so are any random "
+                    ++ "values generated. --record-verbatim FILE keeps those too, and is "
+                    ++ "only worth using if you were asked for it."
                 )
             ]
     , commands =

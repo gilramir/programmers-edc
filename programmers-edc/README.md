@@ -188,10 +188,23 @@ The short version, because a person deciding whether to send a file deserves
 it in one paragraph: **the file has everything you typed in it.** Notes,
 clipboard contents and the values of your environment variables are left out --
 which variables exist is recorded, what is in them is not -- and no screen is
-recorded, only a fingerprint of each one. The program tells you all of this on
-the way out and asks you to look at the file before you send it, which you
-should. `--record-verbatim` keeps the notes and clipboard too, and is only
-worth using if somebody asked you for it.
+recorded, only a fingerprint of each one. Random values the program generated
+are left out as well, for the obvious reason. The program tells you all of this
+on the way out and asks you to look at the file before you send it, which you
+should. `--record-verbatim` keeps the notes, the clipboard and the random
+values too, and is only worth using if somebody asked you for it.
+
+On the other end of that, a tape is read with the runtime's own tool:
+
+```sh
+node ../gren-tvision-runtime/bin/gren-tape.js bug.tape
+```
+
+which turns a few hundred lines of JSON into the thirty that say what the
+person did — runs of the same gesture collapsed, and each one marked with what
+it changed on the screen or that it changed nothing. It also reports what can
+be told without replaying anything: a window off the edge of the desktop, a
+request the program made that was never answered, a crash, a truncation.
 
 The two flags belong to `bin/predc.js` and are taken off the command line
 before `Cli.gren` ever sees them -- a parser that answers an unknown word with

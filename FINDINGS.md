@@ -8610,6 +8610,9 @@ wheel that dragged the list back. Every event is stamped with milliseconds
 since the header so a replay can at least be paced and a gap can be seen.
 Virtualising time is not phase one.
 
+*(Two of those three are dealt with now, and differently from each other. See
+**Reading a tape**, below.)*
+
 **The tape sits above Turbo Vision.** A key that decoded wrong, or a paint that
 came out wrong from correct instructions, is invisible to it: the tape shows
 the event we already agree on. Recording raw stdin bytes would cover that and
@@ -8645,3 +8648,106 @@ Two of the crash checks run in a subprocess, because what they are testing ends
 in `process.exit(1)` and that is the behaviour rather than an accident. They
 assert the escape sequences on stdout, which is the only way to state "the
 user's terminal came back" as a claim rather than a hope.
+
+## Reading a tape
+
+`--record` was the recording half, and a file nobody can read is a file nobody
+sends twice. The question a tape gets asked first is not "does this
+reproduce" -- that is the replayer, and it is next -- but **"what did they
+do?"**, and 339 lines of JSON does not answer it. `gren-tape FILE` does, in
+about thirty.
+
+The collapsing is most of that: a window pulled across the screen is fifty
+`windowResized` messages, a wheel is twenty `scroll`s, and three presses of the
+same menu entry are three lines that mean one thing. Runs of the same gesture
+on the same id become one row saying how many and where it started and stopped.
+
+### The column that is the whole point
+
+A render is on the tape as a hash. That was decided for size and for safety --
+a render carries whatever the tools are showing, and predc's environment tool
+shows the user's credentials -- and it turns out to buy something nobody was
+looking for: **the hash is the only thing on a tape that says whether the
+program did anything.** An input followed by an identical hash is an input the
+model looked at and ignored, and that is invisible in the raw file and in the
+terminal it happened in.
+
+    10.8s  calendar moved ×37  [25,4,63,17] → [50,18,88,31]  → unchanged
+    13.4s  command calendar.prev                             → 2f17b5e0
+
+Thirty-seven drag messages that changed nothing the model draws, and one
+keystroke that changed everything. The first line is *correct* -- the calendar
+does not store its own rectangle, which is the rule about a stored rectangle
+being safe only when it is a constant, from further up this file -- and the
+same shape on a tool that does store one would be the bug. Either way it is a
+sentence rather than a hunt.
+
+The rest of the report is what can be concluded without replaying anything: a
+window rectangle with a negative origin or one past the desktop, a
+`readClipboard` or a `dialog` that was never answered (a model waiting for a
+message that will not arrive is a hang, and looks like nothing at all on a
+tape), a crash, a truncation, and a tape that simply stops -- which is what an
+`uncaughtException` looks like from the outside, and the reason the crash
+handlers exist.
+
+**A tape can hold more than one session**, because the recorder opens the file
+with `a` on the grounds that two runs to the same name is a mistake worth
+surviving. That was written down at the time and the reader is the first thing
+that had to know it; a reader that took the first header and assumed one
+session would have silently reported half of a two-goes-at-it file.
+
+### What never crossed a port, and the two answers it needs
+
+The three holes above are not one problem. They needed different answers and
+the difference is the finding.
+
+**Crypto is recorded, because it cannot be reconstructed.** The seam is not
+where it looks: the Gren kernel holds the object `require("crypto")` returned
+and reads `getRandomValues` off it at each call, and node defines that as a
+**non-configurable getter** -- it cannot be replaced there at all. What the
+getter hands back is a wrapper onto `Crypto.prototype`, and that is an ordinary
+writable property, reachable through `crypto.webcrypto`, which is an instance
+of the class whose prototype it is. One level in, and only while a tape is
+open. The wrapper calls through, so the program gets the system's own
+randomness and the recorder is the only thing that knows -- because weakening a
+program's randomness to make it reproducible would be the wrong trade anywhere
+and an absurd one in a program whose randomness is the feature.
+
+The bytes are **withheld like a document**, which was not the first instinct
+and is obviously right once said: the entire purpose of `predc random` is to
+produce a value somebody is about to use for something. A recorder that kept
+them would mail you other people's keys, which is the same sentence the render
+decision turned on. `--record-verbatim` keeps them, for the case where the
+value *is* the bug.
+
+**The clock is reconstructed, because it cannot be recorded.** Intercepting
+`Date.now` means intercepting it for the whole process, and there is no way to
+tell the program's reads from node's own -- so the sequence a replay would hand
+back would depend on how much of it the replay machine's node consumed first,
+which is a failure that would look like a divergence. It does not need
+recording. Every line is stamped with milliseconds since the header, the header
+says the instant it began, and the header now also carries
+`runtime.timeZone` -- the fourth hole, found while looking at the other three:
+`Time.getZoneName` reads `Intl` and never crosses a port either, and two of
+predc's tools decide what to draw from it, so a tape without it replays into a
+program standing somewhere else on the earth. A replayer puts that back by
+setting `TZ` before the compiled module loads, which is one line, and answers
+`Time.now` from the stamp on the event it is feeding.
+
+The rule underneath: **record what cannot be reconstructed, reconstruct what
+can** -- and prefer reconstruction, because a recorded value is a value that
+can be wrong, missing, or somebody's secret.
+
+### A format number is only useful if it says what it means
+
+`TAPE` went to 2, which the recorder's own comment says is for when a reader
+would get the wrong answer from an older tape -- and a tape-1 tape is exactly
+that now, because it has no random draws and no zone on it. But a reader that
+says "tape format 1, this build writes 2" has told you a number and not a fact.
+
+So the reader carries a table of what each format added, written by whoever
+bumps the number, and reading an old tape says *"format 2 added the random
+values the program drew, and the machine's time zone, so this tape has
+neither"*. It is three words of maintenance at the moment the knowledge exists
+and unrecoverable a year later, which is the same argument this file is made
+of.

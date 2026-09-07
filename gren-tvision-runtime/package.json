@@ -6,12 +6,14 @@
   "description": "Runs a Gren program's UI on Turbo Vision: the diff layer between the Tui port protocol and the native binding.",
   "main": "tui.js",
   "bin": {
-    "gren-tui": "bin/gren-tui.js"
+    "gren-tui": "bin/gren-tui.js",
+    "gren-tape": "bin/gren-tape.js"
   },
   "files": [
     "tui.js",
     "diff.js",
     "record.js",
+    "tape.js",
     "bin"
   ],
   "dependencies": {

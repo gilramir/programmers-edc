@@ -38,6 +38,8 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 LAUNCHER = os.path.join(ROOT, "bin", "predc.js")
+GREN_TAPE = os.path.join(ROOT, "..", "gren-tvision-runtime", "bin", "gren-tape.js")
+RECORD_JS = os.path.join(ROOT, "..", "gren-tvision-runtime", "record.js")
 sys.path.insert(0, os.path.join(ROOT, "..", "tvision-node", "test"))
 
 from harness import Pty, Checks, node_argv
@@ -156,8 +158,14 @@ def main():
     # A tape of events replays into a different program without it: the
     # terminal was a different size, the config file said a different theme,
     # the command line named a different tool.
-    check("the header says which tape format this is", header["tape"] == 1,
-          header.get("tape"))
+    # Asked of the runtime rather than written here. A literal is a number
+    # somebody has to remember to change, and this check is that the tape
+    # agrees with the recorder that wrote it -- not that the number is 2.
+    written = int(subprocess.run(
+        ["node", "-p", f"require('{RECORD_JS}').TAPE"],
+        capture_output=True, timeout=20).stdout.strip())
+    check("the header says which tape format this is, and it is this build's",
+          header["tape"] == written, f"{header.get('tape')} vs {written}")
     check("and which protocol the two halves were speaking, which is the "
           "version skew a replay has to refuse rather than guess at",
           isinstance(header.get("protocol"), int), header.get("protocol"))
@@ -324,6 +332,33 @@ def main():
     check("an ordinary run still exits 0", code == 0, f"exit={code}")
     check("and says nothing about recording, because nothing was recorded",
           "Recorded to" not in out(app), out(app)[-200:])
+
+    # ---- 11. a tape that can be read is the point of writing one ---------
+    #
+    # `gren-tape` is unit-tested against tapes built by hand, which is where
+    # the shapes worth testing live -- a file with two runs in it, a request
+    # nobody answered, a format older than the reader. This is the other seam:
+    # the bin, over a file a real session actually produced. `random` because
+    # it is the tool that draws from `Crypto`, and a draw is the one thing on
+    # a tape that no message carries.
+    home = home_with()
+    tape = tape_path()
+    app = start(home, "--record", tape, "random")
+    settled(app, tape)
+    app.send(ALT_X, settle=1.0)
+    app.wait(timeout=8)
+
+    done = subprocess.run(node_argv(GREN_TAPE, tape), env=env_for(home),
+                          cwd=ROOT, capture_output=True, timeout=20)
+    report = done.stdout.decode()
+    check("gren-tape reads a tape this session wrote", done.returncode == 0,
+          done.stderr[:200])
+    check("and says which window was opened", "+random" in report, report[:800])
+    check("and that a draw happened which a replay cannot reproduce",
+          "cannot reproduce" in report, report[:800])
+    check("and it names the zone, without which two tools draw a different day",
+          "timeZone" not in report and "/" in report.split("runtime")[1][:80],
+          report.split("runtime")[1][:80] if "runtime" in report else report[:200])
 
     return check.report(app)
 

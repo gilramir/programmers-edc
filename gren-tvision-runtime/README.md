@@ -69,11 +69,67 @@ const app = run(main, { record: { path, verbatim, program, extra }, crashLog });
 myPort.attach(app, { record: app.tuiRecorder });
 ```
 
-Three things a tape cannot reach, stated so nobody is surprised by them:
-`Time.every`, `Time.now` and `Crypto` never cross a port, so a replay gets
-different ticks and different random bytes; the tape sits above Turbo Vision,
-so a key that decoded wrong or a paint that came out wrong is invisible to it;
-and a replayer is not written yet — this is the recording half.
+**What never crossed a port.** `Time.now`, `Time.every` and `Crypto` are Gren
+tasks rather than messages, so nothing here sees them happen, and a tape
+without them is not quite the input it claims to be. They are dealt with
+differently because they need different things:
+
+  - **Random draws are recorded**, by replacing `Crypto.prototype`'s
+    `getRandomValues` while a tape is open — the module object node hands the
+    Gren kernel defines it as a getter that cannot be replaced, so the seam is
+    one level in. The wrapper calls through, so the program gets the system's
+    own randomness; only the recorder is any the wiser. The bytes are
+    **withheld like a document**, because the whole purpose of a random value
+    is that somebody is about to use it for something.
+  - **The clock is not recorded, it is reconstructed.** Every line is stamped
+    with milliseconds since the header, the header carries the instant it
+    began, and `runtime.timeZone` says where the machine thought it was — which
+    is enough for a replayer to answer `Time.now` with what it answered then.
+    Recording the calls instead would mean intercepting `Date.now` for the
+    whole process, and there is no way to tell the program's reads from node's.
+
+Two things a tape still cannot reach: it sits above Turbo Vision, so a key that
+decoded wrong or a paint that came out wrong is invisible to it; and the values
+`init` read off the disk — the environment, the file a viewer was opened on —
+are the user's, and deliberately not on it.
+
+## Reading a tape
+
+```sh
+gren-tape bug.tape             # what the person did, and what changed
+gren-tape bug.tape --all       # one line per message, nothing collapsed
+gren-tape bug.tape --extra     # the launcher's block, as JSON
+gren-tape bug.tape --json      # the analysis, for something else to read
+```
+
+A tape is mostly drag events — a window pulled across the screen is fifty
+`windowResized` messages — so the report collapses runs of the same gesture and
+says what each one changed:
+
+```
+   9.7s  command tool.calendar                          → +calendar  a1d01b9c
+  10.8s  calendar moved ×37  [25,4,63,17] → [50,18,88,31]  → unchanged
+  13.4s  command calendar.prev                          → 2f17b5e0
+  46.5s  command help.tools                             → +help  089b607e
+  48.0s  help.scroll scrolled 3 → 0, out to 18 ×12      → 089b607e  (12 renders)
+```
+
+**The right-hand column is the reason this exists.** A render is on the tape as
+a hash, and the hash is the only thing that says whether the program did
+anything: an input followed by an identical hash is an input the model looked at
+and ignored. That is usually correct — the calendar does not store its own
+rectangle, so dragging it changes nothing it draws — and occasionally it is the
+whole bug, and either way it cannot be seen in the raw file.
+
+A program with a second inbound stream gets it labelled — predc's time
+converter answers over `intlIn`, and two conversations printed as one would be
+worse than not having teed the second onto the tape at all.
+
+It also reports what it can tell is wrong without replaying anything: a window
+rectangle with a negative origin or one past the desktop, a `readClipboard` or a
+`dialog` that was never answered, a crash, a truncation, a tape that just stops,
+and a format or protocol older than the build reading it — which names what the
+older format was missing rather than only that a number differs.
 
 ## Crashes
 

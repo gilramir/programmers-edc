@@ -48,7 +48,7 @@ const os = require('os');
 const path = require('path');
 
 /** Bumped when a reader would get the wrong answer from an older tape. */
-const TAPE = 1;
+const TAPE = 2;
 
 /** Stop before filling somebody's disk. The header says when this happened. */
 const MAX_BYTES = 16 * 1024 * 1024;
@@ -69,6 +69,7 @@ const SAFE_ENV = [
   'TERM_PROGRAM',
   'TERM_PROGRAM_VERSION',
   'TMUX',
+  'TZ',
   'VTE_VERSION',
   'WSL_DISTRO_NAME',
   'XDG_SESSION_TYPE',
@@ -80,6 +81,15 @@ const BULK = {
   clipboardText: 'text',
   editorText: 'text',
 };
+
+/** What `Intl` says this machine's zone is, or null on a runtime without it. */
+function zoneName() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+  } catch {
+    return null;
+  }
+}
 
 /** Short, stable, and says nothing about the content. */
 function digest(text) {
@@ -207,6 +217,13 @@ function createRecorder(opts = {}) {
       platform: process.platform,
       arch: process.arch,
       release: os.release(),
+      // The zone `Time.getZoneName` will answer with, which is read through
+      // `Intl` and therefore never crosses a port. Two of predc's tools decide
+      // what to draw from it, so a tape without it replays into a program
+      // standing somewhere else on the earth. A replayer puts it back by
+      // setting `TZ` before the compiled module loads, which is why this is
+      // worth one line here rather than an interception anywhere.
+      timeZone: zoneName(),
     },
     // The size the program will lay itself out against before any `Resized`
     // arrives -- half the layout bugs there are begin here.
@@ -224,6 +241,21 @@ function createRecorder(opts = {}) {
     envNames: Object.keys(env).sort(),
     ...(opts.extra ? { extra: opts.extra } : {}),
   });
+
+  // Built here rather than inside `farewell` so that it can be read as well as
+  // printed: what a tape holds is the one thing about this feature a person
+  // has to be able to check, and a string only a file descriptor ever sees is
+  // a string nothing can test.
+  const notice = [
+    `\nRecorded to ${path.resolve(file)}`,
+    '  It contains everything you typed and every event the program saw.',
+    verbatim
+      ? '  It was recorded verbatim: clipboard and editor contents are in it,\n' +
+        '  and so is every random value the program generated.'
+      : '  Clipboard and editor contents were left out, and so were any random\n' +
+        '  values generated; keystrokes were not.',
+    '  Look at it before you send it to anybody.\n',
+  ].join('\n');
 
   const recorder = {
     path: file,
@@ -259,6 +291,35 @@ function createRecorder(opts = {}) {
       put(record);
     },
 
+    /**
+     * Bytes the program drew from the system's random source.
+     *
+     * This is the one thing a tape has to record that is neither inbound nor
+     * outbound: `Crypto` is a Gren task, not a port, so nothing here sees it
+     * cross anything. Without it a replay of `predc random` regenerates the
+     * page with different numbers on it and reports a divergence that is not a
+     * bug -- which, repeated, is how a replayer teaches you to ignore it.
+     *
+     * **Withheld by default, like a document, and for the same reason.** The
+     * whole purpose of the random tool is to produce a value somebody is about
+     * to use for something: a key, a token, a password. Those are on the
+     * screen and therefore in nobody's render, but they would be on the tape,
+     * and a recorder that mails you other people's keys is the thing this
+     * format was shaped to avoid. The count and the hash are kept, so a reader
+     * can still say how many draws it cannot reproduce and a replayer can
+     * still tell whether it is being handed the same ones.
+     */
+    random(kind, bytes) {
+      const buffer = Buffer.from(bytes || []);
+      const encoded = buffer.toString('base64');
+      put({
+        t: Date.now() - began,
+        rng: kind,
+        n: buffer.length,
+        ...(verbatim ? { value: encoded } : { sha: digest(encoded) }),
+      });
+    },
+
     /** Anything the launcher knows that the protocol does not. */
     note(kind, data) {
       put({ t: Date.now() - began, note: kind, ...(data === undefined ? {} : { data }) });
@@ -290,19 +351,13 @@ function createRecorder(opts = {}) {
      * It says the two things a person needs to decide whether to send the file:
      * where it is, and that their keystrokes are in it.
      */
+    notice,
+
     farewell() {
       if (farewelled) return;
       farewelled = true;
-      const lines = [
-        `\nRecorded to ${path.resolve(file)}`,
-        '  It contains everything you typed and every event the program saw.',
-        verbatim
-          ? '  It was recorded verbatim: clipboard and editor contents are in it too.'
-          : '  Clipboard and editor contents were left out; keystrokes were not.',
-        '  Look at it before you send it to anybody.\n',
-      ];
       try {
-        fs.writeSync(2, lines.join('\n'));
+        fs.writeSync(2, notice);
       } catch {
         /* stderr is gone */
       }
@@ -311,6 +366,80 @@ function createRecorder(opts = {}) {
 
   return recorder;
 }
+
+/**
+ * Record the random bytes the Gren program draws, without changing them.
+ *
+ * Gren's `Crypto` reaches `require("crypto")` and holds the module object,
+ * reading the method off it at each call -- so replacing the method on that
+ * object is enough, and the object is the same one this file already required
+ * for `digest`. The wrapper calls through and records what came back: the
+ * program gets the system's randomness, exactly as it would have, and the tape
+ * gets a note that a draw happened.
+ *
+ * Called only when there is a recorder, so a run without `--record` is
+ * untouched -- which matters more than it sounds. Weakening a program's
+ * randomness to make it reproducible would be the wrong trade in any program
+ * and an absurd one in a program whose randomness is the feature.
+ */
+let randomnessRecorder = null;
+let randomnessPatched = false;
+
+function recordRandomness(recorder) {
+  // The target is a variable and the patch is installed once, which is the
+  // shape a process wants: a second `run()` in the same process re-aims this
+  // rather than wrapping the wrapper, and passing null aims it at nothing --
+  // which is how the tests put the runtime back the way they found it.
+  randomnessRecorder = recorder || null;
+  if (randomnessPatched || !recorder) return;
+  randomnessPatched = true;
+
+  const keep = (kind, bytes) => {
+    try {
+      if (randomnessRecorder) randomnessRecorder.random(kind, bytes);
+    } catch {
+      /* a tape that cannot describe a draw must not stop the draw */
+    }
+  };
+
+  try {
+    // **Not on the module object**, which is where the Gren kernel reads it
+    // from and where it cannot be replaced: node defines `getRandomValues`
+    // there as a non-configurable getter. What that getter hands back is a
+    // wrapper that calls the method on `Crypto.prototype`, and *that* is an
+    // ordinary writable property. So the seam is one level in, reachable
+    // through `webcrypto`, which is an instance of the class whose prototype
+    // it is. `randomUUID` needs none of that: on the module object it is a
+    // plain writable value.
+    const proto = Object.getPrototypeOf(crypto.webcrypto);
+    const getRandomValues = proto && proto.getRandomValues;
+    if (typeof getRandomValues === 'function') {
+      proto.getRandomValues = function (array) {
+        const filled = getRandomValues.call(this, array);
+        keep('getRandomValues', Buffer.from(filled.buffer, filled.byteOffset, filled.byteLength));
+        return filled;
+      };
+    }
+  } catch {
+    /* a runtime that will not be patched here is a runtime whose tapes cannot
+       replay a random draw, which is a note for the reader rather than a
+       reason to refuse to run */
+  }
+
+  try {
+    const randomUUID = crypto.randomUUID;
+    if (typeof randomUUID === 'function') {
+      crypto.randomUUID = function (...args) {
+        const id = randomUUID.apply(crypto, args);
+        keep('randomUUID', Buffer.from(String(id), 'utf8'));
+        return id;
+      };
+    }
+  } catch {
+    /* as above */
+  }
+}
+
 
 /**
  * Catch what the binding cannot.
@@ -403,6 +532,7 @@ module.exports = {
   MAX_BYTES,
   SAFE_ENV,
   createRecorder,
+  recordRandomness,
   takeRecordFlags,
   installCrashHandlers,
   restoreTerminal,

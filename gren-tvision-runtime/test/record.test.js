@@ -17,7 +17,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { createRecorder, takeRecordFlags, redact, TAPE } = require('../record');
+const { createRecorder, recordRandomness, takeRecordFlags, redact, TAPE } = require('../record');
 
 let n = 0;
 function tapePath() {
@@ -327,4 +327,104 @@ test('a rejected promise is the same crash', () => {
 test('redact leaves an ordinary message alone rather than cloning it', () => {
   const message = { type: 'click', id: 'w', x: 3, y: 4 };
   assert.equal(redact(message), message);
+});
+
+// --- What never crossed a port -------------------------------------------
+//
+// `Crypto` is a Gren task rather than a message, so nothing in the runtime
+// sees a draw happen; the recorder reaches into node's crypto module to hear
+// about it. These are the tests that the reaching works, that it hands back
+// what it was given, and -- the one that matters -- that the bytes themselves
+// stay off a redacted tape, for the same reason a clipboard does: the whole
+// point of the random tool is to make a value somebody is about to use.
+
+test('the header says which zone the machine thinks it is in', () => {
+  const { file, rec } = open();
+  rec.close();
+  const { header } = readTape(file);
+  assert.equal(header.runtime.timeZone, Intl.DateTimeFormat().resolvedOptions().timeZone);
+});
+
+test('TZ is recorded by value, because it decides what two tools draw', () => {
+  const { file, rec } = open({ env: { TZ: 'Asia/Seoul', SECRET: 'hunter2' } });
+  rec.close();
+  const { header, raw } = readTape(file);
+  assert.equal(header.terminal.env.TZ, 'Asia/Seoul');
+  assert.ok(!raw.includes('hunter2'));
+});
+
+test('a random draw is recorded as a shape, and the bytes are not on the tape', () => {
+  const { file, rec } = open();
+  recordRandomness(rec);
+  const array = new Uint8Array(8);
+  require('crypto').getRandomValues(array);
+  recordRandomness(null);
+  rec.close();
+
+  const { events, raw } = readTape(file);
+  const draw = events.find((e) => e.rng);
+  assert.equal(draw.rng, 'getRandomValues');
+  assert.equal(draw.n, 8);
+  assert.equal(draw.value, undefined);
+  assert.equal(typeof draw.sha, 'string');
+  assert.ok(!raw.includes(Buffer.from(array).toString('base64')));
+});
+
+test('the program is handed the system\'s own randomness, unchanged', () => {
+  const { file, rec } = open();
+  recordRandomness(rec);
+  // Two draws of the same length that came out equal would mean the wrapper
+  // was answering rather than passing through.
+  const a = new Uint8Array(16);
+  const b = new Uint8Array(16);
+  require('crypto').getRandomValues(a);
+  require('crypto').getRandomValues(b);
+  recordRandomness(null);
+  rec.close();
+  assert.notDeepEqual([...a], [...b]);
+  assert.notDeepEqual([...a], new Array(16).fill(0));
+  assert.equal(readTape(file).events.filter((e) => e.rng).length, 2);
+});
+
+test('verbatim keeps the bytes, because then the value is the bug', () => {
+  const { file, rec } = open({ verbatim: true });
+  recordRandomness(rec);
+  const array = new Uint8Array(8);
+  require('crypto').getRandomValues(array);
+  recordRandomness(null);
+  rec.close();
+  const draw = readTape(file).events.find((e) => e.rng);
+  assert.equal(draw.value, Buffer.from(array).toString('base64'));
+  assert.equal(draw.sha, undefined);
+});
+
+test('aiming the interception at nothing stops it recording', () => {
+  const { file, rec } = open();
+  recordRandomness(rec);
+  recordRandomness(null);
+  require('crypto').getRandomValues(new Uint8Array(4));
+  rec.close();
+  assert.equal(readTape(file).events.filter((e) => e.rng).length, 0);
+});
+
+test('a UUID is a draw too', () => {
+  const { file, rec } = open();
+  recordRandomness(rec);
+  const id = require('crypto').randomUUID();
+  recordRandomness(null);
+  rec.close();
+  const draw = readTape(file).events.find((e) => e.rng === 'randomUUID');
+  assert.equal(draw.n, 36);
+  assert.match(id, /^[0-9a-f-]{36}$/);
+  assert.ok(!readTape(file).raw.includes(id));
+});
+
+test('the notice on the way out says whether the random values were kept', () => {
+  const { rec } = open();
+  assert.match(rec.notice, /everything you typed/);
+  assert.match(rec.notice, /random\n  values generated; keystrokes were not/);
+  assert.match(rec.notice, /Look at it before you send it/);
+
+  const { rec: v } = open({ verbatim: true });
+  assert.match(v.notice, /every random value the program generated/);
 });
