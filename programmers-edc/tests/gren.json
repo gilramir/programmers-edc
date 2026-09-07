@@ -8,7 +8,7 @@
     "gren-version": "0.6.6",
     "dependencies": {
         "direct": {
-            "gilramir/gren-argparse": "2.0.0",
+            "gilramir/gren-argparse": "2.0.1",
             "gilramir/gren-bignum": "1.0.0",
             "gilramir/gren-toml": "1.1.0",
             "gilramir/gren-tvision": "local:../../gren-tvision",

@@ -33,6 +33,8 @@ PAINTED = (b"\x1b[?1049h", b"\x1b[?1000h", b"\x1b[2J")
 
 UUID4 = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
 
+SGR = re.compile(rb"\x1b\[[0-9;]*m")
+
 
 def scratch():
     """A HOME of its own, so no driver reads the colour scheme another wrote.
@@ -57,6 +59,18 @@ def leave(check, app, name):
 
 def painted(app):
     return [seq for seq in PAINTED if seq in app.buf]
+
+
+def written(app):
+    """The lines as they were written, rather than as a screen would show them.
+
+    `app.render()` is the wrong tool for asking whether a line was too wide,
+    because it crops to the terminal -- the overflow is exactly the part it
+    throws away -- and a help text longer than the window has scrolled off the
+    top of it besides. The bytes have neither problem.
+    """
+    text = SGR.sub(b"", app.buf).decode("utf-8", "replace")
+    return text.replace("\r\n", "\n").split("\n")
 
 
 def main():
@@ -185,6 +199,32 @@ def main():
     check("--help never started Turbo Vision", painted(app) == [], repr(painted(app)))
     check("and it is coloured, because a terminal is watching",
           b"\x1b[36m" in app.buf or b"\x1b[96m" in app.buf, repr(app.buf[:80]))
+
+    # Under a pty the width is the terminal's own, and this is the check that
+    # says so: eighty columns of text folded again by a fifty-column window
+    # arrives as prose with every other line half empty. It belongs here
+    # rather than beside the pipe check because a pipe is the case where
+    # nobody can be asked -- and eighty was the only width predc was ever
+    # right at, gren-argparse 2.0.1 being what made the rest of them work.
+    app = Pty(node_argv(LAUNCHER, "--help"), env, cwd=work, size=(50, 40))
+    app.wait(timeout=8)
+    widest = max(len(line) for line in written(app))
+    check("a fifty-column terminal gets a fifty-column help text",
+          40 < widest <= 50, f"widest={widest}")
+
+    # The terminal that will not say how wide it is. A pty whose winsize was
+    # never set reports zero columns, and zero is not merely a small number:
+    # the hard splitter behind `PP.text` cuts a string into chunks of that
+    # width, and a chunk of zero consumes none of it, so `--help` sat in a
+    # loop printing nothing. `Main.say` refuses to believe a width under
+    # twenty. `app.buf` and not `app.render()` here because the screen
+    # emulator has no grid to replay into either.
+    app = Pty(node_argv(LAUNCHER, "--help"), env, cwd=work, size=(0, 24))
+    code = app.wait(timeout=8)
+    check("--help finishes on a terminal that reports no width", code == 0,
+          f"exit={code}")
+    check("and prints the text rather than looping on it",
+          b"every-day" in app.buf, repr(app.buf[:80]))
 
     app = Pty(node_argv(LAUNCHER, "--version"), env, cwd=work)
     code = app.wait(timeout=8)

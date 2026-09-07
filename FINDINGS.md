@@ -3904,6 +3904,66 @@ exit code and the text. It then runs the same two through a pipe, which is the
 only way to tell stdout from stderr (a pty is one file) and the case where the
 colour has to come off and the width has to be eighty.
 
+### Eighty was the only width it was right at
+
+That last check is the whole of what pinned the wrapping, and it goes through a
+pipe -- which is the one case where the width is a constant predc picked
+itself. So it was really a check on the constant. Asked the same question at
+eight real terminal widths, the help text turned out to be over-wide at every
+one of them:
+
+    columns   40   50   57   60   70   80  100  132
+    widest    57   67   71   71   71   80  101  133
+
+Two bugs in `gilramir/gren-argparse`, neither of which had ever fired anywhere
+else, because until 2.0.1 the library did not wrap at all: `Argparse.Program`
+rendered through `PP.toString`, whose `maxColumns` is `Math.maxSafeInteger`,
+and predc -- which cannot use that runner and passes a real number -- was the
+only caller that ever gave the wrapper something to do. A word landing exactly
+on the boundary was accepted without counting the space that joins it to the
+line, which is the hundred-and-thirty-three. And a horizontal `block` rendered
+each child after the first against the full width, as though it began at column
+zero, which is everything below about fifty-seven: the commands table, cut in
+the wrong place on any narrow terminal.
+
+The eighty-one had already been seen -- one commit earlier, when the new
+`--record` outro reached it -- and dealt with by rewording the prose until no
+line got there. That was a symptom treated as a typo, and the reason it looked
+like one is the same reason the bug lasted: at eighty columns exactly, only the
+off-by-one is reachable, and an off-by-one reads as a sentence that is one word
+too long. **A fallback is the easiest branch in a program to test and the least
+informative to test**, because it is the branch where nothing was asked and so
+nothing can disagree.
+
+`drive_cli.py` runs `--help` on a fifty-column pty now, and reads the bytes
+rather than the screen: `render()` crops to the terminal, which throws away
+exactly the overflow the check is looking for.
+
+### A width of zero is not a narrow terminal
+
+`Terminal.initialize` reports whatever `process.stdout` says, and a pty whose
+winsize was never set says **zero columns**. That is not a small number to wrap
+to. The hard splitter behind `PP.text` cuts a string into chunks of
+`maxColumns`, and a chunk of zero consumes none of the string, so the recursion
+never gets anywhere: `predc --help` on such a terminal printed nothing, never
+exited, and had to be killed. It is the worst-looking failure a `--help` has
+available -- a tool that appears to hang before it has done anything at all.
+
+`Main.say` refuses to believe a width under twenty now, which is the floor
+`Argparse.Program` applies for exactly this reason. Which is the interesting
+half: predc **copied that runner's rules by hand** -- colour only for a
+terminal with no `NO_COLOR`, eighty when there is no terminal -- because it
+cannot use the runner itself, and the floor was not among them, having been
+added upstream after the copy was taken. A rule copied is a rule that stops
+being updated, and nothing can be done about that here except keep the copy to
+four lines and in one place, which is where it already is.
+
+The desktop's `cols` got the same guard in the same edit, `max 1` beside the
+`max 1` the rows already had. Nothing was seen to go wrong there -- `Resized`
+corrects it a frame later -- but a zero-width desktop is a rectangle every
+window in `init` is sized from, and the rows were guarded for a reason that
+does not stop applying at the other axis.
+
 ## The scroll bar you had to click twice
 
 `predc hex README.md`, a scroll bar on the right of the dump, and clicking it

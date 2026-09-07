@@ -318,7 +318,7 @@ init env =
                       desktop =
                         when terminal is
                             Just tty ->
-                                { cols = tty.columns, rows = max 1 (tty.rows - 2) }
+                                { cols = max 1 tty.columns, rows = max 1 (tty.rows - 2) }
 
                             Nothing ->
                                 { cols = 80, rows = 23 }
@@ -524,10 +524,17 @@ say terminal vars stream doc =
         -- line ends, and the honest answer to that is the terminal it is
         -- being printed into. Eighty when there is no terminal, which is the
         -- width every pipe has been assumed to have since the VT100.
+        --
+        -- A terminal that reports fewer than twenty columns is not believed,
+        -- and that floor is not tidiness: a width of zero puts the hard
+        -- splitter behind `PP.text` into a loop it never leaves, because a
+        -- zero-width chunk consumes none of the string. A pty whose winsize
+        -- was never set reports exactly that, and `predc --help` on one hung
+        -- with nothing printed.
         width =
             when terminal is
                 Just config ->
-                    config.columns
+                    max 20 config.columns
 
                 Nothing ->
                     80

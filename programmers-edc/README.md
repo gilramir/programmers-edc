@@ -213,6 +213,12 @@ documents. What that forced into gren-tvision is `Tui.defineProgramOrExit`: a
 the terminal, and only `init` can decide that, because the first render is what
 takes it. FINDINGS.md has the story.
 
+The one rule copied out of that runner rather than called is how wide to wrap
+and whether to colour: the terminal's own columns, eighty when the output is a
+pipe, no colour for a pipe or for `NO_COLOR`. A terminal claiming fewer than
+twenty columns is not believed -- a pty whose winsize was never set reports
+zero, and wrapping to zero is an endless loop rather than a narrow page.
+
 ## Layout
 
     bin/predc.js      the launcher: resolves main.js against itself, not the cwd

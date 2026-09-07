@@ -14,7 +14,7 @@
             "gren-lang/test": "5.0.0"
         },
         "indirect": {
-            "gilramir/gren-argparse": "2.0.0",
+            "gilramir/gren-argparse": "2.0.1",
             "gren-lang/url": "6.0.0"
         }
     }
