@@ -8278,3 +8278,70 @@ were nothing -- so the buttons went exactly where two blank rows had been since
 the window was written. `Tui.fixedSize` is why nobody had dragged the mistake
 out of it. `rows` is now `gridRows + buttonRows + 1` and the window is
 `rows + 2`, so the two numbers are one number and cannot drift again.
+
+## A fourth spelling, and the blank row the fourth radio button ate
+
+**Random values** offered UUID v4, Hex and Base64. Asked whether it could do
+integers too, with a nudge that `BigInt` was available if it helped -- and the
+nudge is the whole design, because a plain `Int` would not have needed it.
+
+The answer is that Integer is a **fourth spelling of the same draw**, not a
+fourth question. The tool's central rule is that re-spelling is not re-rolling:
+Hex and Base64 are one set of bytes written two ways, and the display changes
+without a single new byte being asked for. Integer joins that set as the bytes
+read as one unsigned big-endian number, so `Bytes each` is what decides its
+range -- four bytes a `uint32`, eight a `uint64`, sixteen a thirty-nine-digit
+value. `respell` needed no change at all: it rolls only when `rows * wide`
+changes, and Integer wants exactly the bytes Hex wanted.
+
+**Through the hex rather than by arithmetic**, which is the argument the base64
+branch beside it already makes. `decimalOf` builds the string `Hex` would have
+drawn and hands it to `BigInt.fromStringWithBase 16`, so the two spellings are
+the same number *by construction* rather than by two pieces of code agreeing --
+and a hand-rolled `acc * 256 + byte` fold would have been that second piece. It
+also gives the driver an equation it can check without reimplementing anything:
+`int(decimal) == int(hex, 16)`, over the same three values.
+
+Sixteen bytes is where this stops being a formality. `2^128 - 1` is eighty-six
+bits past a double, so a `Float` would have shown a rounded number that looked
+exactly like a number, and Gren's `Int` would have been worse. The driver
+asserts the digits are all there rather than the first seventeen and a
+rounding.
+
+**Not a range.** "A random number between 1 and 100" is a different question
+with a real trap in it -- the modulo of a uniform draw is not uniform unless
+the range divides the draw -- and it was left out rather than answered badly.
+This tool spells a draw; a range would be a tool that shapes one.
+
+### The comment that was right, and the row it did not account for
+
+The radio cluster carried this:
+
+> Four rows tall for three items, because a cluster flows its items down the
+> rectangle before it goes across: three rows would also do, and a fourth costs
+> nothing and leaves room to add a kind without discovering the column rule
+> again.
+
+Which was correct about the thing it was warning of -- a `TRadioButtons` given
+more items than rows draws fewer buttons than it was handed and says nothing,
+the fixed-space failure again -- and wrong about the cost. The fourth row was
+not free: it was the blank row between the controls and the values, and the
+fourth button took it. The values ended up against the buttons.
+
+So the window is a row taller and `rowsIn` subtracts seven instead of six. The
+lesson is narrow and worth keeping: **room left for a future item is only free
+if it is room nothing is using**, and a blank row in a layout is being used --
+by the layout.
+
+### And a driver that read the footer as a value
+
+`parts()` in `drive_random.py` separates the values from the summary line by
+what the summary *says* -- `"version 4" in text or "random bytes" in text` --
+which is the right idea, since counting rows is the thing half the checks in
+that file are about. The new footer says `5 unsigned integers, 16 bytes wide`
+and matched neither phrase, so the summary was read as a fourth random value
+and `int()` was handed a sentence.
+
+The phrases are a named list now, one per branch of `Tool.Random.summary`, so
+a fifth kind has one place to fail to update rather than a condition buried in
+a loop.

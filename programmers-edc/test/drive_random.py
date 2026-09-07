@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""predc's random values: v4 UUIDs, and random bytes as hex or base64.
+"""predc's random values: v4 UUIDs, and random bytes as hex, base64 or a number.
 
 This is the one tool whose window is not a function of its model, and most of
 what is checked here is that claim held in both directions.
@@ -11,9 +11,9 @@ every other driver in this directory asserts. The bytes come from
 CSPRNG -- through a `Task`, so they are stored in the model rather than worked
 out from it, and that storing is the whole design.
 
-**It must not change when only the spelling did.** Switching between UUID, Hex
-and Base64 re-spells the draw that is already there; it does not ask for new
-bytes. The check for that is exact rather than incidental: the hex of a row,
+**It must not change when only the spelling did.** Switching between UUID, Hex,
+Base64 and Integer re-spells the draw that is already there; it does not ask for
+new bytes. The check for that is exact rather than incidental: the hex of a row,
 with the two nibbles a v4 UUID is required to fix put back, is the UUID
 character for character. If switching rolled again the two would agree only by
 accident, and never twice.
@@ -39,6 +39,13 @@ from harness import Pty, Checks, node_argv
 
 UUID4 = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 
+# What the summary line says, per kind, so that `parts` can tell it from a
+# value. One phrase per branch of `Tool.Random.summary`, and adding a kind
+# without adding its phrase here makes the footer read as a fourth value --
+# which is what happened when Integer was added, and is why this is a list with
+# a name rather than an `or` buried in the loop.
+FOOTER = ("version 4", "random bytes", "unsigned integers")
+
 
 def inside(app):
     """Every row between the window's two side walls."""
@@ -60,7 +67,7 @@ def parts(app):
         text = row.strip()
         if not text:
             continue
-        if "version 4" in text or "random bytes" in text:
+        if any(phrase in text for phrase in FOOTER):
             footer = text
         elif footer:
             message = text
@@ -174,6 +181,26 @@ def main():
     values, footer, _ = parts(app)
     check("base64 is the third spelling of that same draw",
           [base64.b64decode(v).hex() for v in values] == hexed, (hexed, values))
+
+    # And the fourth: the same bytes as one unsigned big-endian number.
+    #
+    # Sixteen bytes is a thirty-nine-digit value, which is past a double by
+    # eighty-six bits and past a Gren `Int` by more -- so this is `BigInt`
+    # underneath, and `int(v)` on this side is what says the digits are all
+    # there rather than the first seventeen and a rounding.
+    menu(app, "Generate")
+    entry(app, "Integer")
+    values, footer, _ = parts(app)
+    check("the integers are decimal and nothing else",
+          len(values) == 3 and all(re.match(r"^[0-9]+$", v) for v in values),
+          values)
+    check("and each one is that same draw read as one big-endian number",
+          [int(v) for v in values] == [int(h, 16) for h in hexed], (hexed, values))
+    check("exactly, at sixteen bytes, which no Int in Gren can hold",
+          all(int(v) >= 2 ** 53 for v in values) and max(len(v) for v in values) > 30,
+          values)
+    check("and the footer says what decides the range",
+          "3 unsigned integers, 16 bytes wide" in footer, footer)
 
     # The width, reached the long way round the Tab ring -- count, width,
     # cluster, Again, Copy -- which is four Tabs from the cluster and arrives

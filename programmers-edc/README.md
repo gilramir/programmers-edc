@@ -88,7 +88,8 @@ base64, percent-encoding, C string escapes, HTML entities, both directions.
 
 A v4 UUID, or N random bytes as hex or base64.
 
-**Done** -- see "Random values" below.
+**Done** -- see "Random values" below. An integer spelling was added later, on
+the same bytes.
 
 ## Environment variables
 
@@ -479,8 +480,8 @@ the first frame as a result.
 ## Random values
 
 **Tools ▸ Random values** (`Alt-V`) makes v4 UUIDs, or runs of random bytes
-spelled as hex or as base64. *Again* rolls, *Copy* takes them all, and `Enter`
-presses *Again* from wherever the caret is. The bytes come from
+spelled as hex, as base64, or as a decimal integer. *Again* rolls, *Copy* takes
+them all, and `Enter` presses *Again* from wherever the caret is. The bytes come from
 `Crypto.getRandomUInt8Values`, which is `crypto.getRandomValues` underneath:
 the platform's CSPRNG, not `Math.random`.
 
@@ -491,9 +492,9 @@ twice and it answers the same twice, which is why they are all pure
 the model's memory of something that already happened, and putting them there
 costs a `Task`, a `Cmd`, a `Msg` and a `Step`.
 
-**Re-spelling is not re-rolling.** Switching between UUID, Hex and Base64 shows
-the draw that is already there written another way; it does not ask for new
-bytes. Only a change in *how many bytes are wanted* rolls again -- a different
+**Re-spelling is not re-rolling.** Switching between UUID, Hex, Base64 and
+Integer shows the draw that is already there written another way; it does not
+ask for new bytes. Only a change in *how many bytes are wanted* rolls again -- a different
 count, a different width, or a switch to or from UUID when the width is not
 already sixteen.
 
@@ -503,6 +504,20 @@ except for two nibbles. A v4 UUID is not sixteen random bytes; it is sixteen
 random bytes with six of their bits spent saying which kind of UUID it is, and
 this is somewhere you can watch that happen. `drive_random.py` checks it as an
 equation rather than by eye.
+
+**Integer is a spelling, not a fourth question.** It is the same bytes read as
+one unsigned big-endian number, so `Bytes each` is what decides its range: four
+bytes is a `uint32`, eight is a `uint64`, and sixteen — the default — is a
+thirty-nine-digit value that no `Int` in this language can hold. That is why it
+goes through `BigInt`, and why it is exact rather than a double's idea of the
+number. It is also the one of the four with no shell one-liner behind it, which
+is most of the argument for having it.
+
+It is deliberately *not* "a random number between 1 and 100". That is a
+different question with a real trap in it — the modulo of a uniform draw is not
+uniform unless the range divides the draw — and answering it badly would be
+worse than not answering it. This tool spells a draw; a range would be a tool
+that shapes one.
 
 The width field is *disabled* rather than ignored while UUID is picked, because
 sixteen is not a default there but a definition -- and a disabled view is

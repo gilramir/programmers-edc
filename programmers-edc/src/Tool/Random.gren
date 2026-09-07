@@ -1,13 +1,27 @@
 module Tool.Random exposing (Model, Msg, Step, answered, command, init, menu, menuItem, update, view, windowId)
 
-{-| Random values: a v4 UUID, or a run of random bytes spelled as hex or as
-base64.
+{-| Random values: a v4 UUID, or a run of random bytes spelled as hex, as
+base64, or as a decimal integer.
 
-The three things a programmer asks a shell for when they need a name nothing
-else has: `uuidgen`, `head -c 16 /dev/urandom | xxd -p`, and the same thing
-through `base64`. All three are one pipeline too long to remember correctly at
-the moment you want them, and two of them have a trailing newline waiting to
-ruin the paste.
+The things a programmer asks a shell for when they need a name nothing else
+has: `uuidgen`, `head -c 16 /dev/urandom | xxd -p`, and the same thing through
+`base64`. All of them are one pipeline too long to remember correctly at the
+moment you want them, and two of them have a trailing newline waiting to ruin
+the paste.
+
+**Integer is the fourth spelling and not a fourth question.** It is the same
+bytes read as one unsigned big-endian number, so `Bytes each` is what decides
+its range: four bytes is a `uint32`, eight is a `uint64`, and sixteen -- the
+default -- is a thirty-nine-digit number that no `Int` in this language can
+hold. That is why it goes through `BigInt`, and why it is *exact*: the value on
+the screen is the bytes, not a double's idea of them. There is no shell
+one-liner for this one at all, which is the argument for having it.
+
+**It is deliberately not "a random number between 1 and 100".** That is a
+different question with a real trap in it -- the modulo of a uniform draw is
+not uniform unless the range divides the draw -- and answering it badly is
+worse than not answering it. This tool spells a draw; a range would be a tool
+that shapes one.
 
 **This is the one tool whose window is not a function of its model**, and that
 is the whole of its design. Every other tool in predc renders what it was
@@ -18,9 +32,9 @@ happened -- and putting them there costs a `Task`, a `Cmd`, a `Msg` and this
 module's `Step`. `Crypto.getRandomUInt8Values` is the source, which is
 `crypto.getRandomValues` underneath: the platform's CSPRNG and not `Math.random`.
 
-**Re-spelling is not re-rolling.** Switching between Hex and Base64 shows the
-same bytes written two ways, and the display changes without a single new byte
-being asked for -- because the two are the same draw and saying otherwise would
+**Re-spelling is not re-rolling.** Switching between Hex, Base64 and Integer
+shows the same bytes written three ways, and the display changes without a
+single new byte being asked for -- because the two are the same draw and saying otherwise would
 be a lie about what you are looking at. Only a change in *how many bytes are
 wanted* rolls again: a different count, a different width, or a switch to or
 from UUID when the width is not already sixteen. That rule is one line in
@@ -35,6 +49,7 @@ you can watch that happen.
 
 -}
 
+import BigInt
 import Bitwise
 import Bytes exposing (Bytes)
 import Bytes.Decode as Decode
@@ -111,6 +126,7 @@ menu =
             , Item { title = "~U~UID v4", cmd = "random.kind.uuid", key = "", shortcut = "" }
             , Item { title = "~H~ex", cmd = "random.kind.hex", key = "", shortcut = "" }
             , Item { title = "~B~ase64", cmd = "random.kind.base64", key = "", shortcut = "" }
+            , Item { title = "~I~nteger", cmd = "random.kind.int", key = "", shortcut = "" }
             , Tui.Separator
             , Item { title = "Cop~y~ them all", cmd = "random.copy", key = "", shortcut = "y" }
             ]
@@ -124,6 +140,7 @@ type Kind
     = Uuid
     | Hex
     | Base64
+    | Integer
 
 
 type alias Model =
@@ -379,6 +396,9 @@ update ports event model =
             else if cmd == "random.kind.base64" then
                 respell { model | kind = Base64 } model
 
+            else if cmd == "random.kind.int" then
+                respell { model | kind = Integer } model
+
             else
                 still model
 
@@ -451,6 +471,9 @@ kindAt index =
         2 ->
             Base64
 
+        3 ->
+            Integer
+
         _ ->
             Uuid
 
@@ -467,17 +490,24 @@ kindIndex kind =
         Base64 ->
             2
 
+        Integer ->
+            3
+
 
 {-| How many rows of a window this tall are the canvas.
 
-Six are spoken for: two frame rows, the row of controls, the blank under it,
-and the two rows the canvas keeps for its own footer and message. Written once
-and used twice -- to lay the window out and to read a `WindowResized` -- which
-is the hex viewer's arithmetic and the same reason for it.
+Seven are spoken for: two frame rows, the four the radio cluster is tall, the
+blank under it, and the two rows the canvas keeps for its own footer and
+message -- which is nine, less the two the controls share their rows with. It
+was six while the cluster was three rows, and adding Integer to it is what
+pushed the values up against the buttons: the fourth button took the blank row
+rather than a row of its own. Written once and used twice, to lay the window
+out and to read a `WindowResized`, which is the hex viewer's arithmetic and the
+same reason for it.
 -}
 rowsIn : Int -> Int
 rowsIn height =
-    max 1 (height - 6)
+    max 1 (height - 7)
 
 
 -- BYTES
@@ -546,6 +576,39 @@ spell kind bytes =
             -- nobody can check by eye.
             Tool.Encode.base64Encode bytes
 
+        Integer ->
+            decimalOf bytes
+
+
+{-| The bytes as one unsigned integer, big-endian, in decimal.
+
+**Through the hex rather than by arithmetic**, which is the same argument the
+base64 line makes one branch up. `BigInt.fromStringWithBase 16` is given the
+string `Hex` would have drawn, so the two spellings are the same number by
+construction rather than by two pieces of code agreeing -- and folding
+`acc * 256 + byte` by hand would be that second piece. It also means a driver
+can check one against the other with `int(hex, 16)` and be checking predc
+rather than checking itself.
+
+Big-endian because that is what the hex beside it reads as, and because a
+sixteen-byte value read the other way round would not be the number the same
+bytes are in every other window of this program.
+
+`Maybe.withDefault "0"` cannot happen -- `hex2` emits two hex digits per byte
+and nothing else -- and is written rather than crashed on, because an empty
+draw is a real state (`chunk` of nothing) and `0` is what no bytes are worth.
+-}
+decimalOf : Array Int -> String
+decimalOf bytes =
+    if Array.isEmpty bytes then
+        "0"
+
+    else
+        String.join "" (Array.map hex2 bytes)
+            |> BigInt.fromStringWithBase 16
+            |> Maybe.map BigInt.toString
+            |> Maybe.withDefault "0"
+
 
 {-| Sixteen bytes as a UUID, version 4, in the shape RFC 9562 asks for.
 
@@ -601,7 +664,7 @@ view : Inks -> Model -> Tui.Window
 view inks model =
     { id = windowId
     , title = "Random values"
-    , rect = { x1 = 0, y1 = 1, x2 = 79, y2 = 7 + openRows }
+    , rect = { x1 = 0, y1 = 1, x2 = 79, y2 = 8 + openRows }
     , resize = Tui.resizeHeight
     , palette = Tui.BlueWindow
     , canClose = True
@@ -667,12 +730,14 @@ view inks model =
             }
         , RadioButtons
             { id = kindId
-            -- Four rows tall for three items, because a cluster flows its
-            -- items down the rectangle before it goes across: three rows would
-            -- also do, and a fourth costs nothing and leaves room to add a
-            -- kind without discovering the column rule again.
-            , rect = { x1 = 2, y1 = 1, x2 = 17, y2 = 4 }
-            , items = [ "UUID v4", "Hex", "Base64" ]
+            -- Four rows tall, which is now four rows for four items: a
+            -- cluster flows its items down the rectangle before it goes
+            -- across, and a cluster given more items than rows draws fewer
+            -- buttons than it was handed and says nothing -- which is the
+            -- fixed-space failure this repo keeps meeting. The fourth row was
+            -- put here empty when there were three kinds, for exactly this.
+            , rect = { x1 = 2, y1 = 1, x2 = 17, y2 = 5 }
+            , items = [ "UUID v4", "Hex", "Base64", "Integer" ]
             , selected = kindIndex model.kind
             , available = []
             }
@@ -714,7 +779,10 @@ view inks model =
             , view =
                 Canvas
                     { id = canvasId
-                    , rect = { x1 = 1, y1 = 5, x2 = 1 + lineWidth, y2 = 5 + openRows }
+                    -- Row 6 and not row 5: the cluster above is four rows now
+                    -- and row 5 is the blank that keeps the values off the
+                    -- buttons.
+                    , rect = { x1 = 1, y1 = 6, x2 = 1 + lineWidth, y2 = 6 + openRows }
                     , lines = display inks model
                     , cursor = Nothing
                     , takesFocus = False
@@ -785,6 +853,16 @@ summary model hidden =
             when model.kind is
                 Uuid ->
                     made ++ " UUIDs, version 4"
+
+                -- The width is what decides the range, so it is the width the
+                -- line names -- `8 random bytes` and `unsigned, 8 bytes wide`
+                -- are the same fact, and the second is the one somebody asks
+                -- about a number.
+                Integer ->
+                    made
+                        ++ " unsigned integers, "
+                        ++ String.fromInt want.wide
+                        ++ " bytes wide"
 
                 _ ->
                     made ++ " x " ++ String.fromInt want.wide ++ " random bytes"
