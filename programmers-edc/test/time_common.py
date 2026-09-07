@@ -125,7 +125,7 @@ def retype(app, where, text, settle=1.0):
     every one of those keystrokes recomputes the whole table, and a field that
     is briefly empty must leave the other rows alone."""
     app.click(where[0], where[1], settle=0.6)
-    app.send(b"\x1b[3~" * 24, settle=0.8)
+    app.send(b"\x1b[3~" * 24, wait=0.8)
     app.send(text.encode(), settle=settle)
 
 
@@ -139,8 +139,8 @@ def type_in_find(app, text, clear=False):
         if "Find" in line:
             app.click(line.index("Find") + 30, r + 1, settle=0.6)
             if clear:
-                app.send(b"\x1b[3~" * 40, settle=0.6)
-                app.send(b"\x7f" * 40, settle=0.6)
+                app.send(b"\x1b[3~" * 40, wait=0.6)
+                app.send(b"\x7f" * 40, wait=0.6)
             app.send(text.encode(), settle=1.4)
             return True
     return False

@@ -112,7 +112,7 @@ def main():
 
     # Twelve steps back is the same month a year earlier, which is the thing
     # the C++ view cannot be asked for at all.
-    app.send(b"\x1b[A" * 12, settle=1.2)
+    app.send(b"\x1b[A" * 12, wait=1.2)
     check("a year back is the same month, one year earlier",
           heading(app.render()) == (MONTHS[today.month - 1], today.year - 1),
           str(heading(app.render())))

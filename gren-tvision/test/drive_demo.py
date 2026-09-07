@@ -199,8 +199,13 @@ def main():
     # on anything that is not already selected.
     note, at = topmost_note(app)
     check("a note is where its frame says it is", at is not None, app.render())
-    app.right_click(at[0] + 3, at[1] + 2, settle=1.0)
-    app.right_click(at[0] + 3, at[1] + 2, settle=1.2)
+    # `wait` and not `settle` for both: the screen stops moving before the
+    # model has heard about either click. The first is spent activating the
+    # window and draws almost nothing; the second puts the menu up and the
+    # event that opened it arrives after it. A wait that stops when the screen
+    # stops reads the event log a beat too early.
+    app.right_click(at[0] + 3, at[1] + 2, wait=1.0)
+    app.right_click(at[0] + 3, at[1] + 2, wait=1.2)
     opened = app.render()
     check("a right click opened a context menu",
           all(re.search(pattern, opened)

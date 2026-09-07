@@ -30,6 +30,13 @@ import unicodedata
 
 COLS, ROWS = 80, 25
 
+# How long the terminal has to say nothing before `settle` calls it settled.
+# Two hundred milliseconds against a repaint that arrives in single figures --
+# generous, and generous is what it should be, since the cost of being wrong is
+# a driver reading a half-drawn screen and the cost of being slow is a fifth of
+# a second on a wait that was a whole one.
+QUIET = 0.2
+
 # What a menu, a frame and the desktop are drawn out of. None of it is text, so
 # none of it can be the hot letter or part of a title.
 MENU_FRAME = " ░│┌┐└┘─╔╗╚╝║═[]■↕↑►"
@@ -191,14 +198,38 @@ class Pty:
         self.widest, self.tallest = max(self.widest, cols), max(self.tallest, rows)
         fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
         os.kill(self.pid, signal.SIGWINCH)
-        self.pump(settle)
+        self.settle(settle)
 
-    def pump(self, seconds):
-        """Read for `seconds`, keeping everything."""
+    def pump(self, seconds, until_quiet=False):
+        """Read for `seconds`, keeping everything.
+
+        `until_quiet` stops early once the terminal has said nothing for
+        `QUIET` -- **and only if it said something first**. That proviso is the
+        whole safety of it: a driver that pumps expecting *nothing* to happen
+        (typing at a disabled view, checking a key is refused) waits exactly as
+        long as it always did, because nothing ever arrives to start the quiet
+        clock. What is cut short is the ordinary case, where a keystroke is
+        answered in a few milliseconds and the rest of the second is the driver
+        sleeping through an application that finished.
+
+        It is off here and on in `settle`, which is where the time is: 765 of
+        the suite's 942 seconds of scripted sleeping is a `settle=` on a `send`
+        or a `click`, and a `settle` is by name a wait for the screen to stop
+        moving. A bare `pump(n)` still means n, because the calls that spell it
+        that way are the ones waiting for something to *happen* -- a
+        `Time.every` tick, a second to pass -- and nothing on this side can
+        tell that apart from an application that has gone quiet for good.
+        """
         end = time.time() + seconds
+        quiet_after = None
         while time.time() < end:
-            r, _, _ = select.select([self.fd], [], [], max(0, end - time.time()))
+            timeout = max(0, end - time.time())
+            if quiet_after is not None:
+                timeout = min(timeout, max(0, quiet_after - time.time()))
+            r, _, _ = select.select([self.fd], [], [], timeout)
             if not r:
+                if quiet_after is not None and time.time() >= quiet_after:
+                    return
                 continue
             try:
                 chunk = os.read(self.fd, 65536)
@@ -209,6 +240,12 @@ class Pty:
             if not chunk:
                 return
             self.buf += chunk
+            if until_quiet:
+                quiet_after = time.time() + QUIET
+
+    def settle(self, seconds):
+        """Wait up to `seconds` for the screen to stop moving."""
+        self.pump(seconds, until_quiet=True)
 
     def screen(self):
         """Everything ever written, escapes stripped. Good for "did X appear"."""
@@ -339,11 +376,27 @@ class Pty:
         screen = self.display()
         return (screen.col, screen.row)
 
-    def send(self, data, settle=0.6):
-        os.write(self.fd, data)
-        self.pump(settle)
+    def send(self, data, settle=0.6, wait=None):
+        """Type at the terminal, then wait for the screen to stop moving.
 
-    def click(self, col, row, settle=0.5, button=0):
+        `wait=n` instead waits the whole n, for the calls where what is being
+        waited for is not on the screen at all: an autosave's debounce, a
+        megabyte being copied, a file being written. Those look exactly like an
+        application that has finished, because they are one -- the work is
+        going on somewhere a terminal cannot show.
+
+        **A burst of keystrokes wants it too**, and that is the less obvious
+        one: sixty Downs is sixty events, the pump chews through them in
+        batches, and the screen is perfectly still between two batches. Every
+        `send` of a repeated key in this suite waits rather than settles.
+        """
+        os.write(self.fd, data)
+        if wait is not None:
+            self.pump(wait)
+        else:
+            self.settle(settle)
+
+    def click(self, col, row, settle=0.5, button=0, wait=None):
         """One click at 1-based (col, row), in SGR mouse encoding.
 
         TVision turns on modes 1000, 1002 and 1006 at startup, so it is
@@ -354,10 +407,10 @@ class Pty:
         which is the one a context menu is opened with.
         """
         self.send(f"\x1b[<{button};{col};{row}M".encode(), settle=0.15)
-        self.send(f"\x1b[<{button};{col};{row}m".encode(), settle=settle)
+        self.send(f"\x1b[<{button};{col};{row}m".encode(), settle=settle, wait=wait)
 
-    def right_click(self, col, row, settle=0.5):
-        self.click(col, row, settle=settle, button=2)
+    def right_click(self, col, row, settle=0.5, wait=None):
+        self.click(col, row, settle=settle, button=2, wait=wait)
 
     def drag(self, path, settle=0.5, button=0):
         """Press at the first 1-based (col, row) of `path`, move through the

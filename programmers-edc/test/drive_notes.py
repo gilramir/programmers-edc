@@ -193,7 +193,10 @@ def main():
           status(app).startswith("2 notes."), status(app))
 
     # ---- it saves without being told to ----------------------------------
-    app.send(b" edited", settle=1.0)
+    # `wait` and not `settle` for every edit in this driver: the autosave is
+    # a debounce and a disk write, and neither moves the screen -- so a wait
+    # that stops when the screen stops reads the file before it was written.
+    app.send(b" edited", wait=1.0)
     check("what is typed goes into the note that is open",
           text(app)[0] == " editedfirst note", text(app)[:2])
     check("and reaches the disk with no save key pressed, because quit never "
@@ -219,7 +222,7 @@ def main():
           where.bg_at(2, 3) != where.bg_at(2, 2),
           f"{where.bg_at(2, 3)} vs {where.bg_at(2, 2)}")
 
-    app.send(b" ", settle=1.5)
+    app.send(b" ", wait=1.5)
     check("Space opens the one the highlight is on",
           "Notes - Beta" in title(app), title(app))
     check("and the editor is holding its text now",
@@ -229,14 +232,14 @@ def main():
           open(os.path.join(here, "Alpha.md")).read())
 
     # ---- Tab belongs to the editor ---------------------------------------
-    app.send(b"\t", settle=1.0)
+    app.send(b"\t", wait=1.0)
     check("Tab puts a tab in the note rather than leaving the editor, which is "
           "why the window has F4",
           saved(app, os.path.join(here, "Beta.md")).startswith("\tsecond note"),
           repr(open(os.path.join(here, "Beta.md")).read()))
 
     # ---- F2 says so ------------------------------------------------------
-    app.send(F2, settle=1.5)
+    app.send(F2, wait=1.5)
     check("F2 says something even when the autosave has already been round, "
           "because a save key that sometimes does nothing visible is one "
           "nobody believes",
@@ -280,7 +283,7 @@ def main():
     app.send(b" two", settle=0.2)
     menu(app, "Note")
     entry(app, "Rename")
-    app.send(b"\x08" * 24, settle=0.4)
+    app.send(b"\x08" * 24, wait=0.4)
     app.send(b"Checklist", settle=0.4)
     app.send(b"\r", settle=1.5)
     check("a rename moves the file",
@@ -344,7 +347,7 @@ def main():
 
     # Into the middle of the long paragraph, sixty columns along.
     app.send(DOWN, settle=0.5)
-    app.send(RIGHT * 60, settle=0.8)
+    app.send(RIGHT * 60, wait=0.8)
     app.send(F8, settle=1.5)
     wrapped = saved(app, file).split("\n")
     check("F8 wraps the paragraph the caret is in",
@@ -358,7 +361,7 @@ def main():
 
     # The caret. `setEditorText` puts it at the top, so without the new
     # binding call this types into the word "head".
-    app.send(b"<HERE>", settle=1.2)
+    app.send(b"<HERE>", wait=1.2)
     check("the caret comes back to the same place in the prose, which is the "
           "whole reason setEditorCaret exists",
           "juli<HERE>et" in saved(app, file),

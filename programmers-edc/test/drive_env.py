@@ -159,7 +159,7 @@ def clear(app):
     """
     left, _, row = frame(app)
     app.click(left + 9 + 24, row + 2, settle=0.7)
-    app.send(b"\x08" * 32, settle=1.0)
+    app.send(b"\x08" * 32, wait=1.0)
 
 
 def child_env_size(env):
@@ -369,11 +369,11 @@ def main():
     app.send(b"\x1b[B", settle=0.7)
     check("Down does not scroll while the cursor is still on screen",
           listed(app)[0] == first, (first, listed(app)[0]))
-    app.send(b"\x1b[B" * 60, settle=1.2)
+    app.send(b"\x1b[B" * 60, wait=1.2)
     bottom = listed(app)[0]
     check("but the list follows the cursor off the end of the window",
           bottom != first, (first, bottom))
-    app.send(b"\x1b[B" * 10, settle=0.9)
+    app.send(b"\x1b[B" * 10, wait=0.9)
     check("and stops there rather than scrolling past it",
           listed(app)[0] == bottom and listed(app)[-1].strip() != "",
           (bottom, listed(app)[0]))

@@ -9347,3 +9347,47 @@ rather than assuming it, because the ASAN wrapper adds four of its own; it asks
 through `harness.tape_env` now as well, which is the same answer one wrapper
 further out. *A test that asserts on the process's own environment is asserting
 on whatever wraps it*, and the harness had just become part of that.
+
+## The cheaper driver, which was a `settle` all along
+
+`CLAUDE.md` has asked for this one for a while: past thirty suites the wall
+clock is the *sum* over sixteen cores rather than the slowest member, and the
+only thing left that lowers a sum is a driver that costs less. It named where
+to look -- `pump()` sleeping its whole duration whether or not the application
+had gone quiet -- and the measurement bears it out. Of 942 seconds of scripted
+sleeping across the suite, **765 of it is a `settle=` on a `send` or a
+`click`**, and a settle is by name a wait for the screen to stop moving.
+
+So `send` settles now: it stops `QUIET` -- two hundred milliseconds -- after the
+terminal stops talking. **And only if it talked**, which is the whole safety of
+it: a driver that types at a disabled view and expects nothing waits exactly as
+long as it always did, because nothing ever arrives to start the quiet clock.
+
+    53 suites in 150.2s   sum 1826.2s   floor 114.1s   slowest 93.5s
+    53 suites in  82.6s   sum  924.5s   floor  57.8s   slowest 40.9s
+
+### The four that broke, which are one thing four times
+
+Turning it on failed four drivers, in every run and in the same places, and
+each was the same mistake: **a wait for something the screen does not show**.
+
+  - `hex_yank` copies a megabyte, which is a megabyte of work with nothing
+    drawn for it.
+  - `notes` and `record` edit a note, and the autosave is a debounce and a disk
+    write -- neither of which moves anything.
+  - `demo` right-clicks a window, and the model hears about the click after the
+    menu is already on the screen.
+
+Those pass `wait=n` to `send` now and get the whole n. The distinction is the
+useful part: `settle` waits for the *screen*, `wait` waits for the *program*,
+and a driver knows which it meant even when the two look identical from
+outside.
+
+### And the one that flapped, which is the same thing again
+
+`drive_env.py` then failed one run in two on `app.send(b"\x1b[B" * 60, ...)`.
+**A burst of keys is a queue of work rather than one gesture**: sixty Downs is
+sixty events, the pump chews through them in batches, and between two batches
+the screen is perfectly still. Every repeated-key `send` in the suite waits
+rather than settles now -- eleven of them, found by their own shape rather than
+by a list -- and three runs since have been green and identical.

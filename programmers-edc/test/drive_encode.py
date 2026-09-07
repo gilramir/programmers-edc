@@ -75,7 +75,7 @@ def go(app, kind, way, text):
     menu(app, "Transform")
     entry(app, way)
     app.send(b"\x1bi", settle=0.5)              # Alt-I reaches the Input field
-    app.send(b"\x1b[3~" * 60, settle=0.3)
+    app.send(b"\x1b[3~" * 60, wait=0.3)
     app.send(text.encode(), settle=0.9)
     return out(app)
 

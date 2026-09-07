@@ -36,15 +36,29 @@ in three of seventeen phases) and wanted four files; time was flat (36s, then
 **And know when to stop, because that point has been passed.** Past about
 thirty suites on sixteen cores the run is no longer its slowest member: the sum
 matters again, and it puts a floor under the wall clock that no amount of
-further splitting goes below. At 52 suites (2026-09-06) the sum is 1749.8s,
-which over 16 cores is a **109.4s floor** against a 150.2s run and a 93.1s
-slowest driver (`programmers-edc/encode`). Splitting `encode` would buy
-essentially nothing -- it is already under the floor. **The only win left is a
-*cheaper* driver, not a smaller one**, and `pump()` sleeping its whole duration
-whether or not the app has gone quiet is where that would come from. Re-measure
-the sum before believing any of these numbers; they were 972.8s and a 60.8s
-floor at 37 suites. That script can also be run directly, which is what to do
-while working on one:
+further splitting goes below. At 53 suites (2026-09-07) the sum is 924.5s,
+which over 16 cores is a **57.8s floor** against an 82.6s run and a 40.9s
+slowest driver (`programmers-edc/encode`). Splitting anything would buy
+essentially nothing.
+
+That was the cheaper driver this file used to ask for, and it was `pump()`
+sleeping its whole duration whether or not the app had gone quiet: **a `send`
+settles now rather than waits**, returning `QUIET` (200ms) after the terminal
+stops talking, which took the run from 150.2s to 82.6s and the sum from 1749.8s
+to 924.5s. Three calls in four in this suite are a `settle=` on a `send` or a
+`click`, and a settle is by name a wait for the screen to stop moving.
+
+**What must still wait is anything the screen does not show**, and there are
+three kinds: an autosave's debounce, a megabyte being copied, a click the model
+hears about after the menu is already up. Those pass `wait=n` to `send` instead
+and get the whole n. So does **a burst of repeated keys** -- sixty Downs is
+sixty events, the pump chews through them in batches, and the screen is
+perfectly still between two of them. A bare `pump(n)` has always meant n and
+still does.
+
+Re-measure the sum before believing any of these numbers; they were 972.8s and
+a 60.8s floor at 37 suites, and 1749.8s at 52. That script can also be run
+directly, which is what to do while working on one:
 
 ```sh
 devbox run -- python3 tools/run_tests.py entries   # just this one

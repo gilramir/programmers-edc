@@ -251,7 +251,9 @@ def main():
     tape = tape_path()
     app = start(home, "--record", tape, "notes")
     check("the note is open", NOTE in app.render(), app.render())
-    app.send(b"x", settle=1.5)          # an edit, so the autosave reads it back
+    # `wait`: the autosave is a debounce and a disk write, neither of which
+    # moves the screen, so settling on a still screen settles too early.
+    app.send(b"x", wait=1.5)            # an edit, so the autosave reads it back
     settled(app, tape)
     app.send(ALT_X, settle=1.0)
     app.wait(timeout=8)
@@ -282,7 +284,7 @@ def main():
     home = home_with({"Alpha.md": NOTE + "\n"})
     tape = tape_path()
     app = start(home, "--record-verbatim", tape, "notes")
-    app.send(b"x", settle=1.5)
+    app.send(b"x", wait=1.5)            # the autosave again, as above
     settled(app, tape)
     app.send(ALT_X, settle=1.0)
     app.wait(timeout=8)

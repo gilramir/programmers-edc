@@ -129,7 +129,10 @@ def main():
           "MARK" in status(app), status(app))
 
     app.send(b"y", settle=1.2)
-    app.send(b"\x1by", settle=6.0)
+    # `wait` and not `settle`: copying a megabyte is a megabyte of work with
+    # nothing on the screen to show for it, so a driver that stopped when the
+    # screen stopped would read the clipboard before it was filled.
+    app.send(b"\x1by", wait=6.0)
     check("Yes copies the whole megabyte",
           "Copied 1048577 bytes as hex" in status(app), status(app))
     forget_copies(app)

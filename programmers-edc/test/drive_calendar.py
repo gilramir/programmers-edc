@@ -95,7 +95,7 @@ def go_to(app, year, month, name=None):
     question, one answer, and no dependence on what month it is today.
     """
     app.send(b"g", settle=1.0)
-    app.send(b"\x1b[3~" * 12, settle=0.3)              # Del clears the field
+    app.send(b"\x1b[3~" * 12, wait=0.3)              # Del clears the field
     app.send((name or str(month)).encode(), settle=0.3)
     app.send(b"\t", settle=0.3)
     app.send(b"\x1b[3~" * 6, settle=0.3)
