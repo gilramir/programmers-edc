@@ -9290,3 +9290,60 @@ program an answer to a question it has not asked, and everything after belongs
 to a conversation neither side is having. The rule now applies in both places
 that can feed early: the one-step lookahead past a barrier, and the
 set-aside.
+
+## A microtask, which is the point a pump delivers at
+
+The previous entry left a sharp question: how does a driver hand a Gren program
+a message at the same logical point without re-entering its scheduler? The
+answer is `queueMicrotask`, and it is worth the three lines it takes because it
+is the difference between a replay check that flaps and one every commit runs.
+
+Both ends had been measured and both were wrong. **Synchronously**, from inside
+the subscription that brought the cursor to the message: right about the
+coupling, but it re-enters the scheduler mid-dispatch and one update's two
+effects come back in either order depending on the machine. **A turn later**,
+with `setTimeout`: perfectly deterministic, and wrong about thirteen drivers,
+because a recording's messages arrive coupled to the program having finished
+with the one before -- Turbo Vision's pump delivers the next event only once
+the last render has been applied -- and a free turn breaks the coupling.
+
+A microtask is exactly between. The current dispatch unwinds first, so nothing
+is re-entered; it runs before any timer or I/O, so nothing gets in front of it.
+On the same eight-tape corpus: synchronous was six failures in twenty-four and
+flapping, `setTimeout` was nine and steady, a microtask was **six and steady**
+-- and steady is what made the last two findable.
+
+A message on a program's *own* port stays synchronous, because that is where
+its launcher puts it: `bin/timezones.js` answers `intlOut` from inside the
+subscription, and the tape's order is the order that produces.
+
+### And a barrier bars its own port only
+
+The last two went with the rule one level up from the window rule. An inbound
+message is a barrier -- nothing recorded after it can have been produced before
+it was sent -- but that is only true of *its own port*. Where a render sits
+relative to a reply another program's launcher answered on another port is the
+recording machine's business, exactly as the order of two ports between two
+inputs is. Making the barrier port-local took the corpus from six failures to
+**none**, and the suite from thirty-five of thirty-seven to all of them, three
+runs in a row.
+
+One thing narrowed with it rather than widened: the expectation *named* when
+nothing matches is still the nearest one, because past a message going in
+"here" is somewhere else, and a program saying something the tape does not have
+reads better as that than as a mismatch against a line further down.
+
+### On by default, at last
+
+`TVNODE_TAPES=0` turns it off now rather than `=1` turning it on. Every session
+every driver runs is recorded and replayed against the program with no terminal
+-- 37 of them -- and the suite is 153.9s either way, because a replay is
+milliseconds against a pty driver that is mostly asleep.
+
+The last thing in the way was the harness itself: it sets
+`TUI_RECORD_VERBATIM`, which is **one more variable the program was given**, and
+`drive_env.py` counts those exactly. That driver already asks for the number
+rather than assuming it, because the ASAN wrapper adds four of its own; it asks
+through `harness.tape_env` now as well, which is the same answer one wrapper
+further out. *A test that asserts on the process's own environment is asserting
+on whatever wraps it*, and the harness had just become part of that.

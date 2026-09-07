@@ -59,20 +59,37 @@ _ptys = []
 # tape that will not run again, and it shows up on the driver that happened to
 # touch it rather than on somebody's afternoon.
 #
-# **`TVNODE_TAPES=1` turns it on, and it is off by default**, which is not the
-# ambition and is the honest state. On a full run 43 of 53 drivers replay
-# exactly; the ten that do not are three kinds. Three of them reach outside the
-# port boundary through Tasks -- `watch` spawns child processes and watches a
-# directory, `dir` lists one, `notes` reads and writes files -- and those are
-# marked below and will never replay without recording somebody's disk. The
-# rest are races: the same driver replays on one run and not the next, because
-# a recording captures one interleaving of the program's own chains with the
-# terminal's messages and a replay reproduces a different legal one. **A check
-# that flaps is worse than no check**, so this waits until it does not.
-_TAPES = os.environ.get("TVNODE_TAPES") == "1"
+# **On by default**, which took four goes to earn: `TVNODE_TAPES=0` turns it
+# off. Every session every driver runs is replayed, and all thirty-seven of
+# them reproduce, three runs in a row. Six drivers are marked below as never
+# replayable, each with its reason, and all six reasons are one reason -- the
+# program reaches outside the port boundary through a Task, so what it read is
+# on nobody's tape.
+_TAPES = os.environ.get("TVNODE_TAPES", "1") != "0"
 _tape_dir = None
 _replay = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                        "..", "..", "gren-tvision-runtime", "bin", "gren-replay.js")
+
+
+def tape_env(env, argv=()):
+    """The environment a `Pty` will actually hand the child.
+
+    The harness sets `TUI_RECORD_VERBATIM` so that every session is recorded
+    and replayed, and that makes it **one more variable the program was
+    given** -- so a driver that counts them is now counting the harness as
+    well as the launcher. `drive_env.py` already asks for that number rather
+    than assuming it, because the ASAN wrapper adds four of its own; this is
+    the other half of the same answer, and the reason it is a function here
+    rather than a `+ 1` there.
+
+    The value is empty until `Pty` fills it in, which is what says a tape is
+    wanted: a caller already recording one of its own is left alone.
+    """
+    if not _TAPES or "TUI_RECORD" in env or "TUI_RECORD_VERBATIM" in env:
+        return env
+    if any(a in ("--record", "--record-verbatim") for a in argv):
+        return env
+    return dict(env, TUI_RECORD_VERBATIM="")
 
 
 def _tapes_go():
@@ -134,9 +151,8 @@ class Pty:
         # of its own -- `drive_record.py` passes `--record`, and two recorders
         # writing the same program's messages would be one tape too many.
         self.tape = None
-        if _TAPES and "TUI_RECORD" not in env and not any(
-            a in ("--record", "--record-verbatim") for a in argv
-        ):
+        env = tape_env(env, argv)
+        if env.get("TUI_RECORD_VERBATIM") == "":
             self.tape = os.path.join(_tapes_go(), f"pty{len(_ptys)}.tape")
             # Verbatim, which is the one place that is right. A tape withholds
             # documents because they are the user's; a driver's clipboard and

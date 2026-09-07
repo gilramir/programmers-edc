@@ -31,7 +31,7 @@ ROOT = os.path.dirname(HERE)
 LAUNCHER = os.path.join(ROOT, "bin", "predc.js")
 sys.path.insert(0, os.path.join(ROOT, "..", "tvision-node", "test"))
 
-from harness import Pty, Checks, node_argv
+from harness import Pty, Checks, node_argv, tape_env
 
 # A whole environment, and nothing inherited. `env -i` in spirit: every count
 # below is exact because this is very nearly the entire list the process will
@@ -179,8 +179,12 @@ def child_env_size(env):
     by hand.
     """
     argv = node_argv("-e", "console.log(Object.keys(process.env).length)")
-    out = subprocess.run(argv, env=env, capture_output=True, text=True,
-                         timeout=60)
+    # And through the environment the harness will hand the program, not the
+    # one planted here: it adds `TUI_RECORD_VERBATIM` so that every session is
+    # recorded and replayed, which is one more variable on the screen. Same
+    # rule as the paragraph above, one wrapper further out.
+    out = subprocess.run(argv, env=tape_env(env), capture_output=True,
+                         text=True, timeout=60)
     return int(out.stdout.strip())
 
 

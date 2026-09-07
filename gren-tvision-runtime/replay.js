@@ -651,8 +651,13 @@ async function replay(grenModule, session, options = {}) {
       app.ports[name].send(step.message);
     };
 
+    // Set while a message is on its way in on a microtask, so that a pump
+    // called from a subscription meanwhile does not overtake it.
+    let feeding = false;
+
     /** Feed everything the cursor is standing on, until it wants output. */
     const pump = () => {
+      if (feeding) return;
       while (!done && cursor < steps.length) {
         const step = steps[cursor];
         if (step.kind === 'end') {
@@ -686,15 +691,39 @@ async function replay(grenModule, session, options = {}) {
         }
         if (options.trace) options.trace('<-', step.port || 'tui', { in: step.message.type, at: step.at });
 
-        // Fed from here, inside whatever subscription brought the cursor to
-        // it, which is a decision with a measured alternative behind it. See
-        // **the re-entrancy** in FINDINGS: feeding the binding's port a turn
-        // later instead makes the replay perfectly deterministic and wrong
-        // about thirteen drivers, because a recording's messages are coupled
+        // **On a microtask, which is the logical point a pump delivers at.**
+        //
+        // Not from here: feeding inside the subscription that brought the
+        // cursor to this step re-enters the Gren scheduler mid-dispatch, where
+        // `_Scheduler_enqueue` queues rather than runs, and one update's two
+        // effects can come back in either order depending on the machine.
+        //
+        // And not a turn later either: `setTimeout` makes a replay perfectly
+        // deterministic and wrong, because a recording's messages are coupled
         // to the program's own progress -- Turbo Vision's pump delivers the
         // next event only once the last render has been applied -- and a free
-        // turn is not.
-        app.ports[name].send(step.message);
+        // turn breaks that coupling and lets the program's own chains get
+        // ahead.
+        //
+        // A microtask is exactly between: the current dispatch unwinds first,
+        // so nothing is re-entered, and it runs before any timer or I/O, so
+        // nothing else gets in front of it.
+        //
+        // A message on another program's own port stays synchronous, because
+        // that is where its launcher puts it: `bin/timezones.js` answers
+        // `intlOut` from inside the subscription, and the tape's order is the
+        // order that produces.
+        if (step.port) {
+          app.ports[name].send(step.message);
+          continue;
+        }
+        feeding = true;
+        queueMicrotask(() => {
+          feeding = false;
+          app.ports[name].send(step.message);
+          pump();
+        });
+        return;
       }
       ended = true;
       done = allMet();
@@ -714,9 +743,29 @@ async function replay(grenModule, session, options = {}) {
      *
      * Within one port the order is asserted, and it is the whole check.
      */
-    const barrier = (from) => {
+    const barrier = (from, port) => {
       let i = from;
-      while (i < steps.length && steps[i].kind === 'expect') i += 1;
+      while (i < steps.length) {
+        const step = steps[i];
+        if (step.kind === 'expect') {
+          i += 1;
+          continue;
+        }
+        // A message going in on *another* port is not a barrier for this one.
+        // The rule is the window rule one level up: where a render sits
+        // relative to a reply the launcher answered on a different port is the
+        // recording machine's business, not the program's. A tick is the
+        // binding's own message and bars the binding's port only.
+        if (step.kind === 'send' && (step.port || 'tui') !== port) {
+          i += 1;
+          continue;
+        }
+        if (step.kind === 'tick' && port !== 'tui') {
+          i += 1;
+          continue;
+        }
+        break;
+      }
       return i;
     };
 
@@ -735,7 +784,7 @@ async function replay(grenModule, session, options = {}) {
       // repeat is skipped on the way in, and, in the wait loop, on the way out
       // of the tape.
       if (actual.out === 'render' && actual.hash === lastHash) {
-        const end = barrier(cursor);
+        const end = barrier(cursor, port);
         const wanted = steps
           .slice(cursor, end)
           .some((step) => !step.done && (step.port || 'tui') === port &&
@@ -768,6 +817,9 @@ async function replay(grenModule, session, options = {}) {
       // arrived -- an actual repeat the program *did* make matches here.
       for (let i = cursor; i < end; i += 1) {
         const step = steps[i];
+        // The window can now hold messages going in on *other* ports, and a
+        // tick, since neither bars this one. Only expectations are matched.
+        if (step.kind !== 'expect') continue;
         if (step.done) continue;
         if ((step.port || 'tui') !== port) continue;
         if (step.expected.out !== 'render') break;
@@ -786,13 +838,25 @@ async function replay(grenModule, session, options = {}) {
       // that the renders were these renders.
       let found = -1;
       let fallback = -1;
+      // An exact match may be looked for anywhere in the window, which now
+      // reaches past messages going in on other ports. The *fallback* -- the
+      // expectation named when nothing matches, so that the report says what
+      // was wanted here -- may not: past a message going in, "here" is
+      // somewhere else, and a program saying something the tape does not have
+      // is better reported as that than as a mismatch against a line further
+      // down.
+      let near = true;
       for (let i = cursor; i < end; i += 1) {
+        if (steps[i].kind !== 'expect') {
+          near = false;
+          continue;
+        }
         if (steps[i].done || (steps[i].port || 'tui') !== port) continue;
         if (steps[i].expected.out === actual.out) {
           found = i;
           break;
         }
-        if (fallback < 0) fallback = i;
+        if (fallback < 0 && near) fallback = i;
       }
       if (found < 0) found = fallback;
       // One step past the barrier, and only for an exact match. A `Cmd` that
@@ -813,7 +877,12 @@ async function replay(grenModule, session, options = {}) {
         steps[end].kind === 'send' &&
         steps
           .slice(cursor, end)
-          .some((step) => !step.done && (step.port || 'tui') === (steps[end].port || 'tui'));
+          .some(
+            (step) =>
+              step.kind === 'expect' &&
+              !step.done &&
+              (step.port || 'tui') === (steps[end].port || 'tui')
+          );
 
       if (found < 0 && !overtakes && end < steps.length && steps[end].kind === 'send') {
         for (let i = end + 1; i < steps.length && steps[i].kind === 'expect'; i += 1) {

@@ -117,43 +117,43 @@ test('a render that differs is reported, with the message fed last', async () =>
   assert.equal(result.divergence.after.message.cmd, 'tool.hex');
 });
 
-test('a message is fed the moment the cursor reaches it', async () => {
-  // From inside the subscription that brought the cursor to it, which is a
-  // decision with a measured alternative behind it: feeding the binding's port
-  // a turn later instead makes a replay perfectly deterministic and wrong
-  // about a third of the drivers, because a recording's messages are coupled
-  // to the program's own progress -- Turbo Vision's pump delivers the next
-  // event only once the last render has been applied -- and a free turn is
-  // not. FINDINGS has the numbers.
+test('a message goes in on a microtask: not re-entrantly, and before any timer', async () => {
+  // The three-way distinction, and all three were measured against real tapes.
+  //
+  // Feeding from inside the subscription that brought the cursor here
+  // re-enters the Gren scheduler mid-dispatch, and one update's two effects
+  // come back in either order depending on the machine -- a replayer that is
+  // not a function of its tape. Feeding a turn later is deterministic and
+  // wrong, because a recording's messages are coupled to the program's own
+  // progress: the pump delivers the next event only once the last render has
+  // been applied. A microtask is between: the dispatch unwinds first, and
+  // nothing on a timer gets in front.
   const order = [];
-  const first = render(1);
-  const second = render(2);
-  const t = tape([
-    expected(10, first),
-    { t: 11, in: { type: 'resized', cols: 100, rows: 28 } },
-    expected(12, second),
-    { t: 13, out: 'atInstant', port: 'intl' },
-    { t: 20, end: 'exit' },
-  ]);
+  const a = render(1);
+  const b = render(2);
   const result = await replay(
     program({
       onInit: (emit) => {
-        emit(first);
-        // Init's chain continues after the render, in the same turn: the
-        // resize has to have landed in between, which is where the recording
-        // this was taken from has it.
+        emit(a);
+        // Still inside the emit's stack: a message fed from in there would
+        // land before this line.
         order.push('init continued');
-        emit({ type: 'atInstant' }, 'intlOut');
+        setTimeout(() => order.push('timer'), 0);
       },
       onMessage: (m, emit) => {
         order.push(`got ${m.type}`);
-        emit(second);
+        emit(b);
       },
     }),
-    session(t)
+    session(tape([
+      expected(10, a),
+      { t: 11, in: { type: 'resized', cols: 100, rows: 28 } },
+      expected(12, b),
+      { t: 20, end: 'exit' },
+    ]))
   );
   assert.equal(result.ok, true, JSON.stringify(result.divergence));
-  assert.deepEqual(order, ['got resized', 'init continued']);
+  assert.deepEqual(order, ['init continued', 'got resized', 'timer']);
 });
 
 test('a program that goes quiet is a divergence, and says what was wanted', async () => {
@@ -191,9 +191,13 @@ test('a program with more to say than the tape has says so', async () => {
     }),
     session(t)
   );
+  // Caught, and reported against the next thing expected on that port rather
+  // than as an extra: since a message going in on *another* port stopped being
+  // a barrier for this one, the window reaches the render after it, and
+  // "wanted that, got this" is what comes out. Either way the tape and the
+  // program disagree and the check says so.
   assert.equal(result.ok, false);
-  assert.equal(result.extra.length, 1);
-  assert.equal(result.extra[0].port, 'tui');
+  assert.match(result.divergence.why, /the render differs/);
 });
 
 test('but what it says after the tape stops is the recorder stopping', async () => {

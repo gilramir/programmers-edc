@@ -176,7 +176,20 @@ were these screens.
 A message going *in* can be fed one step early when what the program has just
 said is exactly what the tape has on the other side of it — a `Cmd` resolving
 through a Task comes out after the render beside it, and the terminal's next
-message lands in between.
+message lands in between — but never over an unmet expectation on its own
+port, since a request and its reply share one and that would be answering a
+question nobody asked.
+
+**A message goes in on a microtask**, and getting that right is what made the
+replay a function of its tape. Feeding it from inside the subscription that
+brought the cursor to it re-enters the Gren scheduler mid-dispatch, where
+`_Scheduler_enqueue` queues rather than runs, and one update's two effects come
+back in either order depending on how busy the machine is. Feeding it a turn
+later instead is deterministic and wrong, because a recording's messages are
+coupled to the program's own progress: Turbo Vision's pump delivers the next
+event only once the last render has been applied, and a free turn lets the
+program's own chains get ahead. A microtask is between — the dispatch unwinds
+first, and nothing on a timer gets in front.
 
 And "the program has stopped" is asked rather than waited for:
 `process.getActiveResourcesInfo()` shows a file read as `FSReqCallback` and a
@@ -196,9 +209,9 @@ looks exactly like a bug in the program.
 for every session a pty driver runs, and `Checks.report` runs each tape back
 through the program with no terminal. There is nothing to add to a driver: the
 variable is the runtime's own, so fifty-odd drivers became fifty-odd replay
-tests for nothing. It is **off by default** — `TVNODE_TAPES=1` turns it on —
-because 37 of 37 replay exactly on two runs in three, and the third loses the
-time converter. Six
+tests for nothing. It is **on by default** — `TVNODE_TAPES=0` turns it off — because all 37
+reproduce, run after run, and it costs nothing on the clock: a replay is
+milliseconds against a pty driver that is mostly asleep. Six
 drivers are marked as never replayable and say why: `watch` spawns child
 processes and watches a directory, `dir` lists one, `notes` reads and writes
 files, `edit` saves the document it opened, `viewer` is pointed at a file
