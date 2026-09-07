@@ -308,22 +308,64 @@ void JsHistory::handleEvent(TEvent &event)
 
 void JsHistory::openDropDown()
 {
-    if (owner == nullptr || link == nullptr)
+    if (owner == nullptr || link == nullptr || TProgram::deskTop == nullptr)
         return;
 
-    // Borland's rectangle, unchanged (thistory.cpp:89-98): a column wider than
-    // the field on either side, seven rows of list below it, clipped to the
-    // group it opens in.
+    // Borland's rectangle is a column wider than the field on either side and
+    // then two constants, both of which are wrong for a list the model owns.
+    //
+    // `r.b.y += 7` (thistory.cpp:93) is a *fixed* seven rows, so the drop-down
+    // shows six items whether the list holds three or thirty and whatever the
+    // terminal is. That number made sense for what THistory was for -- a
+    // recent-values buffer, capped at whatever fits a global block -- and it
+    // makes none for a list a program hands over: predc's calendar offers the
+    // twelve months and could show half of them.
+    //
+    // `r.intersect(owner->getExtent())` is the other one, and it is the reason
+    // sizing to the list is not enough on its own. `owner` is the *dialog*, so
+    // Borland's drop-down cannot leave the box it belongs to -- which means a
+    // program wanting to show twelve of anything would have to make its dialog
+    // fourteen rows taller than its contents and leave the difference blank,
+    // to give a transient window somewhere to be. That is the tail wagging the
+    // dog, and it is not what a drop-down does anywhere else: it opens over
+    // whatever is behind it.
+    //
+    // So: as many rows as there are items, clipped to the desktop, and opened
+    // on the desktop. Which is what the context menu already does a few
+    // hundred lines away -- `openLocalModal(TProgram::deskTop, popup, ...)` in
+    // app.cc with a rectangle out to the desktop's own extent -- so this is
+    // the binding agreeing with itself rather than a new idea.
     TRect r = link->getBounds();
     r.a.x--;
     r.b.x++;
     r.a.y--;
-    r.b.y += 7;
-    r.intersect(owner->getExtent());
-    r.b.y--;
+    r.b.y += (int) items.size() + 1;
+
+    // Into the desktop's coordinates, since that is what it opens in now.
+    TRect desk(TProgram::deskTop->makeLocal(owner->makeGlobal(r.a)),
+               TProgram::deskTop->makeLocal(owner->makeGlobal(r.b)));
+    TRect room = TProgram::deskTop->getExtent();
+
+    // Above the field instead, when it does not fit below and does fit above.
+    // The rule every drop-down has, and worth having here rather than only
+    // clipping: a field near the foot of the desktop is exactly where a list
+    // clipped to two rows is least usable, and the room is right there.
+    if (desk.b.y > room.b.y)
+        {
+        int wanted = desk.b.y - desk.a.y;
+        int below = room.b.y - desk.a.y;
+        // The field's own top edge, which is one row below where `r` starts.
+        int fieldTop = desk.a.y + 1;
+        if (fieldTop - room.a.y > below)
+            desk = TRect(desk.a.x, std::max((int) room.a.y, fieldTop - wanted),
+                         desk.b.x, fieldTop);
+        }
+
+    desk.intersect(room);
+    desk.b.y--;
 
     g_pendingHistoryItems = &items;
-    JsHistoryWindow *window = new JsHistoryWindow(r);
+    JsHistoryWindow *window = new JsHistoryWindow(desk);
     g_pendingHistoryItems = nullptr;
 
     // Captured by id rather than by `this`. The model keeps running behind a
@@ -332,7 +374,7 @@ void JsHistory::openDropDown()
     // would be a dangling pointer by the time the list answered. ~JsWindow
     // clears the registry, so a lookup that finds nothing is the whole check.
     std::string id = viewId;
-    openLocalModal(owner, window, [id](TView *view, ushort result) {
+    openLocalModal(TProgram::deskTop, window, [id](TView *view, ushort result) {
         ViewRef *ref = g_views.find(id);
         if (ref != nullptr && ref->kind == "history")
             ((JsHistory *) ref->view)

@@ -838,6 +838,14 @@ first for a week, because `Array.append fst second` makes `fst` the *postfix*.
     arrives as an ordinary [`Changed`](#Event) event *on the field*, because
     that is what happened.
 
+    **The list opens as tall as it is**, capped by the desktop, and above the
+    field when there is no room below it. Borland gives one a fixed seven rows
+    and clips it to the *dialog* (`thistory.cpp:93`), which shows six items
+    whatever the list holds and whatever the terminal is -- and leaves a
+    program that wants twelve visible no way to get them but to make its dialog
+    fourteen rows taller than its contents. So this one is sized from `items`
+    and opens on the desktop, and spills over whatever is behind it.
+
     `items` is the model's array and nothing else writes to it. Turbo Vision
     remembers the field for you, in one buffer shared by the whole program;
     here nothing is remembered until the model decides to remember it, which

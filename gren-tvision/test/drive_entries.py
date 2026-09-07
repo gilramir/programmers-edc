@@ -200,8 +200,14 @@ def dropdown(app, at):
     top = at[1] - 2
     left = screen[top].rindex("\u2554")
     right = screen[top].index("\u2557", left)
+    # To the bottom frame and not a fixed six rows. Six was right only while
+    # the binding copied Borland's `field.b.y + 7`, which is the same window
+    # whatever the list holds; it is sized from the list now, so a short list
+    # makes a short window and counting six reads past the end of it.
+    end = next((r for r in range(top + 1, len(screen))
+                if "\u255a" in screen[r][left:right + 1]), top + 1)
     return [row for row in
-            (screen[r][left + 1:right].strip() for r in range(top + 1, top + 7))
+            (screen[r][left + 1:right].strip() for r in range(top + 1, end))
             if row]
 
 

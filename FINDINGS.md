@@ -8112,3 +8112,101 @@ purpose. So it was comparing the hint's words with themselves. It failed --
 only because the row it happened to land on was `NUL`. Two rows further down it
 would have been green and meaningless. It compares against the `Dec 42  Hex 2A`
 line now, which is the ordinary window text this window has most of.
+
+## Six of twelve, and the vendored library that turned out not to be the problem
+
+The calendar's **Go to month** dialog has the twelve months on a drop-down, and
+it showed six of them on a terminal with room for forty. Asked whether all
+twelve could be shown, the first answer was that it would take a patch to the
+vendored Turbo Vision, because `thistory.cpp:89-98` is where the rectangle is:
+
+```cpp
+r.b.y += 7;                          // a fixed seven rows
+r.intersect( owner->getExtent() );   // clipped to the DIALOG
+```
+
+That answer was wrong, and the reason is worth writing down: **the binding
+already reimplements that method.** `JsHistory::openDropDown` in
+`tvision-node/src/views.cc` exists because Borland's version calls
+`owner->execView()`, which is the blocking modal loop this port does not have.
+Its comment says "Borland's rectangle, unchanged (thistory.cpp:89-98)", which
+is exactly true and exactly the thing that made it look like library code. It
+is ours. Nothing under `tvision/` was touched.
+
+### Both constants were wrong, and fixing one would not have been enough
+
+`r.b.y += 7` is a *fixed* seven rows, so the drop-down shows six items whether
+the list holds three or thirty and whatever the terminal is. That constant made
+sense for what `THistory` was for -- a recent-values buffer capped at whatever
+fits a global block -- and makes none for a list a program hands over.
+
+`r.intersect(owner->getExtent())` is the other one, and it is why sizing to the
+list is not enough on its own. `owner` is the **dialog**, so the drop-down
+cannot leave the box it belongs to. A program wanting twelve visible would have
+had to make its dialog fourteen rows taller than its contents and leave the
+difference blank, to give a transient window somewhere to be -- the tail wagging
+the dog, and not what a drop-down does anywhere else. It opens over whatever is
+behind it.
+
+So: as many rows as there are items, clipped to the desktop, opened on the
+desktop, and flipped above the field when it does not fit below and does fit
+above. Which is what the *context menu* has always done, a few hundred lines
+away in `app.cc` -- `openLocalModal(TProgram::deskTop, popup, ...)` with a
+rectangle out to the desktop's own extent -- so this is the binding agreeing
+with itself rather than a new idea.
+
+predc changed not at all for this. Its dialog is the same eleven rows, with
+nothing blank in it, and the drop-down now spills past the frame.
+
+### Two drivers counted six because six was all there had ever been
+
+`drive_dir.py` and `drive_entries.py` both read the drop-down's rows with
+`range(top + 1, top + 7)`. Six, hard-coded, and *correct* for as long as the
+window was always eight rows -- which is a fixed size masquerading as an
+invariant. Both lists in those examples are shorter than six, so the smaller
+window is what broke them: the slice ran past the bottom border and picked up
+the horizontal scroll bar as a list row. Both find the closing frame now, which
+is what they should always have done and what nothing forced until the window
+stopped being one size.
+
+### And the calendar was guessing the desktop
+
+Chasing the drop-down's placement turned up a separate bug in the window it
+opens from. `Tool.Calendar.init` had
+
+```gren
+desktop = { cols = 80, rows = 23 }
+```
+
+and waited for a `Tui.Resized` to correct it. `Resized` fires when the size
+*changes*, so on a terminal nobody resized the guess stood for the whole run.
+The only thing that reads it is `gotoDialog`, which centres itself in what it
+believes the desktop to be -- so on an eighteen-row terminal the dialog was
+placed for a twenty-three-row one and its bottom five rows, `OK` and `Cancel`
+among them, were off the screen.
+
+`Help` guards against precisely this and its comment says so: "`Resized` fires
+when the size *changes*, so a window opened after somebody stretched their
+terminal would otherwise never hear about it." The calendar had the hole that
+comment describes. `init` takes the desktop now, like every other tool's.
+
+### The buttons, and the two rows under them
+
+Separately: `Up` and `Down` were the only way to walk a month, and a key named
+on a line is still a key somebody has to read. Two buttons, `▲ Prev` and
+`▼ Next`, `takesFocus = False` for the calculator's keypad reason -- the grid is
+a focused canvas reading `t`, `g`, `Up` and `Down`, and a button that could hold
+the caret would take the two keys away from the thing it is a shortcut for. No
+`~` in the captions either: a button's tilde makes an `Alt`-letter and every one
+worth having here belongs to a tool.
+
+Previous and next only, no year buttons, which is the argument the Month menu
+already makes in a comment: stepping a year at a time is a poor answer to "show
+me March 2019", and naming the month answers it in one question.
+
+They cost nothing, because the window already had the space. Its rect was
+`rows + 4` tall against a canvas of `rows` -- the frame's two, plus two that
+were nothing -- so the buttons went exactly where two blank rows had been since
+the window was written. `Tui.fixedSize` is why nobody had dragged the mistake
+out of it. `rows` is now `gridRows + buttonRows + 1` and the window is
+`rows + 2`, so the two numbers are one number and cannot drift again.

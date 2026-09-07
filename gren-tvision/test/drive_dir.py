@@ -116,6 +116,22 @@ def arrow(app):
     return None
 
 
+def rows_between(screen, top, left, right):
+    """The list rows of a drop-down, from its top frame to its bottom one.
+
+    Found rather than counted. It was `range(top + 1, top + 7)` -- six rows,
+    which was right only because Borland sizes this window `field.b.y + 7`
+    whatever the list holds. The binding sizes it from the list now, so a
+    two-entry drop-down is a four-row window and a fixed six read two rows
+    past the bottom border.
+    """
+    end = next((r for r in range(top + 1, len(screen))
+                if "\u255a" in screen[r][left:right + 1]), top + 1)
+    return [row for row in
+            (screen[r][left + 1:right].strip() for r in range(top + 1, end))
+            if row]
+
+
 def dropdown(app):
     """The rows of the history drop-down, once it is open.
 
@@ -133,9 +149,7 @@ def dropdown(app):
     if top is None:
         return []
     right = screen[top].index("\u2557", left)
-    return [row for row in
-            (screen[r][left + 1:right].strip() for r in range(top + 1, top + 7))
-            if row]
+    return rows_between(screen, top, left, right)
 
 
 def main():

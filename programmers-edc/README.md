@@ -300,14 +300,21 @@ number against each row. `Up`/`Down` move a month, `g` names one outright, `t`
 comes back to today — and the line under the grid says so, because somebody who
 opens a calendar and sees one month has no way to guess which keys move it.
 
+`▲ Prev` and `▼ Next` are the same two keys as buttons, because a key named on a
+line is still a key somebody has to read and the pointer is how most people try
+a window they have just opened. They do not take the caret: the grid is a
+focused canvas reading every keystroke, and a button that could hold the caret
+would take `Up` and `Down` away from the thing it is a shortcut for — the same
+rule the calculator's keypad follows and for the same reason.
+
 **There is no previous-year key**, deliberately. Stepping a year at a time is a
 poor answer to "show me March 2019": nine presses of one key and then eleven of
 another, counting as you go, with the heading to re-read after each. `g` asks
 for a month and a year instead, prefilled with what is on screen — so "same
 month, other year" is one edit.
 
-**The month field has a drop-down on it**: the `▼` opens the twelve names and
-picking one writes it into the field, so nobody has to remember whether
+**The month field has a drop-down on it**: the `▼` opens all twelve names at
+once and picking one writes it into the field, so nobody has to remember whether
 September is 9 or 10. Typing still works and a number is the short way — `9`,
 `sep` and `September` are the same month. It is a drop-down rather than a list
 beside the field because a dialog's views are built once and nothing patches an
@@ -315,6 +322,16 @@ open modal, so a list and a field could never have been kept in step; one that
 *fills* the field has a single value by construction. A month it cannot read and a
 year it cannot draw are refused separately, since those are different mistakes
 and one message for both would send you to check the field that was fine.
+
+It showed six of the twelve until 2026-09-06, and the fix was in `tvision-node`
+rather than here. Borland sizes a history drop-down at a fixed seven rows below
+its field and clips it to the *dialog*, so it showed six items whatever the list
+held and whatever the terminal was — and no dialog could have fixed that without
+being fourteen rows taller than its contents, to give a transient window
+somewhere to live. It is sized from the list now and opens on the desktop, so it
+spills over whatever is behind it the way a drop-down does everywhere else, and
+falls back to as many as fit on a terminal without the room. This dialog did not
+change a line for it.
 
 Years run 1 to 9999. That is where the arithmetic was checked — Zeller's
 congruence and the ISO week formula against Python's `datetime`, five dates in

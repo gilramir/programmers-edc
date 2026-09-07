@@ -412,7 +412,7 @@ open command shell =
         Cli.Calendar ->
             let
                 step =
-                    Tool.Calendar.init
+                    Tool.Calendar.init shell.desktop
             in
             Node.startProgram
                 { model = Tui.Start { shell | calendar = Just step.model }
@@ -697,7 +697,7 @@ handleEvent event model =
                     Nothing ->
                         let
                             step =
-                                Tool.Calendar.init
+                                Tool.Calendar.init model.desktop
                         in
                         { model = { model | calendar = Just step.model }
                         , command = Cmd.map FromCalendar step.command

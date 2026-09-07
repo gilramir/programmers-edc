@@ -48,6 +48,11 @@ canvasId =
     "calendar.grid"
 
 
+footerId : String
+footerId =
+    "calendar.keys"
+
+
 gotoDialogId : String
 gotoDialogId =
     "calendar.goto.dialog"
@@ -150,13 +155,24 @@ type alias Step =
 `Time.here` answers an offset rather than a zone name -- its own doc comment
 says it hands back `Etc/GMT-5` -- and an offset is all a calendar wants. The
 converter needs the name and pays a port for it; this does not.
+
+**And the desktop is handed over rather than guessed**, which it used to be. It
+said `{ cols = 80, rows = 23 }` and waited for a `Tui.Resized` to correct
+it -- but `Resized` fires when the size *changes*, so on any terminal that was
+never resized the guess stood for the whole run. The only thing that reads it
+is [`gotoDialog`](#gotoDialog), which centres itself in what it believes the
+desktop to be, so on an eighteen-row terminal the dialog was placed for a
+twenty-three-row one and its bottom five rows, `OK` and `Cancel` among them,
+were off the screen. `Help` guards against exactly this and says so; this
+window had the hole `Help`'s comment describes.
+
 -}
-init : Step
-init =
+init : { cols : Int, rows : Int } -> Step
+init desktop =
     { model =
         { showing = Nothing
         , today = Nothing
-        , desktop = { cols = 80, rows = 23 }
+        , desktop = desktop
         , message = ""
         }
     , command =
@@ -586,9 +602,37 @@ gotoDialog model =
 -- VIEW
 
 
+{-| The grid's rows: the month and year, the day headings, and six weeks.
+
+Six and not five, because the longest a month can be laid out in is six weeks
+and a window that changed height between months would be worse than a blank row
+in the ones that do not need it. See [`weeks`](#weeks).
+-}
+gridRows : Int
+gridRows =
+    8
+
+
+{-| Every row of the window's interior: the grid, the two month buttons, and
+the line of keys under them.
+
+Written down as one number because it is the *window's* height as well, and the
+two disagreeing is what left this window with two blank rows under its last
+line for as long as it has existed. The window was `rows + 4` tall against a
+canvas of `rows`, which is the frame's two plus two that were nothing -- and a
+window with `Tui.fixedSize` on it is a window nobody can drag the mistake out
+of.
+-}
 rows : Int
 rows =
-    9
+    gridRows + buttonRows + 1
+
+
+{-| A Turbo Vision button is two rows: the caption and the shadow under it.
+-}
+buttonRows : Int
+buttonRows =
+    2
 
 
 {-| Wide enough for the line of keys under the grid, which is wider than the
@@ -609,7 +653,9 @@ view : Inks -> Week.Rule -> Model -> Tui.Window
 view inks rule model =
     { id = windowId
     , title = "Calendar"
-    , rect = { x1 = 24, y1 = 4, x2 = 24 + canvasWidth + 4, y2 = 4 + rows + 4 }
+    -- `rows + 2` and not `rows + 4`: the two are the frame, and the extra two
+    -- were two rows of nothing under the last line of the window.
+    , rect = { x1 = 24, y1 = 4, x2 = 24 + canvasWidth + 4, y2 = 4 + rows + 2 }
     , resize = Tui.fixedSize
     , palette = Tui.BlueWindow
     , canClose = True
@@ -617,24 +663,74 @@ view inks rule model =
     , views =
         [ Canvas
             { id = canvasId
-            , rect = { x1 = 2, y1 = 1, x2 = 2 + canvasWidth, y2 = 1 + rows }
-            , lines = display inks rule model
+            , rect = { x1 = 2, y1 = 1, x2 = 2 + canvasWidth, y2 = 1 + gridRows }
+            , lines = grid inks rule model
             , cursor = Nothing
             , takesFocus = True
+            }
+        , monthButton "prev" "▲ Prev" 2
+        , monthButton "next" "▼ Next" 14
+        , Canvas
+            { id = footerId
+            , rect =
+                { x1 = 2
+                , y1 = 1 + gridRows + buttonRows
+                , x2 = 2 + canvasWidth
+                , y2 = 2 + gridRows + buttonRows
+                }
+            , lines = [ footer inks model ]
+            , cursor = Nothing
+            , takesFocus = False
             }
         ]
     }
 
 
-display : Inks -> Week.Rule -> Model -> Array (Array Span)
-display inks rule model =
+{-| One of the two month buttons, which exist because `Up` and `Down` were the
+only way to walk a month and a person who has just opened a calendar has no
+reason to try them.
+
+**Previous and next only.** A button per year was asked about and left out for
+the reason the menu already gives: stepping a year at a time is a poor answer
+to "show me March 2019", and **Go to month** answers it in one question. Two
+buttons are a pair somebody reads at a glance; four are a control panel.
+
+**`takesFocus = False`**, which is the calculator's keypad rule and matters for
+the same reason: the grid is a focused `Canvas` reading every keystroke -- `t`,
+`g`, `Up`, `Down` -- and a button that could hold the caret would take `Up` and
+`Down` away from the very thing it is a shortcut for.
+
+**And no `~` in the captions.** A button's tilde makes an `Alt`-letter, and
+every one worth having here is a tool's: `Alt-P` is the environment list and
+`Alt-N` is nothing yet but will be. The keys these stand for are `Up` and
+`Down`, which need no accelerator and are named on the line underneath.
+
+The arrows are the keys, not the direction of time: `▲` is `Up` and `Up`
+goes back a month, which is what a calendar scrolled upward does.
+-}
+monthButton : String -> String -> Int -> View
+monthButton name title x =
+    Tui.Button
+        { id = "calendar.button." ++ name
+        , rect = { x1 = x, y1 = 1 + gridRows, x2 = x + 11, y2 = 1 + gridRows + buttonRows }
+        , title = title
+        , cmd = "calendar." ++ name
+        , isDefault = False
+        , takesFocus = False
+        }
+
+
+{-| The month itself. The line of keys is a canvas of its own now, because the
+two buttons sit between them and a canvas is one rectangle.
+-}
+grid : Inks -> Week.Rule -> Model -> Array (Array Span)
+grid inks rule model =
     when { showing = model.showing, today = model.today } is
         { showing = Just showing, today = Just today } ->
             [ heading inks showing
             , headings inks rule
             ]
                 ++ weeks inks rule showing today
-                ++ [ footer inks model ]
 
         _ ->
             -- One turn of the event loop, and the honest thing to show: a

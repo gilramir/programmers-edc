@@ -75,6 +75,17 @@ def columns(app):
     return []
 
 
+def before(showing):
+    """The month before this one, carrying into the year.
+
+    A helper and not a literal, because `heading` answers whatever month it is
+    the day this runs -- which in January is the case that a naive `month - 1`
+    gets wrong, and once a year is exactly when nobody is looking.
+    """
+    year, month = showing
+    return (year - 1, 12) if month == 1 else (year, month - 1)
+
+
 def go_to(app, year, month, name=None):
     """Name a month outright, through the Go to dialog.
 
@@ -139,6 +150,46 @@ def main():
           footer(app) == "Up/Down month   g go to   t today", repr(footer(app)))
     check("which fits the canvas it is drawn on", len(footer(app)) <= 34,
           f"{len(footer(app))}: {footer(app)!r}")
+
+    # 1b. And the two keys have buttons, because a key named on a line is still
+    #     a key somebody has to read, and the pointer is how most people try a
+    #     window they have just opened. Previous and next only: a button per
+    #     year is a poor answer to "show me March 2019" and Go to month is the
+    #     good one, which is the same argument the Month menu already makes.
+    check("the month has a button each way", "\u25b2 Prev" in app.render()
+          and "\u25bc Next" in app.render(), app.render())
+
+    def press(label):
+        for row, line in enumerate(app.render().split("\n")):
+            at = line.find(label)
+            if at >= 0:
+                app.click(at + 1, row + 1, settle=1.0)
+                return True
+        return False
+
+    here = heading(app)
+    check("Prev is the month before", press("Prev") and heading(app) == before(here),
+          f"{here} -> {heading(app)}")
+    check("and Next is the one after", press("Next") and heading(app) == here,
+          f"back to {heading(app)}, wanted {here}")
+    #     `takesFocus = False` on both, which is the calculator's keypad rule:
+    #     the grid is a focused canvas reading every keystroke, and a button
+    #     that could hold the caret would take Up and Down away from the thing
+    #     it is a shortcut for. Pressing one and then using a key is the check.
+    app.send(b"\x1b[A", settle=0.8)
+    check("and a click leaves the keys where they were",
+          heading(app) == before(here), f"{heading(app)} after Up, wanted {before(here)}")
+    app.send(b"\x1b[B", settle=0.8)
+
+    #     The window is as tall as what is in it. It was `rows + 4` against a
+    #     canvas of `rows` -- the frame's two plus two of nothing -- and with
+    #     `Tui.fixedSize` on it there was no dragging the mistake out.
+    screen = app.render().split("\n")
+    top = next(r for r, line in enumerate(screen) if "\u2554" in line and "Calendar" in line)
+    bottom = next(r for r in range(top + 1, len(screen)) if "\u255a" in screen[r])
+    keys = next(r for r in range(top + 1, bottom) if "Up/Down month" in screen[r])
+    check("and the last line of the window is the last row inside it",
+          bottom - keys == 1, f"{bottom - keys - 1} blank rows under the keys")
 
     # 2. ISO, at the boundary that is the whole reason the rule is subtle.
     #    1 January 2021 is week 53 -- of 2020 -- and a January that says 1 is
@@ -213,12 +264,42 @@ def main():
     check("the month field has a drop-down on it", arrow is not None, app.render())
     app.click(arrow[0], arrow[1], settle=1.4)
     listed = app.render()
-    check("the drop-down lists the twelve months",
-          all(m in listed for m in ("January", "February", "March")), listed)
+    #     All twelve at once, which is the point and was six for a long time.
+    #     Borland sizes this window `field.b.y + 7` and clips it to the dialog
+    #     (`thistory.cpp:89-98`), so it showed six items whatever the list held
+    #     and whatever the terminal was -- and no dialog could fix that without
+    #     being fourteen rows taller than its contents to give a transient
+    #     window somewhere to live. `JsHistory::openDropDown` sizes it from the
+    #     list and opens it on the desktop instead, so it spills over whatever
+    #     is behind it the way a drop-down does everywhere else.
+    months = ("January", "February", "March", "April", "May", "June", "July",
+              "August", "September", "October", "November", "December")
+    check("the drop-down lists all twelve months at once",
+          all(m in listed for m in months),
+          [m for m in months if m not in listed])
+    #     And it is bigger than the dialog it belongs to, which is the half
+    #     that could not be done by making the dialog taller.
+    rows_of = lambda text: [r for r, line in enumerate(app.render().split("\n"))
+                            if text in line]
+    bottom = next(r for r, line in enumerate(app.render().split("\n"))
+                  if "\u2514" in line or "\u255a" in line)
+    check("and it reaches below the dialog that opened it",
+          rows_of("December")[0] > bottom,
+          f"December on row {rows_of('December')}, a frame closed on {bottom}")
     app.send(b"\x1b[B" * 2, settle=0.5)
     app.send(b"\r", settle=1.2)
     check("and picking one writes it into the field",
           "March" in app.render(), app.render())
+    #     The far end of the list is the one that could not be reached without
+    #     scrolling before, so it is the one worth picking.
+    app.click(arrow[0], arrow[1], settle=1.4)
+    app.send(b"\x1b[B" * 11, settle=0.6)
+    app.send(b"\r", settle=1.2)
+    check("including the last one, with no scrolling to get to it",
+          "December" in app.render(), app.render())
+    app.click(arrow[0], arrow[1], settle=1.4)
+    app.send(b"\x1b[B" * 2, settle=0.5)
+    app.send(b"\r", settle=1.2)
     app.send(b"\t", settle=0.3)
     app.send(b"\x1b[3~" * 6, settle=0.3)
     app.send(b"2019", settle=0.4)
