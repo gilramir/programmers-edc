@@ -1344,7 +1344,7 @@ view inks session model =
                 Canvas
                     { id = "unicode.paste"
                     , rect = { x1 = 1, y1 = 4 + openRows, x2 = 1 + lineWidth, y2 = 5 + openRows }
-                    , lines = [ [ Tui.ink inks.dim (Help.pasteHint session) ] ]
+                    , lines = [ Theme.hint inks (Help.pasteHint session) ]
                     , cursor = Nothing
                     , takesFocus = False
                     }
@@ -1524,7 +1524,7 @@ counting inks model =
         -- also decodes to nothing, and there the note below is the answer and
         -- this sentence would be seventy-three columns in front of it.
         if model.typed == "" then
-            [ Tui.ink inks.dim "Type into the field above, or Tab to the rows: 8, l and b read; y copies." ]
+            Theme.hint inks "Type into the field above, or ~Tab~ to the rows: ~8~, ~l~ and ~b~ read; ~y~ copies."
 
         else
             []

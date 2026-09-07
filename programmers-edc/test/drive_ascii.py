@@ -309,10 +309,36 @@ def main():
     rows = listed(app.render())
     check("Tab switches to the long list", "ASCII Chart - list" in app.render(),
           app.render().split("\n")[1])
-    check("and the line says how to get back, whole -- a StaticText is cut "
+    check("and the line says how to get back, whole -- a view is cut "
           "off at its rectangle without saying so, and the first wording was",
           "Tab, or Options, shows the grid" in app.render(),
           [r for r in app.render().split("\n") if "Tab" in r])
+
+    # And it says it the way the status line says things, which is what makes
+    # it read as an instruction rather than as a sentence: `Alt-X` in one
+    # colour and `Exit` in another. The line was one run of one ink for a long
+    # time and the first person to look at it read it as ordinary prose. Three
+    # colours are asserted and none of them is named, because which hues a
+    # scheme picks is the scheme's business -- what cannot vary is that the key
+    # differs from the words beside it and that neither is the body text.
+    d = app.display()
+    hint_row = next(r for r, line in enumerate(app.render().split("\n"))
+                    if "Tab, or Options" in line)
+    line = app.render().split("\n")[hint_row]
+    key = d.fg_at(line.index("Tab", line.index("Tab, or Options")), hint_row)
+    word = d.fg_at(line.index("shows"), hint_row)
+    check("the key on that line is a different colour from the words",
+          key != word, f"both {key}")
+    # Against the `Dec 42  Hex 2A ...` line, which is the ordinary window text
+    # this window has most of -- and not against a list row, because half of
+    # those are control codes and control codes are drawn in the quiet ink on
+    # purpose, so the check would have compared the hint's words with
+    # themselves and passed for the wrong reason. It did, once.
+    body_row = next(r for r, line in enumerate(app.render().split("\n"))
+                    if re.search(r"Dec\s+\d+\s+Hex", line))
+    body = d.fg_at(app.render().split("\n")[body_row].index("Dec"), body_row)
+    check("and neither of them is what the window's ordinary text is drawn in",
+          key != body and word != body, f"key {key}, word {word}, body {body}")
     check("which is what man ascii prints: dec, hex, oct, and a name",
           "Dec  Hex  Oct  Sym   Name" in app.render(),
           [r for r in app.render().split("\n") if "Dec" in r])

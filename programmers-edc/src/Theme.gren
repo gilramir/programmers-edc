@@ -1,4 +1,4 @@
-module Theme exposing (Inks, Name(..), all, fromKey, highlightNames, inks, next, palette, title, toKey)
+module Theme exposing (Inks, Name(..), all, fromKey, highlightNames, hint, inks, next, palette, title, toKey)
 
 {-| predc's colour schemes, and the two halves every one of them has.
 
@@ -24,7 +24,8 @@ that read on Borland's blue are the hues that disappear on a light ground.
 
 -}
 
-import Tui exposing (Hue(..))
+import Math
+import Tui exposing (Hue(..), Span)
 
 
 {-| Which scheme. Stored in the config file as the strings [`toKey`](#toKey)
@@ -79,8 +80,10 @@ what colour they are is what a theme changes.
 
   - `ruler` -- a column header, an offset, a label on a value: the scaffolding
     around the data, and quieter than it.
-  - `dim` -- a placeholder for something that is not there, and a standing
-    hint. Quieter still.
+  - `dim` -- a placeholder for something that is not there, and the words of a
+    standing hint. Quieter still.
+  - `key` -- the name of a key *inside* one of those hints, which is louder
+    than the words around it rather than quieter: see [`hint`](#hint).
   - `alert` -- something went wrong and the line under the window says so.
   - `field` -- a run of cells the user *types into*, painted as a surface of
     its own so that it reads as a box rather than as one more line of text.
@@ -108,12 +111,58 @@ for.
 type alias Inks =
     { ruler : Hue
     , dim : Hue
+    , key : Hue
     , alert : Hue
     , field : { fg : Hue, bg : Hue }
     , selected : { fg : Hue, bg : Hue }
     , marking : { fg : Hue, bg : Hue }
     , highlights : Array { fg : Hue, bg : Hue }
     }
+
+
+{-| A standing hint, with the keys in it picked out.
+
+Every tool window in predc has a line along its foot saying which keys do what,
+and until now every one of them was a single run of `dim` -- which is to say it
+looked exactly like a sentence somebody had written, rather than like a row of
+keys. The status line at the bottom of the screen has never had that problem,
+because `TStatusLine` draws the key and its label in two different colours, and
+that is the whole of the difference: **`Alt-X` in one colour and `Exit` in
+another reads as an instruction, and one colour reads as prose.**
+
+So the hints are marked the way the status line's own entries are, with `~`
+around the parts that are keys:
+
+    Theme.hint inks "~Tab~ base, ~w~ width, ~y~ copy, ~v~ paste"
+
+The convention is Turbo Vision's rather than a new one -- it is what a menu
+title and a status-line entry already use for a hot key in this program, and
+`Help.barVariants` writes its rungs that way. The tildes never reach the
+screen, so a hint reads the same width it always did and every pty driver that
+greps for one of these sentences goes on finding it.
+
+There is no escape for a literal `~`, and none is needed: it is not a character
+that appears in a key name or in the kind of clause these lines are made of.
+A hint containing one would come out with the tilde gone and the colours
+alternating from there, which is visible immediately and in the one place
+somebody is already looking.
+-}
+hint : Inks -> String -> Array Span
+hint scheme text =
+    String.split "~" text
+        |> Array.indexedMap
+            (\index run ->
+                if Math.modBy 2 index == 0 then
+                    Tui.ink scheme.dim run
+
+                else
+                    Tui.ink scheme.key run
+            )
+        -- An empty run between two marks, or at either end, would be a span
+        -- with no text -- which the differ would faithfully send and the
+        -- binding would faithfully draw as nothing. Dropping them keeps a
+        -- hint's span count equal to the number of things it actually says.
+        |> Array.keepIf (\span -> not (String.isEmpty span.text))
 
 
 {-| What the six are *called*, which is the same in every scheme because the
@@ -135,6 +184,11 @@ inks name =
             -- exactly what the first version of these used.
             { ruler = LightCyan
             , dim = Cyan
+            -- The only hue on this ground brighter than everything else on it
+            -- and not already spoken for. `LightRed` is what Turbo Vision's
+            -- own status line uses for a key, and it is `alert` here -- one
+            -- colour cannot mean both "press this" and "this went wrong".
+            , key = White
             , alert = LightRed
             -- Recessed, which on this ground is easy: every terminal's black
             -- is darker than its blue, so the field is a hole in the window
@@ -154,6 +208,7 @@ inks name =
             -- sixteen colours cannot make legible.
             { ruler = LightCyan
             , dim = Cyan
+            , key = White
             , alert = LightRed
             -- The one theme where the field is *lifted* instead. Recessed is
             -- the principle, but at sixteen colours "darker than near-black"
@@ -175,6 +230,11 @@ inks name =
             -- disappear.
             { ruler = Blue
             , dim = DarkGray
+            -- The nearest of the sixteen to this scheme's own `barAccent`,
+            -- `0xB85C00`, which is the colour the status line already draws a
+            -- key in. 5.3:1 on paper, and the one warm hue here that is not
+            -- the alert.
+            , key = Brown
             , alert = Red
             -- Paper's own answer, and the oldest one: a grey well with black
             -- in it.

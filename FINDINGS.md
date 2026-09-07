@@ -8032,3 +8032,83 @@ prose, which is the argument for the check rather than against it.
 The measurement is taken against the same made-up model `wholeThing` uses --
 probe answered, both conditionals in -- so the clipboard page's longest case is
 the one measured rather than whichever case this session happens to be.
+
+## A hint in one colour is a sentence; in two it is an instruction
+
+Every tool window in predc has a line along its foot saying which keys do what
+-- `Tab base, w width, y copy, v paste` under the calculator, `Tab list /
+search c case y copy x hex` under the environment list -- and every one of them
+was a single run of `inks.dim`. Somebody read one and asked why the instructions
+looked like ordinary text.
+
+The answer was on the screen the whole time, one row lower. `TStatusLine` draws
+`Alt-X Exit` in **two** colours, the key in one and its label in another, and
+that is the entire difference between a row of keys and a row of prose. Nothing
+about the status line is cleverer than that; it just does not use one ink for
+both halves.
+
+### The convention was already in the program
+
+Turbo Vision marks a hot key with `~` around it, and predc already writes its
+status-line entries that way -- `Help.barVariants` has rungs like
+`"Paste  ~Ctrl-Shift-V~, ~Shift-Ins~"`. So the hints are marked the same way
+and `Theme.hint` paints them:
+
+```gren
+Theme.hint inks "~Tab~ base, ~w~ width, ~y~ copy, ~v~ paste"
+```
+
+It splits on `~`, paints the even runs in `dim` and the odd ones in a new
+`Inks.key`, and drops the empty runs a mark at either end would leave. The
+tildes never reach the screen, so every hint is the width it always was and
+every pty driver that greps for one of these sentences goes on finding it --
+which is why a change touching nine files broke no existing check.
+
+`Inks` grew `key` rather than reusing something. `ruler` is the scaffolding
+*around* data and a key name is not that; `alert` is `LightRed`, which is what
+Turbo Vision's own status line paints a key in, and one hue cannot mean both
+"press this" and "this went wrong" in the same program. So: `White` on
+Borland's blue and on Midnight's near-black -- the one hue brighter than
+everything else there and not already spoken for -- and `Brown` on Gren's
+paper, which is the nearest of the sixteen to that scheme's own `barAccent`
+(`0xB85C00`), the colour its status line already draws a key in.
+
+### Two hints had to stop being `StaticText` to get a second colour
+
+`TStaticText` draws one run in one colour and has no notion of a hot key, so
+the ASCII chart's line and the environment list's -- the two somebody actually
+pointed at -- could not be painted at all. Both are one-row `Canvas` views now,
+with `takesFocus = False` so the caret still goes where it went. Notes' foot
+line went the same way, and `Tool.Notes.view` grew an `Inks` parameter to do
+it: it was the last view in the program that took none.
+
+**The environment list's line has three colours and not two**, which is the
+part worth keeping. It reads `126 variables   Tab list   / search ...`, and the
+count is an *answer* while the keys are an instruction -- so the count stays in
+the window's ordinary text and only the keys go through `Theme.hint`. A message
+replaces the whole line, keys included, because a message is what just happened
+and the keys are always true.
+
+### Where the checks went, and the one that passed for the wrong reason
+
+`ink_common.py` already opens every tool under Midnight and Gren, and this is
+exactly its subject: `key` and `dim` are two entries a *scheme* picks, and a
+scheme that picked one hue twice would draw a hint indistinguishable from the
+flat one -- while contrasting perfectly well with its ground, so the
+invisible-glyph sweep would not say a word. Four tools carry a (key, word) pair
+in its table now and each asserts the two colours differ.
+
+Borland is the default and forty-four drivers walk it, so its copy of the check
+is in `drive_ascii.py` and `drive_env.py`, the two windows that were reported.
+Each asserts three things: the key differs from the words, and neither is the
+window's ordinary text -- which is the actual complaint, since "it looks like
+ordinary text" is a claim about a third colour rather than about two.
+
+That third assertion is where the first attempt was wrong, and the failure is
+the useful part. It compared the hint against a **list row**, and half the rows
+in the ASCII chart are control codes, which are drawn in the quiet ink on
+purpose. So it was comparing the hint's words with themselves. It failed --
+`key 97, word 36, body 36` -- rather than passing for the wrong reason, but
+only because the row it happened to land on was `NUL`. Two rows further down it
+would have been green and meaningless. It compares against the `Dec 42  Hex 2A`
+line now, which is the ordinary window text this window has most of.

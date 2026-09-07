@@ -99,6 +99,25 @@ def status(app):
     return inside(app)[-1].strip()
 
 
+def foot_colours(app, key, word):
+    """(key colour, word colour) off the line along the foot.
+
+    The keys down there are the only way to reach the list at all -- the search
+    box has the caret when the window opens -- and they were the tail of a
+    sentence in a single ink until the line became a canvas the model paints.
+    """
+    d = app.display()
+    for row, line in enumerate(app.render().split("\n")):
+        at = line.find(word)
+        if at < 0:
+            continue
+        start = line.rfind(key, 0, at)
+        if start < 0:
+            continue
+        return (d.fg_at(start, row), d.fg_at(at, row))
+    return None
+
+
 def box(app):
     """What is typed in the search box. Read from inside the window and not
     from the whole screen, because the menu bar says *Search* too."""
@@ -270,6 +289,24 @@ def main():
           and body[1].startswith("ZZ_BETA"), body)
     check("and the status line says how many of how many",
           status(app).startswith(f"2 of {total} match \"alpha\""), status(app))
+
+    # The keys at the end of that line are drawn the way the status line at the
+    # bottom of the screen draws `Alt-X Exit`: the name of the key in one
+    # colour and the word beside it in another. It was one run of one ink, so
+    # the keys read as the tail of a sentence -- in the one window where they
+    # are the only way out of the search box and into the list.
+    shades = foot_colours(app, "Tab", "list")
+    check("the keys along the foot are drawn as keys, not as more sentence",
+          shades is not None and shades[0] != shades[1], str(shades))
+    # ...and the count in front of them is neither of those, because a count is
+    # an answer rather than an instruction and goes on being window text.
+    d = app.display()
+    row = next(r for r, line in enumerate(app.render().split("\n"))
+               if "Tab list" in line)
+    count = d.fg_at(app.render().split("\n")[row].index("2 of"), row)
+    check("and the count in front of them is neither colour",
+          shades is not None and count not in shades,
+          f"count {count}, hint {shades}")
 
     # Case. `c` belongs to the list, so this is also the Tab and the `/` back.
     app.send(b"\t\t", settle=0.7)

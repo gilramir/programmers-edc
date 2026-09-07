@@ -82,6 +82,7 @@ import FileSystem
 import FileSystem.Path as Path exposing (Path)
 import Json.Decode
 import Task exposing (Task)
+import Theme exposing (Inks)
 import Time
 import Tui exposing (MenuItem(..), View(..))
 import Width
@@ -1528,8 +1529,8 @@ is nothing here to colour: a list, an editor and a line of text are all views
 the palette already dresses. A `Span` is what an ink is for, and this window
 draws none.
 -}
-view : Model -> Tui.Window
-view model =
+view : Inks -> Model -> Tui.Window
+view inks model =
     let
         width =
             max 46 model.desktop.cols
@@ -1588,10 +1589,12 @@ view model =
         , Grows
             { grow = acrossTheFoot
             , view =
-                StaticText
+                Canvas
                     { id = statusId
                     , rect = { x1 = 1, y1 = height - 2, x2 = width - 1, y2 = height - 1 }
-                    , text = status model
+                    , lines = [ Theme.hint inks (status model) ]
+                    , cursor = Nothing
+                    , takesFocus = False
                     }
             }
         ]
@@ -1600,6 +1603,13 @@ view model =
 
 {-| The line along the foot: what just happened, or what to do when nothing
 has.
+
+The `~` marks are the status line's, and [`Theme.hint`](Theme#hint) paints what
+is between them louder than the rest -- which is why this is a `Canvas` rather
+than the `StaticText` it used to be, since `TStaticText` draws one run in one
+colour. A message goes through the same function and comes out entirely in the
+quiet ink, having no marks in it, which is right: a message is a sentence and
+these are keys.
 -}
 status : Model -> String
 status model =
@@ -1610,7 +1620,7 @@ status model =
         "Nowhere to keep notes."
 
     else if Array.isEmpty model.notes then
-        "No notes yet.  Ctrl-N makes one."
+        "No notes yet.  ~Ctrl-N~ makes one."
 
     else
         when model.open is
@@ -1622,7 +1632,7 @@ status model =
                         else
                             " notes.  "
                        )
-                    ++ "F4 for the list, Space opens one, F2 saves now."
+                    ++ "~F4~ for the list, ~Space~ opens one, ~F2~ saves now."
 
             Nothing ->
-                "Space opens the note the highlight is on."
+                "~Space~ opens the note the highlight is on."

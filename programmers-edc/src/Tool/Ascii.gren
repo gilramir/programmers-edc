@@ -752,10 +752,12 @@ view inks model =
                     , rect = { x1 = 2, y1 = 12, x2 = 46, y2 = 13 }
                     , text = Ascii.naming model.code
                     }
-                , StaticText
+                , Canvas
                     { id = hintId
                     , rect = { x1 = 2, y1 = 13, x2 = 46, y2 = 14 }
-                    , text = hint model
+                    , lines = [ Theme.hint inks (hint model) ]
+                    , cursor = Nothing
+                    , takesFocus = False
                     }
                 ]
 
@@ -827,10 +829,12 @@ view inks model =
                 , Grows
                     { grow = acrossTheFoot
                     , view =
-                        StaticText
+                        Canvas
                             { id = hintId
                             , rect = { x1 = 2, y1 = foot, x2 = paneWidth model - 2, y2 = foot + 1 }
-                            , text = hint model
+                            , lines = [ Theme.hint inks (hint model) ]
+                            , cursor = Nothing
+                            , takesFocus = False
                             }
                     }
                 ]
@@ -852,19 +856,25 @@ half that works when this window is closed -- and when the caret is somewhere
 else, since `Tab` reaches the chart only while the chart has it.
 
 **Short enough for the grid**, which is the constraint that shaped the wording:
-a `StaticText` is cut off at its rectangle without saying so, the grid's window
-is forty-eight columns and fixed, and the first version of this line lost the
+a view is cut off at its rectangle without saying so, the grid's window is
+forty-eight columns and fixed, and the first version of this line lost the
 words `| ASCII chart` off the end and read as though Options alone did it. The
 driver checks the sentence arrives whole.
+
+The `~` marks are the status line's, and [`Theme.hint`](Theme#hint) is what
+turns them into two colours. They are also why this is a one-row `Canvas` and
+not the `StaticText` it used to be: `TStaticText` draws one run in one colour
+and has no notion of a hot key, so a line that wanted `Tab` louder than the
+words around it had to become a line the model paints.
 -}
 hint : Model -> String
 hint model =
     when model.mode is
         Grid ->
-            "Tab, or Options, shows the long list"
+            "~Tab~, or ~Options~, shows the long list"
 
         List ->
-            "Tab, or Options, shows the grid"
+            "~Tab~, or ~Options~, shows the grid"
 
 
 {-| Both horizontal edges and both vertical ones follow, so a line stays the

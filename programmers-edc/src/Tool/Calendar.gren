@@ -653,7 +653,7 @@ it, and a menu they have to go looking for is not an answer.
 footer : Inks -> Model -> Array Span
 footer inks model =
     if String.isEmpty model.message then
-        [ Tui.ink inks.dim "Up/Down month   g go to   t today" ]
+        Theme.hint inks "~Up~/~Down~ month   ~g~ go to   ~t~ today"
 
     else
         [ Tui.ink inks.alert model.message ]

@@ -16,6 +16,13 @@ ground out from under every ink in the program at once, and an ink that stops
 contrasting still draws -- which is exactly how the hex viewer's offset column
 spent a month at `fg=34 bg=44`, invisible, with a green suite.
 
+It is also where the *two-tone hints* are checked, for the same reason and in
+the same words: `key` and `dim` are two entries in `Theme.Inks`, a scheme picks
+both, and a scheme that picked one hue twice would draw a hint that looked
+exactly like the flat sentence the two-tone one replaced -- while contrasting
+perfectly well with its ground, so the invariant above would not catch it.
+Borland's copy of that check is in `drive_ascii.py` and `drive_env.py`.
+
 Two suites and not three, because Borland is the default and forty-four
 drivers already walk it. Midnight and Gren are the grounds nobody sweeps, and
 Gren is the interesting one: it is the only light scheme, and on a light ground
@@ -49,17 +56,44 @@ from harness import Pty, Checks, node_argv
 # `Alt` letter for as long as it is there. `~C~alc` takes `Alt-C` away from the
 # time converter, so an `Alt`-driven sweep opens tools in whatever order does
 # not collide, and silently stops opening one the day a menu is retitled.
+#
+# The fourth column is the tool's standing hint, as (key, word) -- the name of
+# a key on that line and a word next to it. Every scheme has to draw those two
+# in different colours, which is the whole of what makes the line read as
+# instructions rather than as a sentence, and it is a per-scheme fact: `key`
+# and `dim` are two entries in `Theme.Inks` and a scheme that picked the same
+# hue for both would produce a hint that looked exactly like the one this
+# replaced. `None` for a tool with no standing hint.
 TOOLS = [
-    ("ASCII chart", "ASCII", b""),
-    ("RPN calculator", "RPN Calculator", b"12\r34\r+"),
-    ("Time converter", "Time converter", b""),
-    ("Unicode decoder", "Unicode", b"41 c3 a9 e4 b8 ad f0 9f 92 a1"),
-    ("Calendar", "Calendar", b""),
-    ("Encode / decode", "Encode / decode", b"predc"),
-    ("Random values", "Random values", b""),
-    ("Environment variables", "Environment", b""),
-    ("Hex dump viewer", "Hex Dump", b""),
+    ("ASCII chart", "ASCII", b"", ("Tab", "shows")),
+    ("RPN calculator", "RPN Calculator", b"12\r34\r+", ("Tab", "base")),
+    ("Time converter", "Time converter", b"", None),
+    ("Unicode decoder", "Unicode", b"41 c3 a9 e4 b8 ad f0 9f 92 a1", None),
+    ("Calendar", "Calendar", b"", ("g", "go to")),
+    ("Encode / decode", "Encode / decode", b"predc", None),
+    ("Random values", "Random values", b"", None),
+    ("Environment variables", "Environment", b"", ("Tab", "list")),
+    ("Hex dump viewer", "Hex Dump", b"", None),
 ]
+
+
+def two_tone(app, key, word):
+    """(key colour, word colour) off the topmost hint line holding both.
+
+    Searched for rather than given a row, because these lines sit at the foot
+    of windows that size themselves to the desktop and the tools are stacked on
+    top of each other as they open.
+    """
+    d = app.display()
+    for row, line in enumerate(app.render().split("\n")):
+        at = line.find(word)
+        if at < 0:
+            continue
+        start = line.rfind(key, 0, at)
+        if start < 0:
+            continue
+        return (d.fg_at(start, row), d.fg_at(at, row))
+    return None
 
 
 def open_tool(app, entry, settle=1.4):
@@ -112,7 +146,7 @@ def sweep(key, name):
     ground = pairs(app)
     check("the empty desktop is painted", len(ground) >= 2, str(sorted(map(str, ground))))
 
-    for entry, title, typed in TOOLS:
+    for entry, title, typed, hint in TOOLS:
         open_tool(app, entry)
         opened = title in app.render()
         check(f"{title} opened", opened, app.render())
@@ -123,6 +157,10 @@ def sweep(key, name):
         # this driver pass by having nothing to look at.
         check(f"and {title} painted with something",
               len(pairs(app)) > 2, str(sorted(map(str, pairs(app)))))
+        if opened and hint:
+            shades = two_tone(app, *hint)
+            check(f"and its hint draws {hint[0]!r} in another colour than {hint[1]!r}",
+                  shades is not None and shades[0] != shades[1], str(shades))
 
     # One dialog, since a dialog is drawn in the *dialog* half of the
     # palette and a window in the window half -- two grounds, and the tools'

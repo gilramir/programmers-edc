@@ -3576,7 +3576,7 @@ markLine inks marking range =
         )
     ]
         ++ swatches inks
-        ++ [ Tui.ink inks.dim "  Esc cancel" ]
+        ++ Theme.hint inks "  ~Esc~ cancel"
 
 
 {-| The six keys, each wearing what it paints.
@@ -3624,5 +3624,5 @@ inkNote inks model =
 
                 Nothing ->
                     Tui.plain ""
-            , Tui.ink inks.dim "  d removes it"
             ]
+                ++ Theme.hint inks "  ~d~ removes it"

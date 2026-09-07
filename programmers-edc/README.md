@@ -1251,6 +1251,31 @@ it follows whatever the terminal is set to; Midnight and Gren name their colours
 exactly, because "whatever this terminal calls black" is not a foundation for a
 dark scheme.
 
+### The keys along the foot are drawn as keys
+
+Every tool window has a line at the bottom saying which keys do what, and they
+are painted the way the status line along the bottom of the screen is painted:
+the name of the key in one colour, the words beside it in another.
+
+    126 variables   Tab list   / search   c case   y copy   x hex
+                    ^^^        ^          ^        ^        ^
+
+They were a single colour until somebody read one and asked why the
+instructions looked like ordinary text -- which was a fair question, because
+`Alt-X Exit` one row below had never had that problem. `TStatusLine` draws the
+key and its label in two colours and that is the whole of the difference.
+
+The marking is Turbo Vision's own: a hint is written with `~` around the parts
+that are keys, `Theme.hint` turns those into a second ink, and the tildes never
+reach the screen. So `Inks` has a `key` beside its `dim` -- `White` on
+Borland's blue and on Midnight, `Brown` on Gren's paper, which is the nearest
+of the sixteen to that scheme's own accent.
+
+The count in front of the keys stays in the window's ordinary text, because a
+count is an answer and the keys are an instruction; and a message replaces the
+whole line, keys included, because a message is what just happened and the keys
+are always true.
+
 ## The config file
 
 `$XDG_CONFIG_HOME/predc/config.toml`, or `~/.config/predc/config.toml`. It has

@@ -906,7 +906,7 @@ view inks model =
 display : Inks -> Model -> Array (Array Span)
 display inks model =
     if String.isEmpty model.typed then
-        [ [ Tui.ink inks.dim "Type or paste something. Tab reaches the output." ] ]
+        [ Theme.hint inks "Type or paste something. ~Tab~ reaches the output." ]
 
     else
         when run model.kind model.way model.typed is

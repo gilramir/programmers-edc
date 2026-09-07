@@ -1540,7 +1540,7 @@ messageLine inks model =
         -- It was `Tab changes base, w changes width` at thirty-three; the two
         -- clipboard keys are worth the word "changes" twice over, because a
         -- key nothing mentions is a key nobody presses.
-        [ Tui.ink inks.dim "Tab base, w width, y copy, v paste" ]
+        Theme.hint inks "~Tab~ base, ~w~ width, ~y~ copy, ~v~ paste"
 
     else
         -- The ellipsis is the point. A canvas cuts a line off at its width

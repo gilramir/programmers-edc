@@ -1363,7 +1363,7 @@ view model =
             -- `Span` for an ink to reach.
             ++ (when model.notes is
                     Just notes ->
-                        [ Tool.Notes.view notes ]
+                        [ Tool.Notes.view (Theme.inks model.theme) notes ]
 
                     Nothing ->
                         []
