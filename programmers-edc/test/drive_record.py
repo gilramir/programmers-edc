@@ -30,6 +30,7 @@ So this driver is about the seams:
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -40,6 +41,8 @@ ROOT = os.path.dirname(HERE)
 LAUNCHER = os.path.join(ROOT, "bin", "predc.js")
 GREN_TAPE = os.path.join(ROOT, "..", "gren-tvision-runtime", "bin", "gren-tape.js")
 RECORD_JS = os.path.join(ROOT, "..", "gren-tvision-runtime", "record.js")
+GREN_REPLAY = os.path.join(ROOT, "..", "gren-tvision-runtime", "bin", "gren-replay.js")
+MAIN_JS = os.path.join(ROOT, "main.js")
 sys.path.insert(0, os.path.join(ROOT, "..", "tvision-node", "test"))
 
 from harness import Pty, Checks, node_argv
@@ -359,6 +362,54 @@ def main():
     check("and it names the zone, without which two tools draw a different day",
           "timeZone" not in report and "/" in report.split("runtime")[1][:80],
           report.split("runtime")[1][:80] if "runtime" in report else report[:200])
+
+    # ---- 12. and a tape that runs again is the point of reading one -------
+    #
+    # The claim the whole feature rests on: the port boundary is total, so a
+    # tape is the *input* that produced a session and not an account of it.
+    # This is the check of that claim, and it is the only one that can be --
+    # `replay.test.js` drives a fake program, because a real one cannot be
+    # asked to say the wrong thing. Here a real session goes through a real
+    # pty and then through no terminal at all.
+    #
+    # `ascii` because it is keyboard-driven and stateful and reads nothing
+    # from the outside: the arrows move a selection, Tab changes the form, and
+    # every one of those is a render the replay has to produce byte for byte.
+    home = home_with()
+    tape = tape_path()
+    app = start(home, "--record", tape, "ascii")
+    for key in (b"\x1b[B", b"\x1b[B", b"\x1b[C", b"\t", b"\x1b[B"):
+        app.send(key, settle=0.4)
+    settled(app, tape)
+    app.send(ALT_X, settle=1.0)
+    app.wait(timeout=8)
+
+    done = subprocess.run(node_argv(GREN_REPLAY, tape, MAIN_JS), env=env_for(home),
+                          cwd=ROOT, capture_output=True, timeout=60)
+    report = done.stdout.decode()
+    check("a recorded session replays with no terminal at all",
+          done.returncode == 0, report[-500:] or done.stderr[-300:])
+    check("and every message it produced was the one the tape has",
+          "all of them the same as the tape" in report, report[-300:])
+    # Not a formality: a replayer that fed nothing would say the same thing.
+    fed = int(re.search(r"replayed (\d+) messages", report).group(1))
+    check("and there were more than a handful of them", fed >= 8, f"{fed} messages")
+
+    # The other half, which is the one that keeps the first honest: a tape
+    # whose draws were withheld cannot replay, and has to say so rather than
+    # blame the program.
+    tape = tape_path()
+    app = start(home, "--record", tape, "random")
+    settled(app, tape)
+    app.send(ALT_X, settle=1.0)
+    app.wait(timeout=8)
+    done = subprocess.run(node_argv(GREN_REPLAY, tape, MAIN_JS), env=env_for(home),
+                          cwd=ROOT, capture_output=True, timeout=60)
+    report = done.stdout.decode()
+    check("a redacted tape of the random tool does not replay", done.returncode == 1,
+          report[-300:])
+    check("and says the withheld draws are why, rather than blaming the program",
+          "withheld" in report, report[-400:])
 
     return check.report(app)
 

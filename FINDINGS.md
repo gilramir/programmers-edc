@@ -8751,3 +8751,105 @@ values the program drew, and the machine's time zone, so this tape has
 neither"*. It is three words of maintenance at the moment the knowledge exists
 and unrecoverable a year later, which is the same argument this file is made
 of.
+
+## Replaying a tape, and the order that was never the program's
+
+The recorder was built on one claim: the port boundary is total, so a Gren
+program here is a pure function of what `init` read and what arrived on
+`tuiIn`, and a tape is therefore the *input* that produced a session rather
+than an account of it. `gren-replay FILE.tape main.js` is the file that either
+makes that true or finds out where it is not. It opens no terminal and never
+starts Turbo Vision: the compiled module is driven straight through its ports.
+
+That is not a shortcut, it is the right boundary. What a tape records is what
+the **model** did; what the differ does with it is `diff.test.js`'s subject,
+against a fake binding. Running the differ here would also mean answering the
+messages it sends back -- `copyToClipboard` is answered unconditionally in
+`tui.js` -- and a tape has those answers on it already, so two things would be
+feeding the program at once.
+
+### The wrong driver, and the four lines that killed it
+
+The obvious replayer feeds a message, waits, checks what came back, feeds the
+next. It cannot reproduce a tape, and `predc time` showed why in four lines:
+
+    render 333c0a51        init's first
+    in     resized         the terminal, arriving
+    render 333c0a51        the resize, redrawn identically
+    out    atInstant       init's chain, continuing
+
+The terminal's first `resized` arrived **between two steps of `init`'s own
+chain** -- after its first render and before it asked node for the time zones.
+A driver that waits for the render and then sends the resize puts it *after*
+the whole of init, which is a state the recording never had; the zones arrive
+before the resize instead of after it, and every render from there on differs
+for a reason that is not a bug. Waiting longer makes it worse rather than
+better.
+
+**A tape's order is not the program's.** It is the interleaving of the
+program's own asynchronous chains -- file reads, whose timing is the recording
+machine's disk -- with messages arriving from outside. Nothing a replay does to
+its own clock reproduces that.
+
+What does reproduce it is already on the tape: **the program's own output is
+the only clock both runs share.** So there is one cursor over the events. An
+outbound message is matched against what the cursor points at and steps it
+forward; an inbound message is sent the *instant* the cursor reaches it, from
+inside the subscription that moved it there -- synchronously, in the same turn,
+which is the whole trick. The resize then lands exactly where it landed,
+between the render and the request, because it is sent from inside the handler
+for the render that preceded it.
+
+That is also what `programmers-edc/bin/timezones.js` has been doing all along:
+it answers `intlOut` synchronously inside the subscription, which is why its
+answers land where they do on the tape. The replayer generalised the launcher's
+own habit without noticing until afterwards.
+
+The result on the recording that started this: **57 matching messages** of
+`rec.001` -- the ascii chart, the whole calendar session, six months paged back
+and forth, every drag -- and then a divergence at the exact line where the
+random tool opens and draws bytes that a tape of format 1 never recorded.
+
+### A replay is the program, so a replay writes
+
+Replaying a session in which somebody changed a setting makes the program
+**save the setting**. It was found the way these things are found: a scratch
+tape was replayed, and predc wrote `chart = "list"` out of its config file,
+because the recorded session had toggled the ASCII chart's form. On a machine
+that was only meant to be reading somebody's bug report. It costs a user's
+notes as easily as their theme.
+
+So a replay gets a directory of its own, with `HOME` and the four XDG variables
+pointed into it, and the files the launcher recorded under `extra` seeded
+inside. **This is safer and also more faithful**, which is the part worth
+keeping: `init` then decides from the recording's config rather than from the
+config of whoever is reading the tape, and a divergence on the first render
+stops meaning "your theme is different from theirs". `--in-place` turns it off
+and says out loud what it is turning off.
+
+The seeding needs a rule for where a recorded absolute path goes, and the path
+announces it: anything under `.config`, `.local/share`, `.local/state` or
+`.cache` is an XDG path, and the tail after that is what the program will ask
+for once the matching variable points here. Anything else is shaped by a rule
+this cannot guess, and saying so beats planting the file where the program will
+not look.
+
+### Two more things `init` reads, found by writing the thing that needed them
+
+The first replay diverged on the first render of every tape, because
+`Terminal.initialize` reads four properties off `process.stdout` and a replay's
+stdout is a pipe. Half the layout in a Turbo Vision program is decided from
+those numbers before the first `Resized` can arrive -- predc sizes its desktop
+from them in `init` -- so a replay that let its own stdout answer diverges
+immediately and blames the program.
+
+Three of the four were on the tape. `colorDepth` was not, and neither were the
+flags `init` was given, so the format went to 3 with both on it. Nothing in
+this repo reads either one. That is exactly why they belong there: **a replay
+has to hand `init` the same values it was given and cannot know which of them
+the program looked at**, and an input a replay guesses at is an input that
+makes a divergence unreadable.
+
+The pattern is the one this file keeps finding. Writing the program that needs
+a capability is what finds the gaps in it; staring at the recorder found none
+of these three, and one afternoon of replaying found all of them.

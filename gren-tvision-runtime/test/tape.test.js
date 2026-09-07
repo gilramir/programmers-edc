@@ -196,9 +196,13 @@ test('a crash and a truncation are both anomalies', () => {
 });
 
 test('an older tape is told what it is missing, by name', () => {
+  // The number comes from the recorder rather than from here: what this
+  // checks is that every format between the tape's and this build's says what
+  // it added, which is the whole reason the table exists.
   const a = one(tape([render(1, 'a'), { t: 2, end: 'exit' }], { tape: 1 }));
-  assert.match(a.compatibility[0], /tape format 1, this build writes 2/);
-  assert.match(a.compatibility[1], /random values/);
+  assert.match(a.compatibility[0], new RegExp(`tape format 1, this build writes ${TAPE}`));
+  assert.equal(a.compatibility.length, TAPE, a.compatibility.join(' / '));
+  assert.match(a.compatibility.join('\n'), /random values/);
 });
 
 test('a tape from another protocol says a replay would compare two programs', () => {

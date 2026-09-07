@@ -206,6 +206,19 @@ it changed on the screen or that it changed nothing. It also reports what can
 be told without replaying anything: a window off the edge of the desktop, a
 request the program made that was never answered, a crash, a truncation.
 
+And then the tape can be run again, which is what it was recorded for:
+
+```sh
+node ../gren-tvision-runtime/bin/gren-replay.js bug.tape main.js
+```
+
+with no terminal and no Turbo Vision — predc's compiled module driven straight
+through its ports, its renders fingerprinted the way the recorder fingerprinted
+the originals, and the first one that differs printed with the message that was
+fed last. It runs in its own directory with the recorded config file seeded in
+it, so replaying somebody's session neither reads your settings nor writes over
+them.
+
 The two flags belong to `bin/predc.js` and are taken off the command line
 before `Cli.gren` ever sees them -- a parser that answers an unknown word with
 an exit cannot also be where a launcher's flag is declared -- which is why they

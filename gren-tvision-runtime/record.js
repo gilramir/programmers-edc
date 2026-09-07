@@ -48,7 +48,7 @@ const os = require('os');
 const path = require('path');
 
 /** Bumped when a reader would get the wrong answer from an older tape. */
-const TAPE = 2;
+const TAPE = 3;
 
 /** Stop before filling somebody's disk. The header says when this happened. */
 const MAX_BYTES = 16 * 1024 * 1024;
@@ -111,6 +111,29 @@ function redact(message) {
     [field]: undefined,
     withheld: { field, chars: message[field].length, sha: digest(message[field]) },
   };
+}
+
+/**
+ * What an outbound message looks like on a tape.
+ *
+ * Its own function because a replayer has to produce exactly this from a
+ * message the program just sent, and compare it against what the tape has. Two
+ * spellings of the same rule, in two files, is the shape of a bug that reports
+ * a divergence nobody can find.
+ */
+function fingerprint(message) {
+  const type = message && message.type;
+  const record = { out: type };
+  if (type === 'render') {
+    record.hash = digest(JSON.stringify(message));
+    record.windows = (message.windows || []).map((w) => w.id);
+    record.overlays = (message.overlays || []).length;
+  } else if (message && message.id !== undefined) {
+    record.id = message.id;
+  } else if (message && message.spec && message.spec.id !== undefined) {
+    record.id = message.spec.id;
+  }
+  return record;
 }
 
 /**
@@ -210,6 +233,11 @@ function createRecorder(opts = {}) {
       ...(opts.program || {}),
       argv: (opts.argv || process.argv).slice(1),
       cwd: opts.cwd || process.cwd(),
+      // What the launcher handed `init` as flags. Nothing here passes any and
+      // it is recorded regardless, for the same reason as `colorDepth`: it is
+      // an input, and an input a replay has to guess at is an input that makes
+      // a divergence unreadable.
+      flags: opts.flags === undefined ? {} : opts.flags,
     },
     protocol: opts.protocol,
     runtime: {
@@ -231,6 +259,12 @@ function createRecorder(opts = {}) {
       isTTY: !!(process.stdout && process.stdout.isTTY),
       columns: (process.stdout && process.stdout.columns) || null,
       rows: (process.stdout && process.stdout.rows) || null,
+      // The fourth thing `Terminal.initialize` answers with. Nothing in this
+      // repo reads it and it goes on the tape anyway, because a replay has to
+      // hand `init` the same four numbers it was given and cannot know which
+      // of them the program looked at.
+      colorDepth:
+        process.stdout && process.stdout.getColorDepth ? process.stdout.getColorDepth() : 0,
       env: SAFE_ENV.reduce((acc, name) => {
         if (env[name] !== undefined) acc[name] = env[name];
         return acc;
@@ -276,19 +310,11 @@ function createRecorder(opts = {}) {
      * the following 40 kilobytes" is a liability.
      */
     outbound(message, port = 'tui') {
-      const type = message && message.type;
-      const record = { t: Date.now() - began, out: type };
-      if (port !== 'tui') record.port = port;
-      if (type === 'render') {
-        record.hash = digest(JSON.stringify(message));
-        record.windows = (message.windows || []).map((w) => w.id);
-        record.overlays = (message.overlays || []).length;
-      } else if (message && message.id !== undefined) {
-        record.id = message.id;
-      } else if (message && message.spec && message.spec.id !== undefined) {
-        record.id = message.spec.id;
-      }
-      put(record);
+      put({
+        t: Date.now() - began,
+        ...fingerprint(message),
+        ...(port === 'tui' ? {} : { port }),
+      });
     },
 
     /**
@@ -532,6 +558,7 @@ module.exports = {
   MAX_BYTES,
   SAFE_ENV,
   createRecorder,
+  fingerprint,
   recordRandomness,
   takeRecordFlags,
   installCrashHandlers,

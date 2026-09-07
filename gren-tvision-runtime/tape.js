@@ -38,6 +38,7 @@ const UNPROMPTED_MS = 200;
 // nobody can reconstruct it from the diff.
 const ADDED_IN = {
   2: "the random values the program drew, and the machine's time zone",
+  3: "the terminal's colour depth and the flags init was given",
 };
 
 /**

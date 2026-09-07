@@ -7,13 +7,15 @@
   "main": "tui.js",
   "bin": {
     "gren-tui": "bin/gren-tui.js",
-    "gren-tape": "bin/gren-tape.js"
+    "gren-tape": "bin/gren-tape.js",
+    "gren-replay": "bin/gren-replay.js"
   },
   "files": [
     "tui.js",
     "diff.js",
     "record.js",
     "tape.js",
+    "replay.js",
     "bin"
   ],
   "dependencies": {

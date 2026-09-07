@@ -46,6 +46,7 @@ function run(grenModule, options = {}) {
     ? createRecorder({
         ...(typeof asked === 'string' ? { path: asked } : asked),
         protocol: PROTOCOL,
+        flags: options.flags || {},
       })
     : null;
   // Unconditional: the whole difficulty with a crash is that it lands on the

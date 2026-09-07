@@ -93,6 +93,63 @@ decoded wrong or a paint that came out wrong is invisible to it; and the values
 `init` read off the disk — the environment, the file a viewer was opened on —
 are the user's, and deliberately not on it.
 
+## Replaying a tape
+
+```sh
+gren-replay bug.tape main.js        # the compiled module, not the launcher
+```
+
+No terminal is opened and Turbo Vision is never started. The program is driven
+straight through its ports and its output is fingerprinted the way the recorder
+fingerprinted the original; the first pair that differs is the answer, printed
+with the message that was fed last. Exit 0 if the tape reproduced, 1 if it
+diverged, 2 if it could not be run.
+
+```
+  --env NAME=VALUE   plant a variable the tape kept only the name of
+  --in-place         let the program write where it wrote when recorded
+  --trace            print every message, both ways, as it goes
+```
+
+**The tape drives itself, through the program's own output.** This is the whole
+design and it took a wrong one to find it. The obvious driver feeds a message,
+waits, checks what came back, and feeds the next — and it cannot reproduce a
+tape, because a tape's order is not the program's. `predc time` proved it in
+four lines: the terminal's first `resized` arrived *between* two steps of
+`init`'s own chain, after its first render and before it asked node for the
+time zones. Feeding that resize a moment later — which is all "wait, then
+send" can do — puts the program in a state the recording never had, and every
+render after it differs for a reason that is not a bug. So there is one cursor
+over the tape: an outbound message is matched against what it points at and
+steps it forward, and an inbound message is sent the instant the cursor reaches
+it, from inside the subscription that moved it there.
+
+**A replay is the program, so a replay writes what the program writes.** That
+is obvious once it has happened to you: replaying a session in which somebody
+changed a setting makes the program save the setting, over yours, on a machine
+that was only meant to be reading a bug report. So a replay gets a directory of
+its own, with `HOME` and the XDG variables pointed into it, and the files the
+launcher recorded in `extra` seeded inside it. That is safer and also *more*
+faithful — `init` then decides from the recording's config rather than from the
+config of whoever is reading the tape. `--in-place` turns it off and says so.
+
+What goes back before the program starts: the arguments (which for predc decide
+whether there is a program to run at all), the working directory, the time
+zone, the four numbers `Terminal.initialize` answers with, the flags `init` was
+given, and the clock. `Time.every` is driven rather than waited for, so a tape
+with a clock in it replays in milliseconds rather than in the minute it took to
+record.
+
+A launcher that wants its own state replayed records it as `{path, contents}`
+under `extra`, and a path under `.config`, `.local/share`, `.local/state` or
+`.cache` is placed where the matching XDG variable will find it.
+
+What it cannot put back is what the tape does not carry: the values of
+environment variables (names only, on purpose — `--env` is for the two that
+mattered) and any file the program read that its launcher did not record. Both
+are reported before the first message is fed, because the failure they cause
+looks exactly like a bug in the program.
+
 ## Reading a tape
 
 ```sh
