@@ -8962,3 +8962,104 @@ different legal one. **A check that flaps is worse than no check**, so the
 whole thing is behind `TVNODE_TAPES=1` until it does not. The mechanism, the
 numbers and the reasons are written down here so that the next person to look
 starts where this stopped rather than where it started.
+
+## The seven flapping drivers, and how many of them were the replayer
+
+Seven drivers replayed on one run and not the next, and the last commit put
+that down to races in the recording. Most of it was not. Six causes, and only
+the last is anything a tape cannot fix.
+
+### The reading that belonged to the tick
+
+Clock readings are served by position on the tape, so that a missed one does
+not shift the rest -- and the position was being moved to the render being
+waited for. A tick reads the clock and *then* renders, so its reading sits on
+the line before the render's: moving up to the render first threw that reading
+away and handed the tick the next one, a second later. One second wrong, and
+wrong for the rest of the run.
+
+The rule underneath is worth more than the fix. **The position moves only at an
+inbound message**, because an inbound message is the only barrier there is.
+Everything recorded between two of them -- a `Time.now` inside the update, the
+one a `Task` took a moment later, the one a tick took -- belongs to that stretch
+and is handed out in order within it. Moving it at every render instead throws
+away the reading a task was about to ask for, which is a timestamp one second
+wrong in a log nobody was looking at.
+
+### A tick is known by its reading, not by a gap
+
+The driver has to tell a `Time.every` tick from the second render of one
+update, because it fires the first itself and waits for the second. Time looked
+like the way to tell: a tick is a second later and a second render is a
+millisecond later. It is not the way. `demo` renders twice for one message and
+the second lands three milliseconds after; `predc time` produces a tick eight
+milliseconds after a resize. Neither threshold sorts both.
+
+**Every tick reads the clock before it renders**, because that is how
+`Time.every` builds the `Posix` it hands over. A reading between here and the
+render being waited for is what says this one is a timer going off, and it is
+exact rather than a guess.
+
+### A render identical to the one before it is a no-op
+
+`predc random` diverges on whether the terminal's first resize arrives before
+or after the `Crypto` task comes back: one order redraws the old page and then
+the new, the other redraws the new one twice. Both are three renders and two
+screens, and **the differ patches nothing for a repeat** -- there is nothing on
+a screen, or in a driver, that can tell them apart.
+
+So a render that repeats the screen already drawn is walked past, on either
+side: one the program made and the tape has not, and one the tape has and the
+program did not repeat. What is compared is the sequence of *distinct* screens,
+which is what a tape can honestly hold a program to.
+
+### One step past the barrier, for an exact match
+
+A `Cmd` that resolves through a Task comes out a few milliseconds after the
+render beside it, and the terminal's next message lands in between -- so the
+tape has a message going *in* between two things one update sent out, and a
+driver that will not send anything until the tape's next line arrives waits for
+a message that is waiting for it. Sending that message early is safe when what
+has just arrived is exactly what the tape has on the other side of it: the
+terminal did not wait for us either.
+
+### And then the bug that was producing most of it
+
+The lookahead above sends a message out of turn and leaves the cursor standing
+behind it, and nothing else moves the cursor -- so the driver sat on a message
+it had already sent until the timeout, and reported *"the program stopped
+before the tape did"*. Six replays of one tape gave 18, 107, 113, 18, 18 and
+113 matching messages. After one `pump()`, six gave 113.
+
+**A replay is deterministic and a flapping replay is a bug in it**, which
+should have been the first thought rather than the last. The recording is where
+the races are, and that made every irregularity look like one.
+
+### "Has the program stopped?" is a question, not a wait
+
+The one race that was real, and it was the replayer's. The driver has to decide
+that nothing more is coming before it fires a tick, and it decided by counting
+quiet turns -- which makes the answer depend on how busy the machine is, and
+the suite runs sixteen drivers at once. Two turns was enough on an idle machine
+and not on a loaded one; twenty was better and still wrong; a hundred cost a
+tenth of a second per tick and was *still* wrong.
+
+`process.getActiveResourcesInfo()` is node's own list of what is outstanding,
+and it answers the question properly: `FSReqCallback` while a file read is in
+flight, `Timeout` while anything waits on a real timer, and neither for a
+`Time.every`, because a replay's intervals are virtual. That distinction is
+exactly the one wanted, and it does not care how loaded the machine is.
+
+### Where it is now
+
+**38 of 40 replay**, and the two are the same program: `Tool.Time` emits a
+varying number of renders for one update, and enough of that variation is not
+absorbed by the no-op rule to matter. Five drivers are marked as never
+replayable, and the reasons are all one reason -- `watch` spawns child
+processes and watches a directory, `dir` lists one, `notes` reads and writes
+files, `edit` saves the document it opened, and `viewer` is pointed at a file
+each case rewrites. All of that is Tasks rather than messages.
+
+Still `TVNODE_TAPES=1` rather than on by default, because two that flap are two
+too many for something every commit has to pass. The distance from seven to two
+was six defects and one honest limit, which is a better ratio than it looked.

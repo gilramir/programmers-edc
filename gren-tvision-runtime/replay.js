@@ -48,9 +48,32 @@ const { PROTOCOL } = require('./tui');
 /** How long to wait for output the tape says is coming. */
 const DEFAULT_TIMEOUT_MS = 5000;
 
+
+
 /** A turn of the event loop that lets I/O run, which a microtask does not. */
 function turn() {
   return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/**
+ * Is the program still working?
+ *
+ * The driver has to decide "there is nothing more coming" before it fires a
+ * tick, and the only way to ask an async runtime that used to be to wait a
+ * while -- which makes the answer depend on how busy the machine is, and a
+ * replayer whose result depends on the load reports races it invented. This is
+ * the question asked properly: `process.getActiveResourcesInfo` is node's own
+ * list of what is outstanding, and during a replay it is `PipeWrap` twice for
+ * stdio and nothing else when the program has stopped. A file read in flight
+ * shows as `FSReqCallback`; a `Process.sleep` or anything else waiting on a
+ * real timer shows as `Timeout`. `Time.every` shows as neither, because a
+ * replay's intervals are virtual -- which is exactly the distinction wanted.
+ */
+function working() {
+  for (const resource of process.getActiveResourcesInfo()) {
+    if (resource === 'FSReqCallback' || resource === 'Timeout') return true;
+  }
+  return false;
 }
 
 /**
@@ -506,9 +529,20 @@ async function replay(grenModule, session, options = {}) {
     );
   }
 
-  // Where on the tape the replay has got to, which the clock needs: see
-  // `install`.
+  // Where on the tape the replay has got to, which the clock needs. It moves
+  // only at an inbound message, because an inbound message is the only barrier
+  // there is: everything recorded between two of them -- a `Time.now` inside
+  // the update, the one a `Task` took a moment later, the one a tick took --
+  // belongs to that stretch and is handed out in order within it. Moving it at
+  // every render instead throws away the reading a task was about to ask for,
+  // which is a timestamp one second wrong in a log nobody was looking at.
   let atLine = 0;
+  // The lines the program's readings of the clock were written on. Used to
+  // tell a tick from the second render of one update: see the wait loop.
+  const readingLines = (session.events || [])
+    .filter((e) => e.now !== undefined)
+    .map((e) => e.at);
+  const readAfter = (from, before) => readingLines.some((l) => l > from && l < before);
   const stage = install(session, { ...options, position: () => atLine });
   warnings.push(...stage.notes);
   const withheldDraws = stage.draws.filter((d) => d.value === undefined).length;
@@ -533,6 +567,15 @@ async function replay(grenModule, session, options = {}) {
     let matched = 0;
     let lastSent = null;
     let divergence = null;
+    // The screen as the replay last agreed it was, and how many repeats of it
+    // went past on each side.
+    let lastHash = null;
+    let repeats = 0;
+    // Expectations met later than the tape has them. A `Cmd` that resolves
+    // through a Task comes out a few milliseconds after the render beside it,
+    // and once that happens the two are matched out of order rather than
+    // called a difference -- see the wait loop.
+    const deferred = [];
     let done = false;
     const extra = [];
 
@@ -540,6 +583,23 @@ async function replay(grenModule, session, options = {}) {
       if (divergence) return;
       divergence = { step, after: lastSent, why, actual };
       done = true;
+    };
+
+    /** Feed the message at `from`, stepping the cursor over it. */
+    const pumpFrom = (from) => {
+      const step = steps[from];
+      if (!step || step.kind !== 'send' || step.done) return;
+      step.done = true;
+      lastSent = step;
+      atLine = step.at;
+      stage.clockAt(step.t);
+      const name = inboundPort(step.port);
+      if (!app.ports[name]) {
+        stop(`the program has no ${name} port to send this to`, step);
+        return;
+      }
+      if (options.trace) options.trace('<-', step.port || 'tui', { in: step.message.type, at: step.at });
+      app.ports[name].send(step.message);
     };
 
     /** Feed everything the cursor is standing on, until it wants output. */
@@ -553,6 +613,8 @@ async function replay(grenModule, session, options = {}) {
         }
         if (step.kind !== 'send') return;
         cursor += 1;
+        if (step.done) continue;
+        step.done = true;
         lastSent = step;
         atLine = step.at;
         stage.clockAt(step.t);
@@ -592,7 +654,57 @@ async function replay(grenModule, session, options = {}) {
       if (options.trace) options.trace('->', label || 'tui', actual);
       if (divergence) return;
       const port = label || 'tui';
+      // **A render identical to the one before it is a no-op**, and how many
+      // of them a run produces is not the program's behaviour: the differ
+      // patches nothing for the second, and a screen cannot tell them apart.
+      // They differ between runs because a message can land either side of a
+      // Task's continuation -- `predc random` draws its bytes, and whether the
+      // terminal's first resize arrives before or after the draw comes back
+      // decides whether the resize redraws the old page or the new one. So a
+      // repeat is skipped on the way in, and, in the wait loop, on the way out
+      // of the tape.
+      if (actual.out === 'render' && actual.hash === lastHash) {
+        const end = barrier(cursor);
+        const wanted = steps
+          .slice(cursor, end)
+          .some((step) => !step.done && (step.port || 'tui') === port &&
+            step.expected.out === 'render' && step.expected.hash === actual.hash);
+        if (!wanted) {
+          repeats += 1;
+          return;
+        }
+      }
+      // Anything set aside earlier, first: it was expected before this and is
+      // still expected.
+      for (const i of deferred) {
+        const step = steps[i];
+        if (step.done || (step.port || 'tui') !== port) continue;
+        if (step.expected.out !== actual.out) continue;
+        if (actual.out === 'render' && step.expected.hash !== actual.hash) continue;
+        step.done = true;
+        if (actual.out === 'render') lastHash = actual.hash;
+        matched += 1;
+        pump();
+        return;
+      }
+
       const end = barrier(cursor);
+      // The tape's own repeats, walked past for the same reason: a render it
+      // has twice and the program only drew once is two of the same screen,
+      // and nothing downstream can tell. Only ones that are not what just
+      // arrived -- an actual repeat the program *did* make matches here.
+      for (let i = cursor; i < end; i += 1) {
+        const step = steps[i];
+        if (step.done) continue;
+        if ((step.port || 'tui') !== port) continue;
+        if (step.expected.out !== 'render') break;
+        if (step.expected.hash !== lastHash || step.expected.hash === actual.hash) break;
+        step.done = true;
+        repeats += 1;
+      }
+      while (cursor < steps.length && steps[cursor].kind === 'expect' && steps[cursor].done) {
+        cursor += 1;
+      }
       // By type first, and only then by position. Between two inputs a model
       // may emit a render and a `focus` in either order -- they are one
       // `Cmd.batch` on one port, and which of them the recorder saw first is
@@ -610,6 +722,34 @@ async function replay(grenModule, session, options = {}) {
         if (fallback < 0) fallback = i;
       }
       if (found < 0) found = fallback;
+      // One step past the barrier, and only for an exact match. A `Cmd` that
+      // resolves through a Task comes out a few milliseconds after the render
+      // beside it, and the terminal's next message lands in between -- so the
+      // tape has a message going *in* between two things one update sent out.
+      // Sending that message early is safe when what has just arrived is
+      // exactly what the tape has on the other side of it: the terminal did
+      // not wait for us either.
+      if (found < 0 && end < steps.length && steps[end].kind === 'send') {
+        for (let i = end + 1; i < steps.length && steps[i].kind === 'expect'; i += 1) {
+          const step = steps[i];
+          if (step.done || (step.port || 'tui') !== port) continue;
+          if (step.expected.out !== actual.out) continue;
+          if (actual.out === 'render' && step.expected.hash !== actual.hash) continue;
+          // Marked before the message goes in, not after: sending it runs the
+          // program, which can call straight back into here, and a step still
+          // open at that moment is a step that gets matched twice.
+          step.done = true;
+          if (actual.out === 'render') lastHash = actual.hash;
+          matched += 1;
+          deferred.push(i);
+          pumpFrom(end);
+          // And on with the rest: the cursor is still standing behind the
+          // message that was just sent out of turn, and nothing else moves it.
+          pump();
+          return;
+        }
+      }
+
       if (found < 0) {
         // Nothing on this port was expected here. After the tape's last step
         // that is ordinary -- the recorder's `end` line is written as the
@@ -624,7 +764,7 @@ async function replay(grenModule, session, options = {}) {
         return;
       }
       steps[found].done = true;
-      atLine = steps[found].at;
+      if (actual.out === 'render') lastHash = actual.hash;
       matched += 1;
       while (cursor < steps.length && steps[cursor].kind === 'expect' && steps[cursor].done) {
         cursor += 1;
@@ -657,27 +797,74 @@ async function replay(grenModule, session, options = {}) {
         );
         break;
       }
+      // Everything fed, and only messages set aside still outstanding: give
+      // the program a moment and then say which one never came.
+      if (done) break;
       await turn();
       if (cursor !== was) {
         was = cursor;
         idle = 0;
         continue;
       }
-      // Two quiet turns, not one: a program waiting on a file read is quiet
-      // too, and firing a tick into that would put a render where the tape has
-      // none.
+      // Quiet means node says nothing is outstanding, not that some number of
+      // milliseconds went by: see `working`. A few such turns rather than one,
+      // since a task can sit between its resolution and its continuation with
+      // nothing outstanding to show for it.
+      if (working()) {
+        idle = 0;
+        continue;
+      }
       idle += 1;
-      if (idle < 2) continue;
-      idle = 0;
+      if (idle < 5) continue;
       // Nothing arrived, and the tape says something should have. A render
       // with no message under it is a `Time.every` tick, so one is fired, at
       // the moment the tape stamped it. A replay that waited for the wall
       // instead would take as long as the recording did, which for a tool with
       // a clock in it is the difference between a test and an afternoon.
+      // The position is *not* moved to the render being waited for. A tick
+      // reads the clock and then renders, so its reading is written on the
+      // line before the render's -- moving up to the render first throws that
+      // reading away and hands the tick the next one, which is a second later
+      // and a clock a second wrong for the rest of the run.
+      //
+      // And only a render the tape says *is* a tick. `demo` renders twice for
+      // one message, a millisecond apart, and a replay that fired a tick while
+      // waiting for the second of them put a clock a second on where the
+      // recording had none, and then blamed the program for the difference.
+      // The tape tells the two apart, and not by how long the gap is -- a tick
+      // eight milliseconds after a resize is still a tick. **Every tick reads
+      // the clock before it renders**, because that is how `Time.every` builds
+      // the `Posix` it hands over, so a reading between here and the render
+      // being waited for is what says this one was a timer going off.
       const want = steps[cursor];
-      if (want && want.kind === 'expect') {
-        atLine = want.at;
+      // The cursor can be left standing on a message already sent out of turn
+      // by the lookahead above. Stepping over it is `pump`'s job, and nothing
+      // has called it since.
+      if (want && want.kind !== 'expect') {
+        pump();
+        continue;
+      }
+      if (!want) continue;
+      // The other half of the no-op rule: the tape has a render the program
+      // did not repeat here. Nothing on a screen distinguishes them, so it is
+      // walked past rather than waited for.
+      if (want.expected.out === 'render' && want.expected.hash === lastHash) {
+        want.done = true;
+        repeats += 1;
+        cursor += 1;
+        while (cursor < steps.length && steps[cursor].kind === 'expect' && steps[cursor].done) {
+          cursor += 1;
+        }
+        pump();
+        continue;
+      }
+      if (readAfter(atLine, want.at)) {
+        // Reset, so that a tape wanting two ticks in a row gets two: each
+        // stall fires one, and a `Time.every` with more than one interval on
+        // it can need several before the render the tape has comes out.
+        idle = 0;
         stage.tickAt(want.t);
+        continue;
       }
     }
     // A last turn or two, so that anything the program was about to say is
@@ -685,7 +872,22 @@ async function replay(grenModule, session, options = {}) {
     await turn();
     await turn();
 
+    // Anything set aside and never met is an absence rather than a difference,
+    // and it is reported as the first one.
+    if (!divergence) {
+      const missing = deferred.map((i) => steps[i]).find((step) => !step.done);
+      if (missing) {
+        stop(`${difference(missing.expected, null)} at all`, missing);
+      }
+    }
+
     const unexpected = extra.filter((e) => !e.afterEnd);
+    if (repeats) {
+      warnings.push(
+        `${repeats} render(s) that repeated the screen already drawn were passed over on ` +
+          'one side or the other: how many of those a run makes is not the program'
+      );
+    }
     if (extra.length > unexpected.length) {
       warnings.push(
         `${extra.length - unexpected.length} message(s) came after the tape's last line, ` +
@@ -694,7 +896,10 @@ async function replay(grenModule, session, options = {}) {
     }
 
     return {
-      ok: !divergence && !unexpected.length && cursor >= steps.length,
+      ok:
+        !divergence &&
+        !unexpected.length &&
+        steps.every((step) => step.kind !== 'expect' || step.done),
       matched,
       total: steps.filter((s) => s.kind === 'expect').length,
       divergence,

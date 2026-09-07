@@ -119,7 +119,17 @@ replay(grenModule, session, {
         const m = after.message || {};
         console.log(`  last fed   line ${after.at}, ${(after.t / 1000).toFixed(1)}s: ${m.type}${m.id ? ` ${m.id}` : ''}${m.cmd ? ` ${m.cmd}` : ''}`);
       }
-      console.log(`  expected   line ${step.at}: ${step.expected.out}${step.expected.hash ? ` ${step.expected.hash}` : ''}`);
+      // A divergence can name a message going the other way -- a port the
+      // program does not have, or the tape running on past a program that
+      // stopped -- and those have nothing expected about them.
+      if (step && step.kind === 'expect') {
+        console.log(
+          `  expected   line ${step.at}: ${step.expected.out}` +
+            (step.expected.hash ? ` ${step.expected.hash}` : '')
+        );
+      } else if (step) {
+        console.log(`  at         line ${step.at}, ${(step.t / 1000).toFixed(1)}s`);
+      }
       if (actual) console.log(`  got        ${actual.out}${actual.hash ? ` ${actual.hash}` : ''}`);
       console.log(`  which is   ${why}`);
     } else if (result.extra.length) {

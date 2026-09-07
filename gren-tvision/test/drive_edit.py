@@ -77,7 +77,12 @@ def title(app):
 
 
 def main():
-    check = Checks()
+    check = Checks(
+        replays=(
+            "the document is a file on disk, and the session edits and saves it: "
+            "a replay reads what the session left, not what it started from"
+        )
+    )
     work = tempfile.mkdtemp(prefix="tvedit-")
     try:
         target = os.path.join(work, "note.txt")

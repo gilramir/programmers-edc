@@ -65,7 +65,12 @@ def report(app):
 
 
 def main():
-    check = Checks()
+    check = Checks(
+        replays=(
+            "each case rewrites the file being viewed, so by the end there is one "
+            "file and several sessions, and a tape carries none of its contents"
+        )
+    )
     root = tempfile.mkdtemp(prefix="tvview-")
     try:
         path = os.path.join(root, "sample.txt")

@@ -269,7 +269,16 @@ test('Time.every is driven rather than waited for', async () => {
   // the wall's. The render it produces is on the tape with no message under it.
   const a = render(1);
   const tick = render(2);
-  const t = tape([expected(10, a), expected(60010, tick), { t: 60020, end: 'exit' }]);
+  // With the reading the tick takes on its way: `Time.every` builds its
+  // `Posix` from `Time.now`, so a tick on a tape always has one in front of
+  // it, and that is what tells a replay this render is a timer going off
+  // rather than the second half of an update.
+  const t = tape([
+    expected(10, a),
+    { t: 60009, now: START + 60009 },
+    expected(60010, tick),
+    { t: 60020, end: 'exit' },
+  ]);
   const started = Date.now();
   const result = await replay(
     program({
@@ -418,4 +427,105 @@ test('a program with no tuiIn is refused rather than misreported', async () => {
     () => replay(bare, session(tape([{ t: 10, end: 'exit' }]))),
     /not a gren-tvision program/
   );
+});
+
+test('a render that repeats the screen is walked past, on either side', async () => {
+  // `predc random` diverges on whether the terminal's resize arrives before or
+  // after the Crypto task comes back: one order redraws the old page and then
+  // the new, the other redraws the new one twice. Both are two screens, and
+  // the differ patches nothing for the repeat.
+  const a = render(1);
+  const b = render(2);
+
+  // The tape has one where the program makes two.
+  const extraFromProgram = await replay(
+    program({
+      onInit: (emit) => emit(a),
+      onMessage: (m, emit) => {
+        emit(a);
+        emit(b);
+      },
+    }),
+    session(tape([
+      expected(10, a),
+      { t: 20, in: { type: 'resized', cols: 80, rows: 23 } },
+      expected(30, b),
+      { t: 40, end: 'exit' },
+    ]))
+  );
+  assert.equal(extraFromProgram.ok, true, JSON.stringify(extraFromProgram.divergence));
+
+  // And the tape has two where the program makes one.
+  const extraOnTape = await replay(
+    program({ onInit: (emit) => emit(a), onMessage: (m, emit) => emit(b) }),
+    session(tape([
+      expected(10, a),
+      { t: 20, in: { type: 'resized', cols: 80, rows: 23 } },
+      expected(29, a),
+      expected(30, b),
+      { t: 40, end: 'exit' },
+    ]))
+  );
+  assert.equal(extraOnTape.ok, true, JSON.stringify(extraOnTape.divergence));
+  assert.match(extraOnTape.warnings.join('\n'), /repeated the screen already drawn/);
+});
+
+test('the second render of one update is not mistaken for a tick', async () => {
+  // A tick reads the clock on its way; a second render from the same message
+  // does not. Nothing else tells them apart -- `demo` produces its second
+  // render three milliseconds later and `predc time` produces a tick eight
+  // milliseconds after a resize, so no threshold sorts both.
+  const a = render(1);
+  const b = render(2);
+  let ticks = 0;
+  const result = await replay(
+    program({
+      onInit: (emit) => emit(a),
+      onMessage: (m, emit) => {
+        setInterval(() => {
+          ticks += 1;
+          emit(render(99));
+        }, 1000);
+        // The second render, a turn later and with no reading in front of it.
+        setTimeout(() => emit(b), 0);
+      },
+    }),
+    session(tape([
+      expected(10, a),
+      { t: 20, in: { type: 'command', cmd: 'x' } },
+      expected(23, b),
+      { t: 30, end: 'exit' },
+    ]))
+  );
+  assert.equal(result.ok, true, JSON.stringify(result.divergence));
+  assert.equal(ticks, 0, 'no timer should have been fired');
+});
+
+test('a message can go in one step early when what came out is exactly right', async () => {
+  // A Cmd resolving through a Task comes out after the render beside it, and
+  // the terminal's next message lands in between: the tape has an inbound
+  // message between two things one update sent out, and a driver that waits
+  // for the second before sending waits for a message that is waiting for it.
+  const a = render(1);
+  const b = render(2);
+  const result = await replay(
+    program({
+      onInit: (emit) => emit(a),
+      onMessage: (m, emit) => {
+        if (m.type === 'command') {
+          emit({ type: 'focus', id: 'w' });
+          emit(b);
+        }
+      },
+    }),
+    session(tape([
+      expected(10, a),
+      { t: 20, in: { type: 'command', cmd: 'x' } },
+      { t: 21, out: 'focus', id: 'w' },
+      { t: 22, in: { type: 'focus', id: 'w', index: 0, text: 'x' } },
+      expected(23, b),
+      { t: 30, end: 'exit' },
+    ]))
+  );
+  assert.equal(result.ok, true, JSON.stringify(result.divergence));
 });

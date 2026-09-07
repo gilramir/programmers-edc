@@ -164,9 +164,22 @@ barrier: nothing recorded after one can have been produced before it was sent.
 *Between* two of them the order of two different ports is not the program's —
 predc's request to node for its time zones lands either side of a render
 depending on which chain the recording machine finished first — and neither is
-the order of two different kinds of message on one port. What is asserted is
-that each happened, that there were exactly this many of each, and that the
-renders were these renders.
+the order of two different kinds of message on one port. Nor is a render that
+repeats the screen already drawn: the differ patches nothing for it and no
+screen can tell, so a repeat is walked past on whichever side has it. What is
+asserted is that each distinct screen happened, in this order, and that they
+were these screens.
+
+A message going *in* can be fed one step early when what the program has just
+said is exactly what the tape has on the other side of it — a `Cmd` resolving
+through a Task comes out after the render beside it, and the terminal's next
+message lands in between.
+
+And "the program has stopped" is asked rather than waited for:
+`process.getActiveResourcesInfo()` shows a file read as `FSReqCallback` and a
+real timer as `Timeout`, and shows nothing for a virtual `Time.every`. Counting
+milliseconds instead makes the answer depend on how loaded the machine is,
+which is a replayer reporting races it invented.
 
 What it cannot put back is what the tape does not carry: the values of
 environment variables (names only, on purpose — `--env` is for the two that
@@ -181,11 +194,13 @@ for every session a pty driver runs, and `Checks.report` runs each tape back
 through the program with no terminal. There is nothing to add to a driver: the
 variable is the runtime's own, so fifty-odd drivers became fifty-odd replay
 tests for nothing. It is **off by default** — `TVNODE_TAPES=1` turns it on —
-because 43 of 53 replay exactly and the ten that do not are not all the same
-kind. Three reach outside the port boundary through Tasks and never will; the
-rest are races that pass on one run and fail on the next, and a check that
-flaps is worse than no check. A driver that knows it cannot replay says so:
-`Checks(replays="...")`, with the reason.
+because 38 of 40 replay exactly and the two that do not still flap. Five
+drivers are marked as never replayable and say why: `watch` spawns child
+processes and watches a directory, `dir` lists one, `notes` reads and writes
+files, `edit` saves the document it opened, and `viewer` is pointed at a file
+each case rewrites — all Tasks rather than messages, and on no tape. A driver
+that knows it cannot replay says so with `Checks(replays="...")`, with the
+reason.
 
 ## Reading a tape
 
