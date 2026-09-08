@@ -7,9 +7,9 @@ programmer who has some C or C++ library in mind and wants to know how to get
 at it from a Gren program running on Node.
 
 Everything in it was learned by binding one particular library, Turbo Vision,
-and that binding is used as the worked example throughout.
+and that binding is used as the example throughout.
 [architecture.md](architecture.md) describes that binding in detail. This
-document keeps to the parts that would be the same for any other library.
+document is about the general approach of using a C or C++ library from Gren.
 
 ## The shape of the problem
 
@@ -69,7 +69,7 @@ build matrix.
 ## Getting a handle on the Gren program
 
 The JavaScript side needs to start the Gren program and hold on to its ports.
-Two things about the Gren toolchain make this possible and neither is obvious.
+Two things about the Gren toolchain make this possible.
 
 **Compile to a module, not an executable.** `gren make Main` produces a
 self-running script that initialises itself and throws the handle away.
@@ -145,18 +145,28 @@ came out of getting it wrong first.
 
 **Tell, do not ask.** For every piece of library state a C program would read
 with a getter, decide who moves it. If the library or the user moves it, the
-JavaScript side reports it as an event when it changes, and the model stores
-what it heard. If the model moves it, the model sends it and the JavaScript
-side applies it. Turbo Vision's Edit button reads the list's focused row at
-the moment it is pressed; the Gren version cannot, so the list reports every
-highlight move as a `Focused` event and the model already knows.
+JavaScript side reports it as an event when it changes, and the Gren program
+stores what it heard. If the Gren program moves it, it sends the new value and
+the JavaScript side applies it. Turbo Vision's Edit button reads the list's
+focused row at the moment it is pressed; the Gren version cannot, so the list
+reports every highlight move as a `Focused` event and the program already
+knows it.
 
-**A field the model writes must not come back as the user's event.** Where
-both sides move the same value, the JavaScript layer has to tell the model's
-own writes apart from the user's and report only the second. Otherwise the
-model stores what it hears and writes it back, and the two only agree by luck.
+**An echo is not an event.** Some values move from both ends: the Gren program
+writes them, and the user moves them too. A highlighted row, a scroll position,
+a cursor offset, the size of a window. The JavaScript layer sees both kinds of
+change, and must report only the ones the Gren program did not cause. If it
+echoes the program's own writes back, the program is told about a value it just
+set, stores that, and sends it out again on the next render. Nothing goes wrong
+while the two sides agree, which is most of the time. They stop agreeing when
+the value moves faster than a round trip -- a held key, a mouse wheel -- and
+then a value from several renders ago comes back as news and is written over
+what the user has done since. The exception is a write the library could not
+honour, such as a position past the end of something that has since got
+shorter. That is worth reporting, because it is news rather than an echo, and
+it settles in one round.
 
-**A question is two steps.** When an answer genuinely has to come back, such as
+**A query is asynchronous.** When an answer genuinely has to come back, such as
 reading a document out of an editor or opening a dialog, the shape is a
 request message out and an answer message in, and the Gren side wraps it as a
 `Cmd` that produces a `Msg`. This is exactly how an HTTP request looks in Gren
@@ -195,11 +205,11 @@ things that are actions rather than state, which is exactly what gren-tvision
 ended up with.
 
 **Compare descriptions with descriptions, never with the library.** If the
-JavaScript side diffs the model's value against what the library currently
-holds, it will write the model back over whatever the user just did. It has to
-diff the previous description against the next one, so a value is only written
-when the model changed it. Every virtual DOM has this rule and it is not
-optional.
+JavaScript side diffs the Gren program's value against what the library
+currently holds, it will write that value back over whatever the user just did.
+It has to diff the previous description against the next one, so a value is
+only written when the program changed it. Every virtual DOM has this rule and
+it is not optional.
 
 ## The event loop
 
