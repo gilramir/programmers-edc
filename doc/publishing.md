@@ -5,8 +5,9 @@ library. This is what that costs, what it does *not* cost, and how to build for
 the platforms this machine is not.
 
 Written down because the answers took a morning to establish and would take
-another one to establish again. **Steps 1 and 3 of the order at the end are
-done** (2026-09-08) and are marked below; the rest is still ahead.
+another one to establish again. **Steps 1, 2 and 3 of the order at the end are
+done** (2026-09-08) and are marked below. What is left is the Windows and macOS
+conditionals, the prebuild container, and dropping `"private": true`.
 
 ## Decided, 2026-09-05
 
@@ -34,23 +35,18 @@ The addon is written against **Node-API** (`node-addon-api` 8.x, `Napi::` in
 build-per-Node-version, which is the cost most people remember native addons
 for and the one this project does not pay.
 
-**One gap to close before shipping.** `binding.gyp` never sets `NAPI_VERSION`,
-so the addon compiles against whatever the installed headers offer and the real
-minimum Node version is an accident rather than a decision. Pick a level, define
-it, and say so:
+**~~One gap to close before shipping.~~ Done, 2026-09-08.** `binding.gyp` used
+not to set `NAPI_VERSION`, so the addon compiled against whatever the installed
+headers offered and the real minimum Node version was an accident rather than a
+decision. It is level 9 now, in `binding.gyp`:
 
 ```python
 "defines": [ "NAPI_CPP_EXCEPTIONS", "NAPI_VERSION=9" ],
 ```
 
-and in `package.json`:
-
-```json
-"engines": { "node": ">=18.17" }
-```
-
-Node-API 9 is Node 18.17+; level 8 reaches back to Node 12 and buys nothing
-this project needs.
+with `"engines": { "node": ">=18.17" }` in both packages' `package.json` saying
+the same thing to npm. Node-API 9 is Node 18.17+; level 8 reaches back to Node
+12 and buys nothing this project needs.
 
 ## What does matter
 
@@ -257,7 +253,30 @@ It also killed a documented trap: `node-gyp build` used not to relink when only
 `libtvision.a` had changed, because the archive was outside gyp's dependency
 graph. A `dependencies` edge is that graph.
 
-**Both npm packages are `"private": true`** and the runtime depends on
+**The `files` lists are written (2026-09-08), and the tarball was built from
+rather than read.** `tvision-node` ships `index.js`, `binding.gyp`,
+`tvision-sources.gypi`, `src/`, `scripts/`, `tvision/source`, `tvision/include`
+and `tvision/COPYRIGHT` -- 307 files, 372 KB, against 858 with no list at all.
+Two entries are less obvious than they look:
+
+  - **`scripts/` is not optional.** `binding.gyp` shells out to
+    `scripts/asan-flags.sh` at *configure* time, so leaving the directory out
+    breaks `npm install` for every consumer rather than only the sanitizer
+    build. (It is also why the file has to become conditional before Windows
+    can work -- there is no `sh` there.)
+  - **`tvision/COPYRIGHT` has to be named**, for the reason two sections up.
+
+The check that matters is not reading the list. It is `npm pack`, unpack
+somewhere else, and build there: 307 files, `node-gyp rebuild` green with no
+cmake and no sibling checkout, and the addon loads and exports `start`. `ldd`
+on the result is `libncursesw.so.6`, `libstdc++.so.6`, `libgcc_s.so.1`,
+`libm`, `libpthread`, `libc` -- and nix's `ld-linux`, which is the whole
+argument for building prebuilds in a container and not here.
+
+`gren-tvision-runtime` already had a list and it is complete: the five modules,
+the three `bin/` scripts, LICENSE and README.
+
+**Both npm packages are still `"private": true`** and the runtime depends on
 `"tvision-node": "file:../tvision-node"`. Those become a real version range on
 the day of the first publish.
 
@@ -284,13 +303,13 @@ anybody who likes the package will ask.
 
 ## Suggested order
 
-1. `NAPI_VERSION` and `engines`, which is ten minutes and decides the support
-   floor. **Still open.**
-2. LICENSE files. **Done**, except `tvision/COPYRIGHT` in `files`.
+1. `NAPI_VERSION` and `engines`. **Done, 2026-09-08.**
+2. LICENSE files. **Done**, `tvision/COPYRIGHT` included.
 3. ~~Vendor tvision at pack time;~~ move the build into `binding.gyp` so cmake
    stops being a requirement. **Done, 2026-09-08** -- and no vendoring was
-   needed, see above. The `files` lists and dropping `"private": true` are
-   what remains of this step.
+   needed, see above. The `files` lists are done too; **dropping
+   `"private": true` is what is left**, and it is deliberately last, because
+   until it goes there is no way to publish either package by accident.
 4. `binding.gyp` conditionals for Windows and macOS, even before either is
    built -- they are what makes a CI matrix possible at all. The file now has
    two targets rather than one, so each needs them; the library target is the

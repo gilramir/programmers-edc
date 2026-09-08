@@ -23,5 +23,8 @@
   },
   "scripts": {
     "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=18.17"
   }
 }

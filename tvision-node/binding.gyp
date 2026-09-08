@@ -79,7 +79,19 @@
       ],
       "ldflags": [ "<!@(sh scripts/asan-flags.sh ldflags)" ],
       "cflags_cc!": [ "-fno-exceptions" ],
-      "defines": [ "NAPI_CPP_EXCEPTIONS" ],
+      # NAPI_VERSION is the support floor, and naming it is the point.
+      # Without it the addon compiles against whatever level the installed
+      # headers happen to offer, so the oldest Node it runs on is an accident
+      # of the machine it was built on rather than a decision. Level 9 is Node
+      # 18.17 and up, which `engines` in package.json repeats; level 8 reaches
+      # back to Node 12 and buys nothing used here.
+      #
+      # This is also what makes one prebuilt binary enough. Node-API is
+      # ABI-stable across Node majors by contract, so a .node built at level 9
+      # loads on 18, 20, 22, 24 and whatever follows -- the per-Node-version
+      # build matrix that native addons are remembered for is a cost this
+      # project does not pay.
+      "defines": [ "NAPI_CPP_EXCEPTIONS", "NAPI_VERSION=9" ],
       "libraries": [ "<!@(pkg-config --libs ncursesw)" ]
     }
   ]

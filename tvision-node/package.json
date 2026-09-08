@@ -19,5 +19,18 @@
   },
   "devDependencies": {
     "node-gyp": "^11.0.0"
-  }
+  },
+  "engines": {
+    "node": ">=18.17"
+  },
+  "files": [
+    "index.js",
+    "binding.gyp",
+    "tvision-sources.gypi",
+    "src",
+    "scripts",
+    "tvision/source",
+    "tvision/include",
+    "tvision/COPYRIGHT"
+  ]
 }
