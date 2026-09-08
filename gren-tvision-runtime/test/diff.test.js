@@ -19,12 +19,14 @@ function fakeTv(initiallyOpen = []) {
     calls,
     open,
     // What the binding answers when the differ asks where the caret has been
-    // moved to in a window, keyed by window id. Set it in a test that cares.
+    // moved to in a window, keyed by window id: {id, pos} or nothing. Set it
+    // in a test that cares.
     caret: {},
     movedCaret(windowId) {
-      return this.caret[windowId] || '';
+      return this.caret[windowId] || null;
     },
     focus: (id) => calls.push(['focus', id]),
+    setInputCaret: (id, pos) => calls.push(['setInputCaret', id, pos]),
     exists: (id) => open.has(id),
     built: [],
     window(spec) {
@@ -166,6 +168,15 @@ const stopped = (over = {}) =>
     ...over,
   });
 
+// A window with one field in it, for the caret checks.
+const formWin = (over = {}) => ({
+  id: 'w',
+  title: 'Form',
+  rect: [1, 1, 40, 10],
+  items: [{ type: 'inputLine', id: 'f', rect: [2, 1, 20, 2], maxLen: 8, value: 'abcd' }],
+  ...over,
+});
+
 // A window with a row added to it, which is structural however small: nothing
 // can insert a view into a window but a rebuild.
 const withRow = (over = {}) =>
@@ -235,18 +246,62 @@ test('and the caret comes back with it', () => {
   const tv = fakeTv();
   const differ = createDiffer(tv);
   differ.apply([clockWin()]);
-  tv.caret.w = 'b';
+  tv.caret.w = { id: 'b', pos: -1 };
   tv.calls.length = 0;
 
   differ.apply([withRow()]);
   assert.deepEqual(tv.calls, [['close', 'w'], ['window', 'w'], ['focus', 'b']]);
 });
 
+test('and so does how far into a field it was', () => {
+  // Focusing a field is what makes TInputLine select the whole value, so a
+  // caret restored by focus alone sits at the end with the lot selected and
+  // the next keystroke replaces it.
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  differ.apply([formWin()]);
+  tv.caret.w = { id: 'f', pos: 3 };
+  tv.calls.length = 0;
+
+  differ.apply([formWin({ items: [...formWin().items, { type: 'staticText', id: 'r', rect: [2, 8, 20, 9], text: 'x' }] })]);
+  assert.deepEqual(tv.calls, [
+    ['close', 'w'],
+    ['window', 'w'],
+    ['focus', 'f'],
+    ['setInputCaret', 'f', 3],
+  ]);
+});
+
+test('a caret the rebuild had nowhere to put comes back when the field does', () => {
+  // predc's time converter has static text where its fields are while its
+  // clock is running, so the caret cannot go back on the way in -- and should
+  // be waiting when the fields return. The binding answers nothing while
+  // nobody moves the caret, so this is the differ remembering rather than
+  // asking twice.
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  differ.apply([formWin()]);
+  tv.caret.w = { id: 'f', pos: 2 };
+
+  // Into the read-only shape: same ids, and `f` is static text now.
+  differ.apply([formWin({ items: [{ type: 'staticText', id: 'f', rect: [2, 1, 20, 2], text: '' }] })]);
+  tv.caret.w = null;                  // nobody moved it while it was there
+  tv.calls.length = 0;
+
+  differ.apply([formWin()]);
+  assert.deepEqual(tv.calls, [
+    ['close', 'w'],
+    ['window', 'w'],
+    ['focus', 'f'],
+    ['setInputCaret', 'f', 2],
+  ]);
+});
+
 test('but not when the view that had it is gone, which is often why it rebuilt', () => {
   const tv = fakeTv();
   const differ = createDiffer(tv);
   differ.apply([withRow()]);
-  tv.caret.w = 'r';                    // the row that is about to be taken away
+  tv.caret.w = { id: 'r', pos: -1 };   // the row that is about to be taken away
   tv.calls.length = 0;
 
   differ.apply([clockWin()]);

@@ -9595,3 +9595,35 @@ first button on the way in and the converter's first field on the way back. The
 view with that id is still in the description, so the differ asks for it and
 Turbo Vision declines, which is the right answer arrived at by the shortest
 route.
+
+### Both of those are fixed, and one of them had a reason to exist
+
+The two things written down as lost above lasted one commit.
+
+**The column** needed a second call rather than a second thought.
+`TInputLine::setState` selects the whole value when the view *gains* focus
+(tinputli.cpp:558), which is the trap CLAUDE.md already records for driving a
+field from a test -- so a caret put back by `focus` alone lands at the end of
+the value with all of it selected, and the user's next keystroke replaces their
+own data. `movedCaret` answers `{id, pos}` now and `setInputCaret(id, pos)`
+puts the offset back after the focus, with the scroll arithmetic copied out of
+TInputLine's own cursor-key path because `displayedPos` is private.
+
+**The caret with nowhere to go** needed the runtime to remember rather than
+only to ask. The differ keeps the last place the user put the caret in each
+window, replaces it when they move it, and drops it with the window; a rebuild
+that cannot land it -- predc's converter has static text where its fields are
+while the clock runs -- changes nothing, so the caret is waiting when the
+fields come back.
+
+What is left is Turbo Vision's and is not a defect: a window that loses focus
+and gets it back selects the whole value of the field the caret is in, so the
+caret ends up at the end of it. That is the same select-on-focus, and leaving a
+window is not a rebuild. `drive_time.py` checks the field after the picker
+closes and the exact column only across the clock, where one window is
+involved and nothing else can move anything.
+
+The driver also proves the caret is a caret and not a cursor left parked at the
+right coordinates, which cost a wrong reading first: the field is asked to
+answer an arrow key and a `Backspace`. Three of the checks in that block read
+correctly against a parked cursor and only that one does not.

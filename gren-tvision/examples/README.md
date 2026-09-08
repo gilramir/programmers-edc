@@ -1463,10 +1463,25 @@ field there when the window first opened. So each window remembers what it was
 *built* focusing, and the answer is empty until somebody moves the caret off
 it.
 
-What is not restored is the caret's column inside a field: a rebuilt
-`InputLine` is a new one and starts with its own selection. The field comes
-back, the character position does not, and `drive_time.py` says so by checking
-the field rather than the column.
+**The column inside the field comes back too**, and it has to: focusing a field
+is what makes `TInputLine` select its whole value, so a caret put back by focus
+alone sits at the end with everything selected and the user's next keystroke
+replaces the lot. `movedCaret` answers `{id, pos}` and `Tui.setInputCaret` puts
+the offset back after the focus.
+
+**And a caret the rebuild had nowhere to put waits for its field.** predc's
+converter has static text where its fields are while its clock runs, so the
+caret cannot go back on the way in -- and should be there when the fields
+return. The runtime remembers the last place the user put the caret in each
+window rather than only asking at the moment of the rebuild, and a view that
+declines the caret changes nothing about what is remembered.
+
+What is still Turbo Vision's own and not this: a window that *loses* focus and
+gets it back selects the whole value of whatever field has its caret, so the
+caret ends up at the end of that field. Leaving a window and coming back is not
+a rebuild and there is nothing here to fix -- `drive_time.py` checks the field
+after the picker closes for that reason, and the column only where one window
+is involved.
 
 ## `Focused` is the list box's contract, not the area list's feature
 

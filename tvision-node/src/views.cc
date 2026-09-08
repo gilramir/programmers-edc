@@ -2365,17 +2365,42 @@ static Napi::Value MovedCaret(const Napi::CallbackInfo &info)
 
     JsWindow *win = g_views.findWindow(windowId);
     if (win == nullptr || win->current == nullptr || win->current == win->builtFocus)
-        return Napi::String::New(env, "");
+        return env.Null();
 
     if (const std::vector<std::string> *ids = g_views.idsOf(windowId))
         for (const std::string &id : *ids)
             {
             ViewRef *ref = g_views.find(id);
-            if (ref != nullptr && ref->view == win->current)
-                return Napi::String::New(env, id);
+            if (ref == nullptr || ref->view != win->current)
+                continue;
+
+            Napi::Object out = Napi::Object::New(env);
+            out.Set("id", Napi::String::New(env, id));
+            // How far into the field, for the one view type where the caret
+            // has somewhere to be other than the view itself. -1 says the
+            // question does not apply, and the caller writes nothing back.
+            out.Set("pos",
+                    Napi::Number::New(env,
+                                      ref->kind == "inputLine"
+                                          ? ((TInputLine *) ref->view)->curPos
+                                          : -1));
+            return out;
             }
 
-    return Napi::String::New(env, "");
+    return env.Null();
+}
+
+// tv.setInputCaret(id, pos) -- put the caret `pos` characters into a field,
+// with nothing selected. The other half of movedCaret: see JsInputLine.
+static Napi::Value SetInputCaret(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    ViewRef *ref = g_views.find(info[0].ToString().Utf8Value());
+    if (ref == nullptr || ref->kind != "inputLine")
+        return Napi::Boolean::New(env, false);
+
+    ((JsInputLine *) ref->view)->setCaret(info[1].ToNumber().Int32Value());
+    return Napi::Boolean::New(env, true);
 }
 
 // tv.focus(id) -- bring a window to the front, or focus a control.
@@ -2551,6 +2576,7 @@ void registerViewApi(Napi::Env env, Napi::Object exports)
     exports.Set("exists", Napi::Function::New(env, Exists));
     exports.Set("focus", Napi::Function::New(env, Focus));
     exports.Set("movedCaret", Napi::Function::New(env, MovedCaret));
+    exports.Set("setInputCaret", Napi::Function::New(env, SetInputCaret));
     exports.Set("close", Napi::Function::New(env, Close));
 }
 

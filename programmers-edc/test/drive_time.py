@@ -50,6 +50,8 @@ and `drive_time_moves.py`; see `time_common.py` for why there are three.
 
 import sys
 
+RIGHT = b"\x1b[C"
+
 from time_common import (
     Checks, WHEN, add_zone, click_button, clock, field_at, launch, message,
     open_picker, posix, posix_at, posix_value, retype, row,
@@ -178,9 +180,13 @@ def main():
     # The *field*, not the column inside it: a rebuilt input line is a new one
     # and its caret starts at the end of its value, which for a two-digit day
     # is two columns along from where the click left it.
-    # `field_at` is 1-based and `cursor` is 0-based, so the day's two digits are
-    # at[0]-1 and at[0], and at[0]+1 is the column the caret sits in past the
-    # last one.
+    # The field, and not the column inside it, because closing the picker hands
+    # the converter its focus back and **a field selects its whole value when
+    # it gains the caret** -- which puts the caret at the end of the day and is
+    # Turbo Vision's doing rather than the rebuild's. The block at the end of
+    # this file checks the column, where no second window is involved.
+    # `field_at` is 1-based and `cursor` is 0-based, so the day's two digits
+    # are at at[0]-1 and at[0], and at[0]+1 is the column past the last one.
     caret = app.cursor()
     check("and the caret is still in the field it was in",
           caret[1] == before[1] and at[0] - 1 <= caret[0] <= at[0] + 1,
@@ -251,6 +257,37 @@ def main():
     retype(app, field_at(app, "UTC", 0), "1999", settle=1.2)
     check("and the fields take typing again", row(app, "UTC")[0] == "1999",
           str(row(app, "UTC")))
+
+    # ---- and the caret keeps its column, and waits for its field ----
+    #
+    # The clock is the hard case for both, and one window is involved so
+    # nothing else can be moving the caret. Going live turns every field into
+    # static text, so the caret cannot go back on the way in; it has to be
+    # waiting when the fields return. And a caret restored by focus alone would
+    # sit at the end of the value with the lot selected, so the column is what
+    # says the offset went back too.
+    at = field_at(app, "America/Chicago", 2)
+    app.click(at[0], at[1], settle=0.6)
+    app.send(RIGHT, settle=0.6)
+    put = app.cursor()
+    check("the caret moves inside the field it was clicked into",
+          put[0] == at[0] and put[1] == at[1] - 1, str((at, put)))
+
+    app.send(b"\x1bl", settle=2.0)
+    app.send(b"\x1bs", settle=2.0)
+    check("the caret comes back to the column it was in, across a live clock",
+          app.cursor() == put, str((put, app.cursor())))
+
+    # And it is the caret and not a cursor left parked there: a field with the
+    # caret in it answers the arrow key and the backspace. Read as a line
+    # rather than through `row`, which wants two digits in a day and is about
+    # to be handed one.
+    line = lambda: [l for l in app.render().split("\n") if "America/Chicago" in l][0]
+    was = line()
+    app.send(RIGHT, settle=0.6)
+    app.send(b"\x08", settle=1.0)
+    check("and it is really in the field, which answers a Backspace",
+          line() != was, f"{was.strip()!r} -> {line().strip()!r}")
 
     app.send(b"\x1bx", settle=1.0)
     check("Alt-X exits", app.wait(timeout=6) == 0, "")

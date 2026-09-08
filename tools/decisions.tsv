@@ -276,10 +276,10 @@ TInputLine	data	used	the binding calls it; not itself a thing a Gren program nam
 TInputLine	maxLen	used	the binding calls it; not itself a thing a Gren program names
 TInputLine	maxWidth	skipped	how wide the text may draw, as against how much of it there is; the rectangle decides that here
 TInputLine	maxChars	used	the storage limit, which is maxLen + 1 -- the off-by-one that cost a four-digit year
-TInputLine	curPos	used	the binding calls it; not itself a thing a Gren program names
-TInputLine	firstPos	used	the binding calls it; not itself a thing a Gren program names
-TInputLine	selStart	used	the binding calls it; not itself a thing a Gren program names
-TInputLine	selEnd	used	the binding calls it; not itself a thing a Gren program names
+TInputLine	curPos	used	read by movedCaret and written by setInputCaret, so a rebuilt field keeps the caret where the user had it
+TInputLine	firstPos	used	kept in step by setInputCaret, so a restored caret is scrolled into view
+TInputLine	selStart	used	cleared by setInputCaret: a caret put back is a caret, not a selection
+TInputLine	selEnd	used	cleared by setInputCaret: a caret put back is a caret, not a selection
 TInputLine	build	internal	object-stream persistence; no view here is serialised
 TLabel	draw	internal	a virtual the binding overrides or inherits, not a call a model makes
 TLabel	getPalette	internal	a virtual the binding overrides or inherits, not a call a model makes

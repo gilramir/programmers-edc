@@ -139,11 +139,13 @@ module.exports = {
   close: addon.close,
   exists: addon.exists,
   focus: addon.focus,
-  // Where the caret has been moved to since a window was built, if anywhere.
-  // For the layer that rebuilds windows: see the note in views.cc for why this
-  // is a question rather than an event, and why it answers about *moving*
-  // rather than about focus.
+  // Where the caret has been moved to since a window was built, if anywhere,
+  // as {id, pos} -- and setInputCaret is how it is put back. For the layer that
+  // rebuilds windows: see the note in views.cc for why this is a question
+  // rather than an event, and why it answers about *moving* rather than about
+  // focus.
   movedCaret: addon.movedCaret,
+  setInputCaret: addon.setInputCaret,
   setText: addon.setText,
   setViewEnabled: addon.setViewEnabled,
   setWindowFlags: addon.setWindowFlags,

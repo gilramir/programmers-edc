@@ -86,6 +86,14 @@ function createDiffer(tv, onClosed = () => {}) {
   // it. See the note on `moved` at the rebuild below.
   const moved = new Map();
 
+  // And where the user last put the caret in each window, as {id, pos}. Kept
+  // rather than only asked for, because a rebuild can arrive at a moment when
+  // the view that had it cannot take it back -- predc's time converter has
+  // static text where its fields are while its clock runs -- and the caret
+  // should still be there when the field is. Replaced whenever the user moves
+  // the caret somewhere else, and dropped with the window.
+  const carets = new Map();
+
   // tv.close() destroys the window, which notifies onClose -- but not until the
   // pump reaches a safe point, so the notification arrives *after* the call
   // that caused it. A synchronous flag would already have been cleared; the ids
@@ -251,6 +259,7 @@ function createDiffer(tv, onClosed = () => {}) {
           for (const id of current.keys()) {
             if (!next.has(id)) {
               moved.delete(id);
+              carets.delete(id);
               if (tv.exists(id)) closeWindow(id);
             }
           }
@@ -290,14 +299,25 @@ function createDiffer(tv, onClosed = () => {}) {
               // moved caret is put back. A window rebuilt before anyone has
               // touched it -- which is every window whose data arrives after
               // it opens -- gets the focus its new description asks for, the
-              // same as it always did. A view that is gone is half the reason
-              // a window is rebuilt at all, so a caret with nowhere to go is
-              // ordinary and silent.
-              const caret = tv.movedCaret ? tv.movedCaret(window.id) : '';
+              // same as it always did.
+              const asked = tv.movedCaret ? tv.movedCaret(window.id) : null;
+              if (asked && asked.id) carets.set(window.id, asked);
+              const caret = carets.get(window.id);
+
               closeWindow(window.id);
               tv.window({ ...window, rect: where });
-              if (caret && window.items.some((view) => view.id === caret)) {
-                tv.focus(caret);
+
+              // Focusing a field is what makes it select its whole value, so
+              // the offset goes back after the focus and not before it.
+              // `pos` is -1 for anything that is not a field, and a view that
+              // cannot take the caret refuses silently -- either way the
+              // remembered caret is kept, because the render that brings the
+              // field back is the one that should have it.
+              if (caret && window.items.some((view) => view.id === caret.id)) {
+                tv.focus(caret.id);
+                if (caret.pos >= 0 && tv.setInputCaret) {
+                  tv.setInputCaret(caret.id, caret.pos);
+                }
               }
             } else {
               const before = current.get(window.id);
@@ -416,6 +436,7 @@ function createDiffer(tv, onClosed = () => {}) {
       // the rectangle there is forgetting it exactly when it is needed.
       if (selfClosed.delete(id)) return;
       moved.delete(id);
+      carets.delete(id);
       onClosed(id);
     },
 

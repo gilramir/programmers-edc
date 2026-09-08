@@ -495,6 +495,35 @@ public:
 
     virtual void handleEvent(TEvent &event) override;
 
+    // Put the caret at `pos` characters in, with nothing selected.
+    //
+    // For a window being rebuilt: focusing the field again is not enough,
+    // because taking focus is what makes TInputLine select its whole value
+    // (`setState`, tinputli.cpp:558), so a caret restored by focus alone lands
+    // at the end of the value with the lot selected -- and the user's next
+    // keystroke replaces it.
+    //
+    // The scroll arithmetic is TInputLine's own, from the cursor-key path
+    // (tinputli.cpp:460-465), which cannot be called from here: `displayedPos`
+    // is private, so its one line is repeated instead.
+    void setCaret(int pos)
+    {
+        int len = (int) strlen(data);
+        curPos = pos < 0 ? 0 : (pos > len ? len : pos);
+        selStart = selEnd = curPos;
+
+        int curWidth = strwidth(TStringView(data, curPos));
+        if (firstPos > curWidth)
+            firstPos = curWidth;
+        int leftmost = curWidth - size.x + 2;
+        if (firstPos < leftmost)
+            firstPos = leftmost;
+        if (firstPos < 0)
+            firstPos = 0;
+
+        drawView();
+    }
+
 private:
     std::string viewId;
 };
