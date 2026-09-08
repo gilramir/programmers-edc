@@ -1912,16 +1912,47 @@ static Napi::Value Window(const Napi::CallbackInfo &info)
     return Napi::String::New(env, id);
 }
 
-// tv.setText(id, text) -- static text, in place.
+// tv.setText(id, text) -- a static text's words or a button's caption, in
+// place.
+//
+// The button half is here because the alternative is a rebuilt window. A
+// caption that toggles -- Live clock becoming Stop clock, Start becoming
+// Cancel -- is the ordinary way a button says what pressing it will do, and
+// with no call for it the differ had to tear the window down and make it
+// again, which moved the window back to the model's rectangle and put the
+// caret back in the first field. Both were seen, in that order, in one
+// recorded session.
+//
+// `title` is a public `const char *` that TButton allocates with `newStr` and
+// frees in its destructor (`tbutton.cpp:48` and `:62`), so replacing it is a
+// delete, a newStr and a redraw. The hot key comes with it for free: TButton
+// reads the tildes out of `title` when the key arrives rather than when the
+// button is built, so `~L~ive clock` becoming `~S~top clock` moves the
+// shortcut from Alt-L to Alt-S with no second call.
 static Napi::Value SetText(const Napi::CallbackInfo &info)
 {
     Napi::Env env = info.Env();
     ViewRef *ref = g_views.find(info[0].ToString().Utf8Value());
-    if (ref == nullptr || ref->kind != "staticText")
+    if (ref == nullptr)
         return Napi::Boolean::New(env, false);
 
-    ((JsStaticText *) ref->view)->setText(info[1].ToString().Utf8Value());
-    return Napi::Boolean::New(env, true);
+    if (ref->kind == "staticText")
+        {
+        ((JsStaticText *) ref->view)->setText(info[1].ToString().Utf8Value());
+        return Napi::Boolean::New(env, true);
+        }
+
+    if (ref->kind == "button")
+        {
+        TButton *button = (TButton *) ref->view;
+        std::string text = info[1].ToString().Utf8Value();
+        delete[] (char *) button->title;
+        button->title = newStr(TStringView(text));
+        button->drawView();
+        return Napi::Boolean::New(env, true);
+        }
+
+    return Napi::Boolean::New(env, false);
 }
 
 // tv.setViewEnabled(id, on) -- grey a view out, or bring it back.

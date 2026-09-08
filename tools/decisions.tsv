@@ -227,7 +227,7 @@ TButton	handleEvent	internal	a virtual the binding overrides or inherits, not a 
 TButton	makeDefault	skipped	isDefault is a field of the model's render, so a re-render moves it
 TButton	press	used	the binding calls it; not itself a thing a Gren program names
 TButton	setState	internal	a virtual the binding overrides or inherits, not a call a model makes
-TButton	title	used	the binding calls it; not itself a thing a Gren program names
+TButton	title	bound	`Button.title`, and changed in place by `Tui.setText`'s button half: a caption that toggles used to rebuild the window
 TButton	build	internal	object-stream persistence; no view here is serialised
 TCluster	dataSize	internal	a virtual the binding overrides or inherits, not a call a model makes
 TCluster	drawBox	internal	painting, which is Turbo Vision's once the model has said what to paint

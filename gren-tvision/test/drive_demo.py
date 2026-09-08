@@ -170,6 +170,36 @@ def main():
     press(app, "Clear")
     check("Clear empties it", all(line == "" for line in log(app)), str(log(app)))
 
+    # ---- and the caption toggles without the window being rebuilt ----
+    #
+    # `~S~top` becoming `~S~tart` used to be a structural change -- a button's
+    # caption had no call that changed it in place -- so the differ tore this
+    # window down and made it again for a word. A rebuilt window loses the
+    # caret, so the probe is which button the *space bar* presses: Turbo Vision
+    # presses the focused one (tbutton.cpp:222), and the focused one here is
+    # Clear until a rebuild puts it back on the first button in the window.
+    app.click(44, 5, settle=0.4)                   # the log itself, which is not
+    app.click(44, 5, settle=0.9)                   # selectable: the click is recorded
+    app.send(b"\t", settle=0.5)                    # Stop -> Clear
+    check("the viewer recorded the clicks that woke it",
+          any(line for line in log(app)), str(log(app)))
+
+    app.send(b"\x1bs", settle=0.9)                 # Alt-S, the Stop button's hotkey
+    check("Alt-S stops it, and its caption changes without a rebuild",
+          "Event Viewer (Stopped)" in app.render(), app.render())
+    app.send(b" ", settle=0.9)
+    check("so the space bar still presses Clear, which is where the caret was",
+          all(line == "" for line in log(app)), str(log(app)))
+
+    # And the hot key moved with the caption: the same Alt-S that stopped it
+    # starts it again, because TButton reads the tildes out of its title when
+    # the key arrives rather than when the button is built. Not `press`, which
+    # clicks twice and would toggle it back -- that is for a window which is
+    # not the active one, and this one is.
+    app.send(b"\x1bs", settle=0.9)
+    check("and Alt-S starts it again, the hot key having moved with the caption",
+          "Event Viewer (Stopped)" not in app.render(), app.render())
+
     # About is a message box now: the same dialog it always was, built by
     # Tui.messageBox instead of by hand. What the helper adds is that it
     # centres itself, which needs the desktop's size -- so this is also the

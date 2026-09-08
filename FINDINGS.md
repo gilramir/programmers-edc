@@ -9500,3 +9500,45 @@ tape gave was the two columns side by side, which is exactly what `rects` was
 added for one commit earlier and for a different reason. The unit test is in
 `diff.test.js` where the fault is, and `drive_time.py` drags the window and
 stops the clock so the whole path is covered once.
+
+## The caret was the other half, and a button's caption was the cheap part
+
+The window that jumped left kept its place after the previous commit, and put
+the caret back in its first field anyway. Measured on predc's time converter:
+two Tabs put the caret in the third field of the top row, at column 35, and
+stopping the clock put it back at 25.
+
+A rebuild is invisible up to a point and that is the point it stops at. The
+runtime can remember a rectangle because the binding reports one; it cannot
+remember the caret, because nothing reports which view has it -- and asking
+would be the synchronous query this port has never had.
+
+So the answer is to rebuild less. `~L~ive clock` becoming `~S~top clock` was
+structural because a button's caption had no call that changed it in place, and
+that turns out to be three lines: `TButton::title` is a public `const char *`
+allocated with `newStr` and freed by the destructor (`tbutton.cpp:48`, `:62`),
+so `setText` deletes it, allocates the new one and redraws. `MUTABLE.button` is
+`['title']` from here.
+
+**The hot key comes along for free, and it is worth writing down why.**
+`TButton::handleEvent` calls `hotKey(title)` when a key arrives
+(`tbutton.cpp:191`) rather than caching it when the button is built, so
+`~S~top` becoming `~S~tart` moves the shortcut from one letter to another with
+no second call and nothing to keep in step.
+
+### Which did not fix the converter, and that is the honest part
+
+predc's time window rebuilds for a reason of its own: its rows are `InputLine`s
+in converter mode and `StaticText` in clock mode, so the mode switch really is
+a different window. The caret still jumps there and no caption fix reaches it.
+What the change buys is every *other* toggling button -- and the example that
+proves it is `examples/demo`'s event viewer, whose Stop button toggles its own
+caption in a window that changes nothing else.
+
+`drive_demo.py` tests it by what the space bar presses. Turbo Vision presses
+the *focused* button with the space bar (`tbutton.cpp:222`), so: click the log,
+Tab to Clear, Alt-S to stop the viewer, then space. If the window was rebuilt
+the caret is back on the first button and the space bar restarts the viewer; if
+it was patched the log empties. Then Alt-S again, which now says Start, and the
+viewer runs -- which is the hot key having moved. All three fail without the
+change, and the third fails in a way that would otherwise have been silent.

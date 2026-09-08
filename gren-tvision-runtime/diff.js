@@ -15,6 +15,12 @@
 // either; it is patched with setTitle.
 const MUTABLE = {
   staticText: ['text'],
+  // A button's caption is how a button says what pressing it will do, so a
+  // toggle changes it -- Live clock becomes Stop clock. Structural until
+  // `setText` learned to take a button, and a window rebuilt for a caption
+  // lost the caret and went back to the rectangle the model had for it, which
+  // is what a recorded session caught it doing.
+  button: ['title'],
   inputLine: ['value'],
   history: ['items'],
   listBox: ['items', 'focused', 'top'],
@@ -125,6 +131,12 @@ function createDiffer(tv, onClosed = () => {}) {
         // model by design; writing the model back on every render would eat
         // their keystrokes.
         if (before.text !== after.text) tv.setText(after.id, after.text);
+        break;
+      case 'button':
+        // The hot key rides along: TButton reads the tildes out of its title
+        // when a key arrives rather than when it is built, so `~L~ive clock`
+        // becoming `~S~top clock` moves the shortcut with the caption.
+        if (before.title !== after.title) tv.setText(after.id, after.title);
         break;
       case 'inputLine':
         if (before.value !== after.value) tv.setValue(after.id, after.value);

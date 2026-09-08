@@ -1396,9 +1396,12 @@ somewhere else and the model had never heard about it, because `WindowResized`
 is an event a model may ignore and most do.
 
 The visible bug was predc's time converter jumping back across the screen every
-time the Live clock was switched off -- `~L~ive clock` becoming `~S~top clock`
-is a *structural* change, since a button's caption has no call that changes it
-in place, so the window was rebuilt for what looked like a caption.
+time the Live clock was switched off. That window rebuilds for a real reason --
+its rows are input lines in one mode and static text in the other -- but the
+first thing found in it was that `~L~ive clock` becoming `~S~top clock` was
+*also* structural, since a button's caption had no call that changed it in
+place. It has one now (below), and the converter still rebuilds; a window whose
+only change is a caption no longer does.
 
 The runtime keeps the two rectangles apart now. What it last applied is still
 the model's own, and is still what the next description is compared against --
@@ -1410,6 +1413,31 @@ still wins, and the drag is forgotten when it does.
 
 Nothing changes for a program: this is the runtime keeping a promise the
 package already made, which is that a rebuild is an implementation detail.
+
+## A button's caption is patched now, and the hot key comes with it
+
+Found on the way out of the above, and it is the cheaper half of the same
+problem: a rebuild is only invisible up to a point, and the point it stops at
+is the caret. A window rebuilt for a caption put the caret back in its first
+control, which no amount of remembering rectangles fixes.
+
+`TButton::title` is a public `const char *` that the view allocates with
+`newStr` and frees in its destructor, so changing one is a delete, a `newStr`
+and a redraw -- and `Tui.setText`'s button half is those three lines.
+`skeleton()` treats `title` as mutable from here, so a toggling button costs
+its window nothing at all.
+
+**The hot key moves with the caption for free**, which is the part worth
+knowing: `TButton::handleEvent` calls `hotKey(title)` when a key arrives rather
+than caching it at construction (`tbutton.cpp:191`), so `~S~top` becoming
+`~S~tart` moves the shortcut and nothing has to be told. `examples/demo`'s
+event viewer is where this is exercised -- `drive_demo.py` stops it with Alt-S,
+presses the space bar to prove the caret never left the Clear button beside it,
+and starts it again with the same Alt-S.
+
+A button's `cmd` is still structural, and should be: the caption says what
+pressing it will do and the command *is* what pressing it does. A model that
+changes one is asking for a different button.
 
 ## `Focused` is the list box's contract, not the area list's feature
 

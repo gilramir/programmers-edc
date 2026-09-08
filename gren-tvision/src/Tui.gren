@@ -650,7 +650,9 @@ place, the second through `TView::locate`, which is also what resolves the
 
 Changing [`resize`](#Resize), or the id, type or rectangle of anything inside
 the window, is a structural change: the window is closed and rebuilt, losing
-focus and z-order. Changing only the *content* of its views is not.
+focus and z-order. Changing only the *content* of its views is not. A rebuilt
+window does keep its *place*: if the user had dragged it somewhere, that is
+where it comes back, and only a model that moves it itself moves it.
 
 A window's `rect` is the model's opinion of where the window should be, not a
 report of where it is. The user can move and resize one, and the runtime does
@@ -811,6 +813,12 @@ first for a week, because `Array.append fst second` makes `fst` the *postfix*.
     holds the caret, which is what a keypad or a toolbar wants when something
     else in the window is reading the keyboard. A `Canvas` has the same field
     for the same reason.
+
+    **`title` is patched in place**, so a button that says what pressing it
+    will do -- `~S~top` becoming `~S~tart` -- costs its window nothing. The
+    hotkey moves with the caption, because Turbo Vision reads the tildes when
+    the key arrives rather than when the button is built. `cmd` is not: a
+    button whose command changed is a different button, and gets one.
   - `InputLine` -- a text field. `maxLen` is how many characters the user may
     type, and the rectangle needs **two columns more than that**: one the
     field spends on itself and one for the caret to sit past the last
