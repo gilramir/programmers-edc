@@ -14,10 +14,12 @@ widget in the inventory described from the Gren side. `Tui.gren`'s doc comments
 are the reference and are more precise; this is the part that says what the
 things *are*.
 
-> Each widget entry ends with the examples that use it. Runnable Gren snippets
-> and screenshots will be added to those entries; until then
-> [`../examples/`](../examples) is the worked code, and every example is also a
-> pty test, so none of it has rotted.
+> Each widget entry ends with the examples that use it, and every picture in
+> this document is a photograph of one of them: `doc/shots.py` boots the
+> example at a pty, keys it into the state being described, and crops the
+> screen to it. So the pictures cannot drift from the code -- and
+> [`../examples/`](../examples) is the worked source, every line of which is
+> also a pty test.
 
 ## The programming model
 
@@ -78,6 +80,8 @@ subscription. See its entry below.
 | Alt-X Exit   Alt-A Add   F3 Edit                           |  <- the status line
 +------------------------------------------------------------+
 ```
+
+![examples/forms: the menu bar, two windows on the hatched desktop, and the status line](img/screen.png)
 
 Four regions, and `Ui` has one field for each:
 
@@ -141,6 +145,9 @@ you write a dialog.
   - **`Enter` does not press the focused button**, select a list item, or tick
     a check box. `Space` does all three. `Enter` means "the default action of
     this dialog", and only a button with `isDefault = True` answers it.
+
+    ![examples/hello: four buttons and no default one, so Enter presses none of them](img/buttons.png)
+
   - **A `~` marks a hotkey**: `"~F~ile"` draws as *F*ile and responds to
     `Alt-F` in a menu, or to the bare letter in a context menu.
   - **Hotkeys are one flat namespace.** Inside a dialog, the first control that
@@ -169,7 +176,9 @@ you write a dialog.
 
 Thirteen `View` constructors, twelve of them widgets and one a wrapper. Turbo
 Vision's own class is named in each heading, so the C++ documentation and
-source stay usable.
+source stay usable. Most of them are in this one dialog:
+
+![examples/forms: labels, input lines, a check box cluster, radio buttons, multi-state boxes and two buttons](img/dialog.png)
 
 ### `StaticText` -- a run of text (`TStaticText`)
 
@@ -183,6 +192,8 @@ whatever runs off the bottom, so budget the columns and the rows; a newline in
 right answer to a surprising number of things -- a status readout, a label that
 names nothing, the line an `Edited` event fills in with `12:4`.
 
+![examples/forms: a window of static texts, redrawn from the model whenever the highlight moves](img/statictext.png)
+
 *Used by nearly every example.*
 
 ### `Label` -- text bound to a control (`TLabel`)
@@ -195,6 +206,8 @@ A static text that names another view by id: `Alt-`*x* on the label's hotkey
 moves the caret to the control, and clicking the label does too. **List the
 control before its label** -- the binding has to have built the view the label
 names, and it throws if it has not.
+
+![examples/forms: three labels, each naming the field beside it, hot letter in red](img/label.png)
 
 That constraint is the only thing in this package that makes the order of a
 window's `views` mean anything beyond who gets focus first.
@@ -214,6 +227,8 @@ Pressing it sends `cmd` as a `Command` event, or closes a `dialog` with it.
 Press with `Space`, with a click, or with its `~`*x*~ hotkey; `Enter` reaches
 only a button with `isDefault = True`. Twelve columns by two rows is the
 conventional size and what the package's own helpers use.
+
+![examples/forms: the default Save button and Cancel, each with its drop shadow](img/button.png)
 
 `takesFocus = False` makes a button that can be pressed but never holds the
 caret. That is what a keypad or a toolbar wants when something else in the
@@ -238,6 +253,8 @@ InputLine
 ```
 
 One line of editable text, with the usual editing keys and a selection.
+
+![examples/forms: the phone field, which takes digits and punctuation and nothing else](img/inputline.png)
 
 `maxLen` is how many characters it will hold; the field scrolls sideways when
 the text outgrows the rectangle.
@@ -275,6 +292,8 @@ was typed there before. Clicking it -- or pressing `Down` in the field -- opens
 a list; choosing an entry puts it in the field and arrives as an ordinary
 `Changed` event *on the field*, because that is what happened.
 
+![examples/entries: the arrow beside the filter box, dropped down over the window](img/history.png)
+
 Two things about it are unusual:
 
   - **It has no rectangle.** It occupies the three columns immediately to the
@@ -300,6 +319,8 @@ ListBox { id : String, rect : Rect, items : Array String, focused : Int }
 The most-used control in Turbo Vision, and the one with two states worth
 distinguishing:
 
+![examples/forms: a list box with the highlight on its first row and a scroll bar beside it](img/listbox.png)
+
   - the **highlight** moves with the arrow keys, the mouse or a render, and
     reports a `Focused` event;
   - a **selection** is committed with `Space` or a double click, and reports a
@@ -320,7 +341,9 @@ There is no tree widget, and none is needed. `TOutlineViewer` exists in C++
 because the view has to own the node chain and work out which rows are visible;
 a model that re-renders owns the structure already, so a tree is a `type Node`
 in the model, the visible rows are a fold over it, and a plain `ListBox`
-displays them with its scrolling and its highlight. `examples/dir` is that.
+displays them with its scrolling and its highlight. `examples/dir` is that:
+
+![examples/dir: a directory tree and a file pane, both of them list boxes](img/tree.png)
 
 *Used by `entries`, `forms`, `dir`.*
 
@@ -329,6 +352,8 @@ displays them with its scrolling and its highlight. `examples/dir` is that.
 ```gren
 CheckBoxes { id : String, rect : Rect, items : Array String, checked : Array Bool }
 ```
+
+![examples/forms: a two-box cluster, both ticked, with the group's hot letter](img/checkboxes.png)
 
 A *group*, not a single box: Turbo Vision clusters check boxes so that arrow
 keys move within the group and one hotkey per item reaches its box directly.
@@ -351,6 +376,8 @@ MultiCheckBoxes
     }
 ```
 
+![examples/forms: one box on the third state and one ticked, the focused box highlighted](img/multicheckboxes.png)
+
 The same cluster, where each box cycles through several states rather than two.
 `marks` is one character per state, in order, drawn between the brackets:
 `" ?X"` is a box that goes blank, `?`, `X` and wraps. `states` is one index into
@@ -372,6 +399,8 @@ Reported as a `Changed` event carrying `Marks`, and read out of a dialog with
 RadioButtons { id : String, rect : Rect, items : Array String, selected : Int }
 ```
 
+![examples/forms: two radio buttons, the first of them chosen](img/radiobuttons.png)
+
 The same cluster machinery with exactly one item chosen; `selected` is its
 index. `Space` or a click chooses the focused one, arrow keys move within the
 group, and each item can have its own `~`*x*~ hotkey. Reported as `Changed`
@@ -391,6 +420,8 @@ ScrollBar
     , min : Int, max : Int, pageStep : Int, arrowStep : Int
     }
 ```
+
+![examples/mouse: a horizontal scroll bar used as a slider, with its labels above it](img/scrollbar.png)
 
 A list box makes its own; this is one you put in a window and ask about. Moving
 it -- arrow, page, drag, wheel or key -- sends a `Scrolled` event, and `value`
@@ -427,6 +458,8 @@ Canvas
     }
 ```
 
+![examples/ascii: a canvas of coloured spans, with the terminal's own cursor on the selected cell](img/canvas.png)
+
 The escape hatch, and where a C++ program would have subclassed `TView` and
 overridden `draw()`. It paints exactly the lines it is given and reports
 `KeyPressed` and `Clicked` while focused. Turbo Vision's own calendar, ASCII
@@ -453,6 +486,8 @@ colour: today on a calendar, a tile that is out of place, a job that failed.
 `Hue` is the sixteen colours a terminal has had since 1981, which is also all
 that Turbo Vision's palettes deal in.
 
+![examples/palette: seven lines, each naming the colour it is drawn in](img/colours.png)
+
 `cursor` is the terminal's own block cursor in the canvas's coordinates -- the
 one piece of a canvas that is not made of characters, and the only way an ASCII
 chart can show which cell is selected. `Nothing` hides it.
@@ -470,6 +505,8 @@ arrive either way.
 ```gren
 Editor { id : String, rect : Rect }
 ```
+
+![examples/edit: a document, a scroll bar on each axis, and a caption fed by the Edited event](img/editor.png)
 
 `TEditor` is Borland's editor: insert and overwrite, selection, one level of
 undo, a clipboard shared between editors, auto indent, word-left and word-right,
@@ -529,6 +566,12 @@ window is zoomed, resized, tiled, or carried along by a terminal that changed
 size. Without it a view keeps the rectangle the model gave it, so a window that
 got taller shows the same list box with empty space underneath.
 
+The same window in an 80x25 terminal and in a 100x30 one: the list stretched,
+the caption stayed a row above the button, and the button stayed at the foot.
+
+![examples/entries in an 80x25 terminal](img/grows-80.png)
+![the same window in a 100x30 terminal](img/grows-100.png)
+
 It is Turbo Vision's own `growMode`, one flag per edge, resolved by
 `TGroup::changeBounds`. The interesting combinations are pairs, and they are
 named:
@@ -563,10 +606,14 @@ type alias Window =
     { id : String, title : String, rect : Rect, views : Array View }
 ```
 
+![examples/entries: a window with a close box, a zoom box, a counted title and a shadow](img/window.png)
+
 A framed, movable window on the desktop, with a close box and a zoom box. The
 frame occupies row and column zero, so a view's rectangle starts at 1. Windows
 can be zoomed, resized, tiled and cascaded -- `"tile"` and `"cascade"` are
-built-in command names and `examples/demo` puts them on a menu.
+built-in command names and `examples/demo` puts them on a menu:
+
+![examples/demo: three windows after Tile, and the event log that heard about it](img/tile.png)
 
 `title` and `rect` are both patched in place, so a counter in a title
 (`Entries (3)` becoming `Entries (4)`) and a window that lays itself out against
@@ -577,6 +624,8 @@ the terminal size are both ordinary model changes.
 ```gren
 Tui.dialog tui { id = "add", title = "Add entry", rect = ..., views = [ ... ] }
 ```
+
+![examples/entries: a modal dialog, its field being typed into, OK and Cancel](img/dialogtyped.png)
 
 A `DialogSpec` is the same shape as a `Window`, plus the fact that it is
 *answered* rather than merely shown. `Tui.dialog` is a `Cmd`; the answer arrives
@@ -613,10 +662,14 @@ menuBar =
     ]
 ```
 
+![examples/forms: an open pull-down, hot letters in red and shortcuts right-aligned](img/menubar.png)
+
 `key` is a hotkey that works anywhere; `shortcut` is the hint drawn
 right-aligned in the pull-down and is text only. `SubMenu` nests to any depth.
 An entry on the *bar* with no items of its own is a plain command sitting on the
-bar, which is what `tvision/examples/mmenu` does with its "Next menu".
+bar, which is what `tvision/examples/mmenu` does with its "Next menu":
+
+![examples/mmenu: a bare command on the menu bar, beside two pull-downs](img/menucommand.png)
 
 **The menu bar is part of the view.** Turbo Vision builds it inside the
 application constructor, which makes it look like fixed configuration, but both
@@ -637,6 +690,8 @@ not built on Turbo Vision's own machinery.
 ```gren
 statusLine = [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" } ]
 ```
+
+![examples/forms: the status line, one clickable entry per key](img/statusline.png)
 
 The bar along the bottom. Every entry is clickable, and **its `key` works
 everywhere, including over an open modal dialog** -- Turbo Vision offers the
@@ -661,6 +716,8 @@ Tui.popupMenu tui
     }
 ```
 
+![examples/demo: a context menu opened with the right button over a window](img/popup.png)
+
 `view` and `at` are exactly what a `Clicked` event hands you, so opening a menu
 where the user clicked needs no arithmetic; the menu flips up or left if there
 is no room below or right. **What comes back is an ordinary `Command` event** --
@@ -684,6 +741,8 @@ and a clock in the top-right corner is not in it.
 An overlay is drawn above every window, cannot be covered by one, never takes
 part in Tile or Cascade, and is in **screen** coordinates -- row 0 is the menu
 bar's row.
+
+![examples/demo: a clock at the end of the menu bar's row, above the desktop](img/overlay.png)
 
 ```gren
 overlays =
@@ -720,6 +779,8 @@ Tui.dialog tui <|
         }
 ```
 
+![examples/entries: a Yes/No box, sized to the line it was given](img/messagebox.png)
+
 Sized to its longest line. `okButtons`, `okCancelButtons`, `yesNoButtons` and
 `yesNoCancelButtons` cover the four Turbo Vision uses -- and those four command
 names are the only ones that close a modal, so use them. Turbo Vision's own
@@ -730,6 +791,8 @@ Closing a box from its frame or with `Esc` reports `"cancel"` even when it has
 no Cancel button, so a Yes/No box has three answers to handle rather than two.
 
 ### `Tui.fileDialog`
+
+![examples/dir: a name field with a history arrow, a list of directories, the path, and three buttons](img/filedialog.png)
 
 A file or directory chooser: a field with a history drop-down, a list, a path
 line and your buttons. It is a *layout* and nothing else. `TFileDialog` reads
@@ -773,6 +836,9 @@ Four commands the model can issue that are not about drawing:
     hotkey included. (Only the first 146 distinct command names in a program
     can be disabled; beyond that they are numbered above the range Turbo Vision
     allows to be greyed.)
+
+    ![examples/entries: Clear greyed out on the menu after the list was emptied](img/disabled.png)
+
   - **`Tui.focus tui "list"`** puts the caret on a view, or raises a window. The
     id is looked up as a window first and then as a view. This is how a program
     answers "show me that window" for a window that is already open and buried,

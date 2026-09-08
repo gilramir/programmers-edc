@@ -9627,3 +9627,77 @@ The driver also proves the caret is a caret and not a cursor left parked at the
 right coordinates, which cost a wrong reading first: the field is asked to
 answer an arrow key and a `Backspace`. Three of the checks in that block read
 correctly against a parked cursor and only that one does not.
+
+## A screenshot is a blit, and the palette is not ANSI's
+
+The widget documentation wanted pictures. There were three ways to get them and
+only one of them is any good.
+
+**termshot** renders with `bunt.ParseStream` (`internal/img/output.go:165`): a
+byte stream in, a sequence of coloured runes out, laid down as lines. That is
+right for `ls -a` and useless here, because a Turbo Vision repaint is nothing
+*but* cursor addressing -- every cell the program ever painted would come out
+in emission order, concatenated. **Xvfb plus xterm plus `import`** works and
+costs an X server, a font configuration, a timing guess about when the app has
+stopped painting, and pixels that depend on the machine that took the picture.
+
+The third way was already built. `harness.Screen` is a framebuffer in every
+sense except pixels: a grid of cells, and per cell the `(fg, bg)` in force when
+it was written. So a screenshot is a blit -- 8x16 bitmap per cell, two colours,
+integer scale -- and the two hundred lines it took are `tools/cp437.py`,
+`tools/shot.py` and `gren-tvision/doc/shots.py`.
+
+### The repertoire is exactly one code page, which decides the font
+
+Booting `demo`, `entries` and `ascii` and collecting every glyph that reached
+the terminal returns the 256 characters of code page 437 and nothing else. That
+is not a coincidence and it is what makes the font question easy: 4 KB of 8x16
+bitmaps covers everything that can appear, with no metrics, no fallback chain
+and no missing-glyph box, and the box drawing tiles the way it did in 1985
+because it is the same bitmaps. DejaVu Sans Mono does cover all 256 at a uniform
+advance -- Noto Sans Mono is missing fourteen, including the card suits -- but
+its `─` does not tile and its `░` is a halftone of dots.
+
+The two characters that are *not* in CP437 are `▸` and `▾`, which
+`examples/dir` draws its tree markers with. They alias to `►` and `▼`, the same
+shapes one size up. Everything else that misses is drawn `?` **and reported at
+the end of the run**, because a `?` in a screenshot is indistinguishable from a
+program that meant to draw one.
+
+### ANSI's colour order is not VGA's, and the mistake looks deliberate
+
+SGR counts black, red, green, yellow, blue, magenta, cyan, white. A VGA palette
+entry counts black, blue, green, cyan, red, magenta, brown, white -- the same
+eight with the low and high bits of the index swapped. Reading `44` as "the
+fourth colour" produced red windows on a pink desktop, which does not look like
+an error; it looks like somebody chose it. The table is six lines and a comment
+in `tools/shot.py`.
+
+### The innermost frame is not the smallest one
+
+Shots find their subject rather than counting to it: `box(app, "Edit record")`
+returns the screen rectangle of the frame that text is drawn inside, so a crop
+survives an example laying itself out differently, and a window that failed to
+open is an error rather than a photograph of the desktop.
+
+The first rule was "the smallest frame containing the text", and it answered
+with the wrong window every time a dialog was up. Windows overlap: the dialog in
+front is *bigger* than the list window it covers, and every row of that window's
+rectangle picks up the dialog's text through it -- so the window underneath both
+contains the string and has the smaller area. The rule that works is the frame
+whose top-left corner is nearest, which is what "innermost" means when the
+frames are not nested.
+
+### Twenty-eight of thirty are reproducible byte for byte
+
+Two runs back to back differ in exactly the two shots with a clock in them:
+`examples/demo`'s overlay, and the tiled desktop it is standing on. Every other
+image is identical, which is what would let the pictures be *checked* -- crop,
+compare, fail when a widget's appearance changed and nobody re-shot it. That is
+not wired into `check`, and the reason is the wall clock: a full run is 49s,
+which would make it the slowest suite in a 82.6s test run.
+
+Two traps cost a picture each. `Pty.click` counts from one, as a terminal's
+mouse report does, so clicking a window's top frame at "row 1" clicks the menu
+bar. And a window has to be *found before* the thing being photographed covers
+it: the history drop-down opens over the title its window would be found by.

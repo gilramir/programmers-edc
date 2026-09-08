@@ -202,6 +202,36 @@ own module `Main` too compiled *predc* into `app`, which ran, found no terminal
 and no arguments, and exited 0 in silence. A suite that passes by not running
 is the worst failure there is, so the module is `Tests`.
 
+## The widget documentation has screenshots, and they are generated
+
+`gren-tvision/doc/widgets.md` has a picture of every widget, and every one of
+them is a photograph of an example rather than a mock-up:
+
+```sh
+devbox run -- python3 gren-tvision/doc/shots.py            # all thirty, 49s
+devbox run -- python3 gren-tvision/doc/shots.py listbox    # just these
+```
+
+It boots the example at a pty through the same harness the drivers use, keys it
+into the state the documentation is describing, and crops. `tools/shot.py`
+turns a `harness.Screen` into a PNG -- 8x16 CP437 bitmaps out of
+`tools/cp437.py`, the VGA palette, and a hand-rolled PNG writer, so there is
+nothing to install.
+
+**Shots find their subject rather than counting to it.** `box(app, "Edit
+record")` is the frame that text is drawn inside; only the rectangle of a
+*view* within its window is written down, because that number is in the Gren
+source and nothing on screen finds it. Two traps, one picture each: `Pty.click`
+counts from one, so a window's top frame is row 2 and row 1 is the menu bar;
+and a window must be found *before* the thing being photographed covers it,
+because a drop-down opens over the title its window would be found by.
+
+Twenty-eight of the thirty are reproducible byte for byte -- the two that are
+not have a clock in them, and `take(...)` marks those `stable=False`. A
+character CP437 has no glyph for is drawn `?` and **named at the end of the
+run**; if a new example draws something new, alias it in `tools/cp437.py`
+rather than letting the picture lie.
+
 ## Git
 
 No remote; history is a linear chain on `main` and committing there directly is

@@ -6,9 +6,9 @@ answer different questions.
   - **[Turbo Vision, from Gren](widgets.md)** -- what you are programming
     against. The programming model, the anatomy of the screen, the conventions
     that will surprise anybody who has not used Turbo Vision before, and every
-    widget in the inventory described from the Gren side. Start here if you
-    want to write a program. Runnable snippets and screenshots are being added
-    to each widget entry.
+    widget in the inventory described from the Gren side, with a screenshot of
+    each taken from the example that uses it. Start here if you want to write
+    a program.
 
   - **[How a Gren program ends up on Turbo Vision](architecture.md)** -- how it
     works underneath. The four layers, why a Gren package cannot own its own
