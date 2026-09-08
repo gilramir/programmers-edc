@@ -9391,3 +9391,46 @@ sixty events, the pump chews through them in batches, and between two batches
 the screen is perfectly still. Every repeated-key `send` in the suite waits
 rather than settles now -- eleven of them, found by their own shape rather than
 by a list -- and three runs since have been green and identical.
+
+## The anomaly that was on the wrong side of the port
+
+A recorded predc session replayed clean -- 379 messages, every fingerprint the
+same as the tape -- and `gren-tape` reported two anomalies against it anyway:
+
+    line 243   calc at [-1,1,37,18]: its origin is off the top or left of the desktop  (26 of these)
+    line 485   calc at [68,8,106,25]: past the 105x40 desktop  (35 of these)
+
+Sixty-one of them, and all sixty-one were somebody dragging the calculator
+around with the mouse and letting it go past an edge, which Turbo Vision allows
+on purpose. The check was reading **inbound** messages -- `windowResized`, which
+is the user's own hand -- so what it reported was the user, to themselves, and
+it could never report the thing it was written for. A rectangle the *model*
+chose is on the outbound side, and the outbound side was a hash and a list of
+window ids with no rectangles in it at all.
+
+Which is the rule this port already runs on, arriving from a new direction:
+**who moved the value decides what it means.** An off-desktop rectangle coming
+in is a gesture; the same rectangle going out is a decision. They read
+identically and they are opposites.
+
+So the rectangles go on the tape. `fingerprint()` now writes `rects`, one entry
+per window keyed by id, and the format is 7. It is the only part of a render
+kept in full, and it costs nothing to the argument that keeps the rest of it
+off -- a render carries whatever the tools are showing and `predc env` shows
+credentials, but a position is not a document.
+
+### The echo has to be subtracted, or the fix reports the same thing
+
+The model stores the rectangle it was told about and renders it back on every
+frame afterwards, so checking outbound rectangles alone turns sixty-one
+anomalies into several hundred: one per render for as long as the window stays
+where the user put it. The reader keeps the last rectangle each window was
+*dragged* to and skips a render that merely repeats it. A window the model then
+moves somewhere else off the desktop is reported again, because that is the
+model's doing even though the user had it off the desktop a moment earlier.
+
+Two unit tests hold that pair apart, which is the shape worth having: one for a
+rectangle the model chose, one for a rectangle the user chose and the renders
+that echo it. Neither is reachable from a pty driver -- the model would have to
+have the bug for the driver to see it -- which is the case for the fake-binding
+layer restated.

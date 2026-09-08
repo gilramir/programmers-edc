@@ -44,7 +44,14 @@ function one(text, opts) {
   return analyse(sessions[0], opts);
 }
 
-const render = (t, hash, windows = []) => ({ t, out: 'render', hash, windows, overlays: 0 });
+const render = (t, hash, windows = [], rects = undefined) => ({
+  t,
+  out: 'render',
+  hash,
+  windows,
+  ...(rects ? { rects } : {}),
+  overlays: 0,
+});
 
 test('a file with two runs appended to it reads as two sessions', () => {
   const text = tape([render(1, 'a'), { t: 2, end: 'exit' }]) + tape([render(1, 'b')]);
@@ -132,17 +139,39 @@ test('an input that produced no render at all is visible', () => {
   assert.equal(a.rows[1].effect, 'no render');
 });
 
-test('a rectangle with a negative origin is an anomaly', () => {
+test('a rectangle the model drew with a negative origin is an anomaly', () => {
   const a = one(
     tape([
-      render(1, 'a', ['w']),
-      { t: 2, in: { type: 'windowResized', id: 'w', rect: [-5, 1, 59, 20] } },
-      render(3, 'a', ['w']),
+      render(1, 'a', ['w'], { w: [2, 1, 40, 20] }),
+      { t: 2, in: { type: 'command', cmd: 'tile' } },
+      render(3, 'b', ['w'], { w: [-5, 1, 33, 20] }),
       { t: 4, end: 'exit' },
     ])
   );
   assert.equal(a.anomalies.length, 1);
-  assert.match(a.anomalies[0].what, /off the top or left/);
+  assert.match(a.anomalies[0].what, /the model drew w at \[-5,1,33,20\].*off the top or left/);
+});
+
+test('but one the user dragged there is not, however many renders repeat it', () => {
+  // Turbo Vision lets a window be pulled past an edge, and the model then
+  // renders it back where it was pulled to for as long as it stays there.
+  // Reporting that is reporting the user to themselves, once per frame.
+  const dragged = [
+    { t: 1, in: { type: 'windowResized', id: 'w', rect: [-5, 1, 33, 20] } },
+    render(2, 'a', ['w'], { w: [-5, 1, 33, 20] }),
+    { t: 3, in: { type: 'key', id: 'w', key: 'x' } },
+    render(4, 'b', ['w'], { w: [-5, 1, 33, 20] }),
+    { t: 5, end: 'exit' },
+  ];
+  assert.deepEqual(one(tape(dragged)).anomalies, []);
+
+  // And the model moving it somewhere else off the desktop is the model's
+  // doing again, even though the user had it off the desktop a moment ago.
+  const then = dragged.slice(0, 3).concat([
+    render(4, 'b', ['w'], { w: [-9, 1, 29, 20] }),
+    { t: 5, end: 'exit' },
+  ]);
+  assert.equal(one(tape(then)).anomalies.length, 1);
 });
 
 test('and one past the edge is measured against the last resize, not the header', () => {
@@ -150,15 +179,13 @@ test('and one past the edge is measured against the last resize, not the header'
   // that fits the second and not the first must not be reported.
   const events = [
     { t: 1, in: { type: 'resized', cols: 100, rows: 40 } },
-    render(2, 'a', ['w']),
-    { t: 3, in: { type: 'windowResized', id: 'w', rect: [0, 0, 90, 30] } },
-    render(4, 'a', ['w']),
-    { t: 5, end: 'exit' },
+    render(2, 'a', ['w'], { w: [0, 0, 90, 30] }),
+    { t: 3, end: 'exit' },
   ];
   assert.deepEqual(one(tape(events)).anomalies, []);
 
   const past = events.slice();
-  past[2] = { t: 3, in: { type: 'windowResized', id: 'w', rect: [0, 0, 120, 30] } };
+  past[1] = render(2, 'a', ['w'], { w: [0, 0, 120, 30] });
   assert.match(one(tape(past)).anomalies[0].what, /past the 100x40 desktop/);
 });
 

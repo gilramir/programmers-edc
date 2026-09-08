@@ -131,8 +131,12 @@ test('a render is fingerprinted, never written', () => {
     type: 'render',
     protocol: 22,
     windows: [
-      { id: 'env', items: [{ type: 'staticText', text: 'AWS_SECRET_ACCESS_KEY=hunter2' }] },
-      { id: 'hex', items: [] },
+      {
+        id: 'env',
+        rect: [2, 1, 40, 20],
+        items: [{ type: 'staticText', text: 'AWS_SECRET_ACCESS_KEY=hunter2' }],
+      },
+      { id: 'hex', rect: [10, 3, 60, 22], items: [] },
     ],
     overlays: [{ id: 'o' }],
   };
@@ -141,6 +145,10 @@ test('a render is fingerprinted, never written', () => {
   const { events, raw } = readTape(file);
   assert.equal(events[0].out, 'render');
   assert.deepEqual(events[0].windows, ['env', 'hex']);
+  // Where the model put them, which is the one part of a render that is kept:
+  // a window off the desktop is a bug only when the model is what put it
+  // there, and that cannot be told from the inbound side.
+  assert.deepEqual(events[0].rects, { env: [2, 1, 40, 20], hex: [10, 3, 60, 22] });
   assert.equal(events[0].overlays, 1);
   assert.match(events[0].hash, /^[0-9a-f]{16}$/);
   // The measured reason renders are not recorded: `predc env` puts the user's

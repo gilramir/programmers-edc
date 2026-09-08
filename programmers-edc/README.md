@@ -188,7 +188,8 @@ The short version, because a person deciding whether to send a file deserves
 it in one paragraph: **the file has everything you typed in it.** Notes,
 clipboard contents and the values of your environment variables are left out --
 which variables exist is recorded, what is in them is not -- and no screen is
-recorded, only a fingerprint of each one. Random values the program generated
+recorded, only a fingerprint of each one and the rectangle each window was
+drawn at. Random values the program generated
 are left out as well, for the obvious reason. The program tells you all of this
 on the way out and asks you to look at the file before you send it, which you
 should. `--record-verbatim` keeps the notes, the clipboard and the random

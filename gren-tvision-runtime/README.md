@@ -44,17 +44,21 @@ with milliseconds since the header.
 
 ```
 {"tape":1,"at":"…","redacted":true,"program":{…},"protocol":22,"terminal":{…},"envNames":[…]}
-{"t":39,"out":"render","hash":"db6159a141bafe53","windows":["env"],"overlays":0}
+{"t":39,"out":"render","hash":"db6159a141bafe53","windows":["env"],"rects":{"env":[2,1,40,20]},"overlays":0}
 {"t":40,"in":{"type":"resized","cols":80,"rows":23}}
 {"t":2464,"in":{"type":"changed","id":"env.find","value":"TERM"}}
 {"t":3464,"end":"exit"}
 ```
 
 **Inbound is kept, outbound is fingerprinted.** A render is the output and a
-replay regenerates it, so what goes on the tape is its hash and the window ids
-it drew — enough to check a replay against, and not enough to leak anything. It
-is also the only safe choice: a render carries whatever the tools are showing,
-and predc's environment tool showed the user's credentials.
+replay regenerates it, so what goes on the tape is its hash, the window ids it
+drew and the rectangle it drew each of them at — enough to check a replay
+against, and not enough to leak anything. It is also the only safe choice: a
+render carries whatever the tools are showing, and predc's environment tool
+showed the user's credentials. The rectangles are the one exception, and they
+are there for the anomaly below: a window off the desktop is a defect when the
+*model* put it there and the user's own business when they dragged it there,
+and only the outbound side can tell those apart. A position is not a document.
 
 **What is withheld, and what cannot be.** `editorText` and `clipboardText` are
 documents rather than gestures, so they are recorded as a length and a hash;
@@ -253,10 +257,19 @@ converter answers over `intlIn`, and two conversations printed as one would be
 worse than not having teed the second onto the tape at all.
 
 It also reports what it can tell is wrong without replaying anything: a window
-rectangle with a negative origin or one past the desktop, a `readClipboard` or a
-`dialog` that was never answered, a crash, a truncation, a tape that just stops,
-and a format or protocol older than the build reading it — which names what the
-older format was missing rather than only that a number differs.
+the model drew with a negative origin or past the edge of the desktop, a
+`readClipboard` or a `dialog` that was never answered, a crash, a truncation, a
+tape that just stops, and a format or protocol older than the build reading it
+— which names what the older format was missing rather than only that a number
+differs.
+
+The window check reads the rectangles on the render lines and skips any the
+user dragged to, which is the correction that made it worth having. It used to
+read the inbound `windowResized` messages instead, so it fired on somebody
+pulling a window past an edge on purpose — Turbo Vision allows that — and could
+never see the case it was written for, a rectangle the model itself chose. The
+rule is the one the rest of this binding runs on: who moved the value decides
+what it means.
 
 ## Crashes
 

@@ -21,7 +21,10 @@
 //     fires per `Time.every` tick, so an open clock is 4 KB a second for as
 //     long as the program is up. The hash is what makes a replay checkable:
 //     the same tape through the same build must produce the same fingerprints,
-//     and the first one that differs is where to look.
+//     and the first one that differs is where to look. The one exception is
+//     each window's rectangle, which is kept in full because it is what makes
+//     a window the model put off the desktop tellable from one the user
+//     dragged there, and because a position is not a document.
 //
 //   - **A render carries whatever the tools are showing**, which for predc
 //     means the user's environment block. `AWS_SECRET_ACCESS_KEY=hunter2` is in
@@ -53,7 +56,7 @@ const path = require('path');
 const realNow = Date.now;
 
 /** Bumped when a reader would get the wrong answer from an older tape. */
-const TAPE = 6;
+const TAPE = 7;
 
 /** Stop before filling somebody's disk. The header says when this happened. */
 const MAX_BYTES = 16 * 1024 * 1024;
@@ -132,6 +135,19 @@ function fingerprint(message) {
   if (type === 'render') {
     record.hash = digest(JSON.stringify(message));
     record.windows = (message.windows || []).map((w) => w.id);
+    // Where the model put each window, keyed by id. This is the one part of a
+    // render worth keeping in full, because a rectangle here is a rectangle
+    // the *model* asked for -- and a window off the desktop is a bug only when
+    // the model is the one that put it there. The reader used to look for that
+    // on the inbound side, where the rectangles are the user's own dragging,
+    // so it fired on somebody moving a window past an edge on purpose and
+    // could never see the case it was written for. A position is not a
+    // document: there is nothing here to withhold.
+    const rects = {};
+    (message.windows || []).forEach((w) => {
+      if (Array.isArray(w.rect)) rects[w.id] = w.rect;
+    });
+    if (Object.keys(rects).length) record.rects = rects;
     record.overlays = (message.overlays || []).length;
   } else if (message && message.id !== undefined) {
     record.id = message.id;

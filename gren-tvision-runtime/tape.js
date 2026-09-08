@@ -42,6 +42,7 @@ const ADDED_IN = {
   4: 'which compiled module it was, so a replay needs no second argument',
   5: 'every reading the program took of the clock',
   6: 'every Time.every tick the model was sent',
+  7: 'the rectangle the model drew each window at',
 };
 
 /**
@@ -263,7 +264,7 @@ function analyse(session, opts = {}) {
   if (header.tape !== TAPE) {
     compatibility.push(`tape format ${header.tape}, this build writes ${TAPE}`);
     for (let v = (header.tape || 0) + 1; v <= TAPE; v += 1) {
-      if (ADDED_IN[v]) compatibility.push(`  format ${v} added ${ADDED_IN[v]}, so this tape has neither`);
+      if (ADDED_IN[v]) compatibility.push(`  format ${v} added ${ADDED_IN[v]}, which this tape does not have`);
     }
   }
   if (header.protocol !== undefined && header.protocol !== PROTOCOL) {
@@ -288,6 +289,10 @@ function analyse(session, opts = {}) {
   let desktop = header.terminal
     ? { cols: header.terminal.columns, rows: header.terminal.rows }
     : null;
+  // The last rectangle the *user* dragged each window to, so that the model
+  // repeating it back is not read as the model's own doing. See the check
+  // under `render` below.
+  const userRects = new Map();
   let lastHash = null;
   let openWindows = [];
   let ended = null;
@@ -361,19 +366,13 @@ function analyse(session, opts = {}) {
       counts.in += 1;
       if (message.withheld) withheld.push(message.withheld);
       if (message.type === 'resized') desktop = { cols: message.cols, rows: message.rows };
-      if (Array.isArray(message.rect)) {
-        const [x0, y0, x1, y1] = message.rect;
-        if (x0 < 0 || y0 < 0) {
-          anomalies.push({
-            at: step.at,
-            what: `${message.id} at ${rect(message.rect)}: its origin is off the top or left of the desktop`,
-          });
-        } else if (desktop && desktop.cols && (x1 > desktop.cols || y1 > desktop.rows)) {
-          anomalies.push({
-            at: step.at,
-            what: `${message.id} at ${rect(message.rect)}: past the ${desktop.cols}x${desktop.rows} desktop`,
-          });
-        }
+      // Where the user has put each window with the mouse. Not an anomaly --
+      // Turbo Vision lets a window be dragged past an edge and that is the
+      // user's business -- but it is what the renders below are measured
+      // against, so that the model echoing back a rectangle the user chose
+      // reads as the echo it is.
+      if (message.type === 'windowResized' && Array.isArray(message.rect)) {
+        userRects.set(message.id, message.rect.join(','));
       }
       // A request the program made, and the answer it was given.
       // `readClipboard` is answered by `clipboardText` and `dialog` by
@@ -392,6 +391,28 @@ function analyse(session, opts = {}) {
         openWindows = o.windows || [];
         openWindows.forEach((w) => windowsSeen.add(w));
         lastHash = o.hash;
+        // A window off the desktop, and the model is the one that put it
+        // there: this is the whole reason the rectangles are on the tape. A
+        // rectangle the user dragged to is skipped, because it is theirs and
+        // because the model renders it back on every frame afterwards -- which
+        // would be one anomaly per render for as long as the window stayed
+        // where somebody deliberately put it.
+        Object.entries(o.rects || {}).forEach(([id, r]) => {
+          if (!Array.isArray(r) || r.length !== 4) return;
+          if (userRects.get(id) === r.join(',')) return;
+          const [x0, y0, x1, y1] = r;
+          if (x0 < 0 || y0 < 0) {
+            anomalies.push({
+              at: o.at,
+              what: `the model drew ${id} at ${rect(r)}: its origin is off the top or left of the desktop`,
+            });
+          } else if (desktop && desktop.cols && (x1 > desktop.cols || y1 > desktop.rows)) {
+            anomalies.push({
+              at: o.at,
+              what: `the model drew ${id} at ${rect(r)}: past the ${desktop.cols}x${desktop.rows} desktop`,
+            });
+          }
+        });
       } else if (o.out === 'readClipboard') {
         unanswered.set('readClipboard', step.at);
       } else if (o.out === 'dialog') {
