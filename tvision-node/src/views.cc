@@ -1908,6 +1908,7 @@ static Napi::Value Window(const Napi::CallbackInfo &info)
 
     TProgram::deskTop->insert(win);
     applyInitialFocus(spec, firstSelectable);
+    win->builtFocus = win->current;
     applyCursors(env, spec.Get("items"));
     return Napi::String::New(env, id);
 }
@@ -2331,6 +2332,52 @@ static Napi::Value Exists(const Napi::CallbackInfo &info)
                               g_views.has(info[0].ToString().Utf8Value()));
 }
 
+// tv.movedCaret(windowId) -- the control the caret has been moved to since
+// this window was built, or "" if nobody has moved it.
+//
+// A synchronous question, which the port has none of and this is not: nothing
+// here reaches a Gren program. It exists for the differ, at one moment -- a
+// window it is about to tear down and build again -- because a rebuild that
+// puts the caret back in the first control is a rebuild the user sees. There
+// is no event to hear this on instead: the binding reports a *list's*
+// highlight moving and not the caret moving between views, and adding that
+// event would be a message per Tab for something only the layer below the port
+// ever wants.
+//
+// **"Moved" and not "focused" is the whole of it**, and it was learned the
+// expensive way. A window that opens before its data arrives is built once
+// small and again full, and the first one's focus is nobody's choice -- it is
+// whatever `applyInitialFocus` reached in a window that had fewer controls in
+// it. Carrying that forward is not restoring the caret, it is pinning it: in
+// predc's time converter it left the caret in the POSIX field for the rest of
+// the session, because that field was the only one there when the window first
+// opened. So the answer is empty unless somebody has actually moved the caret,
+// which is what `builtFocus` records.
+//
+// `TGroup::current` is the focused subview and is public (views.h:877). The id
+// comes back out of the registry's own list for the window, which is short --
+// the views of one window -- and walked rather than indexed because a reverse
+// map would be a second thing to keep in step for no gain at this size.
+static Napi::Value MovedCaret(const Napi::CallbackInfo &info)
+{
+    Napi::Env env = info.Env();
+    std::string windowId = info[0].ToString().Utf8Value();
+
+    JsWindow *win = g_views.findWindow(windowId);
+    if (win == nullptr || win->current == nullptr || win->current == win->builtFocus)
+        return Napi::String::New(env, "");
+
+    if (const std::vector<std::string> *ids = g_views.idsOf(windowId))
+        for (const std::string &id : *ids)
+            {
+            ViewRef *ref = g_views.find(id);
+            if (ref != nullptr && ref->view == win->current)
+                return Napi::String::New(env, id);
+            }
+
+    return Napi::String::New(env, "");
+}
+
 // tv.focus(id) -- bring a window to the front, or focus a control.
 static Napi::Value Focus(const Napi::CallbackInfo &info)
 {
@@ -2503,6 +2550,7 @@ void registerViewApi(Napi::Env env, Napi::Object exports)
     exports.Set("setValue", Napi::Function::New(env, SetValue));
     exports.Set("exists", Napi::Function::New(env, Exists));
     exports.Set("focus", Napi::Function::New(env, Focus));
+    exports.Set("movedCaret", Napi::Function::New(env, MovedCaret));
     exports.Set("close", Napi::Function::New(env, Close));
 }
 

@@ -51,8 +51,8 @@ and `drive_time_moves.py`; see `time_common.py` for why there are three.
 import sys
 
 from time_common import (
-    Checks, WHEN, clock, field_at, launch, message, posix, posix_at,
-    posix_value, retype, row,
+    Checks, WHEN, add_zone, click_button, clock, field_at, launch, message,
+    open_picker, posix, posix_at, posix_value, retype, row,
 )
 
 
@@ -155,6 +155,36 @@ def main():
     retype(app, field_at(app, "America/Chicago", 2), "31", settle=1.4)
     check("and so is the 31st of April", "does not exist" in message(app), message(app))
 
+
+    # ---- the caret survives a window the model rebuilds ----
+    #
+    # Adding a zone gives the converter another row, and a row added is
+    # structural -- nothing can insert a view into a window but a rebuild. The
+    # rebuild used to put the caret back in the first field, so a user who was
+    # part-way through typing a date came back to the wrong one. Chicago's row
+    # rather than UTC's because a zone is appended above UTC and that row
+    # really does move.
+    at = field_at(app, "America/Chicago", 2)      # the day field
+    app.click(at[0], at[1], settle=0.6)
+    before = app.cursor()
+    check("the caret is in the field that was clicked",
+          before[1] == at[1] - 1, str((before, at)))
+
+    open_picker(app)
+    add_zone(app, "Asia/Seoul")
+    click_button(app, "Done")
+    check("adding a zone gave the converter another row",
+          row(app, "Asia/Seoul") is not None, app.render())
+    # The *field*, not the column inside it: a rebuilt input line is a new one
+    # and its caret starts at the end of its value, which for a two-digit day
+    # is two columns along from where the click left it.
+    # `field_at` is 1-based and `cursor` is 0-based, so the day's two digits are
+    # at[0]-1 and at[0], and at[0]+1 is the column the caret sits in past the
+    # last one.
+    caret = app.cursor()
+    check("and the caret is still in the field it was in",
+          caret[1] == before[1] and at[0] - 1 <= caret[0] <= at[0] + 1,
+          str((before, caret, at)))
 
     # ---- the live clock ----
     #

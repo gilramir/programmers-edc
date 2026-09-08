@@ -9542,3 +9542,56 @@ the caret is back on the first button and the space bar restarts the viewer; if
 it was patched the log empties. Then Alt-S again, which now says Start, and the
 viewer runs -- which is the hot key having moved. All three fail without the
 change, and the third fails in a way that would otherwise have been silent.
+
+## The caret across a rebuild, and the difference between focused and moved
+
+The last of what a rebuild threw away. `Tui.setText` took the *caption* case
+out of predc's way, but a window rebuilt for a real reason -- another zone
+added to the converter, so another row of views -- still put the caret back in
+the first control, and somebody part-way through typing a date landed in the
+year field.
+
+**A question, not an event.** The binding has no event for the caret moving
+between views: a list box's highlight has one because the *model* needs it, and
+the caret is Turbo Vision's business. Adding one would be a message per `Tab`
+for something only the layer under the port ever reads. So the differ asks
+instead, at the one moment it has to know, and `tv.movedCaret(windowId)`
+answers from `TGroup::current` (public, views.h:877) walked back to an id
+through the registry's own list for that window. Nothing about it reaches a
+Gren program. The rule in CLAUDE.md is about what a *model* may ask for; this
+is one JavaScript function asking another, on the same side of the port.
+
+### Which was wrong the first time, and the way it was wrong is the finding
+
+The first version answered "which view has the caret", the differ put that back
+after every rebuild, and predc's time converter came up with the caret in the
+POSIX field and stayed there for the whole session.
+
+A window that opens before its data arrives is built twice: once small, once
+full. The small one focused POSIX because POSIX was the only field in it, and
+that focus was nobody's choice -- not the user's, not the model's, just what
+`applyInitialFocus` reached in a window with fewer controls. Restoring it into
+the full window is not restoring anything; it is pinning the caret to an
+accident, and every rebuild after that pins it again.
+
+So the question is "where has the caret been *moved* to", and each window
+records what it was built focusing (`JsWindow::builtFocus`). The answer is
+empty until somebody moves the caret off that, and an empty answer leaves the
+new window to focus whatever its description asks for -- which is what every
+rebuild did before any of this. Restoring only what somebody moved is the same
+rule as `moved` for rectangles one commit earlier, and the same rule as
+`valueChanged` for input lines long before that.
+
+### What is still lost, said out loud
+
+The *column* inside a field. A rebuilt `InputLine` is a new one, with its own
+selection and its own caret at the end of its value. `drive_time.py` checks the
+field and not the column for that reason, and the check reads
+`at[0] - 1 <= caret[0] <= at[0] + 1` rather than an equality.
+
+And a caret whose view stops being able to hold one. predc's converter in clock
+mode has static text where its fields were, so the caret goes to the mode's
+first button on the way in and the converter's first field on the way back. The
+view with that id is still in the description, so the differ asks for it and
+Turbo Vision declines, which is the right answer arrived at by the shortest
+route.

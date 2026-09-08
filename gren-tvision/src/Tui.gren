@@ -650,9 +650,14 @@ place, the second through `TView::locate`, which is also what resolves the
 
 Changing [`resize`](#Resize), or the id, type or rectangle of anything inside
 the window, is a structural change: the window is closed and rebuilt, losing
-focus and z-order. Changing only the *content* of its views is not. A rebuilt
-window does keep its *place*: if the user had dragged it somewhere, that is
-where it comes back, and only a model that moves it itself moves it.
+its z-order. Changing only the *content* of its views is not.
+
+Two things a rebuilt window does keep. Its **place**: if the user had dragged
+it somewhere, that is where it comes back, and only a model that moves it
+itself moves it. And the **caret**, if the user had moved it -- the control it
+was in gets it back, as long as that control is still there and can still take
+it. A window rebuilt before anybody has touched it focuses whatever its new
+description says, the way it always did.
 
 A window's `rect` is the model's opinion of where the window should be, not a
 report of where it is. The user can move and resize one, and the runtime does

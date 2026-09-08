@@ -18,6 +18,13 @@ function fakeTv(initiallyOpen = []) {
   return {
     calls,
     open,
+    // What the binding answers when the differ asks where the caret has been
+    // moved to in a window, keyed by window id. Set it in a test that cares.
+    caret: {},
+    movedCaret(windowId) {
+      return this.caret[windowId] || '';
+    },
+    focus: (id) => calls.push(['focus', id]),
     exists: (id) => open.has(id),
     built: [],
     window(spec) {
@@ -219,6 +226,31 @@ test('a rebuilt window comes back where the user dragged it', () => {
   assert.deepEqual(tv.calls, [['close', 'w'], ['window', 'w']]);
   assert.deepEqual(tv.built[0].rect, [6, 1, 74, 18]);
   assert.equal(tv.built[0].items.length, 2);
+});
+
+test('and the caret comes back with it', () => {
+  // The other half of what a rebuild throws away, and the half the model
+  // cannot put back: nothing tells it which view has the caret. The differ
+  // asks the binding at the one moment it needs to know.
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  differ.apply([clockWin()]);
+  tv.caret.w = 'b';
+  tv.calls.length = 0;
+
+  differ.apply([withRow()]);
+  assert.deepEqual(tv.calls, [['close', 'w'], ['window', 'w'], ['focus', 'b']]);
+});
+
+test('but not when the view that had it is gone, which is often why it rebuilt', () => {
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  differ.apply([withRow()]);
+  tv.caret.w = 'r';                    // the row that is about to be taken away
+  tv.calls.length = 0;
+
+  differ.apply([clockWin()]);
+  assert.deepEqual(tv.calls, [['close', 'w'], ['window', 'w']]);
 });
 
 test('but the model moving it in the same render wins, and is not undone later', () => {

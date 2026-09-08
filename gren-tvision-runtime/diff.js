@@ -281,8 +281,24 @@ function createDiffer(tv, onClosed = () => {}) {
                 before && JSON.stringify(before.rect) !== JSON.stringify(window.rect);
               const where = modelMoved ? window.rect : moved.get(window.id) || window.rect;
               if (modelMoved) moved.delete(window.id);
+              // And the caret, which is the other thing a rebuild loses and
+              // the one the model cannot put back: it is asked for here rather
+              // than tracked, because the binding has no event for the caret
+              // moving between views and one Tab is not worth a message.
+              //
+              // It answers about the caret having been *moved*, and only a
+              // moved caret is put back. A window rebuilt before anyone has
+              // touched it -- which is every window whose data arrives after
+              // it opens -- gets the focus its new description asks for, the
+              // same as it always did. A view that is gone is half the reason
+              // a window is rebuilt at all, so a caret with nowhere to go is
+              // ordinary and silent.
+              const caret = tv.movedCaret ? tv.movedCaret(window.id) : '';
               closeWindow(window.id);
               tv.window({ ...window, rect: where });
+              if (caret && window.items.some((view) => view.id === caret)) {
+                tv.focus(caret);
+              }
             } else {
               const before = current.get(window.id);
               if (before.title !== window.title) tv.setTitle(window.id, window.title);

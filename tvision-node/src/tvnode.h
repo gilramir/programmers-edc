@@ -945,6 +945,11 @@ public:
     {
     }
 
+    // Which view this window was built focusing, so that "the caret has been
+    // moved since" is answerable. Only ever compared against `current`, and
+    // both die with the window. See MovedCaret in views.cc.
+    TView *builtFocus = nullptr;
+
     ~JsWindow();
 
     virtual void handleEvent(TEvent &event) override;

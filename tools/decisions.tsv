@@ -121,7 +121,7 @@ TGroup	focusNext	internal	Turbo Vision's own plumbing
 TGroup	forEach	internal	Turbo Vision's own plumbing
 TGroup	insert	used	the binding calls it; not itself a thing a Gren program names
 TGroup	insertBefore	internal	Turbo Vision's own plumbing
-TGroup	current	used	the binding calls it; not itself a thing a Gren program names
+TGroup	current	used	read by movedCaret, so that rebuilding a window can put the caret back; not a thing a Gren program names
 TGroup	at	used	the binding calls it; not itself a thing a Gren program names
 TGroup	firstMatch	internal	Turbo Vision's own plumbing
 TGroup	indexOf	internal	Turbo Vision's own plumbing

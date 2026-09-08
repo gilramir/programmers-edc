@@ -1439,6 +1439,35 @@ A button's `cmd` is still structural, and should be: the caption says what
 pressing it will do and the command *is* what pressing it does. A model that
 changes one is asking for a different button.
 
+## And the caret comes back too, if somebody had moved it
+
+The third thing a rebuild threw away, after the window's place and the button
+that did not need rebuilding at all. A window rebuilt because the model gave it
+another row put the caret back in the first control, so somebody part-way
+through typing a date found themselves in the year field.
+
+**The differ asks rather than listens.** There is no event for the caret moving
+between views -- a list's highlight has one, the caret does not -- and adding
+one would be a message per `Tab` for something only the layer under the port
+ever wants. So `tv.movedCaret(windowId)` is a synchronous question, asked at
+the one moment there is to ask it, and answered from `TGroup::current`. Nothing
+about it reaches a Gren program; a model still cannot ask where the caret is.
+
+**"Moved" and not "focused" is the whole of it**, and the first version had it
+wrong. A window that opens before its data arrives is built twice -- small,
+then full -- and the first one's focus is nobody's choice: it is whatever the
+window had when it had fewer controls in it. Carrying that forward is not
+restoring the caret, it is pinning it, and in predc's time converter it left
+the caret in the POSIX field for the whole session, because POSIX was the only
+field there when the window first opened. So each window remembers what it was
+*built* focusing, and the answer is empty until somebody moves the caret off
+it.
+
+What is not restored is the caret's column inside a field: a rebuilt
+`InputLine` is a new one and starts with its own selection. The field comes
+back, the character position does not, and `drive_time.py` says so by checking
+the field rather than the column.
+
 ## `Focused` is the list box's contract, not the area list's feature
 
 predc's picker has three list boxes and handled `Focused` for one of them, and
