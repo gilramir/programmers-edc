@@ -757,6 +757,11 @@ The set is patched by id exactly as a window's contents are, which is what lets
 a clock render once a second without repainting the corner every time. Overlays
 are for showing things; put anything the user has to reach in a window.
 
+A `StaticText` here draws in `theme.bar` -- the menu bar and status line's own
+colour, which is what `TClockView` uses. There is no panel behind a view on the
+application to take a colour from, and row 0 is the bar's row, so matching it
+is the only thing that looks deliberate.
+
 *Used by `demo`.*
 
 ## What the package builds for you

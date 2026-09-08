@@ -440,6 +440,11 @@ The set is rebuilt whole when its shape changes and patched by id when it does
 not, exactly as a window's contents are -- which is what lets a clock render
 once a second without repainting the corner every time. Overlays are for
 showing things; put anything the user has to reach in a window.
+
+A [`StaticText`](#View) here draws in [`theme.bar`](#Theme), the colour of the
+menu bar and the status line, because there is no panel behind a view on the
+application to take one from and row 0 is the bar's own row. `TClockView`
+draws in that colour for the same reason.
 -}
 type alias Ui =
     { menuBar : Array MenuItem

@@ -2525,6 +2525,41 @@ not, which is the same rule a window's contents follow. Without the patching
 half, a clock rendering once a second would destroy and rebuild the corner of
 the screen forever — the exact cost the status line was already paying.
 
+### A fourth thing, found a version later by a screenshot
+
+**A view's palette is a question about its group, and `TStaticText`'s answer
+assumed a window.** `cpStaticText` is `"\x06"` — the sixth entry of whatever
+the owner offers — and for a window or a dialog that is the panel's text
+colour. On the *application* the owner's table is `cpAppColor`, whose first
+seven entries belong to the menu bar and the status line, and whose sixth is
+the bar's **selected disabled** colour. So the clock drew black on green,
+across a grey bar, on the same row as it. Nothing chose that colour; it is the
+sixth slot of two unrelated tables, read as if it were one.
+
+Turbo Vision's own two views on `TProgram` say what the answer should have
+been. `TClockView::draw` and `THeapView::draw` both call `getColor(2)` — the
+bar's normal colour, which is `theme.bar` after `buildAppPalette` — and neither
+overrides `getPalette` at all, because base `TView::getPalette` returns null
+and a null palette passes the index straight up. `JsStaticText::getPalette`
+now returns `"\x02"` when its owner is the application and `TStaticText`'s own
+otherwise, which is the same answer arrived at from the other side.
+
+Asking the owner rather than carrying a flag set at build time: a palette is
+read on every draw, the same view can be moved between a window and the
+overlay set by a rerender, and the question "which group am I in" has an
+answer at exactly the moment it is asked.
+
+**What is worth keeping is how long it survived.** Twelve drivers assert
+colour, `drive_demo` asserted four separate things about the clock, and the
+sweep every driver runs for text drawn in the colour behind it passes on
+green-on-grey because that contrasts fine. All of them were about the *text*.
+It was found by `doc/shots.py` — the first time anything in this repo produced
+a picture — and it was obvious in the picture instantly. `drive_demo` now
+compares the clock's ink against a plain letter of the menu bar, which is a
+comparison rather than a constant so that it holds under any theme, and not
+the first letter of an entry because that is the hot key and a third colour on
+purpose.
+
 ## The tvedit milestone: where the state stops being the model's
 
 Fourteen examples put the state in the model and re-rendered it, and every one

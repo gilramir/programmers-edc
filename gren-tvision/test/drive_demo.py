@@ -134,6 +134,26 @@ def main():
           bar)
     check("and it is against the right-hand edge",
           bar.rstrip().endswith(re.search(r"\d\d:\d\d:\d\d", bar).group(0)), bar)
+
+    # And it is drawn in the bar's colour, which is not a detail of taste:
+    # cpStaticText is the sixth entry of whatever group owns the view, and on
+    # the application that table is cpAppColor, whose sixth entry is the bar's
+    # *selected disabled* colour -- black on green, laid across a grey bar.
+    # The clock was that colour until JsStaticText learned to ask which group
+    # it is in. Both drivers and eyes had missed it: the sweep for invisible
+    # text passes on green-on-grey, and every check above is about text.
+    #
+    # Against a plain letter of the menu bar rather than a constant, because
+    # what is being asserted is that the two match under whatever theme is
+    # loaded. Not the first letter of an entry -- that is the hot key, and it
+    # is a third colour on purpose.
+    display = app.display()
+    hhmmss = re.search(r"\d\d:\d\d:\d\d", bar)
+    plain = bar.index("ile")            # "File" without its hot F
+    clock_ink = (display.fg_at(hhmmss.start(), 0), display.bg_at(hhmmss.start(), 0))
+    bar_ink = (display.fg_at(plain, 0), display.bg_at(plain, 0))
+    check("and in the menu bar's own colour, not the sixth slot of another table",
+          clock_ink == bar_ink, f"clock {clock_ink} vs bar {bar_ink}")
     first_time = re.search(r"\d\d:\d\d:\d\d", bar).group(0)
     app.pump(1.6)
     later = re.search(r"\d\d:\d\d:\d\d", app.render().split("\n")[0])

@@ -903,6 +903,21 @@ row and that is where a clock goes.
 `watch` still puts its counters in the status line, which is a fair place for
 counters that are text; the point is that it is now a choice.
 
+A fourth thing turned up later, and the way it turned up is the point. **A
+view's palette is a question about the group it is in**, and `TStaticText`
+answered as if that were always a window: `cpStaticText` is the sixth entry of
+the owner's table, which on the application is the menu bar's *selected
+disabled* colour. The clock drew black on green across a grey bar. Turbo
+Vision's own `TClockView` and `THeapView` use `getColor(2)` — the bar's normal
+colour — and `JsStaticText` does the same now when its owner is the
+application.
+
+Twelve drivers assert colour and `drive_demo` asserted four things about the
+clock, all of them about its text; the sweep for invisible text passes on
+green-on-grey. It was found by the first screenshot ever taken of the example
+(`doc/shots.py`, `img/overlay.png`) and was obvious in it immediately. FINDINGS
+has the rest.
+
 ### And what is not a gap
 
 Said plainly, so nobody spends a day on one of these.

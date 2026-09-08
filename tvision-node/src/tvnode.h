@@ -211,6 +211,33 @@ public:
         text = newStr(s.c_str());
         drawView();
     }
+
+    // A static text draws in a different colour depending on which group it
+    // is in, and TStaticText's own palette only knows about one of them.
+    //
+    // cpStaticText is "\x06": the sixth entry of whatever the owner offers.
+    // Inside a window or a dialog that is the panel's text colour and is
+    // right. On the *application* -- an overlay -- the owner's palette is
+    // cpAppColor, whose first seven entries belong to the menu bar and the
+    // status line, and the sixth of those is the bar's *selected disabled*
+    // colour: black on green in the stock scheme, drawn across a grey bar.
+    // Not a colour anybody chose; the sixth slot of two unrelated tables.
+    //
+    // TClockView and THeapView, the two views Turbo Vision itself puts on
+    // TProgram, both draw with getColor(2) for this reason -- the bar's
+    // normal colour, which is `theme.bar` here (buildAppPalette in app.cc).
+    // So does an overlay now, and it follows the theme with the bar.
+    //
+    // Asking the owner rather than carrying a flag: the same view can be
+    // moved between a window and the overlay set, and a palette is read on
+    // every draw, so the answer belongs at the point of the question.
+    virtual TPalette &getPalette() const override
+    {
+        static TPalette onApp("\x02", 1);
+        if (owner != nullptr && owner == (const TGroup *) TProgram::application)
+            return onApp;
+        return TStaticText::getPalette();
+    }
 };
 
 // A scroll bar that takes the mouse wheel only when the pointer is over the
