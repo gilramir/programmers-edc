@@ -252,8 +252,9 @@ rationed at the timer's rate and a paste trickles in.
 main loop usually has nested blocking loops too, for dialogs, menus and
 anything else "modal". Each has to be found and either hoisted out the same
 way or left alone with its cost written down. Turbo Vision's dialogs were
-hoisted, and its pull-down menus were not; while a menu is open the process
-stops for about a second, and that is documented rather than fixed.
+hoisted, and its pull-down menus were not; for as long as a menu is down the
+process is stopped, with the timers and the I/O queueing up to fire when it
+closes, and that is documented rather than fixed.
 
 **Call back only at safe points.** A callback into JavaScript can do anything,
 including sending a message to Gren whose reply arrives synchronously as a

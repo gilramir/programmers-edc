@@ -3,8 +3,8 @@
 // Milestone 1 was the blocking design: tv.run() called TApplication::run() and
 // Node's event loop was starved until the app quit. tv.start() + tv.step() is
 // the pumped one -- Node's loop drives TVision instead of the other way round,
-// so timers, promises and I/O keep working while the TUI is up. Both are kept:
-// examples/hello.js still uses run(), examples/demo.js uses the pump.
+// so timers, promises and I/O keep working while the TUI is up. run() is gone;
+// every example uses the pump, hello.js included.
 //
 // Why this works, checked in the tvision source before it was written:
 //   * TProgram::eventTimeoutMs (app.h:296) is a public static; at 0, getEvent
