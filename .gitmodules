@@ -1,4 +1,4 @@
 [submodule "tvision"]
-	path = tvision
+	path = tvision-node/tvision
 	url = https://github.com/gilramir/tvision.git
 	branch = patches

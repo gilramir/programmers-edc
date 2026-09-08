@@ -56,31 +56,40 @@ Two consequences run through the whole design:
 
 ## Building
 
-Everything runs inside devbox; `node` and `g++` are nix's, and the static
-archive, the addon and the `node` that loads it must all agree on libc and
-libstdc++.
+Everything runs inside devbox; `node` and `g++` are nix's, and Turbo Vision,
+the addon and the `node` that loads it must all agree on libc and libstdc++.
 
 ```sh
-devbox run build      # the library, this addon, and everything downstream
-devbox run lib        # just libtvision.a
+devbox run build                              # this addon and everything downstream
 (cd tvision-node && npx node-gyp build)
 ```
 
-`scripts/build-tvision.sh` builds `../build-tvision/libtvision.a` with
-`-DCMAKE_POSITION_INDEPENDENT_CODE=ON`, which is required: a `.node` is a
-shared object and a non-PIC archive cannot be linked into one. The `tvision/`
-checkout is a git submodule pinned to `gilramir/tvision`'s `patches` branch --
-upstream master plus the fixes upstream has not taken yet. There is no patch
-directory; what the submodule is checked out at is what gets built.
+**node-gyp is the whole build.** `binding.gyp` has two targets:
+`tvision_lib`, a static library of Turbo Vision's 206 sources, and `tvision`,
+the addon, which `dependencies` it. There is no cmake step and no
+`build-tvision/`. The flags on the first target are the ones cmake used to
+generate, copied across and commented; the one that is not optional is
+`-fPIC`, because a `.node` is a shared object and a non-PIC archive cannot be
+linked into one.
 
-**`node-gyp build` does not relink when only `libtvision.a` changed.** The
-generated makefile does not carry the archive as a dependency of the `.node`,
-so after a `devbox run lib` the addon under test is still the previous one,
-which looks exactly like the library change having had no effect. Touch a file
-under `src/`.
+The source list is generated into `tvision-sources.gypi` by
+`scripts/gen-tvision-sources.py` and committed. gyp has no globbing, and the
+`<!@(find ...)` that would stand in for it is a shell dependency in a file that
+runs on the machine of whoever installs the package. Regenerate it after moving
+the submodule pin; `devbox run check` fails if it is stale.
 
-An AddressSanitizer build is `TVNODE_ASAN=1 npx node-gyp rebuild`, run with
-`test/asan.sh`. This is manual memory management against a C++ library from
+`tvision/` is a git submodule pinned to `gilramir/tvision`'s `patches` branch
+-- upstream master plus the fixes upstream has not taken yet. There is no patch
+directory; what the submodule is checked out at is what gets built. It is
+inside this package rather than beside it because `npm pack` walks the
+filesystem: a checked-out submodule's files travel in the tarball, so the
+source build works for anybody with no prebuilt binary for their platform.
+
+An AddressSanitizer build is `TVNODE_ASAN=1 npx node-gyp configure && npx
+node-gyp build`, run with `test/asan.sh`. Prefer that over `rebuild`, which now
+recompiles Turbo Vision too: the sanitizer flags are decided at configure time
+and gyp recompiles only the objects whose command line changed, which is the
+two files in `src/`. This is manual memory management against a C++ library from
 1994; the one-byte overrun that aborts ten minutes later in an unrelated
 `free()` is found in seconds this way and in days any other way.
 

@@ -69,12 +69,26 @@ devbox run -- python3 tools/run_tests.py -j1       # one at a time
 anything that touches C++. After editing `tvision-node/src/`, rebuild with
 `(cd tvision-node && npx node-gyp build)` inside devbox.
 
-**That rebuild does not relink when only `build-tvision/libtvision.a` changed.**
-The generated makefile does not carry the static archive as a dependency of the
-`.node`, so after a `devbox run lib` the addon under test is still the one built
-before it -- which looks exactly like the library change having no effect.
-Deleting `build/Release/tvision.node` does not help either: it is a hard link
-and the copy step restores it. Touch a file under `tvision-node/src/`.
+**Turbo Vision is a gyp target now, not a separate cmake build.** There is no
+`devbox run lib` and no `build-tvision/`: `tvision-node/binding.gyp` has two
+targets, `tvision_lib` (the submodule's 206 sources, from the generated
+`tvision-sources.gypi`) and `tvision` (the addon), with a `dependencies` edge
+between them. Changing the library relinks the addon, which the cmake split
+did not do -- that trap cost a session once and is gone rather than
+documented.
+
+Two things follow. `npx node-gyp build` after editing `tvision-node/src/`
+still costs two files, because the library's objects are untouched. But
+`node-gyp rebuild` now costs 46s rather than 5, so **prefer `configure` plus
+`build`** whenever the flags change and the sources have not -- which is what
+`test:asan` does, and why the sanitizer cycle is 14s instead of a full
+rebuild each way.
+
+**Regenerate `tvision-sources.gypi` after moving the submodule pin**
+(`tvision-node/scripts/gen-tvision-sources.py`). `check` fails if it is stale.
+The list is committed rather than globbed because a published package's
+`binding.gyp` runs on the user's machine, where `<!@(find ...)` is a shell
+dependency and on Windows is nothing at all.
 
 **The check count is `grep -cE "^ok|✓"` over `devbox run test`'s output** --
 the pty drivers *plus* the JS tests `check` runs first. Counting only lines
@@ -155,7 +169,7 @@ editing it, or the driver runs the old `main.js` and fails in a way that looks
 exactly like the feature not working.
 
 **Driving an `InputLine` has two traps and both cost a check that silently does
-nothing** (`tvision/source/tvision/tinputli.cpp:380`). A field selects its whole
+nothing** (`tvision-node/tvision/source/tvision/tinputli.cpp:380`). A field selects its whole
 value when it *gains* the caret and not while it has it, so `Alt-`its-label is a
 no-op when it is already focused — leave and come back to get a fresh selection.
 And `Del` honours a selection while `Backspace` with none deletes one character,
@@ -238,9 +252,13 @@ No remote; history is a linear chain on `main` and committing there directly is
 the workflow. Commit messages are long and narrative — the finding, not just the
 change — and end with the check count. Match the ones already in `git log`.
 
-`tvision/` is a **submodule** of gilramir/tvision, a fork of the upstream C++
-library, pinned to its `patches` branch — upstream master plus the fixes
-upstream has not taken yet, one commit each, each also a `fix/...` topic branch
-for its PR. There is no patch directory: what the submodule is checked out at
+`tvision-node/tvision/` is a **submodule** of gilramir/tvision, a fork of the
+upstream C++ library, pinned to its `patches` branch — upstream master plus the
+fixes upstream has not taken yet, one commit each, each also a `fix/...` topic
+branch for its PR. It sits inside `tvision-node` rather than at the root
+because that is the package that needs it: `npm pack` walks the filesystem, so
+a checked-out submodule's files travel in the tarball as ordinary files (its
+`.git` does not), and the published package builds from source with nothing
+but node-gyp. There is no patch directory: what the submodule is checked out at
 is what gets built. A fix that lands upstream means deleting both its branches
 and moving the pin. README says the rest.

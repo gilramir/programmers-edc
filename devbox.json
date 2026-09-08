@@ -3,7 +3,6 @@
   "packages": {
     "nodejs": "22",
     "gren": "0.6",
-    "cmake": "latest",
     "pkg-config": "latest",
     "ncurses": {
       "version": "latest",
@@ -18,11 +17,7 @@
       "m0": [
         "cd m0-load-test && ./run.sh"
       ],
-      "lib": [
-        "tvision-node/scripts/build-tvision.sh"
-      ],
       "build": [
-        "tvision-node/scripts/build-tvision.sh",
         "(cd tvision-node && npm install --no-audit --no-fund && npx node-gyp rebuild)",
         "(cd gren-tvision-runtime && npm install --no-audit --no-fund)",
         "(cd programmers-edc && npm install --no-audit --no-fund)",
@@ -52,6 +47,7 @@
       ],
       "test": [
         "python3 tools/check_consistency.py",
+        "python3 tvision-node/scripts/gen-tvision-sources.py --check",
         "(cd gren-tvision && gren docs --output=/dev/null)",
         "(cd gren-tvision-runtime && node --test test/*.test.js)",
         "(cd gren-tvision/tests && ./run.sh)",
@@ -61,13 +57,14 @@
         "python3 tools/run_tests.py"
       ],
       "test:asan": [
-        "(cd tvision-node && TVNODE_ASAN=1 npx node-gyp rebuild)",
+        "(cd tvision-node && TVNODE_ASAN=1 npx node-gyp configure && TVNODE_ASAN=1 npx node-gyp build)",
         "gren-tvision/build.sh",
         "programmers-edc/build.sh",
-        "python3 tools/run_tests.py --asan; rc=$?; (cd tvision-node && npx node-gyp rebuild) && exit $rc"
+        "python3 tools/run_tests.py --asan; rc=$?; (cd tvision-node && npx node-gyp configure && npx node-gyp build) && exit $rc"
       ],
       "check": [
         "python3 tools/check_consistency.py",
+        "python3 tvision-node/scripts/gen-tvision-sources.py --check",
         "python3 tools/audit_api.py",
         "(cd gren-tvision && gren docs --output=/dev/null)",
         "(cd gren-tvision-runtime && node --test test/*.test.js)",

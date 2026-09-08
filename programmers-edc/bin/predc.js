@@ -3,7 +3,7 @@
 
 // predc's entry point.
 //
-// gren-tvision ships a `gren-tui` bin that runs any compiled Gren program, and
+// gren-tvision-runtime ships a `gren-tui` bin that runs any compiled Gren program, and
 // for the examples that is the right thing: they are demonstrations, and the
 // name on the command line is the runtime's. An application is not a
 // demonstration. `predc` is the name the user types, the path to the compiled
@@ -26,8 +26,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const run = require('gren-tvision');
-const { takeRecordFlags } = require('gren-tvision/record');
+const run = require('gren-tvision-runtime');
+const { takeRecordFlags } = require('gren-tvision-runtime/record');
 const timezones = require('./timezones');
 
 const version = require('../package.json').version;

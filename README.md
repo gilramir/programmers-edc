@@ -4,7 +4,7 @@ Binding [magiblot/tvision](https://github.com/magiblot/tvision) — a modern por
 Borland's Turbo Vision — into Node, and eventually into
 [Gren](https://gren-lang.org).
 
-The `tvision/` checkout is a **git submodule** pointing at
+The `tvision-node/tvision/` checkout is a **git submodule** pointing at
 [gilramir/tvision](https://github.com/gilramir/tvision), a fork of upstream that
 carries the fixes upstream has not taken yet. Clone with
 `--recurse-submodules`, or run `git submodule update --init` in an existing
@@ -32,7 +32,7 @@ Node-API, so one binary works on every Node version, and glibc rather than
 ## Layout
 
 ```
-devbox.json        node 22, gren, cmake, ncurses (with its dev output)
+devbox.json        node 22, gren, ncurses (with its dev output)
 m0-load-test/      milestone 0: a two-function addon that calls into ncursesw
 tvision-node/      the binding
   src/tvnode.h       shared declarations, widgets, the id registry
@@ -58,7 +58,6 @@ gren-tvision-runtime/  the npm half: the diff layer + the `gren-tui` bin
   record.js          --record: the session, on a file, for a bug report
   test/              node:test, against a fake binding
 tools/             cross-language consistency checks
-build-tvision/     libtvision.a, built PIC (generated)
 ```
 
 The split is forced: **Gren packages may not declare ports**, so the package
@@ -153,26 +152,31 @@ Vision; `Space` does. See FINDINGS.
 
 ## Building without devbox
 
-devbox supplies five things and nothing else — **node 22**, **gren 0.6**,
-**cmake**, **pkg-config** and **ncurses with its dev output**. Every script here
-(`build-tvision.sh`, the two `build.sh`, `run.sh`, `tools/run_tests.py`) is
-plain and only wants those on `PATH`.
+devbox supplies four things and nothing else — **node 22**, **gren 0.6**,
+**pkg-config** and **ncurses with its dev output**. Every script here (the two
+`build.sh`, `run.sh`, `tools/run_tests.py`) is plain and only wants those on
+`PATH`.
+
+**cmake is no longer one of them.** Turbo Vision used to be a separate cmake
+build producing `build-tvision/libtvision.a`; it is a target inside
+`tvision-node/binding.gyp` now, so node-gyp is the whole build. That is for the
+sake of whoever installs the published package on a platform with no prebuilt
+binary: node-gyp they already have, cmake they may not.
 
 | | |
 |---|---|
 | node 22 | what this is pinned to and developed against |
 | `gren` 0.6.6 | `npm i -g gren-lang@0.6.6` — npm's `gren-lang` is that version and its bin is `gren` |
-| cmake, a C++17 compiler, make | `libtvision.a` and the addon |
-| pkg-config and the ncursesw dev files | `binding.gyp` calls `pkg-config --cflags/--libs ncursesw`, and tvision's own cmake `find_library`s `ncursesw` and fails hard without it |
+| a C++17 compiler and make | Turbo Vision and the addon, both through node-gyp |
+| pkg-config and the ncursesw dev files | `binding.gyp` calls `pkg-config --cflags/--libs ncursesw` for both of its targets |
 | python3 | node-gyp wants it, and every test driver is written in it — standard library only, nothing to `pip install` |
 
 On Debian and Ubuntu the system half is
-`build-essential cmake pkg-config libncurses-dev python3`; `libncurses-dev` is
+`build-essential pkg-config libncurses-dev python3`; `libncurses-dev` is
 the package that ships `ncursesw.pc`.
 
 ```sh
-git submodule update --init                        # fills tvision/
-tvision-node/scripts/build-tvision.sh
+git submodule update --init                        # fills tvision-node/tvision/
 (cd tvision-node         && npm install && npx node-gyp rebuild)
 (cd gren-tvision-runtime && npm install)
 (cd programmers-edc      && npm install)
@@ -196,19 +200,23 @@ python3 tools/run_tests.py
 
 Four things that will bite:
 
-**Do not copy `build-tvision/` or `tvision-node/build/` from another machine.**
-Build both there. That is what the comment at the top of `build-tvision.sh` is
-about — a static archive and the `.node` that links it have to come from one
+**Do not copy `tvision-node/build/` from another machine.** Build it there. A
+`.node` and the Turbo Vision objects linked into it have to come from one
 toolchain and one libc, and inside devbox that is nix's gcc rather than the
-system's. Either host is fine; mixing them is not.
+system's. Either host is fine; mixing them is not — and a binary built inside
+devbox links against nix's glibc and will not load anywhere else, which is why
+`doc/publishing.md` says prebuilds have to come out of a container.
 
-**The `tvision/` checkout is a submodule, pinned to a revision** of the
+**The `tvision-node/tvision/` checkout is a submodule, pinned to a revision** of the
 `patches` branch of [gilramir/tvision](https://github.com/gilramir/tvision) —
 upstream master plus the fixes that have not landed upstream yet, one commit
 each. The pin is a fact recorded in this repo's history, which is the point:
 "which tvision was this built against" has an answer afterwards. Moving it
-forward is `git submodule update --remote tvision` and a commit here; a clone
-that skipped `--init` fails in ways that look like this repo's fault.
+forward is `git submodule update --remote tvision-node/tvision` and a commit
+here — plus `tvision-node/scripts/gen-tvision-sources.py`, because the list of
+files node-gyp compiles is committed rather than globbed and `check` fails if
+it is stale. A clone that skipped `--init` fails in ways that look like this
+repo's fault.
 
 **The fork's branches**, and what each is for:
 
@@ -281,11 +289,12 @@ published. `gren-tvision/gren.json` and the three `package.json`s say the same.
 **What ships alongside it is not ours and does not become ours.** `tvision-node`
 links `libtvision.a` statically, so anything built from it carries Turbo Vision
 with it, and Turbo Vision is three layers of terms in one file
-(`tvision/COPYRIGHT`, 119 lines): Borland's 1994 public-source disclaimer on the
+(`tvision-node/tvision/COPYRIGHT`, 119 lines): Borland's 1994 public-source disclaimer on the
 original code, magiblot's MIT licence on everything since, and the MIT notices
 of the third-party pieces vendored into it — Milo Yip's `utoa`, Bjoern
 Hoehrmann's UTF-8 decoder, and the rest. All of them require the notice to
 travel with the binary. **A published `tvision-node` has to include
-`tvision/COPYRIGHT` in its tarball**, which is a packaging job that has not been
-done yet, because how the C++ gets to a consumer at all is still open — see the
-`binding.gyp` note under Building.
+`tvision/COPYRIGHT` in its tarball.** How the C++ gets to a consumer is settled
+now — the submodule lives inside the package and `npm pack` carries its files —
+so this is one line in the `files` list rather than an open question. See
+`doc/publishing.md`.

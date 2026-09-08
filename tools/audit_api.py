@@ -39,7 +39,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-HEADERS = os.path.join(ROOT, "tvision", "include", "tvision")
+HEADERS = os.path.join(ROOT, "tvision-node", "tvision", "include", "tvision")
 DECISIONS = os.path.join(HERE, "decisions.tsv")
 
 # The classes the binding is answerable for. A class not on this list is one
@@ -179,7 +179,7 @@ def main():
     only_todo = "--todo" in sys.argv
 
     if not os.path.isdir(HEADERS):
-        print(f"audit: no headers at {HEADERS} -- is tvision/ checked out?")
+        print(f"audit: no headers at {HEADERS} -- is the submodule checked out?")
         return 1
 
     known = decisions()

@@ -1,9 +1,14 @@
-# gren-tvision (the JavaScript half)
+# gren-tvision-runtime (the JavaScript half)
 
 The Gren package [`gilramir/gren-tvision`](../gren-tvision) is pure Gren: it can
 describe a UI but cannot touch a terminal, because **Gren packages may not
 declare ports**. This npm package is the other half — it takes the description
 off the port and drives [`tvision-node`](../tvision-node) with it.
+
+The npm name is `gren-tvision-runtime` and the Gren name is
+`gilramir/gren-tvision`. Two registries, so nothing collides, but they are two
+different artefacts and the suffix is there to keep anybody from having to work
+that out for themselves.
 
 ```
 gren make Main --output=main.js
@@ -13,7 +18,7 @@ gren-tui main.js
 or, from your own JavaScript:
 
 ```js
-const run = require('gren-tvision');
+const run = require('gren-tvision-runtime');
 run(require('./main.js'));           // options: {flags, moduleName, outPort, inPort}
 ```
 

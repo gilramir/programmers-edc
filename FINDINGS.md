@@ -25,9 +25,11 @@ libc.so.6        => /nix/store/...-glibc-2.42-67/lib/libc.so.6
 
 Consequences, both of which milestone 1 depends on:
 
-- **`libtvision.a` has to be built inside devbox too.** Static archives cannot be
-  mixed across toolchains, so `tvision/build/` (built earlier with system g++) is
-  unusable here. `tvision-node/scripts/build-tvision.sh` builds a fresh one.
+- **Turbo Vision has to be built inside devbox too.** Object files cannot be
+  mixed across toolchains, so `tvision/build/` (built earlier with system g++)
+  is unusable here. It was `scripts/build-tvision.sh` producing a static
+  archive for a while; it is a target of `binding.gyp` now, so node-gyp builds
+  it with the same compiler as the addon and the question cannot be got wrong.
 - **nix packages split their headers into a `dev` output** that devbox does not
   install by default. `ncurses` needs the object form in `devbox.json`:
   ```json
@@ -563,6 +565,33 @@ source file and there is no `configure_file` anywhere -- and its `CMakeLists`
 globs `source/*/*.cpp` with no platform filtering, because the Windows-only
 files guard themselves. So `binding.gyp` can compile all 206 of them directly,
 which was verified: full suite green, one 1.3 MB `.node`, no cmake anywhere.
+
+**Done, 2026-09-08.** `binding.gyp` has a `tvision_lib` static library target
+and the addon `dependencies` it; `build-tvision.sh` and `devbox run lib` are
+gone, and so is cmake from `devbox.json`. Four things the doing added to the
+thinking:
+
+  - **`-fPIC` is not a gyp default for a `static_library`** and has to be
+    written down. cmake was passing `-DCMAKE_POSITION_INDEPENDENT_CODE=ON` for
+    exactly this: a non-PIC archive cannot be linked into a shared object, and
+    a `.node` is one.
+  - **`TVISION_NO_STL` has to stay private to the library.** It was `PRIVATE`
+    in cmake and the reason is not decoration -- `src/*.cc` include `<string>`
+    and `<vector>` and mean them.
+  - **The source list is committed rather than globbed.** gyp can shell out
+    with `<!@(find ...)`, but a published `binding.gyp` runs on the *user's*
+    machine; `scripts/gen-tvision-sources.py` writes `tvision-sources.gypi`
+    and `--check` fails the build when it is stale.
+  - **`rebuild` stopped being the cheap way to change flags.** It now
+    recompiles 206 files (46s). The sanitizer flags are decided at configure
+    time, and gyp recompiles only objects whose command line moved, so
+    `configure` plus `build` touches the two files in `src/` and leaves the
+    library alone -- 14s, and `test:asan` is unchanged at 136s.
+
+It also deleted a trap this file and CLAUDE.md both carried: `node-gyp build`
+did not relink when only `libtvision.a` had changed, because the archive was
+outside gyp's dependency graph. A `dependencies` edge *is* that graph, so the
+warning is not needed any more rather than being easier to remember.
 
 That matters for distribution. It reduces a source install to a C++ compiler
 and ncurses headers, and with `prebuildify` + `node-gyp-build` most users get a
@@ -5870,9 +5899,10 @@ flag.
 [233]: https://github.com/magiblot/tvision/issues/233
 
 The fix is a commit on the `patches` branch of gilramir/tvision, the fork
-`tvision/` is a submodule of, and on `fix/wide-char-trail` beside it for the
-pull request. It began as a `.patch` file in `tvision-node/patches/`, applied
-by `build-tvision.sh` -- which lasted a day, until a second unlanded fix made
+`tvision-node/tvision/` is a submodule of, and on `fix/wide-char-trail` beside
+it for the pull request. It began as a `.patch` file in `tvision-node/patches/`,
+applied by the old `build-tvision.sh` -- which lasted a day, until a second
+unlanded fix made
 the shape of the problem obvious: `git apply -R --check` printed
 `already applied` whether the fix was in the checkout or not, so the mechanism
 that was supposed to guarantee the patch was there could not tell you when it

@@ -4,8 +4,9 @@ Two npm packages and a Gren package, one of which contains a compiled shared
 library. This is what that costs, what it does *not* cost, and how to build for
 the platforms this machine is not.
 
-Nothing here is done yet. It is written down because the answers took a
-morning to establish and would take another one to establish again.
+Written down because the answers took a morning to establish and would take
+another one to establish again. **Steps 1 and 3 of the order at the end are
+done** (2026-09-08) and are marked below; the rest is still ahead.
 
 ## Decided, 2026-09-05
 
@@ -197,39 +198,83 @@ prebuild, then `node-gyp rebuild`, which is exactly the behaviour wanted.
 
 ## The blockers that are not about binaries
 
-**The tvision submodule does not travel.** `npm publish` packs files, and a git
-submodule is a gitlink — the tarball would contain an empty `tvision/`. The
-sources have to be vendored at pack time, from the pin the submodule names.
-This is what "the `binding.gyp` sibling-checkout blocker" actually is: the gyp
-file reaches out to `../tvision/include` and `../build-tvision/libtvision.a`,
-neither of which exists for anybody who installed the package.
+**~~The tvision submodule does not travel.~~ It does, and this section was
+wrong.** The claim here was that `npm publish` packs a gitlink and the tarball
+would contain an empty `tvision/`, so the sources would have to be vendored at
+pack time. npm does not read git: `npm-packlist` walks the *filesystem*, where
+a checked-out submodule is a directory of ordinary files. Tested directly --
+a package with a submodule at `vend/` and `"files": ["vend"]` packs
+`vend/a.cpp` and `vend/include/h.h`, and excludes only the submodule's `.git`.
 
-**And that raises the cmake question.** Today `libtvision.a` is built by a
-separate `cmake` invocation that `binding.gyp` then links. Two ways out:
+So the submodule moved **into** `tvision-node` (2026-09-08) rather than being
+vendored beside it, and a source build works for anybody who installs the
+package. `npm pack --dry-run` in `tvision-node` now lists 630 files under
+`tvision/source` and 76 under `tvision/include`.
 
-  - **List TVision's sources in the gyp file** — 178 files in
-    `source/tvision/` and 29 in `source/platform/`, some of them
-    platform-specific. Generated into a committed `.gypi` by a script, because
-    gyp has no globbing and `<!@(ls ...)` does not work on Windows. The prize
-    is that the source fallback then needs **only node-gyp**, which every npm
-    user already has, rather than cmake as well.
-  - **Keep cmake, driven by `cmake-js`.** Less work now, and it makes cmake a
-    hard install-time requirement for anybody without a prebuild.
+**And it found the one that does not travel, which is the worst possible
+one.** `tvision/COPYRIGHT` is not in that tarball. The fork's own `.gitignore`
+opens with `*` and re-includes by pattern, and the re-include for files is
+`!*.*` -- which means *files with an extension*. `CMakeLists.txt` and
+`README.md` come back; `COPYRIGHT` has no dot in it and stays excluded. Git
+does not care, because the file is tracked and `.gitignore` only governs
+untracked files. **npm-packlist applies the same rules as a filter regardless
+of tracking**, including `.gitignore` files nested inside the package. So the
+file whose entire purpose is to travel with the binary is the one npm silently
+leaves behind, and nothing about the failure is visible from this end.
 
-The first is more work once and much better for anybody on a platform you do
-not ship a binary for. Prefer it.
+Naming it in `files` fixes it -- verified on a scratch package reproducing the
+rule, where `vend/COPYRIGHT` is absent by default and present the moment
+`files` lists it. So `files` is not merely an optimisation to keep the fork's
+examples and tests out of the tarball; **it is what makes the package legal.**
+The entries the build and the licence need are `tvision/source`,
+`tvision/include`, `tvision/COPYRIGHT` and `tvision-sources.gypi`.
 
-**Both npm packages are `"private": true`** and `gren-tvision` depends on
+One more consequence: `--recurse-submodules` on the clone is a publishing
+requirement now and not a convenience, since an uninitialised submodule packs
+an empty directory and the failure lands at the consumer's `npm install`.
+
+**~~And that raises the cmake question.~~ Done, the same day.** `binding.gyp`
+has two targets now: `tvision_lib`, a `static_library` of the 206 sources from
+a generated `tvision-sources.gypi`, and `tvision`, the addon, which
+`dependencies` it. cmake is gone from the build and from `devbox.json`. The
+flags on the library target are the ones cmake was generating, copied over and
+commented in place. Three things worth knowing:
+
+  - The list is **committed and checked**, not globbed.
+    `scripts/gen-tvision-sources.py` writes it and `--check` fails `devbox run
+    check` when it is stale. A `<!@(find ...)` would have run on the user's
+    machine.
+  - **`-fPIC` is not a default for a gyp `static_library`** and has to be
+    named. cmake had `-DCMAKE_POSITION_INDEPENDENT_CODE=ON` for the same
+    reason.
+  - `TVISION_NO_STL` is **private to the library target**. It was `PRIVATE` in
+    cmake too; `src/*.cc` include `<string>` and `<vector>` and mean them.
+
+The prize is that the source fallback needs **only node-gyp**, which every npm
+user already has.
+
+It also killed a documented trap: `node-gyp build` used not to relink when only
+`libtvision.a` had changed, because the archive was outside gyp's dependency
+graph. A `dependencies` edge is that graph.
+
+**Both npm packages are `"private": true`** and the runtime depends on
 `"tvision-node": "file:../tvision-node"`. Those become a real version range on
-the day of the first publish, and the names need deciding: `tvision-node` is
-unscoped and probably taken; `gren-tvision` as an npm name collides with the
-Gren package of the same name, which is a different registry but a confusing
-pair of names to explain.
+the day of the first publish.
 
-**There is no LICENSE file anywhere.** magiblot/tvision is MIT and Borland's
-original was released under a permissive licence; predc, the binding and the
-package need their own, and the fork carries tvision's. Nothing can be
-published until this exists.
+**The names are decided (2026-09-08).** The runtime's npm name is
+`gren-tvision-runtime`, matching its directory. It used to be `gren-tvision`,
+which is also the Gren package's name -- two registries, so nothing collided,
+but explaining which artefact somebody meant cost a sentence every time and a
+name is the one thing that cannot be changed after 1.0.0. `tvision-node` keeps
+its name, subject to it being free on npm, which has not been checked.
+
+**~~There is no LICENSE file anywhere.~~ Done.** ISC, at the root and beside
+each package meant to be published. What is still outstanding is Turbo
+Vision's own: `tvision-node` compiles Turbo Vision into the addon, so
+`tvision/COPYRIGHT` -- Borland's 1994 disclaimer, magiblot's MIT, and the MIT
+notices of the pieces vendored into it -- has to be in the tarball. It is one
+entry in `files`, and as the section above found, it is **excluded by default**
+and will not get there on its own.
 
 **"How does a consumer pty-test their own TUI app?"** predc borrows
 `harness.py` and `tools/run_tests.py` from the repo it happens to sit in. An
@@ -240,12 +285,18 @@ anybody who likes the package will ask.
 ## Suggested order
 
 1. `NAPI_VERSION` and `engines`, which is ten minutes and decides the support
-   floor.
-2. LICENSE files.
-3. Vendor tvision at pack time; move the build into `binding.gyp` so cmake
-   stops being a requirement.
+   floor. **Still open.**
+2. LICENSE files. **Done**, except `tvision/COPYRIGHT` in `files`.
+3. ~~Vendor tvision at pack time;~~ move the build into `binding.gyp` so cmake
+   stops being a requirement. **Done, 2026-09-08** -- and no vendoring was
+   needed, see above. The `files` lists and dropping `"private": true` are
+   what remains of this step.
 4. `binding.gyp` conditionals for Windows and macOS, even before either is
-   built — they are what makes a CI matrix possible at all.
+   built -- they are what makes a CI matrix possible at all. The file now has
+   two targets rather than one, so each needs them; the library target is the
+   one that gains sources, since `win32con.cpp` is `#ifdef _WIN32` from its
+   second line to its last and compiles to an empty object elsewhere, which is
+   why one flat source list is right for every platform.
 5. prebuildify for `linux-x64-gnu` in a manylinux container, with the
    `objdump` check in CI so a glibc regression fails the build rather than a
    user's install.

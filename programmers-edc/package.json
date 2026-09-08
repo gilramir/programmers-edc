@@ -8,6 +8,6 @@
     "predc": "bin/predc.js"
   },
   "dependencies": {
-    "gren-tvision": "file:../gren-tvision-runtime"
+    "gren-tvision-runtime": "file:../gren-tvision-runtime"
   }
 }
