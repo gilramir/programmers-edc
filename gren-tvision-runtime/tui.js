@@ -183,13 +183,20 @@ function run(grenModule, options = {}) {
             // numbers are the desktop's, not the screen's: window rectangles
             // are in desktop coordinates.
             onResize: (cols, rows) => send({ type: 'resized', cols, rows }),
-            // The user moved, resized, zoomed or tiled a window. Nothing is
-            // said to the differ: what it last applied is the model's own
+            // The user moved, resized, zoomed or tiled a window. No call is
+            // written back: what the differ last applied is the model's own
             // rectangle, which has not changed, so it compares equal and no
-            // setBounds is written -- which is exactly what leaves the window
+            // setBounds happens -- which is exactly what leaves the window
             // where the user put it. The model decides whether to care.
-            onWindowResize: (id, x1, y1, x2, y2) =>
-              send({ type: 'windowResized', id, rect: [x1, y1, x2, y2] }),
+            //
+            // The differ is told all the same, and keeps it apart from the
+            // description: a window it has to *rebuild* -- because a button's
+            // caption changed, say -- must come back where the user had it and
+            // not where the model still thinks it is.
+            onWindowResize: (id, x1, y1, x2, y2) => {
+              differ.windowMoved(id, [x1, y1, x2, y2]);
+              send({ type: 'windowResized', id, rect: [x1, y1, x2, y2] });
+            },
             // The differ is told first and the model second. The order is not
             // cosmetic: the model's answer is a render, and the render has to
             // find a description that already agrees with the view, or it

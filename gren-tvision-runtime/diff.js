@@ -70,6 +70,16 @@ function createDiffer(tv, onClosed = () => {}) {
   let chrome = null;       // the menu bar and status line we last applied
   let overlays = null;     // the views on the application we last applied
 
+  // Where the *user* has dragged, zoomed or tiled each window to, which is not
+  // in `current` and must not be: `current` is the description we last applied
+  // and it is what the next description is compared against, so writing the
+  // user's rectangle into it would make the model's unchanged rectangle look
+  // like a change and snap the window back on the very next render.
+  //
+  // It is kept because a rebuild has to put the window back where the user had
+  // it. See the note on `moved` at the rebuild below.
+  const moved = new Map();
+
   // tv.close() destroys the window, which notifies onClose -- but not until the
   // pump reaches a safe point, so the notification arrives *after* the call
   // that caused it. A synchronous flag would already have been cleared; the ids
@@ -227,7 +237,10 @@ function createDiffer(tv, onClosed = () => {}) {
           const next = new Map(windows.map((w) => [w.id, w]));
 
           for (const id of current.keys()) {
-            if (!next.has(id) && tv.exists(id)) closeWindow(id);
+            if (!next.has(id)) {
+              moved.delete(id);
+              if (tv.exists(id)) closeWindow(id);
+            }
           }
 
           for (const window of windows) {
@@ -236,8 +249,28 @@ function createDiffer(tv, onClosed = () => {}) {
             if (!tv.exists(window.id)) {
               tv.window(window);
             } else if (!sameShape(current.get(window.id), window)) {
+              // A rebuild is this layer's own business -- a button whose
+              // caption changed, a row added to a form -- and the window it
+              // makes again has to appear where the last one was, not where
+              // the model thinks it is. The model does not track the user's
+              // dragging and is not asked to: `windowResized` is an event it
+              // may ignore, and predc's time converter ignores it. So a
+              // rebuilt window was going back to the rectangle in the
+              // description, which is where it opened, and the visible effect
+              // was a window jumping left across the screen every time the
+              // Live clock was switched off.
+              //
+              // Unless the model moved it itself in this same render, in which
+              // case that is a decision and it wins -- and the user's old
+              // rectangle is forgotten, or the next rebuild would undo the
+              // move.
+              const before = current.get(window.id);
+              const modelMoved =
+                before && JSON.stringify(before.rect) !== JSON.stringify(window.rect);
+              const where = modelMoved ? window.rect : moved.get(window.id) || window.rect;
+              if (modelMoved) moved.delete(window.id);
               closeWindow(window.id);
-              tv.window(window);
+              tv.window({ ...window, rect: where });
             } else {
               const before = current.get(window.id);
               if (before.title !== window.title) tv.setTitle(window.id, window.title);
@@ -260,6 +293,9 @@ function createDiffer(tv, onClosed = () => {}) {
               // is written at the size it has now.
               if (JSON.stringify(before.rect) !== JSON.stringify(window.rect)) {
                 tv.setBounds(window.id, window.rect);
+                // The model has said where it wants the window, so where the
+                // user had dragged it is no longer where to rebuild it.
+                moved.delete(window.id);
               }
               window.items.forEach((view, i) => patchView(before.items[i], view));
             }
@@ -348,8 +384,25 @@ function createDiffer(tv, onClosed = () => {}) {
 
     /** Route a close notification: ours is swallowed, the user's is reported. */
     windowClosed(id) {
+      // Not for a close of our own, which is how a rebuild starts: forgetting
+      // the rectangle there is forgetting it exactly when it is needed.
       if (selfClosed.delete(id)) return;
+      moved.delete(id);
       onClosed(id);
+    },
+
+    /**
+     * The user moved, resized, zoomed or tiled a window.
+     *
+     * Recorded and nothing else: no call is written, because the window is
+     * already where this says it is. It is remembered so that a *rebuild* can
+     * put it back there, which is the one path that would otherwise move it.
+     * `current` deliberately keeps the model's rectangle instead -- the two
+     * are different things, and the comparison that decides `setBounds` is
+     * between two descriptions and never against the screen.
+     */
+    windowMoved(id, rect) {
+      moved.set(id, rect);
     },
   };
 }

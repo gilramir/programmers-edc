@@ -9434,3 +9434,69 @@ rectangle the model chose, one for a rectangle the user chose and the renders
 that echo it. Neither is reachable from a pty driver -- the model would have to
 have the bug for the driver to see it -- which is the case for the fake-binding
 layer restated.
+
+## The window that jumped left, which the recorder found and a replay could not
+
+The first bug reported by tape rather than by description, three hours after
+the recorder learned to write window rectangles down. The report: start the
+Live clock in the time converter, drag the window, stop the clock, and the
+window jumps back to where it opened. Done twice to be sure.
+
+The tape says it in two columns. Every render carries the model's rectangle:
+
+    {"t":10281,"out":"render","hash":"d739fdc4…","rects":{"time":[1,1,69,18]}}
+    {"t":19099,"in":{"type":"windowResized","id":"time","rect":[0,1,68,18]}}
+    …
+    {"t":21600,"in":{"type":"windowResized","id":"time","rect":[6,1,74,18]}}
+    {"t":21600,"out":"render","hash":"f89fd925…","rects":{"time":[1,1,69,18]}}
+    {"t":23365,"in":{"type":"command","cmd":"time.clock"}}
+    {"t":23365,"out":"render","hash":"ff5d078c…","rects":{"time":[1,1,69,18]}}
+
+The user drags the window from x=1 to x=6, and the model goes on rendering
+`[1,1,69,18]` because it never stored the drag -- which is correct and is the
+design: `windowResized` is an event the model may ignore. Then `time.clock`,
+and the window is at x=1 again.
+
+`~L~ive clock` becomes `~S~top clock`, and **a button's caption is
+structural**: there is no call that changes one in place, so `skeleton()` keeps
+it and `sameShape()` says no. The differ tears the window down and builds it
+again -- at the rectangle in the description, which is the only one it has.
+Every drag the user had made was in Turbo Vision and nowhere else.
+
+The comment in `tui.js` that said why the differ is not told about a drag was
+right about the path it described and silent about the other one:
+
+    // Nothing is said to the differ: what it last applied is the model's own
+    // rectangle, which has not changed, so it compares equal and no setBounds
+    // is written -- which is exactly what leaves the window where the user
+    // put it.
+
+True of the patch path. The rebuild path does not compare anything; it passes
+the description to `tv.window()` and takes what it gets.
+
+### Why the drag cannot go in `current`
+
+The tempting fix is one line: write the user's rectangle into the description
+the differ last applied. It is also a loop. `current` is what the *next*
+description is compared against, so a model that keeps rendering `[1,1,69,18]`
+would then differ from it, and the differ would `setBounds` the window back to
+x=1 on the very next render -- once a second, with the clock running. Which is
+the rule that already has a section in CLAUDE.md, arriving in the third form:
+what the user moved and what the model believes are two values, and the moment
+they are stored in one place something writes one over the other.
+
+So they are two maps. `current` keeps the description, `moved` keeps where the
+user dragged each window to, and only a rebuild reads the second. A model that
+moves the window itself wins and clears the entry -- otherwise the next rebuild
+would undo the move -- and so does a `setBounds`, and so does the user closing
+the window.
+
+### And the replay could not have found it
+
+Running the tape back reproduces every fingerprint, because the fingerprints
+are the model's own renders and the model did nothing wrong: the fault is
+between the port and the screen, in the layer a replay does not run. What the
+tape gave was the two columns side by side, which is exactly what `rects` was
+added for one commit earlier and for a different reason. The unit test is in
+`diff.test.js` where the fault is, and `drive_time.py` drags the window and
+stops the clock so the whole path is covered once.

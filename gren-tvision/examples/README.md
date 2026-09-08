@@ -1387,6 +1387,30 @@ This is not a defect to fix in the package, but it is a fact about it that
 nothing wrote down: `Tui.focus` is a request about the render it accompanies,
 and a render caused by a `Cmd`'s eventual answer is a different render.
 
+## And a rebuilt window stays where the user dragged it
+
+The other half of the same fact, found by a recorded session rather than by
+reading: a window the differ rebuilds used to come back at the rectangle in the
+model's description, which is where it opened. The user had dragged it
+somewhere else and the model had never heard about it, because `WindowResized`
+is an event a model may ignore and most do.
+
+The visible bug was predc's time converter jumping back across the screen every
+time the Live clock was switched off -- `~L~ive clock` becoming `~S~top clock`
+is a *structural* change, since a button's caption has no call that changes it
+in place, so the window was rebuilt for what looked like a caption.
+
+The runtime keeps the two rectangles apart now. What it last applied is still
+the model's own, and is still what the next description is compared against --
+putting the user's rectangle there would make the model's unchanged one look
+like a change and snap the window back on the next render, which with a clock
+running is once a second. Where the user dragged it is remembered separately
+and read only when a window is rebuilt. A model that moves the window itself
+still wins, and the drag is forgotten when it does.
+
+Nothing changes for a program: this is the runtime keeping a promise the
+package already made, which is that a rebuild is an implementation detail.
+
 ## `Focused` is the list box's contract, not the area list's feature
 
 predc's picker has three list boxes and handled `Focused` for one of them, and

@@ -19,8 +19,12 @@ function fakeTv(initiallyOpen = []) {
     calls,
     open,
     exists: (id) => open.has(id),
-    window: (spec) => {
+    built: [],
+    window(spec) {
       open.add(spec.id);
+      // The whole spec as well as the call, because what a rebuilt window is
+      // built *at* is a thing worth asserting and the id alone cannot say it.
+      this.built.push(spec);
       calls.push(['window', spec.id]);
     },
     close: (id) => {
@@ -133,6 +137,92 @@ test('a window the model leaves where it was is not moved', () => {
   tv.calls.length = 0;
   differ.apply([win()]);
   assert.deepEqual(tv.calls, []);
+});
+
+// A button's caption is structural -- there is no call that changes it in
+// place -- so a button that toggles rebuilds its window. predc's time
+// converter has one: `~L~ive clock` becomes `~S~top clock`.
+const clockWin = (over = {}) => ({
+  id: 'w',
+  title: 'Time',
+  rect: [1, 1, 69, 18],
+  items: [
+    { type: 'button', id: 'b', rect: [28, 12, 42, 14], title: '~L~ive clock', cmd: 'clock' },
+  ],
+  ...over,
+});
+
+const stopped = (over = {}) =>
+  clockWin({
+    items: [
+      { type: 'button', id: 'b', rect: [28, 12, 42, 14], title: '~S~top clock', cmd: 'clock' },
+    ],
+    ...over,
+  });
+
+test('a rebuilt window comes back where the user dragged it', () => {
+  // Recorded, not imagined: /tmp/002.rec is a session where the time
+  // converter was dragged from x=1 to x=6 and then the Live clock was
+  // switched off, whose only visible effect should have been a button's
+  // caption. The window jumped back to x=1, because a rebuild built it at the
+  // rectangle in the description and the model had never heard of the drag.
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  differ.apply([clockWin()]);
+  differ.windowMoved('w', [6, 1, 74, 18]);
+  tv.calls.length = 0;
+  tv.built.length = 0;
+
+  differ.apply([stopped()]);
+  assert.deepEqual(tv.calls, [['close', 'w'], ['window', 'w']]);
+  assert.deepEqual(tv.built[0].rect, [6, 1, 74, 18]);
+  assert.equal(tv.built[0].items[0].title, '~S~top clock');
+});
+
+test('but the model moving it in the same render wins, and is not undone later', () => {
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  differ.apply([clockWin()]);
+  differ.windowMoved('w', [6, 1, 74, 18]);
+  tv.built.length = 0;
+
+  differ.apply([stopped({ rect: [20, 4, 88, 21] })]);
+  assert.deepEqual(tv.built[0].rect, [20, 4, 88, 21]);
+
+  // And the drag is forgotten: a second rebuild goes where the model last
+  // said, not back to where the user had it two renders ago.
+  tv.built.length = 0;
+  differ.apply([clockWin({ rect: [20, 4, 88, 21] })]);
+  assert.deepEqual(tv.built[0].rect, [20, 4, 88, 21]);
+});
+
+test('and a setBounds forgets the drag too', () => {
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  differ.apply([clockWin()]);
+  differ.windowMoved('w', [6, 1, 74, 18]);
+  tv.calls.length = 0;
+
+  // Same shape, new rectangle: moved in place rather than rebuilt.
+  differ.apply([clockWin({ rect: [20, 4, 88, 21] })]);
+  assert.deepEqual(tv.calls, [['setBounds', 'w', [20, 4, 88, 21]]]);
+
+  tv.built.length = 0;
+  differ.apply([stopped({ rect: [20, 4, 88, 21] })]);
+  assert.deepEqual(tv.built[0].rect, [20, 4, 88, 21]);
+});
+
+test('a window the user closed and the model reopens forgets where they had it', () => {
+  const tv = fakeTv();
+  const differ = createDiffer(tv);
+  differ.apply([clockWin()]);
+  differ.windowMoved('w', [6, 1, 74, 18]);
+  tv.open.delete('w');
+  differ.windowClosed('w');
+  tv.built.length = 0;
+
+  differ.apply([clockWin()]);
+  assert.deepEqual(tv.built[0].rect, [1, 1, 69, 18]);
 });
 
 test('an input line is written only when the model changed it', () => {

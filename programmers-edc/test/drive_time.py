@@ -56,6 +56,23 @@ from time_common import (
 )
 
 
+def window_edge(app):
+    """The column the converter's frame starts in, and the row its title is on.
+
+    The title sits in the top line of the frame, so the corner to its left is
+    the window's left edge -- which is the only part of a window's position a
+    driver can see, and all this needs to see. Not `lstrip()`: what is to the
+    left of a window is the desktop's hatching and not spaces.
+    """
+    for r, line in enumerate(app.render().split("\n")):
+        if "Time converter" not in line:
+            continue
+        for corner in ("\u2554", "\u250c"):   # double frame when focused, single when not
+            if corner in line:
+                return line.index(corner), r + 1
+    return None, None
+
+
 def main():
     check = Checks()
     app, home = launch()
@@ -173,7 +190,26 @@ def main():
     check("and whose fields are read-only, being static text and not fields",
           row(app, "UTC")[0] == year, str(row(app, "UTC")))
 
+    # ---- and the window stays where the user dragged it ----
+    #
+    # Recorded rather than imagined: a session where the converter was dragged
+    # a few columns right and the clock then switched off, whose only visible
+    # effect should have been a button's caption changing. The window jumped
+    # back to where it had opened. `~L~ive clock` becoming `~S~top clock` is a
+    # structural change -- a button's caption has no call that changes it in
+    # place -- so the differ rebuilds the window, and it was rebuilding it at
+    # the rectangle in the model's description. The model never hears about a
+    # drag it does not store, and this one does not store it.
+    left, title_row = window_edge(app)
+    app.drag([(left + 20, title_row), (left + 23, title_row), (left + 26, title_row)])
+    dragged, _ = window_edge(app)
+    check("the converter can be dragged by its title bar", dragged > left,
+          str((left, dragged)))
+
     app.send(b"\x1bs", settle=2.0)
+    check("and stopping the clock leaves it where it was dragged to",
+          window_edge(app)[0] == dragged, str((dragged, window_edge(app)[0])))
+
     check("Alt-S gives the converter back",
           "Time converter -- live" not in app.render() and "Time converter" in app.render(),
           app.render())
