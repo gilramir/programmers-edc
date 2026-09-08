@@ -5,9 +5,9 @@ library. This is what that costs, what it does *not* cost, and how to build for
 the platforms this machine is not.
 
 Written down because the answers took a morning to establish and would take
-another one to establish again. **Steps 1, 2 and 3 of the order at the end are
-done** (2026-09-08) and are marked below. What is left is the Windows and macOS
-conditionals, the prebuild container, and dropping `"private": true`.
+another one to establish again. **Steps 1 to 4 of the order at the end are
+done** (2026-09-08) and are marked below. What is left is the prebuild
+container and dropping `"private": true`.
 
 ## Decided, 2026-09-05
 
@@ -128,6 +128,66 @@ What changes in the build, beyond the runner:
     x64 build needs `-arch x86_64` and cross-compilation, or a universal binary
     with `-arch arm64 -arch x86_64`.
 
+## What the conditionals say, and how far they were checked
+
+Written 2026-09-08 from `tvision/CMakeLists.txt` and
+`tvision/source/CMakeLists.txt`, which do support all three platforms. They are
+in the file rather than on a branch because a CI matrix cannot be started
+without them. **Neither arm has ever been compiled.**
+
+What each platform gets:
+
+| | Linux | macOS | Windows |
+|---|---|---|---|
+| sources | all 206 | all 206 | all 206 |
+| `HAVE_NCURSES` | yes | yes | no |
+| `compat/windows` | yes | yes | **no** |
+| `compat/malloc` | no | **yes** | no |
+| ncurses | `pkg-config ncursesw` | `-lncurses` | none |
+| `_CRT_*`, `_WIN32_WINNT` | no | no | yes |
+| sanitizer | yes | no | no |
+
+Two of those are easy to get wrong by reading the cmake carelessly.
+`compat/windows` is the shim *for* Windows headers, so it goes everywhere
+except Windows; and `compat/malloc` is included when not Windows and not
+Linux or Android, which in practice means macOS and is one `malloc.h`.
+
+**All 206 sources on every platform** is cmake's own rule -- it globs with no
+filtering -- and it works because the platform files guard themselves:
+`win32con.cpp` is `#ifdef _WIN32` from its second line to its last, and
+`ncurdisp.cpp` and `ncursinp.cpp` are `#ifdef HAVE_NCURSES` the same way. Each
+compiles to an empty object where it does not belong. So there is one flat
+source list, which is also what makes `tvision-sources.gypi` portable.
+
+### What was actually verified
+
+Running `gyp_main.py` directly with `-DOS=mac` and `-DOS=win` -- the same
+arguments node-gyp passes, with the OS overridden -- loads the file and
+generates makefiles for both. That is not a compile, but it evaluates every
+condition and prints the resulting flags, which confirmed the table above:
+macOS gets `compat/malloc` and `-lncurses`, Windows gets neither
+`HAVE_NCURSES` nor `compat/windows` and does get `_WIN32_WINNT=0x0600`.
+
+**And it found a bug that reading would not have.** Node's own `common.gypi`
+defines `_HAS_EXCEPTIONS=0` on Windows, which switches exceptions off inside
+MSVC's standard library. Turbo Vision throws and this addon relies on it, and
+`ExceptionHandling: 1` does not undo a define. Both Windows arms now carry
+`"defines!": [ "_HAS_EXCEPTIONS=0" ]`, which is the documented pattern for a
+node-addon-api addon using C++ exceptions on Windows.
+
+**What is still unverified.** The `msvs_settings` blocks -- `ExceptionHandling`,
+the `/Zc:` options, the `/wd` list -- are invisible to the make generator, and
+gyp's msvs generator hangs on Linux probing for a Visual Studio install, so
+nothing here has checked their spelling. Likewise `xcode_settings`: the make
+generator only translates those when the *host* is a Mac, so
+`MACOSX_DEPLOYMENT_TARGET`, `CLANG_CXX_LANGUAGE_STANDARD` and
+`GCC_ENABLE_CPP_EXCEPTIONS` are written from convention. Both are cheap to fix
+on the first CI run and are the first thing to suspect there.
+
+And the Linux arm was checked for a regression the same way it should be: the
+generated `CFLAGS_CC`, `DEFS` and `INCS` are identical to what the single
+unconditional target produced, line for line once sorted.
+
 ## Windows — your own box works, CI is less work
 
 TVision supports Windows through `source/platform/win32con.cpp` and the Win32
@@ -147,25 +207,16 @@ Do not cross-compile from Linux with MinGW. Node-API is a C ABI so it can be
 made to work, but `node.exe` is built with MSVC and every deviation from that
 path is one you will be debugging alone.
 
-What changes in `binding.gyp`, which is currently Unix-only:
+`binding.gyp` used to shell out to `pkg-config` and to
+`sh scripts/asan-flags.sh` unconditionally, so the build failed on Windows
+before compiling anything. Both are inside `OS=='linux'` now.
 
-```python
-"conditions": [
-  ["OS=='win'", {
-    "sources": [ ... win32con.cpp ... ],
-    "libraries": [ "user32.lib" ],
-    "msvs_settings": { "VCCLCompilerTool": { "ExceptionHandling": 1 } }
-  }],
-  ["OS!='win'", {
-    "cflags_cc": [ "<!@(pkg-config --cflags ncursesw)" ],
-    "libraries": [ "<!@(pkg-config --libs ncursesw)" ]
-  }]
-]
-```
-
-The current file shells out to `pkg-config` and to `sh scripts/asan-flags.sh`
-unconditionally. Neither exists on Windows, so the build fails before it
-compiles anything.
+Two guesses in the sketch this section used to carry turned out to be wrong,
+and are worth recording as such. `"sources": [ ... win32con.cpp ... ]` is not
+needed -- the source list is the same 206 everywhere, see above.
+`"libraries": [ "user32.lib" ]` is not needed either: Turbo Vision's own
+CMakeLists names no Windows libraries, and gyp's msvs generator already links
+the default set, which has `kernel32` and `user32` in it.
 
 ## arm64 — deliberately not now
 
@@ -310,12 +361,9 @@ anybody who likes the package will ask.
    needed, see above. The `files` lists are done too; **dropping
    `"private": true` is what is left**, and it is deliberately last, because
    until it goes there is no way to publish either package by accident.
-4. `binding.gyp` conditionals for Windows and macOS, even before either is
-   built -- they are what makes a CI matrix possible at all. The file now has
-   two targets rather than one, so each needs them; the library target is the
-   one that gains sources, since `win32con.cpp` is `#ifdef _WIN32` from its
-   second line to its last and compiles to an empty object elsewhere, which is
-   why one flat source list is right for every platform.
+4. `binding.gyp` conditionals for Windows and macOS. **Written, 2026-09-08 --
+   and never compiled.** See the section below for what that means and what
+   was checked instead.
 5. prebuildify for `linux-x64-gnu` in a manylinux container, with the
    `objdump` check in CI so a glibc regression fails the build rather than a
    user's install.
