@@ -191,7 +191,10 @@
             "<!@(pkg-config --cflags ncursesw)",
             "<!@(sh scripts/asan-flags.sh cflags)"
           ],
-          "ldflags": [ "<!@(sh scripts/asan-flags.sh ldflags)" ],
+          "ldflags": [
+            "<!@(sh scripts/asan-flags.sh ldflags)",
+            "<!@(sh scripts/portable-flags.sh ldflags)"
+          ],
           "libraries": [ "<!@(pkg-config --libs ncursesw)" ]
         }],
         ["OS=='mac'", {

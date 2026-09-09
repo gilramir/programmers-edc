@@ -23,3 +23,6 @@ programmers-edc/tests/app
 # working directory and config file -- somebody else's, if they sent it.
 *.tape
 rec.[0-9][0-9][0-9]
+
+# Redistributable tarballs, built by tools/pack.sh.
+dist/

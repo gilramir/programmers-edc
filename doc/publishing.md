@@ -366,6 +366,81 @@ anybody who likes the package will ask.
    was checked instead.
 5. prebuildify for `linux-x64-gnu` in a manylinux container, with the
    `objdump` check in CI so a glibc regression fails the build rather than a
-   user's install.
+   user's install. **The container is built and works, 2026-09-08** --
+   `tools/pack/Containerfile` and `tools/pack.sh`, see below. What is left is
+   prebuildify's own layout and the CI job; the compiling half is done and the
+   `objdump` line is in the script.
 6. Add `macos-latest` and `windows-latest` to the matrix when there is somebody
    on either.
+
+
+## The tarball before the package, 2026-09-08
+
+`tools/pack.sh` builds `dist/predc-<version>-linux-x64.tar.gz`: untar it, run
+`./predc`, and that is all. It is not the published package and does not want
+to be -- it is the thing to hand a colleague while the package is still being
+decided -- but it is the same compiling problem, so it was built out of this
+file rather than beside it.
+
+```sh
+tools/pack.sh            # ~2 min: container build, then assemble
+tools/pack-verify.sh     # run the result on Debian 11 and Debian 12
+```
+
+**The container is the whole of it, and it is now real rather than a plan.**
+`tools/pack/Containerfile` is manylinux_2_28 -- AlmaLinux 8, glibc 2.28 -- plus
+node for node-gyp and a static wide ncurses built from source. `TVNODE_PORTABLE=1`
+turns on `-static-libstdc++ -static-libgcc` through
+`tvision-node/scripts/portable-flags.sh`, which is the same env-var-and-shell-
+script shape `asan-flags.sh` uses and for the same reason.
+
+What comes out needs **libc, libm, libpthread and a terminfo database**, and
+its highest glibc symbol is `GLIBC_2.28`. That is the number this file
+predicted; it is now measured.
+
+Three things the doing turned up that the planning had not.
+
+**AlmaLinux 8 has no `ncurses-static` package.** The section above assumes
+`yum install ncurses-static` and there is no such thing in its repositories, so
+the Containerfile builds ncurses 6.5 from source. Two flags in that build are
+not optional and neither is obvious:
+
+  - **`CFLAGS=-fPIC`.** A `.node` is a shared object and an archive of non-PIC
+    objects cannot go into one. The link fails with `relocation R_X86_64_32S
+    against .rodata ... recompile with -fPIC`, which is at least an error
+    message that says what to do.
+  - **`--with-default-terminfo-dir` and `--with-terminfo-dirs`.** Terminfo is
+    data on the filesystem and cannot be linked in, so a static ncurses carries
+    the compiled-in search path *of the machine that built it* -- which would
+    have been `/opt/ncurses/share/terminfo`, a directory that exists nowhere
+    else. The build points them at `/etc/terminfo:/lib/terminfo:/usr/share/terminfo`,
+    which is Debian's list and Red Hat's between them.
+
+**Static ncurses is worth more than the shared-object count suggests.**
+AlmaLinux builds ncurses *without* versioned symbols and Debian builds it
+*with* them. Linking against Alma's shared library leaves unversioned
+references, and those do bind against Debian's versioned library -- but that is
+the dynamic loader being forgiving rather than a promise anybody made, and it
+is the kind of thing that works on four machines and fails on the fifth. A
+static `libncursesw.a` has no opinion about any of it.
+
+## The Node floor is 20, and it is not the addon's
+
+`NAPI_VERSION=9` makes the addon load on Node 18.17 and up, and that number is
+correct and is still in `engines` for both npm packages. **It is not the floor
+for a Gren application**, which is a different question that nobody had asked:
+Gren compiles `Array.prototype.toSpliced`, `toSorted` and `toReversed`, and all
+three are Node 20. On Node 18 the addon loads, the tarball unpacks, and predc
+dies on its first array operation with `array.toSpliced is not a function`.
+
+`programmers-edc/package.json` says `"engines": { "node": ">=20" }` now. The
+general form of it is worth keeping in mind for the package's documentation:
+**the runtime's floor and the application's floor are set by different things**,
+and the higher of the two is whatever the Gren compiler currently emits.
+
+This was found by running the tarball, not by reading it. `ldd` was clean and
+the addon loaded; `./predc --help` is what failed. That is the argument for
+`tools/pack-verify.sh` existing at all -- it starts the program at a real pty
+in a stock Node image and greps what it drew, and the escapes have to be
+stripped first, because a menu title is two runs in two colours and a search
+for `File` otherwise finds nothing while everything is working.

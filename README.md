@@ -33,6 +33,15 @@ Node-API, so one binary works on every Node version, and glibc rather than
 desktop, once in each of its three colour schemes, generated from the running
 program by `doc/shots.py`.
 
+`tools/pack.sh` builds a redistributable predc for linux-x64 --
+`dist/predc-<version>-linux-x64.tar.gz`, which untars and runs with nothing on
+the machine but node 20. The addon in it is compiled in a container against
+glibc 2.28 with libstdc++ and ncurses linked in statically, because a binary
+built in devbox runs nowhere but here; `tools/pack-verify.sh` runs the result
+on Debian 11 and 12 to say so. This is not the published package -- see
+[doc/publishing.md](doc/publishing.md) -- it is what to hand somebody before
+there is one.
+
 ## Layout
 
 ```

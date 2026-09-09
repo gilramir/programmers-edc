@@ -1,0 +1,72 @@
+# The image a redistributable linux-x64 addon is built in.
+#
+# Building the addon where the code is written produces a binary that runs
+# nowhere else: inside devbox it links nix's glibc, libstdc++ and ncurses by
+# absolute /nix/store path, and even with those paths ignored it needs
+# GLIBC_2.38 -- Ubuntu 24.04 and newer, which is not what anybody has at work.
+# glibc symbol versioning is forward-only, so the only way to get a binary that
+# runs on an old distro is to compile it against an old one.
+#
+# manylinux_2_28 is that old distro: AlmaLinux 8, glibc 2.28, with a modern gcc
+# on top of it. CentOS 7-era, which is older than anything still running.
+#
+#   podman build -t predc-build tools/pack        # ~4 minutes, once
+#
+# `tools/pack.sh` builds it on demand and then reuses it.
+FROM quay.io/pypa/manylinux_2_28_x86_64
+
+# Node, for node-gyp and nothing else. Which version is here does not reach
+# the artefact: the addon is Node-API level 9, which is ABI-stable across Node
+# majors by contract, so what it is built against and what it is loaded by are
+# unrelated questions.
+ARG NODE_VERSION=22.14.0
+RUN curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
+      | tar -xJ -C /opt \
+ && ln -s "/opt/node-v${NODE_VERSION}-linux-x64" /opt/node
+ENV PATH=/opt/node/bin:$PATH
+
+# ncurses, static and wide, built from source because AlmaLinux 8 has no
+# ncurses-static package at all. Static rather than shared for two reasons and
+# the second is the one that matters:
+#
+#   - it drops libncursesw.so.6 and libtinfo.so.6 from the runtime surface;
+#   - AlmaLinux builds ncurses **without versioned symbols and Debian builds it
+#     with them**. Linking against Alma's shared library leaves unversioned
+#     references, which do bind against Debian's versioned library -- but that
+#     is the loader being forgiving rather than a promise anybody made, and it
+#     is exactly the kind of thing that works on four machines and not the
+#     fifth. A static libncursesw.a has no opinion about any of it.
+#
+# `--with-default-terminfo-dir` and `--with-terminfo-dirs` are the half that
+# cannot be linked in: terminfo is data on the filesystem, and a static ncurses
+# carries the compiled-in search path of the machine that built it. These are
+# the Debian/Ubuntu locations and the Red Hat one, which between them cover
+# every distro this is likely to land on -- and TERM aside, a terminal program
+# that cannot find terminfo does not start.
+#
+# `CFLAGS=-fPIC` is not optional and is not a default. A .node is a shared
+# object, and an archive of non-PIC objects cannot go into one: the link fails
+# with `relocation R_X86_64_32S against .rodata` and a suggestion to recompile,
+# which is this line.
+ARG NCURSES_VERSION=6.5
+RUN curl -fsSL "https://invisible-mirror.net/archives/ncurses/ncurses-${NCURSES_VERSION}.tar.gz" \
+      | tar -xz -C /tmp \
+ && cd "/tmp/ncurses-${NCURSES_VERSION}" \
+ && CFLAGS=-fPIC CXXFLAGS=-fPIC ./configure \
+      --prefix=/opt/ncurses \
+      --without-shared --with-normal --enable-widec \
+      --enable-pc-files --with-pkg-config-libdir=/opt/ncurses/lib/pkgconfig \
+      --with-default-terminfo-dir=/usr/share/terminfo \
+      --with-terminfo-dirs=/etc/terminfo:/lib/terminfo:/usr/share/terminfo \
+      --disable-db-install \
+      --without-debug --without-ada --without-manpages \
+      --without-progs --without-tests \
+ && make -j"$(nproc)" >/dev/null \
+ && make install >/dev/null \
+ && rm -rf "/tmp/ncurses-${NCURSES_VERSION}"
+
+# So that binding.gyp's `pkg-config --cflags/--libs ncursesw` finds the static
+# one and not the system's shared one. LIBDIR rather than PATH: PATH is
+# searched *before* the default directories, LIBDIR *replaces* them, and only
+# the second is a guarantee.
+ENV PKG_CONFIG_LIBDIR=/opt/ncurses/lib/pkgconfig

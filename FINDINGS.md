@@ -9766,3 +9766,43 @@ Two traps cost a picture each. `Pty.click` counts from one, as a terminal's
 mouse report does, so clicking a window's top frame at "row 1" clicks the menu
 bar. And a window has to be *found before* the thing being photographed covers
 it: the history drop-down opens over the title its window would be found by.
+
+## A tarball that runs somewhere else, and the floor that was not the addon's
+
+`tools/pack.sh` builds a redistributable predc: untar, `./predc`, nothing
+installed but node. Three things came out of making one and all three are the
+kind that are only found by trying.
+
+**The binary this repo builds runs on this machine and nowhere else.** Inside
+devbox the addon takes its RUNPATH from `/nix/store` and needs `GLIBC_2.38`
+besides -- Ubuntu 24.04 and newer. glibc symbol versioning is forward-only, so
+there is no flag and no fix at this end: the binary has to be *compiled*
+against an old glibc. AlmaLinux 8 in a container is glibc 2.28, and with
+`-static-libstdc++ -static-libgcc` and a static wide ncurses the result needs
+libc, libm, libpthread and a terminfo database. `doc/publishing.md` had planned
+exactly this; what it had wrong was that AlmaLinux has no `ncurses-static`
+package, so the container builds ncurses from source -- with `CFLAGS=-fPIC`,
+because an archive of non-PIC objects cannot be linked into a shared object,
+and with `--with-terminfo-dirs` pointed at Debian's and Red Hat's locations,
+because a static ncurses otherwise carries the compiled-in terminfo path of the
+machine that built it.
+
+**The Node floor of a Gren program is not the Node floor of the addon.**
+`NAPI_VERSION=9` is Node 18.17, and that is true of `tvision-node` and stays in
+its `engines`. But Gren compiles `Array.prototype.toSpliced`, `toSorted` and
+`toReversed`, which are Node 20 -- so on Node 18 the addon loads, the tarball
+unpacks, and predc dies on its first array operation. `programmers-edc` says
+`">=20"` now. The two floors are set by different things and the higher one
+wins, which is worth remembering the next time a Gren application is packaged.
+
+**And it was found by running the program rather than by reading it.** `ldd`
+was clean and `require()` of the addon succeeded on glibc 2.31; `./predc
+--help` is what failed. `tools/pack-verify.sh` exists for that: it starts the
+tarball at a real pty inside a stock Node image and greps what was drawn.
+
+One trap in the greping, which cost a wrong answer for a few minutes. **A menu
+title reaches the pty as two runs in two colours** -- the hot key is drawn in
+an accent -- so `File` arrives as `F`, an SGR, then `ile`, and searching the
+raw stream for the word finds nothing while the program is working perfectly.
+`RPN Calculator` was the only string that matched, because it is the only one
+with no hot key in it. Strip the escapes first.
