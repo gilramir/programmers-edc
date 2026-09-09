@@ -60,25 +60,32 @@ if [ -n "$(git status --porcelain)" ]; then
 history, so anything uncommitted would silently not go."
 fi
 
-# The version is read rather than typed. Two places saying a version number is
-# one place too many, and `gren package bump` moves this one.
-version=$(python3 -c "import json;print(json.load(open('$PREFIX/gren.json'))['version'])")
+# The version is a property of the *tag* and of nothing else, so an untagged
+# export does not read it, check it or mention it -- naming a version while
+# pushing a branch reads as a release, and this is not one.
+if [ -n "$tag" ]; then
+    # Read rather than typed: two places saying a version number is one too
+    # many, and `gren package bump` moves this one.
+    version=$(python3 -c "import json;print(json.load(open('$PREFIX/gren.json'))['version'])")
 
-# A tag gren cannot parse is not an error to gren -- Git.gren drops it with
-# mapAndKeepJust and the package simply has no such version. So check the shape
-# here, where somebody is watching. SemanticVersion.fromString splits on "."
-# and wants exactly three integers: no leading v, no -beta.
-if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    die "'$version' in $PREFIX/gren.json is not a version gren can read.
+    # A tag gren cannot parse is not an error to gren -- Git.gren drops it with
+    # mapAndKeepJust and the package simply has no such version. So check the
+    # shape here, where somebody is watching. SemanticVersion.fromString splits
+    # on "." and wants exactly three integers: no leading v, no -beta.
+    if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        die "'$version' in $PREFIX/gren.json is not a version gren can read.
 It splits on '.' and wants exactly three integers -- no leading v, no suffix."
-fi
+    fi
 
-echo "exporting $PREFIX/ at version $version"
-
-if [ -n "$tag" ] && git ls-remote --tags "$REMOTE" "refs/tags/$version" | grep -q .; then
-    die "$version is already tagged on $REMOTE. Bump the version in
+    if git ls-remote --tags "$REMOTE" "refs/tags/$version" | grep -q .; then
+        die "$version is already tagged on $REMOTE. Bump the version in
 $PREFIX/gren.json -- \`cd $PREFIX && gren package bump\` works it out from the
 published docs -- or drop --tag to push main without releasing."
+    fi
+
+    echo "exporting $PREFIX/ as $version"
+else
+    echo "exporting $PREFIX/ -- branch only, no tag"
 fi
 
 # ----------------------------------------------------------------- the split
