@@ -276,6 +276,11 @@ and moving the pin. README says the rest.
 `gren-tvision/` is the master copy of a package that also has to exist as a
 repository of its own, because **a Gren package is a GitHub repository with
 semver tags** and nothing else -- there is no registry to upload a tarball to,
-so a subdirectory of a monorepo cannot be a dependency. The export is
-one-directional and mechanical; `doc/publishing.md` has the procedure. Never
-edit the exported repository.
+so a subdirectory of a monorepo cannot be a dependency.
+`tools/export-gren-tvision.sh` is the procedure: a `git subtree split` and a
+push of the commit it prints, straight from here, with nothing checked out
+anywhere. The export is one-directional -- never edit or commit to it -- and
+the one thing that breaks it is **amending or rebasing a commit that has
+already gone out**, which changes its split hash and orphans everything after
+it. A rewrite outside `gren-tvision/` is invisible to the export.
+`doc/publishing.md` has the rest, including why a tag must be bare `1.0.1`.

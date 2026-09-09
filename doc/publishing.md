@@ -384,42 +384,82 @@ subdirectory's own history, and it is in git rather than in a script somebody
 has to maintain:
 
 ```sh
-git subtree split --prefix=gren-tvision -b gren-tvision-export
-git push git@github.com:gilramir/gren-tvision.git \
-    gren-tvision-export:main \
-    gren-tvision-export:refs/tags/1.0.0
-git branch -D gren-tvision-export        # regenerated every time; do not keep it
+tools/export-gren-tvision.sh             # push main
+tools/export-gren-tvision.sh --tag       # ...and tag it, from gren.json
+tools/export-gren-tvision.sh --dry-run
 ```
 
-Measured rather than sketched: the split takes 1.4s over 172 commits and
-produces 83 of its own, and the tree at its tip is `src doc examples test tests
-gren.json build.sh run.sh README.md LICENSE` -- the directory and nothing above
-it. It is deterministic, so running it again after more work here produces the
-same commits plus the new ones, and the push is a fast-forward.
+which is `git subtree split --prefix=gren-tvision` and a push of the commit it
+prints, with the checks that are easy to skip by hand: a dirty tree (the split
+is of *committed* history, so anything uncommitted silently would not go), a
+version that gren cannot read, a tag already on the remote, and a remote that
+has moved out from under this one.
 
-The tag goes in the same push because **a consumer resolves the tag, and it has
-to name a commit in that repository** -- a tag here points at a commit whose
-tree is the whole monorepo and means nothing to `gren package install`.
+**Nothing is ever checked out.** `git push <remote> <sha>:refs/heads/main`
+pushes straight from this repository, so the export has no working copy, no
+temporary directory and no second clone -- it is a remote in `.git/config` and
+nothing else. The only footprint is `.git/subtree-cache/`, 1.5 MB. Use only
+`git subtree split`: `add`, `pull` and `push` want the remote in this
+repository's history and make merge commits here.
 
-The version in `gren-tvision/gren.json` and the tag have to agree, and
-`gren package bump` is what moves both -- it reads the published docs, compares
-them with the current ones, and works out whether the change is major, minor or
-patch. Run it here, commit the result, then export and tag.
+Measured rather than sketched. The split takes 1.3s over 173 commits, of which
+84 touch the directory, and it is the same cold as warm. Its tree is `src doc
+examples test tests gren.json build.sh run.sh README.md LICENSE .gitignore` --
+the directory and nothing above it. Two runs back to back give the identical
+hash, so a second export is a fast-forward carrying only what changed, and a
+commit that touched nothing in `gren-tvision/` becomes no commit at all: a
+test export with two new commits, one of them to `FINDINGS.md`, added exactly
+one.
 
-### The empty repository comes first
+**What breaks it is rewriting a commit that has already gone out.** Amending
+one in a test moved its split hash from `e73917f` to `0dd5139`, everything
+after it was orphaned, and the push was rejected as not a fast-forward. A
+rewrite *outside* `gren-tvision/` is invisible to the export -- amending the
+`FINDINGS.md` commit did not move the hash at all. So the rule is only about
+this directory, and it is: never amend or rebase a commit that has been
+exported.
 
-`gren package validate` is the pre-flight check -- it verifies the docs, the
-README and the version -- and it **cannot run until the repository exists**.
-Asked today, in a working copy that is complete and correct, it says:
+### The tag
+
+**Tag the export.** That is the only tag gren reads, and the version in
+`gren-tvision/gren.json` has to agree with it. `gren package bump` moves the
+one in the file -- it reads the published docs, compares them with the current
+ones and works out whether the change is major, minor or patch -- so run it
+here, commit, then export with `--tag`.
+
+**The tag has to be bare `1.0.1`.** `Git.gren` takes the last `/`-separated
+segment of `refs/tags/<tag>` and hands it to `SemanticVersion.fromString`,
+which splits on `.`, keeps the parts that are integers, and accepts the result
+only if there are exactly three. So `v1.0.1` is two parts and `1.0.1-beta` is
+three of which one is not a number, and **neither is an error**: `Git.gren`
+drops what does not parse with `mapAndKeepJust`, so the package quietly has no
+versions and nothing says why. The script checks the shape before pushing.
+
+Other tags in that repository are harmless for the same reason -- gren ignores
+what it cannot parse.
+
+**Tag this repository too, under a name of its own** -- `gren-tvision/1.0.1`.
+A split commit carries **no** back-pointer: same message, same author and
+dates, different tree and parent, and nothing whatever linking it to the commit
+it came from. Today's is `4a4c58f` here and `56b83e0` there. Without a tag on
+this side there is no way to answer "what was the repository when 1.0.1 went
+out", and a name of its own leaves room for `tvision-node` and `predc` to be
+released out of the same history.
+
+### `gren package validate` needs a tag before it will run
+
+It is the pre-flight check -- docs, README, version -- and it is the thing you
+would want to run *before* the first tag. It will not:
 
 ```
 -- FAILED TO FETCH VERSIONS FOR PACKAGE ---------------------------------------
-I was attempting to fetch available versions for this package, but I couldn't
-find the repo on github.
+I couldn't find any semver compatible tags in this repo.
 ```
 
-So the first step is creating `gilramir/gren-tvision` empty, before anything
-can be checked, and not after the export is ready to push.
+Before the repository existed it said it could not find the repo; now that it
+exists and is empty it says this. So the first `1.0.0` goes up unvalidated and
+is checked afterwards -- a tag can be moved right up until somebody depends on
+it. From the second release on it works normally.
 
 ### What does not survive the trip
 
@@ -433,9 +473,14 @@ The exported repository is the directory and nothing above it, so anything in
   - **`run.sh`** execs `../gren-tvision-runtime/bin/gren-tui.js`. In the export
     that is the installed `gren-tui`, so the line wants to become one that
     prefers a sibling checkout and falls back to the npm bin.
-  - **Links out of `doc/` and `README.md`** to `../../FINDINGS.md` and
-    `../../doc/publishing.md`. README is fixed; `doc/index.md:42`,
-    `doc/widgets.md:907` and `doc/native.md:435` are the rest.
+  - ~~**Links out of `doc/` and `README.md`**~~ -- fixed, and they point at
+    this repository by URL now.
+
+A fourth is fixed rather than listed: the ignore rules for this directory were
+all in the repository root's `.gitignore`, so none of them travelled and a
+clone of the export that ran `./build.sh` showed fifteen untracked `main.js`
+files. They are in `gren-tvision/.gitignore` now, which still applies here --
+a nested `.gitignore` works either way round.
 
 None of these stops the package working -- a consumer gets `src/`, `gren.json`
 and the prose, which is the whole of what they install. They are what makes the

@@ -1,0 +1,17 @@
+# What `gren make` and `gren package install` leave behind. These rules live
+# here rather than in the repository root because this directory is exported
+# to gilramir/gren-tvision as a repository of its own -- a rule at the root
+# does not travel, and a clone of the export that runs ./build.sh would
+# otherwise show fifteen untracked main.js files. See doc/publishing.md.
+.gren/
+gren_packages/
+examples/*/.gren/
+examples/*/gren_packages/
+examples/*/main.js
+tests/.gren/
+tests/gren_packages/
+tests/app
+tests/app.js
+
+# The pty drivers and the shot script are Python.
+__pycache__/
