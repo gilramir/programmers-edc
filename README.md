@@ -29,6 +29,10 @@ compiled shared library in it costs -- and what it does not: the addon is
 Node-API, so one binary works on every Node version, and glibc rather than
 `node` is the thing that decides where it runs.
 
+[doc/screenshots.md](doc/screenshots.md) is what it all looks like: predc's
+desktop, once in each of its three colour schemes, generated from the running
+program by `doc/shots.py`.
+
 ## Layout
 
 ```

@@ -1,6 +1,9 @@
 This is a small TUI tool that has little tools that a programmer needs now
 and then.
 
+[../doc/screenshots.md](../doc/screenshots.md) has a picture of the desktop in
+each of the three colour schemes, taken from the running program.
+
 # v1
 
 ## RPN Calculator
