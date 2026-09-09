@@ -904,5 +904,5 @@ stock controls are all here. These were left out, each with a reason:
     every port forced into the API, and why each decision went the way it did.
   - [architecture.md](architecture.md) -- how the four layers fit together, and
     the event loop that shaped them.
-  - [`../../FINDINGS.md`](../../FINDINGS.md) -- the long version of everything
-    above.
+  - [`FINDINGS.md`](https://github.com/gilramir/programmers-edc/blob/main/FINDINGS.md) -- the long version of
+    everything above, in the repository this package is developed in.

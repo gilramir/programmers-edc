@@ -17,14 +17,20 @@ down is the rectangle of a *view* inside its window, because that is a number
 in the example's source and there is nothing on the screen to find it by --
 `inside(box, ...)` takes the same `{x1,y1,x2,y2}` the Gren source does.
 
-One shot is marked `stable=False`, because what it photographs is a clock.
-Every other image here is reproducible byte for byte.
+Two shots are marked `stable=False`, because what they photograph is a clock.
+Every other image here is reproducible byte for byte -- including
+`firstprogram`, which is not an example at all but the "A complete program"
+block out of `src/Tui.gren`'s doc comment, compiled and run.
 """
 
+import json
 import os
+import re
 import shutil
+import subprocess
 import sys
 import tempfile
+import textwrap
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PKG = os.path.dirname(HERE)                              # gren-tvision
@@ -405,6 +411,63 @@ def demo():
     quit(app)
 
 
+# ------------------------------------------------- the first program
+#
+# The one program in the documentation that is not an example: the "A complete
+# program" block in `src/Tui.gren`. It is extracted from the doc comment,
+# compiled and run, so the picture cannot drift from the code above it -- and
+# if that program stops compiling, this fails rather than the reader finding
+# out.
+#
+# Doing it caught the program not compiling at all. `Ui` grew `theme` and
+# `Window` grew `resize`, `palette`, `canClose` and `canMove` after the block
+# was written, and nothing had ever fed it to the compiler.
+
+
+def firstprogram():
+    src = open(os.path.join(PKG, "src", "Tui.gren")).read()
+    at = re.search(r"## A complete program\n\n(.*?)\nBuild and run it with:",
+                   src, re.S)
+    if at is None:
+        raise AssertionError("no 'A complete program' block in src/Tui.gren")
+
+    # A temp directory *inside* doc/, because gren.json's source-directories
+    # have to be relative and this one has to reach `../../src`.
+    where = tempfile.mkdtemp(dir=HERE, prefix="_firstprogram-")
+    try:
+        with open(os.path.join(where, "Main.gren"), "w") as f:
+            f.write(textwrap.dedent(at.group(1)).rstrip() + "\n")
+        with open(os.path.join(where, "gren.json"), "w") as f:
+            json.dump({
+                "type": "application",
+                "platform": "node",
+                "source-directories": [".", "../../src"],
+                "gren-version": "0.6.6",
+                "dependencies": {
+                    "direct": {"gren-lang/core": "7.4.2",
+                               "gren-lang/node": "6.1.0"},
+                    "indirect": {"gren-lang/url": "6.0.0"},
+                },
+            }, f, indent=4)
+
+        made = subprocess.run(["gren", "make", "Main", "--output=main.js"],
+                              cwd=where, capture_output=True, text=True)
+        if made.returncode != 0:
+            raise AssertionError("the documented first program does not "
+                                 "compile:\n" + made.stdout + made.stderr)
+
+        app = Pty(node_argv(RUNTIME, "main.js"), ENV, cwd=where, size=(80, 25))
+        app.pump(2.2)
+        # `events: 1` and not 0, and that is the program being right: the
+        # terminal tells a program its size without being asked, so a `Resized`
+        # has already arrived and this counts every event it is given.
+        assert "events: 1" in app.render(), app.render()
+        take(app, "firstprogram")
+        quit(app)
+    finally:
+        shutil.rmtree(where, ignore_errors=True)
+
+
 SECTIONS = [
     ("forms", forms, ("screen", "statictext", "listbox", "menubar", "statusline",
                       "dialog", "label", "inputline", "checkboxes",
@@ -420,6 +483,7 @@ SECTIONS = [
     ("dir", directory, ("filedialog", "tree")),
     ("palette", palette, ("colours",)),
     ("demo", demo, ("tile", "popup", "overlay")),
+    ("firstprogram", firstprogram, ("firstprogram",)),
 ]
 
 

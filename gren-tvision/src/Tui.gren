@@ -117,15 +117,20 @@ Nothing here calls into C++ and nothing here blocks, including modal dialogs.
                     { menuBar = []
                     , statusLine =
                         [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" } ]
+                    , theme = Tui.borland
                     , windows =
                         [ { id = "counter"
                           , title = "Counter"
                           , rect = { x1 = 2, y1 = 2, x2 = 40, y2 = 8 }
+                          , resize = Tui.resizable
+                          , palette = Tui.BlueWindow
+                          , canClose = True
+                          , canMove = True
                           , views =
                                 [ StaticText
                                     { id = "count"
                                     , rect = { x1 = 2, y1 = 1, x2 = 30, y2 = 2 }
-                                    , text = "clicks: " ++ String.fromInt model
+                                    , text = "events: " ++ String.fromInt model
                                     }
                                 ]
                           }
@@ -137,6 +142,27 @@ Nothing here calls into C++ and nothing here blocks, including modal dialogs.
 Build and run it with:
 
     gren make Main --output=main.js && gren-tui main.js
+
+which is this:
+
+![the program above, running](https://raw.githubusercontent.com/gilramir/gren-tvision/main/doc/img/firstprogram.png)
+
+That picture is taken by compiling the program above -- the actual text of it,
+lifted out of this comment -- and photographing it at a real terminal, so it
+cannot come to disagree with the code.
+
+Two things in it are worth a sentence, because both are the program being
+right rather than wrong.
+
+**`events: 1` before you have touched anything.** `update` counts every message
+it is given, and a terminal tells a program how big it is without being asked,
+so a [`Resized`](#Event) has already arrived. Count something narrower and it
+starts at nought.
+
+**The strip above the window is unpainted**, because `menuBar = []` means there
+is no menu bar -- not an empty one -- and the desktop still begins on the row
+below where one would be. Give the program a menu and the strip is the menu
+bar.
 
 
 ## Where the ports come from
@@ -200,6 +226,154 @@ its own is a pull-down, and one without is a command sitting on the bar.
     by Tab *and* acts on the first click, because a control whose whole purpose
     is to be clicked must not behave differently depending on something no
     screen shows. See `Scrolled` for what a click on one does.
+
+## The whole API on one screen
+
+Grouped by what you are trying to do. The reference below is in the same order
+and says the rest.
+
+**Starting a program**
+
+| | |
+|---|---|
+| [`Ports`](#Ports) | the two ports your application declares and hands over |
+| [`defineProgram`](#defineProgram) | build the program; [`Program`](#Program) is what `main` is annotated with |
+| [`ProgramConfiguration`](#ProgramConfiguration) | `init`, `update`, `subscriptions`, `view`, `onEvent` |
+| [`defineProgramOrExit`](#defineProgramOrExit) | the same, for a program that may decide not to paint at all |
+| [`Startup`](#Startup) | `Start model` or `Exit` -- what that `init` answers |
+| [`ProgramConfigurationOrExit`](#ProgramConfigurationOrExit) | its configuration |
+
+**What is on screen**
+
+| | |
+|---|---|
+| [`Ui`](#Ui) | the whole screen: menu bar, status line, windows, overlays, theme |
+| [`Window`](#Window) | one window on the desktop: id, title, rectangle, views |
+| [`Rect`](#Rect) | a rectangle in character cells |
+| [`WindowPalette`](#WindowPalette) | `BlueWindow`, `CyanWindow` or `GrayWindow` |
+| [`Resize`](#Resize) | which of a window's dimensions the user may change |
+| [`resizable`](#resizable) [`resizeWidth`](#resizeWidth) [`resizeHeight`](#resizeHeight) [`fixedSize`](#fixedSize) | the four of them |
+
+**The views**, all constructors of [`View`](#View)
+
+| | |
+|---|---|
+| `StaticText` | a run of text, drawn and nothing else |
+| `Button` | pressed by `Space`, or by `Enter` if `isDefault`; sends a `cmd` |
+| `InputLine` | one line of editable text, with an optional `allowed` set |
+| `History` | the drop-down of previous values for an `InputLine` |
+| `ListBox` | a list, with `focused`, `top`, `columns`, and a `chooses` command |
+| `CheckBoxes` | a group of check boxes, ticked by `Space` |
+| `MultiCheckBoxes` | the same with more than two states per box |
+| `RadioButtons` | a group of which one is `selected` |
+| `ScrollBar` | standalone, or attached to another view by `for` |
+| `Label` | text that gives its `for` view a hotkey and a click target |
+| `Canvas` | you paint it: lines of [`Span`](#Span)s, an optional cursor |
+| `Editor` | a full text editor; its contents do not travel with the render |
+| `Grows` | wraps a view and says which edges follow the window |
+| `Enabled` | wraps a view and greys it out |
+| `Visible` | wraps a view and takes it off the screen |
+
+**Views that follow their window**, all of them a [`Grow`](#Grow)
+
+| | |
+|---|---|
+| [`fixed`](#fixed) | no edge follows: keep the rectangle. The default |
+| [`stretch`](#stretch) | right and bottom follow: grow with the window |
+| [`stretchWidth`](#stretchWidth) [`stretchHeight`](#stretchHeight) | one of the two |
+| [`pinRight`](#pinRight) [`pinBottom`](#pinBottom) | keep the size, slide with that edge |
+
+**Colour on a canvas**
+
+| | |
+|---|---|
+| [`Span`](#Span) | a run of characters in one colour |
+| [`Hue`](#Hue) | the sixteen colours a terminal has had since 1981 |
+| [`line`](#line) | a whole line in the window's own colour -- nearly every line |
+| [`plain`](#plain) | one span in the window's own colour |
+| [`ink`](#ink) | one span in a foreground of your choosing |
+| [`on`](#on) | ...and a background too |
+
+**Colour everywhere else**
+
+| | |
+|---|---|
+| [`Theme`](#Theme) | every colour this package draws rather than the model |
+| [`borland`](#borland) | Turbo Vision's own scheme, and the value to start from |
+| [`ThemePanel`](#ThemePanel) | one surface: a window, the alternate window, a dialog |
+| [`Pair`](#Pair) | a foreground and a background |
+| [`Tint`](#Tint) | `Ansi` one of the sixteen, or `Rgb` if the terminal has it |
+
+**Menus and the status line**
+
+| | |
+|---|---|
+| [`MenuItem`](#MenuItem) | `Item`, `SubMenu` or `Separator` -- the menu bar is a list of them |
+| [`StatusItem`](#StatusItem) | one entry on the status line. Its key is global |
+| [`popupMenu`](#popupMenu) | open a context menu at a point in a view |
+| [`PopupItem`](#PopupItem) | `Entry` or `Divider` -- what goes in one |
+
+**Events**, all constructors of [`Event`](#Event)
+
+| | |
+|---|---|
+| `Command` | a menu entry, a status entry or a button, by its `cmd` string |
+| `Selected` | a list entry was committed; `Focused`, that the caret moved to one |
+| `KeyPressed` | a key nothing else claimed |
+| `Clicked` | with `isDouble` and `isRight`; `Dragged` is what it turned into |
+| `Scrolled` | a scroll bar moved, however it was moved |
+| `Resized` | the terminal changed size; `WindowResized`, that a window did |
+| `Changed` | a control's value changed, carrying a [`Value`](#Value) |
+| `Edited` | an [`Editor`](#View)'s state: caret, selection, undo, modified |
+| `EditorText` | the answer to [`readEditor`](#readEditor); `Searched`, to a find |
+| `Copied` | a copy happened, and whether it left the program |
+| `ClipboardText` | the answer to [`readClipboard`](#readClipboard) |
+| `DialogClosed` | a modal dialog was answered, with its `values` |
+| `WindowClosed` | a window is gone, including when the user closed it |
+| `Unknown` | the runtime said something this version does not know |
+
+**Reading what an event carries**
+
+| | |
+|---|---|
+| [`Value`](#Value) | `Text`, `Flags`, `Choice` or `Marks` -- what `Changed` carries |
+| [`text`](#text) | an input line's text, out of a `DialogClosed`'s `values` |
+| [`number`](#number) | a number: a list box's focused index, a radio group's choice |
+| [`flag`](#flag) [`flags`](#flags) | one check box, or a whole group of them |
+| [`marks`](#marks) | a group of multi-state boxes, one state index per box |
+
+**Telling the terminal to do something**
+
+| | |
+|---|---|
+| [`dialog`](#dialog) | open a modal dialog; [`DialogSpec`](#DialogSpec) is what it takes |
+| [`messageBox`](#messageBox) | a message box, ready to hand to `dialog` |
+| [`MessageButton`](#MessageButton) | its buttons: [`okButtons`](#okButtons), [`okCancelButtons`](#okCancelButtons), [`yesNoButtons`](#yesNoButtons), [`yesNoCancelButtons`](#yesNoCancelButtons) |
+| [`fileDialog`](#fileDialog) | a file or directory chooser, the same way |
+| [`focus`](#focus) | put the caret on a view |
+| [`bringToFront`](#bringToFront) | put a window in front of the others |
+| [`setEnabled`](#setEnabled) | grey a command out everywhere it appears, or bring it back |
+| [`setDoubleClickDelay`](#setDoubleClickDelay) | how long two clicks may be apart and still be one |
+| [`quit`](#quit) | quit |
+
+**The editor**, which is the one view whose contents the model does not hold
+
+| | |
+|---|---|
+| [`setEditorText`](#setEditorText) | put a document in, replacing what is there |
+| [`readEditor`](#readEditor) | ask for it back; the answer is an `EditorText` event |
+| [`setEditorCaret`](#setEditorCaret) | put the caret on a line and a column |
+| [`insertIntoEditor`](#insertIntoEditor) | type at the caret, replacing the selection |
+| [`findInEditor`](#findInEditor) | find forward from the caret and select the match |
+| [`replaceInEditor`](#replaceInEditor) | find and replace |
+
+**The clipboard**
+
+| | |
+|---|---|
+| [`copyToClipboard`](#copyToClipboard) | put text on it; a `Copied` event says whether it left the program |
+| [`readClipboard`](#readClipboard) | ask for its text; the answer is a `ClipboardText` event |
+
 
 @docs Ports
 @docs Program, ProgramConfiguration, defineProgram

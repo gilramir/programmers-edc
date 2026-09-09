@@ -432,10 +432,19 @@ because one of the packages contains a compiled shared object.
   - The library's licence travels with the binary. If you link it statically,
     its notice files have to be in your tarball.
 
-[../../doc/publishing.md](../../doc/publishing.md) has the platform-by-platform
-detail for gren-tvision, including what a manylinux build is for.
+[`doc/publishing.md`](https://github.com/gilramir/programmers-edc/blob/main/doc/publishing.md), in the repository
+this package is developed in, has the platform-by-platform detail for
+gren-tvision, including what a manylinux build is for.
 
-## Where to look in this repository
+## Where to look
+
+These are paths in [gilramir/programmers-edc][mono], the repository this
+package is developed in and where the binding, the runtime and an application
+using all three live together. In a clone of the exported `gren-tvision`
+repository only the `gren-tvision/src/Tui.gren` row is present, as
+`src/Tui.gren`.
+
+[mono]: https://github.com/gilramir/programmers-edc
 
 | | |
 |---|---|

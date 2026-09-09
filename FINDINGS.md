@@ -541,8 +541,13 @@ Inherited from Elm, and not negotiable. So the library is three artifacts:
 | artifact | registry | contents |
 |---|---|---|
 | `gilramir/gren-tvision` | Gren | pure Gren: types, encoders, `defineProgram` |
-| `gren-tvision` | npm | the diff layer and the `gren-tui` bin |
+| `gren-tvision-runtime` | npm | the diff layer and the `gren-tui` bin |
 | `tvision-node` | npm | the native binding |
+
+The npm half was called `gren-tvision` too until 2026-09-08 -- two registries,
+so nothing collided, but saying which artifact you meant cost a sentence every
+time. It is `gren-tvision-runtime` now, matching its directory, and a name is
+the one thing that cannot be changed after 1.0.0.
 
 The package takes the ports as an argument -- a `Tui.Ports msg` record of the
 two functions -- and every application declares them itself. That is eight
@@ -9806,3 +9811,43 @@ an accent -- so `File` arrives as `F`, an SGR, then `ile`, and searching the
 raw stream for the word finds nothing while the program is working perfectly.
 `RPN Calculator` was the only string that matched, because it is the only one
 with no hot key in it. Strip the escapes first.
+
+### The code in a doc comment is the only code nothing compiles
+
+The module comment on `Tui` opens with a section called "A complete program" --
+forty lines, the first thing anybody reads, and the thing they will copy. It
+did not compile, and had not for some time. `Ui` grew a `theme` field and
+`Window` grew `resize`, `palette`, `canClose` and `canMove`, and every
+application in the repository was updated because the compiler made it happen.
+The one program the compiler never sees is the one in the comment.
+
+Nothing catches this. `gren docs` type-checks the module, not the markdown in
+its doc comment; `check_consistency.py` walks four languages and this is in
+none of them; and the audit walks Turbo Vision's members rather than our prose.
+The only way to find out is to compile it, and the only reason anybody did was
+wanting a screenshot of it.
+
+So the screenshot is how it is checked from now on. `doc/shots.py` grew a
+`firstprogram` section that reads `src/Tui.gren`, lifts the block out of the
+comment with a regular expression, writes it into a temp directory under
+`doc/`, compiles it and photographs it running. If the documented program stops
+compiling, the shot run fails with the compiler's own message. The temp
+directory has to be *inside* `doc/` rather than in `/tmp`, because
+`source-directories` in a `gren.json` may not be absolute and this one has to
+reach `../../src`.
+
+Two things the picture shows are the program being right, and both were
+surprises worth writing into the comment beside it.
+
+**The counter reads `1` before anything is touched.** `update` counts every
+message, and a terminal tells a program its size unasked, so the `Resized` that
+protocol version 6 added is already there. The label said `clicks:` and now says
+`events:`, which is what it was always counting.
+
+**The row above the window is unpainted.** `menuBar = []` means
+`JsApp::initMenuBar` returns `nullptr` -- there is no menu bar view, which is
+deliberate and matches the status line -- but `TProgram::initDeskTop` still
+starts the desktop one row down, so with no menu bar row 0 belongs to nobody
+and keeps whatever the terminal had. In a terminal that is the terminal's own
+background and nobody notices. In a screenshot it is a black band, which is how
+it was noticed at all.

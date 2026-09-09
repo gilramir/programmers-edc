@@ -1,7 +1,7 @@
 # Publishing
 
 Two npm packages and a Gren package, one of which contains a compiled shared
-library. This is what that costs, what it does *not* cost, and how to build for
+library and one of which is not on a registry at all. This is what that costs, what it does *not* cost, and how to build for
 the platforms this machine is not.
 
 Written down because the answers took a morning to establish and would take
@@ -336,7 +336,9 @@ the day of the first publish.
 which is also the Gren package's name -- two registries, so nothing collided,
 but explaining which artefact somebody meant cost a sentence every time and a
 name is the one thing that cannot be changed after 1.0.0. `tvision-node` keeps
-its name, subject to it being free on npm, which has not been checked.
+its name, subject to it being free on npm, which has not been checked. The Gren
+package keeps `gilramir/gren-tvision`, which is not a name on a registry but
+the GitHub repository it is exported to -- see below.
 
 **~~There is no LICENSE file anywhere.~~ Done.** ISC, at the root and beside
 each package meant to be published. What is still outstanding is Turbo
@@ -351,6 +353,94 @@ and will not get there on its own.
 independent application would have neither, and the answer is not "copy the
 file". This is a publishing blocker in the sense that it is the first question
 anybody who likes the package will ask.
+
+## The Gren half: a package is a repository, and this one is a subdirectory
+
+Everything above is about npm. The third artifact is not on npm and not on any
+registry at all, which is the thing to know before planning its release:
+
+```
+Gren packages are "just" git repositories hosted on github. As long as you've
+tagged your repository with semver formatted tags, anyone can add your package
+as a dependency.                            -- gren package validate --help
+```
+
+There is nothing to upload. `gren package install gilramir/gren-tvision` reads
+the tags of `github.com/gilramir/gren-tvision` and clones one, and the root of
+that repository is what a consumer gets -- so it must contain `gren.json`,
+`src/Tui.gren` and a README. **A subdirectory of a monorepo cannot be a Gren
+dependency**, and no flag makes it one.
+
+So `gren-tvision/` has to exist twice: here, where it is written and where the
+examples and the drivers can reach the rest of the repo, and at
+`gilramir/gren-tvision`, where it is a repository whose root is that directory.
+This one is the master copy. The other is an export, it is written to only by
+the export, and nothing is ever committed to it by hand.
+
+### The export
+
+`git subtree split` is the mechanism, because it is repeatable, it carries the
+subdirectory's own history, and it is in git rather than in a script somebody
+has to maintain:
+
+```sh
+git subtree split --prefix=gren-tvision -b gren-tvision-export
+git push git@github.com:gilramir/gren-tvision.git \
+    gren-tvision-export:main \
+    gren-tvision-export:refs/tags/1.0.0
+git branch -D gren-tvision-export        # regenerated every time; do not keep it
+```
+
+Measured rather than sketched: the split takes 1.4s over 172 commits and
+produces 83 of its own, and the tree at its tip is `src doc examples test tests
+gren.json build.sh run.sh README.md LICENSE` -- the directory and nothing above
+it. It is deterministic, so running it again after more work here produces the
+same commits plus the new ones, and the push is a fast-forward.
+
+The tag goes in the same push because **a consumer resolves the tag, and it has
+to name a commit in that repository** -- a tag here points at a commit whose
+tree is the whole monorepo and means nothing to `gren package install`.
+
+The version in `gren-tvision/gren.json` and the tag have to agree, and
+`gren package bump` is what moves both -- it reads the published docs, compares
+them with the current ones, and works out whether the change is major, minor or
+patch. Run it here, commit the result, then export and tag.
+
+### The empty repository comes first
+
+`gren package validate` is the pre-flight check -- it verifies the docs, the
+README and the version -- and it **cannot run until the repository exists**.
+Asked today, in a working copy that is complete and correct, it says:
+
+```
+-- FAILED TO FETCH VERSIONS FOR PACKAGE ---------------------------------------
+I was attempting to fetch available versions for this package, but I couldn't
+find the repo on github.
+```
+
+So the first step is creating `gilramir/gren-tvision` empty, before anything
+can be checked, and not after the export is ready to push.
+
+### What does not survive the trip
+
+The exported repository is the directory and nothing above it, so anything in
+`gren-tvision/` that reaches outside it is broken there. Three do:
+
+  - **`test/drive_*.py`** put `../tvision-node/test` on `sys.path` for
+    `harness.py`. The pty drivers do not run in the export. That is the same
+    hole as "how does a consumer pty-test their own TUI app?" below, and it
+    should be answered once, for both.
+  - **`run.sh`** execs `../gren-tvision-runtime/bin/gren-tui.js`. In the export
+    that is the installed `gren-tui`, so the line wants to become one that
+    prefers a sibling checkout and falls back to the npm bin.
+  - **Links out of `doc/` and `README.md`** to `../../FINDINGS.md` and
+    `../../doc/publishing.md`. README is fixed; `doc/index.md:42`,
+    `doc/widgets.md:907` and `doc/native.md:435` are the rest.
+
+None of these stops the package working -- a consumer gets `src/`, `gren.json`
+and the prose, which is the whole of what they install. They are what makes the
+exported repository look abandoned to somebody who clones it, which is a
+different and slower kind of damage.
 
 ## Suggested order
 
@@ -372,6 +462,10 @@ anybody who likes the package will ask.
    `objdump` line is in the script.
 6. Add `macos-latest` and `windows-latest` to the matrix when there is somebody
    on either.
+7. Export `gren-tvision` to `gilramir/gren-tvision` and tag it. Independent of
+   everything above -- it needs no binary and no container -- but the empty
+   repository has to be created before `gren package validate` will run at all.
+   See the section above.
 
 
 ## The tarball before the package, 2026-09-08

@@ -39,5 +39,7 @@ Alongside these, in the repository:
   - [`../src/Tui.gren`](../src/Tui.gren) -- the API reference, as doc comments.
   - [`../examples/README.md`](../examples/README.md) -- the plan of record:
     every ported example, and what each one forced into the API.
-  - [`../../FINDINGS.md`](../../FINDINGS.md) -- running notes on what turned
-    out to be true, including the things that were not what we expected.
+  - [`FINDINGS.md`](https://github.com/gilramir/programmers-edc/blob/main/FINDINGS.md) -- running notes on what
+    turned out to be true, including the things that were not what we
+    expected. It lives in the repository this package is developed in; see the
+    end of the README.
