@@ -55,8 +55,10 @@ kernel code.
 ## What Turbo Vision forced into the design
 
 Gren has no FFI. The only door out of a Gren program is a port, which carries
-JSON in one direction, asynchronously, with no return value. Everything in
-this section follows from that.
+JSON in one direction, asynchronously, with no return value. Data comes back
+the same way and never as a reply: JavaScript sends JSON on a second port, and
+the program hears it as an ordinary `msg` in `update`, unconnected to whatever
+it sent out. Everything in this section follows from that.
 
 ### Nothing can be asked, only told
 
