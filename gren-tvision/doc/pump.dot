@@ -44,8 +44,8 @@ digraph pump {
     tick -> get [lhead=cluster_step, label=" calls"];
     queue -> tick [ltail=cluster_step,
                    label="  returns  0  quiet: setTimeout(tick, 8ms)\l"
-                         "            >0  busy:  setImmediate(tick)\l"
-                         "            <0  quit:  the terminal is already back\l"];
+                       + "            >0  busy:  setImmediate(tick)\l"
+                       + "            <0  quit:  the terminal is already back\l"];
   }
 
   subgraph cluster_run {
