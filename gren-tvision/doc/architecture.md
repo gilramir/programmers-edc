@@ -4,7 +4,7 @@ This is the technical half of the documentation. It explains what the layers
 are, why there are four of them, what Turbo Vision forced into the design, and
 why having the event loop decided most of it. Nothing here is needed to write a
 program; for that, read [widgets.md](widgets.md). For the general problem of
-reaching a C or C++ library from Gren, of which this binding is one instance,
+using a C or C++ library from Gren, of which this binding is one instance,
 read [native.md](native.md).
 
 ## The four layers
