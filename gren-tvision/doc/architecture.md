@@ -158,7 +158,9 @@ which is what a new field looks like to an older runtime.
 
 This is the part that shaped everything else.
 
-`TApplication::run()` is a blocking loop around `getEvent`. While it runs,
+`TApplication::run()` is a blocking loop around `getEvent`, which waits for the
+next keystroke, mouse report or timer tick and hands it to the view that should
+have it — and which does not return until it has one. While it runs,
 Node's event loop never does: no timers, no promises, no I/O and no ports. A
 Gren program under `run()` could not receive its own `Cmd`s, so a dialog would
 never resolve and the first `await` would deadlock. Turbo Vision has to be a
