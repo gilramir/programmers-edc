@@ -39,10 +39,13 @@ digraph pump {
       get -> handle -> flush -> queue;
     }
 
-    alive -> tick [style=dashed, label=" all stay alive\l while step() runs\l",
+    { rank=same; tick; alive; }
+
+    alive -> tick [style=dashed, arrowhead=none, constraint=false,
+                   label=" all stay alive\l while step() runs\l",
                    fontcolor="#666666"];
     tick -> get [lhead=cluster_step, label=" calls"];
-    queue -> tick [ltail=cluster_step,
+    queue -> tick [ltail=cluster_step, constraint=false,
                    label="  returns  0  quiet: setTimeout(tick, 8ms)\l"
                        + "            >0  busy:  setImmediate(tick)\l"
                        + "            <0  quit:  the terminal is already back\l"];
