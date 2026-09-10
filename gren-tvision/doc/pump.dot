@@ -22,7 +22,10 @@ digraph pump {
 
     alive [label="timers, file I/O, inotify,\land the two Gren ports",
            fontname="Helvetica", fillcolor="#ffffff"];
-    tick  [label="tick()"];
+    tick  [label="tick(), on what step() returned:\l"
+                + "   0  quiet: setTimeout(tick, 8ms)\l"
+                + "  >0  busy:  setImmediate(tick)\l"
+                + "  <0  quit:  the terminal is already back\l"];
 
     subgraph cluster_step {
       label="addon.step()  -  the guest: one turn of TProgram's loop";
@@ -45,10 +48,7 @@ digraph pump {
                    label=" all stay alive\l while step() runs\l",
                    fontcolor="#666666"];
     tick -> get [lhead=cluster_step, label=" calls"];
-    queue -> tick [ltail=cluster_step, constraint=false,
-                   label="  returns  0  quiet: setTimeout(tick, 8ms)\l"
-                       + "            >0  busy:  setImmediate(tick)\l"
-                       + "            <0  quit:  the terminal is already back\l"];
+    queue -> tick [ltail=cluster_step, constraint=false, label=" returns"];
   }
 
   subgraph cluster_run {
