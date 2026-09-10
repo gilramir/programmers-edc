@@ -1,0 +1,65 @@
+// The pump: Node's event loop as the host, one turn of Turbo Vision's own
+// loop as the guest inside it. Regenerate img/pump.png with:
+//
+//     devbox run doc:diagrams
+//
+digraph pump {
+  rankdir=TB;
+  bgcolor="white";
+  compound=true;
+  fontname="Helvetica";
+  fontsize=12;
+  node [shape=box, style=filled, fillcolor="white", color="#444444",
+        fontname="Courier", fontsize=11, margin="0.12,0.07"];
+  edge [fontname="Helvetica", fontsize=10, color="#444444"];
+
+  subgraph cluster_node {
+    label="Node's event loop  -  the host";
+    labeljust="l";
+    style=filled;
+    fillcolor="#f2f2f2";
+    color="#888888";
+
+    alive [label="timers, file I/O, inotify,\land the two Gren ports",
+           fontname="Helvetica", fillcolor="#ffffff"];
+    tick  [label="tick()"];
+
+    subgraph cluster_step {
+      label="addon.step()  -  the guest: one turn of TProgram's loop";
+      labeljust="l";
+      style=filled;
+      fillcolor="#e4ecf4";
+      color="#6d8bab";
+
+      get    [label="getEvent\l  eventTimeoutMs = 0: polls, never blocks\l"];
+      handle [label="handleEvent\l  up to 64 events per call\l"];
+      flush  [label="flush the screen"];
+      queue  [label="queue notifications\l  drained by the pump at a safe point\l"];
+
+      get -> handle -> flush -> queue;
+    }
+
+    alive -> tick [style=dashed, label=" all stay alive\l while step() runs\l",
+                   fontcolor="#666666"];
+    tick -> get [lhead=cluster_step, label=" calls"];
+    queue -> tick [ltail=cluster_step,
+                   label="  returns  0  quiet: setTimeout(tick, 8ms)\l"
+                         "            >0  busy:  setImmediate(tick)\l"
+                         "            <0  quit:  the terminal is already back\l"];
+  }
+
+  subgraph cluster_run {
+    label="What it replaced: TApplication::run() as the host";
+    labeljust="l";
+    style="filled,dashed";
+    fillcolor="#f7f0f0";
+    color="#b08a8a";
+
+    run [label="while (!quit) {\l  getEvent(...)   // blocks here\l  handleEvent(...)\l}\l",
+         fillcolor="#ffffff"];
+    dead [label="no timers, no promises, no I/O, no ports:\lthe Gren program never receives its own Cmds",
+          fontname="Helvetica", fillcolor="#ffffff", color="#b08a8a"];
+
+    run -> dead [color="#b08a8a", style=dashed, arrowhead=none];
+  }
+}
