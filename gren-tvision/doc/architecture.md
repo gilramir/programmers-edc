@@ -158,6 +158,25 @@ which is what a new field looks like to an older runtime.
 
 This is the part that shaped everything else.
 
+```
+Node's event loop -- the host
+   |
+   |  timers, file I/O, inotify and the two Gren ports all live here
+   |
+   +--> tick() calls addon.step() -- the guest, one turn of TProgram's loop
+   |        |
+   |        |  getEvent at eventTimeoutMs = 0: polls, never blocks
+   |        |  handleEvent, up to 64 events, then the screen is flushed
+   |        |  notifications queued for the pump to drain
+   |        v
+   |     returns: 0 quiet, >0 busy, <0 quit
+   |
+   +--- setTimeout(tick, 8ms) if quiet, setImmediate(tick) if busy
+
+TApplication::run() would have been the host instead, and its getEvent
+blocks: while it owns the process, nothing above it runs at all.
+```
+
 `TApplication::run()` is a blocking loop around `getEvent`, which waits for the
 next keystroke, mouse report or timer tick and hands it to the view that should
 have it — and which does not return until it has one. While it runs,
