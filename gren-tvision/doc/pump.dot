@@ -48,7 +48,10 @@ digraph pump {
                    label=" all stay alive\l while step() runs\l",
                    fontcolor="#666666"];
     tick -> get [lhead=cluster_step, label=" calls"];
-    queue -> tick [ltail=cluster_step, constraint=false, label=" returns"];
+    // headlabel rather than label: an unconstrained edge's label is unranked
+    // and drifts, but a head label is anchored to the arrowhead.
+    queue -> tick [ltail=cluster_step, constraint=false,
+                   headlabel="returns", labeldistance=2.5, labelangle=45];
   }
 
   subgraph cluster_run {
