@@ -51,7 +51,7 @@ digraph pump {
     // headlabel rather than label: an unconstrained edge's label is unranked
     // and drifts, but a head label is anchored to the arrowhead.
     queue -> tick [ltail=cluster_step, constraint=false,
-                   headlabel="returns", labeldistance=2.5, labelangle=45];
+                   headlabel="returns", labeldistance=3.5, labelangle=-60];
   }
 
   subgraph cluster_run {
