@@ -4,21 +4,34 @@ Terminal user interfaces in [Gren][gren], drawn by [Turbo Vision][tv] — the
 framework Borland shipped in 1990, ported to modern Unix and Windows by
 [magiblot][tv], and driven here by the Elm architecture.
 
-You write `view : Model -> Ui` and get windows, menus, dialogs, list boxes and
-a mouse. Nothing you write calls into C++, and nothing blocks — including modal
-dialogs, which take all the keyboard input without stopping your subscriptions.
+You write an ordinary Elm-architecture program — `init`, `update`,
+`subscriptions` and `view : Model -> Ui` — and the C++ library owns the screen.
+Your `view` describes the windows, menus, dialogs, list boxes and mouse handling
+you want; Turbo Vision draws them, runs its own event loop over them, and sends
+back what the user did as messages your `update` sees. Nothing you write calls
+into C++, and nothing blocks — including modal dialogs, which take all the
+keyboard input without stopping your subscriptions.
 
 [gren]: https://gren-lang.org
 [tv]: https://github.com/magiblot/tvision
 
 ## Where the documentation is
 
-| | |
-|---|---|
-| **API reference** | the doc comments in [`src/Tui.gren`](src/Tui.gren), published with the package. Every type and function is in one table there before the reference itself, and the reference says of each what Turbo Vision will do that you did not expect. |
-| **[`doc/`](doc/index.md)** | the long-form documents. [Turbo Vision, from Gren](doc/widgets.md) is the guided tour — the programming model, the anatomy of the screen and every widget, for people who have never used Turbo Vision. [How a Gren program ends up on Turbo Vision](doc/architecture.md) is the technical half: the four layers, and the event loop that shaped them. [Driving a C or C++ library from Gren](doc/native.md) is the same problem in general, for a reader with some other library in mind. [The clipboard, from a terminal program](doc/clipboard.md) is the one every consumer eventually needs: why a copy reaches the rest of the machine sometimes and not others. |
-| **This file** | what the thing is, how to install it, and a first program. |
-| **[`examples/`](examples/)** | one runnable application per feature. Its README says what each one was ported for and what it forced into the API. |
+The long-form documents are in [`doc/`](doc/index.md):
+
+- [Turbo Vision, from Gren](doc/widgets.md) — the guided tour: the programming
+  model, the anatomy of the screen and every widget, for people who have never
+  used Turbo Vision.
+- [How a Gren program ends up on Turbo Vision](doc/architecture.md) — the
+  technical half: the four layers, and the event loop that shaped them.
+- [Driving a C or C++ library from Gren](doc/native.md) — the same problem in
+  general, for a reader with some other library in mind.
+- [The clipboard, from a terminal program](doc/clipboard.md) — the one every
+  consumer eventually needs: why a copy reaches the rest of the machine
+  sometimes and not others.
+
+And [`examples/`](examples/) has one runnable application per feature. Its
+README says what each one was ported for and what it forced into the API.
 
 ## Installing
 
@@ -36,7 +49,7 @@ needs a C++ compiler and ncurses headers.
 
 ## A first program
 
-Your application declares the two ports — the package cannot — and hands them
+Your application declares the two ports — this package cannot — and hands them
 over:
 
 ```gren
@@ -55,10 +68,9 @@ tui =
     { toJs = tuiOut, fromJs = tuiIn }
 ```
 
-then `Tui.defineProgram tui { init, update, subscriptions, view, onEvent }` — the
-menu bar and the status line are part of what `view` returns, not configuration
-beside it. The full version, with a picture of it running, is at the top of the
-module docs; [`examples/hello`](examples/hello) is the next size up.
+then `Tui.defineProgram tui { init, update, subscriptions, view, onEvent }`. The
+full version, with a picture of it running, is at the top of the module docs;
+[`examples/hello`](examples/hello) is the next size up.
 
 An application with a command line wants `Tui.defineProgramOrExit` instead,
 whose `init` answers `Tui.Start model` or `Tui.Exit`. `Exit` sends no render,
@@ -75,11 +87,14 @@ gren-tui main.js
 
 `gren-tui` comes from the npm package. It is a three-line script; if you would
 rather write it yourself, `require('gren-tvision-runtime')(require('./main.js'))`
-is the whole of it.
+is the whole of it. An installed application usually should: it gets its own
+name on the command line, finds `main.js` next to itself rather than in the
+working directory, and can subscribe ports of its own to the app `run()` hands
+back.
 
 ## Examples
 
-Fifteen of them, each a port of a program from `tvision/examples/`, and each
+Fifteen of them, each a port of a program from the C++ code in  `tvision/examples/`, and each
 chosen because it forced something into the API that staring at the binding did
 not. [`examples/README.md`](examples/README.md) says what each one forced.
 
@@ -115,7 +130,7 @@ you develop against a Gren package without path dependencies.
 The unit tests cover the pure parts and need nothing but `gren`.
 
 `test/drive_*.py` is the other half: one driver per example, typing at a real
-terminal and asserting on what was drawn, which is the only honest way to test
+terminal and asserting on what was drawn, which is the best way to test
 a TUI and is what has caught most of the bugs in this project. They import a
 pty harness that lives in the repository this package is developed in, so they
 run there and not from a clone of this one.
