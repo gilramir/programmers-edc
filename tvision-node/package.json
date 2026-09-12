@@ -33,7 +33,7 @@
     "test:asan": "TVNODE_ASAN=1 node-gyp rebuild && python3 test/drive_regress.py; node-gyp rebuild",
     "ascii": "node examples/ascii.js",
     "form": "node examples/form.js",
-    "prepublishOnly": "node -e \"if(!require('fs').existsSync('prebuilds/linux-x64/tvision.node')){console.error('the prebuilt addon is missing -- run tools/prepare-publish.sh');process.exit(1)}\""
+    "prepublishOnly": "node ../tools/check-prebuild.js"
   },
   "dependencies": {
     "node-addon-api": "^8.5.0",

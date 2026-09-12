@@ -26,6 +26,27 @@ HERE_ONLY=0
 
 say() { printf '\n== %s\n' "$*"; }
 
+# ---------------------------------------------------------------- the npm
+
+# WHICH npm DECIDES WHAT SHIPS, which is not a thing anybody should have to
+# know. npm 9.2.0 packs 407 files here and npm 10.9.8 packs 309: the older one
+# does not apply the `files` list inside `tvision/`, so the fork's examples,
+# its .github workflows, its CMakeLists and its README -- 98 files and a
+# megabyte that this package deliberately leaves out -- go out with the
+# release. Nothing is broken by it and nothing would ever have said so.
+#
+# devbox has 10.9.8 and this machine's system npm is 9.2.0, so the failure
+# mode is running this from the wrong shell, which looks identical.
+npm_major=$(npm -v | cut -d. -f1)
+if [ "$npm_major" -lt 10 ]; then
+    echo "prepare-publish: npm $(npm -v) is too old -- it ignores the \`files\`" >&2
+    echo "      list inside tvision/ and would publish ~98 files that are" >&2
+    echo "      meant to stay out. Run this and the publishes inside devbox:" >&2
+    echo "          devbox run -- tools/prepare-publish.sh" >&2
+    exit 1
+fi
+echo "npm $(npm -v), node $(node -v)"
+
 # --------------------------------------------------------- the prebuilt addon
 
 say "the prebuilt addon"
@@ -118,10 +139,13 @@ done
 
 say "to publish, in this order"
 cat <<'TXT'
-   npm login                               # the token in ~/.npmrc is expired
-   npm publish -w tvision-node
-   npm publish -w gren-tvision-runtime
-   npm publish -w programmers-edc
+   npm login                               # the token in ~/.npmrc expires
+   devbox run -- npm publish -w tvision-node
+   devbox run -- npm publish -w gren-tvision-runtime
+   devbox run -- npm publish -w programmers-edc
+
+Through devbox for the same reason this script refuses to run outside it: the
+system npm here is 9.2.0 and packs 98 files that `files` does not name.
 
 Each depends on the one above it by version range, so a consumer who installs
 the third the moment it lands needs the first two already there.

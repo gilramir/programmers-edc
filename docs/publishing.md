@@ -740,12 +740,22 @@ it somewhere else with no prebuild in it, and it compiles in 40s and loads.
 `devbox run check`, `devbox run test`, and `test:asan` if any C++ moved. Then:
 
 ```sh
-tools/prepare-publish.sh          # container prebuild + harness + file lists
-npm login                         # the token in ~/.npmrc expires
-npm publish -w tvision-node
-npm publish -w gren-tvision-runtime
-npm publish -w programmers-edc
+devbox run -- tools/prepare-publish.sh    # prebuild + harness + file lists
+npm login                                 # the token in ~/.npmrc expires
+devbox run -- npm publish -w tvision-node
+devbox run -- npm publish -w gren-tvision-runtime
+devbox run -- npm publish -w programmers-edc
 ```
+
+**Inside devbox, and that is not a formality: which npm you publish with
+decides what ships.** This machine's system npm is 9.2.0 and devbox's is
+10.9.8, and on this package they disagree -- 407 files against 309. The older
+one does not apply the `files` list inside `tvision/`, so the fork's
+`examples/`, its `.github/` workflows, its `CMakeLists.txt` and its `README.md`
+travel with the release: 98 files and a megabyte that this package has gone to
+some trouble to leave out. Nothing breaks, and nothing would ever have said so.
+`tools/prepare-publish.sh` refuses to run under npm 9 now, which is the only
+reason this is a paragraph rather than a published tarball.
 
 In that order, because each depends on the one above it by version range and a
 consumer may install the third the moment it lands.
@@ -769,3 +779,65 @@ tools/export-gren-tvision.sh --tag     # split, push, tag 1.0.0 (bare, no v)
 git tag gren-tvision/1.0.0 && git push origin gren-tvision/1.0.0
 gren package validate                  # only works once a tag exists
 ```
+
+## Two traps found on publishing day, 2026-09-12
+
+Both were found by a check running rather than by anybody thinking, which is
+the argument for the checks.
+
+### The submodule pin was not on the fork
+
+The first CI run ever, eleven seconds, `fatal: remote error: upload-pack: not
+our ref 30bd5c0`. The pin in this repository named a commit that
+`gilramir/tvision` did not have: `patches` was at its parent, because the
+`TWindow::zoom` fix had been committed locally and never pushed -- and so had
+`fix/zoomrect-origin`, the topic branch for its PR.
+
+**That is a broken `git clone --recurse-submodules` for everybody**, which is
+the first line of the README and, per the section above, a publishing
+requirement rather than a convenience. It had presumably been broken for days;
+nothing here could notice, because the commit is present locally and every
+build worked.
+
+What it did *not* break is npm: the addon's tarball carries `tvision/source`
+as 218 ordinary files, which is the whole reason the submodule moved inside the
+package. The release would have installed and built for everybody while the
+repository it came from could not be cloned.
+
+Verified afterwards the way it should have been all along -- `git clone
+--recurse-submodules --depth 1` into a scratch directory, then `npm install` in
+it: 39 seconds and the addon loads.
+
+### npm 9 and npm 10 disagree about what `files` means
+
+`npm pack` reported 309 files one moment and 407 the next, with a clean tree in
+between. The tree had not changed: **the system npm is 9.2.0 and devbox's is
+10.9.8**, and the two disagree about applying a `files` list inside a
+directory that is itself a git repository with its own `.gitignore`. npm 9
+lets the fork's `examples/`, `.github/`, `CMakeLists.txt` and `README.md`
+through -- 98 files, a megabyte, all of it deliberately excluded.
+
+So `tools/prepare-publish.sh` refuses to run under npm 9 and says which shell
+to use, and the runbook above goes through devbox at every step.
+
+The lesson generalises past npm: **a packaging list is not a fact about the
+repository, it is a fact about the tool that reads it.** The only reliable
+check is to pack with the tool that will publish and look at what came out,
+which is what that script does and why it names files rather than counting
+them.
+
+### And the guard that was checking the wrong thing
+
+`prepublishOnly` checked that `prebuilds/linux-x64/tvision.node` *existed*.
+`tools/prepare-publish.sh --here` puts a file there that exists and is the
+worst thing in the world to publish: this checkout's own build, linked against
+nix's ncurses and libstdc++, which installs cleanly and loads on this machine
+and on no other. Two runs of `--here` while checking the file lists left
+exactly that staged.
+
+`tools/check-prebuild.js` is the guard now, and it asks what the addon asks the
+loader for rather than whether a file is present: the container's build needs
+libc, libm, libpthread and terminfo, and anything naming `libncursesw`,
+`libstdc++` or `libgcc_s` is the local one. The sonames are plain strings in
+the dynamic string table, so it needs no ELF parser and no `readelf` -- which
+matters, because it has to run wherever `npm publish` runs.
