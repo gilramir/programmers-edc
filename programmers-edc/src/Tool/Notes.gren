@@ -432,7 +432,7 @@ their stems, sorted.
 `Path` splits a filename from its extension itself, which is what makes the
 name-is-the-filename rule cost nothing in either direction.
 
-Sorted by the lower-cased name so that `Ideas` and `ideas` are neighbours
+Sorted by the lower-cased name so that `Ideas` and `ideas` are neighbors
 rather than a screen apart, which is what somebody scanning a list expects and
 is not what a byte-order sort does with ASCII.
 -}
@@ -1525,7 +1525,7 @@ answerDelete ports closed model =
 
 
 {-| No `Inks`, unlike every other tool's `view`, and the reason is that there
-is nothing here to colour: a list, an editor and a line of text are all views
+is nothing here to color: a list, an editor and a line of text are all views
 the palette already dresses. A `Span` is what an ink is for, and this window
 draws none.
 -}
@@ -1607,7 +1607,7 @@ has.
 The `~` marks are the status line's, and [`Theme.hint`](Theme#hint) paints what
 is between them louder than the rest -- which is why this is a `Canvas` rather
 than the `StaticText` it used to be, since `TStaticText` draws one run in one
-colour. A message goes through the same function and comes out entirely in the
+color. A message goes through the same function and comes out entirely in the
 quiet ink, having no marks in it, which is right: a message is a sentence and
 these are keys.
 -}

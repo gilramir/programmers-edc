@@ -122,7 +122,7 @@ tv.window({
 Twelve view types: `staticText`, `label`, `button`, `inputLine`, `history`,
 `checkBoxes`, `multiCheckBoxes`, `radioButtons`, `listBox`, `scrollBar`,
 `editor`, and `canvas` -- the last being the escape hatch for anything the set
-does not have, a rectangle of coloured spans the caller paints and gets key and
+does not have, a rectangle of colored spans the caller paints and gets key and
 click callbacks for. The puzzle, the calendar and the ASCII table from
 `tvdemo` are all canvases.
 
@@ -151,7 +151,7 @@ Turbo Vision owns the terminal and `console.log` draws over the app.
   `TColorDialog` family are deliberately not wrapped: in this architecture the
   program owns its data and builds those dialogs out of the parts it already
   has, which is what gren-tvision's own `Tui.fileDialog` helper is and what
-  `examples/palette` argues at length for the colour one. There is no help
+  `examples/palette` argues at length for the color one. There is no help
   system; `THelpFile` reads a binary format produced by `tvhc` and porting the
   compiler buys nothing. `gren-tvision/examples/README.md` records what was
   left out and why.
@@ -174,7 +174,7 @@ Turbo Vision owns the terminal and `console.log` draws over the app.
 |---|---|
 | `src/app.cc` | the application, the pump, the safe-point queues, hoisted modality, the menu bar and status line |
 | `src/views.cc` | every view type: built from a JSON description, updated, read back |
-| `src/tvnode.h` | the `Js*` subclasses -- where Turbo Vision's behaviour is overridden rather than merely called |
+| `src/tvnode.h` | the `Js*` subclasses -- where Turbo Vision's behavior is overridden rather than merely called |
 | `src/keys.h` | key names to `kb*` codes, in both directions |
 | `index.js` | the pump's timing, the promise-rejection guard, `messageBox`, `log` |
 | `examples/` | plain-JavaScript applications: `hello`, `demo`, `form`, `ascii`, `clip` |
@@ -182,7 +182,7 @@ Turbo Vision owns the terminal and `console.log` draws over the app.
 | `test/regress_*.js` | small applications that exist only to be driven |
 
 `tvnode.h` is worth reading before proposing a patch to the submodule: a good
-deal of what looks like missing Turbo Vision behaviour is overridden here
+deal of what looks like missing Turbo Vision behavior is overridden here
 instead.
 
 ## Tests
@@ -199,8 +199,8 @@ The drivers test the **build**, not the source: rebuild the addon after editing
 `src/`, or the driver runs the old `.node` and fails in a way that looks
 exactly like the feature not working.
 
-## Licence
+## License
 
-ISC, in `LICENSE`. Turbo Vision itself is under its own licence and is linked
+ISC, in `LICENSE`. Turbo Vision itself is under its own license and is linked
 statically, so anything shipping this binary has to carry the library's notice
 files too. `docs/publishing.md` at the repository root has the rest.

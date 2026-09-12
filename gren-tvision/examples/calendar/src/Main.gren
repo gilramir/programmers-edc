@@ -2,7 +2,7 @@ port module Main exposing (main)
 
 {-| tvdemo's calendar (`tvision/examples/tvdemo/calendar.cpp`), in Gren.
 
-A month of dates painted on a `Canvas`, with today picked out in a colour of
+A month of dates painted on a `Canvas`, with today picked out in a color of
 its own. The original is a `TView` subclass whose `draw()` walks the weeks and
 switches attribute halfway through a row; here the row is an array of
 [`Span`](Tui#Span)s and the switch is `Tui.ink`.
@@ -384,7 +384,7 @@ weekdayNames =
 
 
 {-| Six rows of seven cells, each cell three columns wide. A cell outside the
-month is blank; today is the one span in the whole view that names a colour.
+month is blank; today is the one span in the whole view that names a color.
 -}
 weeks : { year : Int, month : Int } -> Date -> Array (Array Tui.Span)
 weeks showing today =
@@ -406,7 +406,7 @@ weeks showing today =
                 -- Light green on blue, which is what Turbo Vision's own
                 -- calendar marks today in: it is app palette entry 10, the
                 -- one a blue window also uses for the icons on its frame.
-                -- Yellow would be invisible -- that is the colour a blue
+                -- Yellow would be invisible -- that is the color a blue
                 -- window's ordinary text already is.
                 Tui.ink LightGreen (String.padLeft 2 ' ' (String.fromInt day) ++ " ")
 

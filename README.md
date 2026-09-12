@@ -65,7 +65,7 @@ fail.
 - [Building and running](docs/building.md) — the devbox commands, every example
   and what it demonstrates, and the recipe without devbox.
 - [Screenshots](docs/screenshots.md) — predc's desktop in each of its three
-  colour schemes, generated from the running program.
+  color schemes, generated from the running program.
 
 **How it works**
 
@@ -92,7 +92,7 @@ fail.
 - [publishing.md](docs/publishing.md) — what shipping a package with a compiled
   library in it costs, and what it does not.
 
-## Licence
+## License
 
 ISC, in `LICENSE` at the root and beside each package that is meant to be
 published. `gren-tvision/gren.json` and the three `package.json`s say the same.
@@ -101,7 +101,7 @@ published. `gren-tvision/gren.json` and the three `package.json`s say the same.
 links `libtvision.a` statically, so anything built from it carries Turbo Vision
 with it, and Turbo Vision is three layers of terms in one file
 (`tvision-node/tvision/COPYRIGHT`, 119 lines): Borland's 1994 public-source
-disclaimer on the original code, magiblot's MIT licence on everything since, and
+disclaimer on the original code, magiblot's MIT license on everything since, and
 the MIT notices of the third-party pieces vendored into it — Milo Yip's `utoa`,
 Bjoern Hoehrmann's UTF-8 decoder, and the rest. All of them require the notice
 to travel with the binary. **A published `tvision-node` has to include

@@ -14,7 +14,7 @@ and -- when the terminal allows it -- with the rest of the machine.
 list **Help | What is in here** shows in the program.
 
 [../docs/screenshots.md](../docs/screenshots.md) has a picture of the desktop in
-each of the three colour schemes, taken from the running program.
+each of the three color schemes, taken from the running program.
 
 The original feature list, version by version -- what was asked for, what was
 dropped, and what was declined -- is [docs/predc-plan.md](../docs/predc-plan.md).
@@ -137,8 +137,8 @@ the terminal, and only `init` can decide that, because the first render is what
 takes it. FINDINGS.md has the story.
 
 The one rule copied out of that runner rather than called is how wide to wrap
-and whether to colour: the terminal's own columns, eighty when the output is a
-pipe, no colour for a pipe or for `NO_COLOR`. A terminal claiming fewer than
+and whether to color: the terminal's own columns, eighty when the output is a
+pipe, no color for a pipe or for `NO_COLOR`. A terminal claiming fewer than
 twenty columns is not believed -- a pty whose winsize was never set reports
 zero, and wrapping to zero is an endless loop rather than a narrow page.
 
@@ -153,7 +153,7 @@ zero, and wrapping to zero is an endless loop rather than a narrow page.
     src/Help.gren     the one window that is not a tool: Help | Copying and
                       pasting, which measures this session and explains it
     src/Ascii.gren    what ASCII says about a byte, shared by two of the tools
-    src/Theme.gren    the three colour schemes, and the inks the tools paint with
+    src/Theme.gren    the three color schemes, and the inks the tools paint with
     src/Config.gren   the one thing predc remembers between runs
     test/drive_*.py   one pty driver per tool, plus the shell, the themes, the
                       CLI and the session recorder
@@ -234,14 +234,14 @@ to know where the typing went there had been nothing for it to disagree with.
 `v` marks from the cursor, `V` marks whole rows, and one of `1`-`6` paints what
 is marked; `Esc` drops the mark and `d` takes the paint off the range under the
 cursor. While a mark is out, the line under the dump carries the six keys
-drawn in the colours they paint, because `1-6` is a range of numbers and not an
+drawn in the colors they paint, because `1-6` is a range of numbers and not an
 answer to which one is yellow. Everything that moves the cursor -- arrows, `PgDn`, `Ctrl-End`, a click
 on either column, **Bytes | Go to offset** -- moves the far end of the mark,
 because the far end *is* the cursor. **Bytes | Highlight** is the same six
 things on a menu, for finding them the first time.
 
 **Dragging marks too**, and it is the same mark: press on a byte, pull, and
-what the pointer crosses is marked, ready for a colour. A plain click still
+what the pointer crosses is marked, ready for a color. A plain click still
 just moves the cursor -- the mark begins on the first cell the pointer *moves*
 to, anchored where the press landed, so nothing was taken away from clicking.
 Dragging off the window is harmless and does not scroll: a terminal reports
@@ -439,7 +439,7 @@ That forced one thing on the shell. A window sized from the desktop is sized in
 on a fifty-row terminal opened a window for a twenty-three-row one. `Main` now
 seeds its idea of the desktop from `Terminal.initialize` — which it had already
 awaited, for the `--help` width — rather than from a guess it would correct a
-frame later. Every tool that centres or sizes itself gets the right answer in
+frame later. Every tool that centers or sizes itself gets the right answer in
 the first frame as a result.
 
 ## Random values
@@ -1059,7 +1059,7 @@ i18n is one step less expensive than it was.
 ## The ASCII chart has two of it
 
 `Tab` toggles, and **Options | ASCII chart** names the two -- which is also
-where the mode is remembered from, since it is a setting like the colour scheme
+where the mode is remembered from, since it is a setting like the color scheme
 and the week numbering rather than something the tool owns. The window says
 `Tab, or Options, shows the long list` along its foot, because a key nothing on
 the screen mentions is a key nobody presses; that line is why the mode was hard
@@ -1096,7 +1096,7 @@ more of it than fits. A rebuild the user asked for by pressing `Tab` costs one
 window's repaint.
 
 **And the mode is remembered**, in `chart` in the config file, the way the
-colour scheme and the calendar's week numbering are. It is written the moment
+color scheme and the calendar's week numbering are. It is written the moment
 you switch, because predc is a program people leave open and close with the
 window.
 
@@ -1255,8 +1255,8 @@ A scheme is two things, and `src/Theme.gren` is where the split is explained.
 `Tui.Theme` is everything gren-tvision draws -- the desktop, the menu bar, the
 frames, the dialogs -- and can be 24-bit. `Theme.Inks` is what the tools' own
 canvases paint with, which a theme cannot reach and which is one of the sixteen
-colours a terminal has always had. Borland's is built out of those sixteen, so
-it follows whatever the terminal is set to; Midnight and Gren name their colours
+colors a terminal has always had. Borland's is built out of those sixteen, so
+it follows whatever the terminal is set to; Midnight and Gren name their colors
 exactly, because "whatever this terminal calls black" is not a foundation for a
 dark scheme.
 
@@ -1264,15 +1264,15 @@ dark scheme.
 
 Every tool window has a line at the bottom saying which keys do what, and they
 are painted the way the status line along the bottom of the screen is painted:
-the name of the key in one colour, the words beside it in another.
+the name of the key in one color, the words beside it in another.
 
     126 variables   Tab list   / search   c case   y copy   x hex
                     ^^^        ^          ^        ^        ^
 
-They were a single colour until somebody read one and asked why the
+They were a single color until somebody read one and asked why the
 instructions looked like ordinary text -- which was a fair question, because
 `Alt-X Exit` one row below had never had that problem. `TStatusLine` draws the
-key and its label in two colours and that is the whole of the difference.
+key and its label in two colors and that is the whole of the difference.
 
 The marking is Turbo Vision's own: a hint is written with `~` around the parts
 that are keys, `Theme.hint` turns those into a second ink, and the tildes never
@@ -1293,7 +1293,7 @@ at exit -- a setting that survives only a tidy close is a setting that gets
 lost, and predc is a program people close with Alt-X.
 
 ```toml
-# Which colour scheme predc opens in: borland, midnight, or gren.
+# Which color scheme predc opens in: borland, midnight, or gren.
 theme = "midnight"
 
 # The time zones the time converter shows, in the order it
@@ -1320,10 +1320,10 @@ off again leaves the file exactly as it was.
 It was JSON and is now TOML, for the comments -- both the ones above, which
 predc writes when it invents a key, and the ones you write yourself. Which
 turns out to be a claim about the *writing* rather than the format: a program
-that serialises its model over the file deletes every word you put in it the
-next time you pick a colour.
+that serializes its model over the file deletes every word you put in it the
+next time you pick a color.
 
-So predc does not serialise. `Config.save` reads the file back off the disk,
+So predc does not serialize. `Config.save` reads the file back off the disk,
 edits the document it parsed, and writes that out --
 [gren-toml](https://github.com/gilramir/gren-toml) keeps the whitespace and the
 comments as text in its AST, so everything the edit did not touch comes back
@@ -1335,7 +1335,7 @@ Setting a value that has not changed does nothing at all, which matters most
 for the key predc is *not* changing. Setting a value replaces the whitespace
 inside it, so a list you spread over four lines with a note against each zone
 would otherwise come back as one line -- on the key you had not touched,
-because you picked a colour.
+because you picked a color.
 
 **And the zone list is changed an element at a time**, which is the same
 promise on the key predc *is* changing. Writing a whole array flattens it,

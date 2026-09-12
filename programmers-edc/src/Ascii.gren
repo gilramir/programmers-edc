@@ -9,7 +9,7 @@ called -- and a second copy of the names table would be a second copy to get
 wrong. So the facts live here and the two tools share them.
 
 Everything in here is a pure function of one number. Nothing knows about a
-window, a colour, or which tool is asking. That is the test for whether
+window, a color, or which tool is asking. That is the test for whether
 something belongs in this module rather than in the tool that wanted it.
 
 -}

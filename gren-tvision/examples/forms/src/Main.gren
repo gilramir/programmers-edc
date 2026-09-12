@@ -8,7 +8,7 @@ bound to them, a group of check boxes, a group of radio buttons, Save and
 Cancel -- and that half is what this is. The other half is `opstream` and
 `ipstream` writing the views themselves to a `.f32` file, so that a *data file*
 carries its own dialog layout. That trick has no meaning here: a Gren view is a
-function of the model, and there is nothing to serialise.
+function of the model, and there is nothing to serialize.
 
 What porting it needed that the package did not have:
 
@@ -350,7 +350,7 @@ save record model =
         }
 
 
-{-| Edit and Delete mean nothing with no records. Disabling the *command* greys
+{-| Edit and Delete mean nothing with no records. Disabling the *command* grays
 it out everywhere it appears at once -- the menu entry, the status line entry
 and the button in the window -- and makes every route to it inert.
 -}

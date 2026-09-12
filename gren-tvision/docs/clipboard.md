@@ -403,7 +403,7 @@ the only correlation the `OSC 52` protocol offers.
 
 `"clipboard.cut"`, `"clipboard.copy"` and `"clipboard.paste"` are built-in
 command names. They act on whatever holds the caret — **an `InputLine` as much
-as an `Editor`**, since both react to those commands and both light and grey
+as an `Editor`**, since both react to those commands and both light and gray
 them as a selection comes and goes. `"editor.clear"`, `"editor.undo"` and
 `"editor.selectAll"` are the editor's alone.
 

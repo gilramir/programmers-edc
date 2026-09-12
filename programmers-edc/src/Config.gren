@@ -31,9 +31,9 @@ Borland for having used an older predc yesterday.
 
 **And the file is TOML, so that it can be commented -- which is what makes the
 fifth decision necessary.** A format with comments in it is a format somebody
-opens in an editor, and a program that writes such a file by serialising its
+opens in an editor, and a program that writes such a file by serializing its
 own model deletes every word the user wrote the moment the theme changes. So
-nothing here serialises. `save` re-reads the file and edits the document it
+nothing here serializes. `save` re-reads the file and edits the document it
 parsed: see [`save`](#save).
 
 -}
@@ -450,7 +450,7 @@ apply config document =
         |> Edit.introduce
             [ "theme" ]
             { blankBefore = True
-            , leading = [ " Which colour scheme predc opens in: borland, midnight, or gren." ]
+            , leading = [ " Which color scheme predc opens in: borland, midnight, or gren." ]
             , trailing = Nothing
             }
             (Edit.string (Theme.toKey config.theme))
@@ -463,7 +463,7 @@ apply config document =
         -- rather than `theme`'s and is the right one here. predc's bargain with
         -- a hand-written file is that it changes the one thing it was asked to
         -- change -- `drive_theme.py` asserts that byte for byte -- and adding a
-        -- key somebody never asked about, because they picked a colour scheme,
+        -- key somebody never asked about, because they picked a color scheme,
         -- is not that. Choosing US writes it, with the sentence that says what
         -- it is; choosing ISO back takes both away again, and the file is as it
         -- was.

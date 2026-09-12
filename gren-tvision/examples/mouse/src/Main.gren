@@ -5,7 +5,7 @@ Gren.
 
 A scroll bar sets how long Turbo Vision waits before deciding two clicks were a
 double click, and a strip of text above it lets you feel where that boundary
-is: double-click the strip and it changes colour. Move the bar towards `Slow`
+is: double-click the strip and it changes color. Move the bar towards `Slow`
 and a lazier pair of clicks counts; move it towards `Fast` and the same pair
 counts as two.
 
@@ -33,7 +33,7 @@ dialog with one scroll bar in it wants the wheel from anywhere in it; see
 
 **A click that knows it is the second one.** `TClickTester` reacts to
 `meDoubleClick`, so `Clicked` grew `isDouble`. The first click of a pair still
-arrives on its own a moment earlier, which is exactly the behaviour being
+arrives on its own a moment earlier, which is exactly the behavior being
 demonstrated here.
 
 The dialog is a plain window rather than a modal one, because the whole point
@@ -243,7 +243,7 @@ mouseWindow model =
 
 {-| The original's `Fast Medium Slow` strip, which `TClickTester` draws in
 `getColor(1)` or `getColor(2)` depending on whether it has been double-clicked.
-Here the two colours are said out loud.
+Here the two colors are said out loud.
 -}
 testerLine : Model -> Array Tui.Span
 testerLine model =

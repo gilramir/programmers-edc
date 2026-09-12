@@ -172,7 +172,7 @@ type alias Model =
     -- pasted, which is also what `bytes` being empty means -- but a name is
     -- what the window says and a length is not.
     , name : String
-    -- What is in the entry field, exactly as it was typed. Nothing normalises
+    -- What is in the entry field, exactly as it was typed. Nothing normalizes
     -- it and nothing writes it back, so the caret never moves under somebody's
     -- fingers -- the model's copy and the field's contents are the same string
     -- and the differ writes nothing.

@@ -103,15 +103,15 @@ answer to "how old a distro does this run on".
 
 Two routes exist and both are wrong:
 
-  - **A macOS VM on non-Apple hardware breaks Apple's licence.** Not a
-    technicality worth arguing about; it is the licence.
+  - **A macOS VM on non-Apple hardware breaks Apple's license.** Not a
+    technicality worth arguing about; it is the license.
   - **osxcross** cross-compiles from Linux using the macOS SDK, which has to be
-    extracted from Xcode — the same licence problem, plus a toolchain that
+    extracted from Xcode — the same license problem, plus a toolchain that
     breaks on every SDK bump.
 
 **Use GitHub Actions' `macos-latest` runners.** They are Apple hardware, they
 are free for public repositories, and they are how essentially every native npm
-package builds its macOS artefacts. You do not need to own a Mac.
+package builds its macOS artifacts. You do not need to own a Mac.
 
 What changes in the build, beyond the runner:
 
@@ -241,7 +241,7 @@ path has to keep working even once prebuilds exist.
 earns its complexity somewhere around five targets, and this is not there.
 
 Keep the source build as the fallback in every case: `node-gyp-build` tries the
-prebuild, then `node-gyp rebuild`, which is exactly the behaviour wanted.
+prebuild, then `node-gyp rebuild`, which is exactly the behavior wanted.
 
 ## The blockers that are not about binaries
 
@@ -273,11 +273,11 @@ Naming it in `files` fixes it -- verified on a scratch package reproducing the
 rule, where `vend/COPYRIGHT` is absent by default and present the moment
 `files` lists it. So `files` is not merely an optimisation to keep the fork's
 examples and tests out of the tarball; **it is what makes the package legal.**
-The entries the build and the licence need are `tvision/source`,
+The entries the build and the license need are `tvision/source`,
 `tvision/include`, `tvision/COPYRIGHT` and `tvision-sources.gypi`.
 
 One more consequence: `--recurse-submodules` on the clone is a publishing
-requirement now and not a convenience, since an uninitialised submodule packs
+requirement now and not a convenience, since an uninitialized submodule packs
 an empty directory and the failure lands at the consumer's `npm install`.
 
 **~~And that raises the cmake question.~~ Done, the same day.** `binding.gyp`
@@ -334,7 +334,7 @@ the day of the first publish.
 **The names are decided (2026-09-08).** The runtime's npm name is
 `gren-tvision-runtime`, matching its directory. It used to be `gren-tvision`,
 which is also the Gren package's name -- two registries, so nothing collided,
-but explaining which artefact somebody meant cost a sentence every time and a
+but explaining which artifact somebody meant cost a sentence every time and a
 name is the one thing that cannot be changed after 1.0.0. `tvision-node` keeps
 its name, subject to it being free on npm, which has not been checked. The Gren
 package keeps `gilramir/gren-tvision`, which is not a name on a registry but
@@ -477,7 +477,7 @@ The exported repository is the directory and nothing above it, so anything in
     this repository by URL now.
 
 A fourth is fixed rather than listed: the ignore rules for this directory were
-all in the repository root's `.gitignore`, so none of them travelled and a
+all in the repository root's `.gitignore`, so none of them traveled and a
 clone of the export that ran `./build.sh` showed fifteen untracked `main.js`
 files. They are in `gren-tvision/.gitignore` now, which still applies here --
 a nested `.gitignore` works either way round.
@@ -581,5 +581,5 @@ This was found by running the tarball, not by reading it. `ldd` was clean and
 the addon loaded; `./predc --help` is what failed. That is the argument for
 `tools/pack-verify.sh` existing at all -- it starts the program at a real pty
 in a stock Node image and greps what it drew, and the escapes have to be
-stripped first, because a menu title is two runs in two colours and a search
+stripped first, because a menu title is two runs in two colors and a search
 for `File` otherwise finds nothing while everything is working.

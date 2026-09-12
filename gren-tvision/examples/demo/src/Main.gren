@@ -93,7 +93,7 @@ type alias Model =
     , now : Time.Posix
     , zone : Time.Zone
     -- Only the About box needs this, and it needs it because a message box
-    -- centres itself and a rectangle is in desktop coordinates.
+    -- centers itself and a rectangle is in desktop coordinates.
     , desktop : { cols : Int, rows : Int }
     }
 
@@ -357,11 +357,11 @@ handleEvent event model =
             else
                 { model = model, command = Cmd.none }
 
-        Command "colours" ->
-            { model = model, command = Tui.dialog tui (coloursDialog model) }
+        Command "colors" ->
+            { model = model, command = Tui.dialog tui (colorsDialog model) }
 
         DialogClosed closed ->
-            if closed.id == "colours" && closed.cmd == "ok" then
+            if closed.id == "colors" && closed.cmd == "ok" then
                 { model = { model | hue = hueAt (Tui.number "pick" closed.values) }
                 , command = Cmd.none
                 }
@@ -464,7 +464,7 @@ view model =
         , SubMenu
             { title = "~O~ptions"
             , key = ""
-            , items = [ Item { title = "~C~olours...", cmd = "colours", key = "", shortcut = "" } ]
+            , items = [ Item { title = "~C~olors...", cmd = "colors", key = "", shortcut = "" } ]
             }
         ]
     , theme = Tui.borland
@@ -628,13 +628,13 @@ aboutDialog model =
 
 
 {-| tvdemo's `Colors...` opens a `TColorDialog`, which edits the application's
-palette. There is no equivalent here and there does not need to be: a colour
+palette. There is no equivalent here and there does not need to be: a color
 dialog is a form, and what it sets is a field. This one is five radio buttons.
 -}
-coloursDialog : Model -> Tui.DialogSpec
-coloursDialog model =
-    { id = "colours"
-    , title = "Colours"
+colorsDialog : Model -> Tui.DialogSpec
+colorsDialog model =
+    { id = "colors"
+    , title = "Colors"
     , rect = { x1 = 24, y1 = 5, x2 = 56, y2 = 17 }
     , views =
         [ Tui.RadioButtons
@@ -647,11 +647,11 @@ coloursDialog model =
         , Tui.Label
             { id = "pickLabel"
             , rect = { x1 = 2, y1 = 1, x2 = 20, y2 = 2 }
-            , text = "~N~ote colour"
+            , text = "~N~ote color"
             , for = "pick"
             }
         , Tui.Button
-            { id = "coloursOk"
+            { id = "colorsOk"
             , rect = { x1 = 4, y1 = 8, x2 = 15, y2 = 10 }
             , title = "~O~K"
             , cmd = "ok"
@@ -659,7 +659,7 @@ coloursDialog model =
             , takesFocus = True
             }
         , Tui.Button
-            { id = "coloursCancel"
+            { id = "colorsCancel"
             , rect = { x1 = 17, y1 = 8, x2 = 29, y2 = 10 }
             , title = "Cancel"
             , cmd = "cancel"

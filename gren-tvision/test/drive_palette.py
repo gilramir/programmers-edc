@@ -54,12 +54,12 @@ def main():
     app.pump(2.5)
     screen = app.render()
     check("both windows drawn",
-          "Colours, said out loud" in screen and "Saying nothing" in screen, screen)
+          "Colors, said out loud" in screen and "Saying nothing" in screen, screen)
 
     display = app.display()
     for row, (attr, fg, bg) in enumerate(EXPECTED):
         line = screen.split("\n")[FIRST[1] + row]
-        check(f"line {row + 1} names attribute {attr}", f"colour is {attr}" in line,
+        check(f"line {row + 1} names attribute {attr}", f"color is {attr}" in line,
               repr(line))
         got = (display.fg_at(FIRST[0], FIRST[1] + row),
                display.bg_at(FIRST[0], FIRST[1] + row))
@@ -105,7 +105,7 @@ def main():
           (app.display().fg_at(*FIRST), app.display().bg_at(*FIRST)) == above,
           str(above))
     check("and the lines themselves are untouched",
-          " A span that names no colour follows" in app.render(), app.render())
+          " A span that names no color follows" in app.render(), app.render())
     check("the title says which set it is in",
           "Saying nothing (blue)" in app.render(),
           [r for r in app.render().split("\n") if "Saying nothing" in r])

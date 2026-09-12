@@ -131,7 +131,7 @@ type alias Model =
       -- the one state this tool can be in that it cannot draw a month for.
       showing : Maybe { year : Int, month : Int }
     , today : Maybe Date
-    -- A dialog centres itself on the desktop, so the tool has to know how big
+    -- A dialog centers itself on the desktop, so the tool has to know how big
     -- it is. Seeded and then kept current by `Resized`, which the shell passes
     -- on to every open tool.
     , desktop : { cols : Int, rows : Int }
@@ -160,7 +160,7 @@ converter needs the name and pays a port for it; this does not.
 said `{ cols = 80, rows = 23 }` and waited for a `Tui.Resized` to correct
 it -- but `Resized` fires when the size *changes*, so on any terminal that was
 never resized the guess stood for the whole run. The only thing that reads it
-is [`gotoDialog`](#gotoDialog), which centres itself in what it believes the
+is [`gotoDialog`](#gotoDialog), which centers itself in what it believes the
 desktop to be, so on an eighteen-row terminal the dialog was placed for a
 twenty-three-row one and its bottom five rows, `OK` and `Cancel` among them,
 were off the screen. `Help` guards against exactly this and says so; this

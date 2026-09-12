@@ -185,7 +185,7 @@ def main():
     # whose fields are undocumented is one nobody opens.
     text = open(config_file(home)).read()
     check("and explains the key it just invented",
-          any(line.startswith("#") and "colour scheme" in line
+          any(line.startswith("#") and "color scheme" in line
               for line in text.split("\n")),
           text)
 

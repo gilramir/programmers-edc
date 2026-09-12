@@ -40,7 +40,7 @@ load-bearing:
 **The row being typed in is never written back to.** [`editing`](#Model) holds
 the id of the field the user last touched and the text they put in it, and that
 one field renders from `editing` while every other renders from the last
-answer. Without it, normalising a typed `5` into `05` would move the caret
+answer. Without it, normalizing a typed `5` into `05` would move the caret
 under the user's fingers on the very next keystroke.
 
 **An incomplete row asks nothing.** Every field takes digits only -- that is
@@ -1332,7 +1332,7 @@ No `Theme.Inks`, unlike every other tool here, and that is not an oversight:
 inks are what a `Canvas` paints its `Span`s with, and this window is made of
 stock controls. A `StaticText` takes no `Hue` and an `InputLine` takes no
 `Hue`, so a table of input fields has no surface the model is allowed to
-colour. It follows the window's palette, which is the right answer anyway.
+color. It follows the window's palette, which is the right answer anyway.
 -}
 windows : { cols : Int, rows : Int } -> Model -> Array Tui.Window
 windows desktop model =
@@ -1349,7 +1349,7 @@ windows desktop model =
 {-| How wide the name column is: as wide as the longest name on it, within
 reason. `America/Argentina/Rio_Gallegos` is thirty characters and would push
 the window past eighty columns on its own, so the column is capped and the
-name is cut -- a name is recognisable from its first twenty-four characters,
+name is cut -- a name is recognizable from its first twenty-four characters,
 and the alternative is a window that does not fit the terminal it is in.
 -}
 nameWidth : Model -> Int
@@ -1535,7 +1535,7 @@ clockRow editing live fx names index y row =
                     -- honest way to say it in a model that re-renders: there
                     -- is nothing to type into, rather than a field that
                     -- swallows what is typed. It also *looks* right, because
-                    -- an input line carries its own background colour and a
+                    -- an input line carries its own background color and a
                     -- static text wears the window's.
                     --
                     -- `+ 1` on the x, because `TInputLine::draw` writes its

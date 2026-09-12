@@ -7,7 +7,7 @@ off the port and drives [`tvision-node`](../tvision-node) with it.
 
 The npm name is `gren-tvision-runtime` and the Gren name is
 `gilramir/gren-tvision`. Two registries, so nothing collides, but they are two
-different artefacts and the suffix is there to keep anybody from having to work
+different artifacts and the suffix is there to keep anybody from having to work
 that out for themselves.
 
 ```
@@ -257,7 +257,7 @@ and ignored. That is usually correct — the calendar does not store its own
 rectangle, so dragging it changes nothing it draws — and occasionally it is the
 whole bug, and either way it cannot be seen in the raw file.
 
-A program with a second inbound stream gets it labelled — predc's time
+A program with a second inbound stream gets it labeled — predc's time
 converter answers over `intlIn`, and two conversations printed as one would be
 worse than not having teed the second onto the tape at all.
 

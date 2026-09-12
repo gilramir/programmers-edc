@@ -56,7 +56,7 @@ toKey mode =
 
 {-| Anything that is not `list` is the grid, which is the same shape every
 other key in `Config` reads: a config file never reports an error, so a value
-nobody recognises has to be the default rather than a failure.
+nobody recognizes has to be the default rather than a failure.
 -}
 fromKey : String -> Mode
 fromKey key =

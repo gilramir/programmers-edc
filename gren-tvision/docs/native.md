@@ -72,7 +72,7 @@ The JavaScript side needs to start the Gren program and hold on to its ports.
 Two things about the Gren toolchain make this possible.
 
 **Compile to a module, not an executable.** `gren make Main` produces a
-self-running script that initialises itself and throws the handle away.
+self-running script that initializes itself and throws the handle away.
 `gren make Main --output=main.js` produces a CommonJS module that runs nothing
 and exports the program:
 
@@ -162,7 +162,7 @@ while the two sides agree, which is most of the time. They stop agreeing when
 the value moves faster than a round trip -- a held key, a mouse wheel -- and
 then a value from several renders ago comes back as news and is written over
 what the user has done since. The exception is a write the library could not
-honour, such as a position past the end of something that has since got
+honor, such as a position past the end of something that has since got
 shorter. That is worth reporting, because it is news rather than an echo, and
 it settles in one round.
 
@@ -174,7 +174,7 @@ and it needs no new machinery.
 
 **Version the wire format.** A Gren package and an npm package are published
 separately and will drift apart. Every message from Gren carries a `protocol`
-integer, and the runtime refuses a number it does not recognise. Without that,
+integer, and the runtime refuses a number it does not recognize. Without that,
 a new field looks to an old runtime like nothing at all, and the failure is a
 program that renders nothing or quietly stops updating.
 
@@ -429,7 +429,7 @@ because one of the packages contains a compiled shared object.
     Say exactly which in the README. If the library can be compiled directly
     from `binding.gyp`, with no CMake step, a source install gets much simpler;
     check whether its build generates any headers before assuming it can.
-  - The library's licence travels with the binary. If you link it statically,
+  - The library's license travels with the binary. If you link it statically,
     its notice files have to be in your tarball.
 
 [`docs/publishing.md`](https://github.com/gilramir/programmers-edc/blob/main/docs/publishing.md), in the repository

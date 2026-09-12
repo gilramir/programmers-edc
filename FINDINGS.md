@@ -316,8 +316,8 @@ reserves 0-99 for itself and 100-255 for the application, and `cmFileFocused`
 start at **110** and only spill into 1000+ once 255 is exhausted, where the
 restriction returns.
 
-The test for this had to be behavioural: greying a menu item is a *colour*
-change, and colour is exactly what the pty harness strips. What it checks is
+The test for this had to be behavioral: graying a menu item is a *color*
+change, and color is exactly what the pty harness strips. What it checks is
 that a disabled command does not fire.
 
 ### `operator+` decides whether a submenu nests or not
@@ -768,14 +768,14 @@ remaining C++ example would force into the API.
 
 ## Porting the rest of tvdemo
 
-### A canvas had one colour, and three examples needed two
+### A canvas had one color, and three examples needed two
 
-The chart came out the same colour all over because that is all a canvas could
+The chart came out the same color all over because that is all a canvas could
 be: `JsCanvas::draw()` took `getColor(colorIndex)` once and moved every string
 into the buffer with it. Nothing had complained, because the ASCII chart really
-is one colour.
+is one color.
 
-The next three examples are all colour. `calendar.cpp` draws today with
+The next three examples are all color. `calendar.cpp` draws today with
 `getColor(7)` and the rest of the month with `getColor(6)`; `puzzle.cpp` keeps
 two attributes in an array and indexes it per tile; `palette.cpp` is an essay
 about nothing else. So a canvas line stopped being a string and became an array
@@ -795,7 +795,7 @@ already using. A `Maybe { fg, bg }` would have forced every highlight to name a
 background it has no opinion about, which is how a view stops matching the rest
 of the program when someone changes the theme.
 
-**A span with no colour has to encode to what a string encoded to.** The
+**A span with no color has to encode to what a string encoded to.** The
 runtime diffs canvas lines by comparing their JSON, so a `plain` span emits
 `{"text": "..."}` and nothing more; had it emitted `{"text":..,"fg":null,..}`
 every canvas in every existing example would have repainted on every render and
@@ -809,24 +809,24 @@ which is the only number that is right.
 
 The binding accepts a bare string in place of an array of spans, so the
 `tvision-node` examples and their tests did not have to change at all. That is
-not a courtesy: it is the shape every canvas had before colour existed, and it
+not a courtesy: it is the shape every canvas had before color existed, and it
 is what `Tui.line` produces.
 
-### The test harness could not see colour, so it grew eyes
+### The test harness could not see color, so it grew eyes
 
 `Screen`, the little terminal emulator in `tvision-node/test/harness.py`,
 parsed SGR only well enough to skip it. That was fine while the only question
 was what the screen said. It is not fine for a calendar, where the entire
-visible difference between today and the twenty-ninth is the colour: the text
+visible difference between today and the twenty-ninth is the color: the text
 is identical, there is no highlight bar, and the cursor is somewhere else.
 
 So `Screen` now keeps `(foreground, background)` per cell alongside the
 character, and `Pty.display()` hands back the whole thing -- text, cursor and
-colour together. `fg_at(col, row)` is what `drive_calendar.py` asserts on.
+color together. `fg_at(col, row)` is what `drive_calendar.py` asserts on.
 
 This is the third time the harness has had to grow before a port could be
 tested (`render()` for the ticking clock, `cursor()` for the ASCII chart, now
-colour), and every time the addition was smaller than the bug it would have
+color), and every time the addition was smaller than the bug it would have
 hidden.
 
 ### Porting the calendar: `localtime()` in a constructor is untestable
@@ -885,10 +885,10 @@ checks the screen agrees, breadth-first searches for the answer and plays it.
 Purity bought a test that the original cannot have. It is the clearest example
 so far of the trade this binding makes going the right way.
 
-The colours are the other half, and they are keyed on the *letter* rather than
-the square, so a tile carries its colour as it slides. The checkerboard is
+The colors are the other half, and they are keyed on the *letter* rather than
+the square, so a tile carries its color as it slides. The checkerboard is
 therefore a picture of how scrambled the board is, and a solved board drops
-back to one colour -- which is the only announcement `puzzle.cpp` makes that
+back to one color -- which is the only announcement `puzzle.cpp` makes that
 you have won, and the thing the test asserts to prove it did.
 
 ### Porting the calculator: a button that cannot be focused
@@ -910,7 +910,7 @@ does anything where the window has a canvas doing the reading.
 
 The display itself is a canvas, which is why it can be selectable, and it is
 painted green on black -- the original uses palette entry 1, and this is the
-first place where saying the colour outright is simply nicer than looking it
+first place where saying the color outright is simply nicer than looking it
 up.
 
 `calcKey()` transcribes almost exactly. The one place it does not is
@@ -923,11 +923,11 @@ is the original's state machine unchanged.
 
 ### Porting the palette example: the subject does not survive translation
 
-`tvision/examples/palette` is an essay about how a view gets its colour. A view
-asks for colour 1; its palette turns that into an index into the window's
+`tvision/examples/palette` is an essay about how a view gets its color. A view
+asks for color 1; its palette turns that into an index into the window's
 palette; the window's turns that into an index into the application's; the
 application's holds the byte the terminal receives. Three levels, three
-parallel palettes for colour, black-and-white and monochrome displays, and a
+parallel palettes for color, black-and-white and monochrome displays, and a
 comment explaining that the tables are `#define`s so the compiler will
 concatenate them.
 
@@ -935,7 +935,7 @@ concatenate them.
     #define cpTestWindow "\x88\x89\x8A\x8B\x8C\x8D"
     #define cpTestAppC   "\x3E\x2D\x72\x5F\x68\x4E"
 
-In Gren a span names its colour and there is nothing in between, so the essay
+In Gren a span names its color and there is nothing in between, so the essay
 becomes a six-row table holding what those three lines resolve to. The
 original's last line -- the one whose comment says it "bypasses the palettes"
 -- ends up indistinguishable from the six above it, because there are none to
@@ -943,11 +943,11 @@ bypass.
 
 That is a real trade and the port says so rather than claiming a win. The
 indirection exists so that one edit to the application's palette restyles every
-view in the program; naming the colour gives that up. What comes back is that
-the colour is in the model, where the same branch that decides *what* to draw
-decides what colour to draw it -- which is how the calendar marks today and the
+view in the program; naming the color gives that up. What comes back is that
+the color is in the model, where the same branch that decides *what* to draw
+decides what color to draw it -- which is how the calendar marks today and the
 puzzle shows a tile out of place, and neither of those is a question a palette
-can answer. A canvas that names no colour still follows the window, which is
+can answer. A canvas that names no color still follows the window, which is
 what the example's second window is for and what nearly every other canvas in
 these examples does.
 
@@ -1222,7 +1222,7 @@ wfZoom`, `gfGrowAll | gfGrowRel`, `ofTileable`, and a `zoomRect`. Dialogs keep
 
 The child views do *not* grow with the window, because their rectangles are
 what the model said they are. A tiled window therefore shows a clipped canvas
-rather than a stretched one. That is the honest behaviour for a declarative
+rather than a stretched one. That is the honest behavior for a declarative
 API and it is a known gap, not an oversight: growing a view would put its size
 somewhere the model cannot see, which is the thing this whole binding is
 arranged to avoid.
@@ -1387,7 +1387,7 @@ four times per keystroke. The fix is a generation counter — a change bumps it
 and schedules a `Process.sleep`, and the sleep starts a run only if its
 generation is still the current one. `drive_watch.py` writes five files in a
 row and checks that exactly one run happened and that all five were seen, which
-is the pair of assertions that pins the behaviour down: debounced, not
+is the pair of assertions that pins the behavior down: debounced, not
 throttled, and not deaf.
 
 **A killed child goes on talking for a moment.** `Process.kill` on the id
@@ -1460,30 +1460,30 @@ C++ example would force something, and each one did. The first program written
 for the API rather than translated into it forced nothing — the widget set was
 finished, and what it found instead was a documentation hole with teeth in it.
 
-### Every window is grey, so half the palette is unreadable in one
+### Every window is gray, so half the palette is unreadable in one
 
-`examples/watch` paints a job's output in the colour of its state, and the
+`examples/watch` paints a job's output in the color of its state, and the
 first attempt used `LightGreen` for a pass, `LightRed` for a failure and
 `LightGray` for a run still going. On screen that is hard to read, hard to
 read, and completely invisible.
 
 The reason is one line of inheritance. `JsWindow` derives from `TDialog`
 (FINDINGS has the note on what else that cost), so a window's background is the
-light grey a dialog has and not the blue a `TWindow` has. Against light grey
+light gray a dialog has and not the blue a `TWindow` has. Against light gray
 the eight *bright* hues — the top half of the sixteen — are the wrong half:
 `LightGray` text on a `LightGray` ground is nothing at all, and the rest are
 low contrast. Against Turbo Vision's blue they would all have been fine, which
 is why the mistake is easy to make from a palette table.
 
 `Green`, `Red` and `DarkGray` read properly, and a job with nothing to say uses
-**no colour at all** — `Tui.plain`, which paints in whatever the view's palette
+**no color at all** — `Tui.plain`, which paints in whatever the view's palette
 entry says. That last one is the point worth keeping: a span that names no
-colour is the only kind that stays correct if the window's palette ever
+color is the only kind that stays correct if the window's palette ever
 changes, and it is exactly what the calendar's write-up argued for when spans
-were added. Naming a colour is for the thing that is different from its
+were added. Naming a color is for the thing that is different from its
 surroundings, not for the ordinary case.
 
-`drive_watch.py` asserts on the two colour codes directly. Nothing else on
+`drive_watch.py` asserts on the two color codes directly. Nothing else on
 screen would show the difference, which is the same reason `drive_calendar.py`
 has to.
 
@@ -1656,7 +1656,7 @@ on a `Cmd.batch` ordering nothing promises.
 ### `sfSelected` does not mean what the name suggests
 
 The first version focused the view and reported success, and the window it was
-in stayed grey. The callback even came back — Turbo Vision said the list box
+in stayed gray. The callback even came back — Turbo Vision said the list box
 was focused — and the frame did not change.
 
 `TView::focus()` starts with
@@ -1770,7 +1770,7 @@ rule exists for.
 `flushResize()` compares `deskTop->size` with the last size reported, at the
 pump's safe point, beside `flushFocused` and `flushScrolled`. Two integers once
 per pump. It is true no matter how the resize happened, it needs no queue
-because the safe point *is* where it runs, and initialising the remembered size
+because the safe point *is* where it runs, and initializing the remembered size
 to zero is what makes the first pass after startup report the real size with no
 special case for startup at all.
 
@@ -2035,7 +2035,7 @@ reachable or deliberately not.
 
 ### It could not have been written two commits ago
 
-A message box centres itself, a dialog's rectangle is in desktop coordinates,
+A message box centers itself, a dialog's rectangle is in desktop coordinates,
 and until the `Resized` event nothing in a pure `view` function knew how big
 the desktop was. So `desktop` is a field on the spec and the model passes the
 size it was last told:
@@ -2052,8 +2052,8 @@ Tui.dialog tui <|
 ```
 
 The JavaScript one calls `screenSize()` and is a row out because of it: it
-centres against the *screen* and then places the result in desktop
-coordinates, so an 80x25 terminal puts the box one row below centre. Nobody
+centers against the *screen* and then places the result in desktop
+coordinates, so an 80x25 terminal puts the box one row below center. Nobody
 noticed, and nobody would; it is worth writing down only because the Gren
 version gets it right by having been given the right number rather than by
 being more careful.
@@ -2564,15 +2564,15 @@ the screen forever — the exact cost the status line was already paying.
 **A view's palette is a question about its group, and `TStaticText`'s answer
 assumed a window.** `cpStaticText` is `"\x06"` — the sixth entry of whatever
 the owner offers — and for a window or a dialog that is the panel's text
-colour. On the *application* the owner's table is `cpAppColor`, whose first
+color. On the *application* the owner's table is `cpAppColor`, whose first
 seven entries belong to the menu bar and the status line, and whose sixth is
-the bar's **selected disabled** colour. So the clock drew black on green,
-across a grey bar, on the same row as it. Nothing chose that colour; it is the
+the bar's **selected disabled** color. So the clock drew black on green,
+across a gray bar, on the same row as it. Nothing chose that color; it is the
 sixth slot of two unrelated tables, read as if it were one.
 
 Turbo Vision's own two views on `TProgram` say what the answer should have
 been. `TClockView::draw` and `THeapView::draw` both call `getColor(2)` — the
-bar's normal colour, which is `theme.bar` after `buildAppPalette` — and neither
+bar's normal color, which is `theme.bar` after `buildAppPalette` — and neither
 overrides `getPalette` at all, because base `TView::getPalette` returns null
 and a null palette passes the index straight up. `JsStaticText::getPalette`
 now returns `"\x02"` when its owner is the application and `TStaticText`'s own
@@ -2584,14 +2584,14 @@ overlay set by a rerender, and the question "which group am I in" has an
 answer at exactly the moment it is asked.
 
 **What is worth keeping is how long it survived.** Twelve drivers assert
-colour, `drive_demo` asserted four separate things about the clock, and the
-sweep every driver runs for text drawn in the colour behind it passes on
-green-on-grey because that contrasts fine. All of them were about the *text*.
+color, `drive_demo` asserted four separate things about the clock, and the
+sweep every driver runs for text drawn in the color behind it passes on
+green-on-gray because that contrasts fine. All of them were about the *text*.
 It was found by `docs/shots.py` — the first time anything in this repo produced
 a picture — and it was obvious in the picture instantly. `drive_demo` now
 compares the clock's ink against a plain letter of the menu bar, which is a
 comparison rather than a constant so that it holds under any theme, and not
-the first letter of an entry because that is the hot key and a third colour on
+the first letter of an entry because that is the hot key and a third color on
 purpose.
 
 ## The tvedit milestone: where the state stops being the model's
@@ -2607,7 +2607,7 @@ Elm answer and probably fine for real files, but the diff is per-view, not
 per-character, so every keystroke would resend the document." That is the
 view→model direction and it is the smaller half. The bigger half is the other
 one: **`view` runs on every tick of every subscription.** A `text` field on an
-editor would serialise the whole file into the render message once a second for
+editor would serialize the whole file into the render message once a second for
 as long as a clock is running, whether or not anybody touched it. And a model
 that owned the buffer would have to implement insert, delete, word-left, undo
 and a clipboard — which is to say implement `TEditor`.
@@ -2753,7 +2753,7 @@ the binding leaves `TEditor::findStr`, `replaceStr` and `editorFlags` set to
 whatever the model last asked for. Search again in the menu is the *program*
 issuing the same command a second time, which is what lets it say "not found"
 in its own words; `Ctrl-L` does the same thing silently, which is Borland's
-behaviour and is fine.
+behavior and is fine.
 
 ### And the reserved vocabulary reached its ceiling
 
@@ -3032,16 +3032,16 @@ now disables `cmZoom` for a window that cannot zoom. `cmResize` is deliberately
 left alone: a fixed-size window can still be *moved*, and `cmResize` is the
 move as well as the grow.
 
-The check for it is in `drive_ascii.py`, and it asserts on the colour the
-entry is drawn in rather than on any text, because greying is the entire
-visible difference -- the same reason the chart's own colour checks read
+The check for it is in `drive_ascii.py`, and it asserts on the color the
+entry is drawn in rather than on any text, because graying is the entire
+visible difference -- the same reason the chart's own color checks read
 attributes.
 
-## A window's colour set, and the buffer that hid the change
+## A window's color set, and the buffer that hid the change
 
-`WindowPalette` on a [`Window`](Tui#Window) is the small half of the colour
+`WindowPalette` on a [`Window`](Tui#Window) is the small half of the color
 work and the one piece of Turbo Vision's palette machinery that survives being
-asked to name a colour instead of an index into a table -- because there are
+asked to name a color instead of an index into a table -- because there are
 three of them and they have names, rather than a hundred and thirty-five of
 them and byte offsets.
 
@@ -3059,28 +3059,28 @@ list boxes, and those ask for palette entries past the eight that a
 first entries of `cpBlueDialog` agree with `cpBlueWindow` exactly so that a
 dialog could be made to look like a window, which is what makes this work at
 all -- and which means the fix in the previous section was, strictly, selecting
-the blue *dialog* palette. The colours are the same; the length is not, and the
+the blue *dialog* palette. The colors are the same; the length is not, and the
 length is the reason.
 
 **`drawView()` is not enough, and fails silently.** Setting `palette` and
 asking the window to draw itself changed nothing on screen -- while the same
 render's `setTitle` visibly worked, which is what made it confusing. A
 `TGroup` that has a buffer draws by blitting it (`tgroup.cpp:128`), so
-`drawView()` on a recoloured window paints the cached colours straight back.
-`redraw()` is `drawSubViews`, which asks every child for its colour again, and
+`drawView()` on a recolored window paints the cached colors straight back.
+`redraw()` is `drawSubViews`, which asks every child for its color again, and
 that is the only route to a palette. The check that found it asserts the body
-colour of a canvas that names no colour -- three sets, three different
+color of a canvas that names no color -- three sets, three different
 attributes, and the third `Alt-W` bringing the first back.
 
 `examples/palette` is where this is demonstrated, and it is the right place
 rather than a convenient one: that example exists to show the trade between
-naming a colour and inheriting one, and `Alt-W` now shows both halves at once.
-The window whose spans name both halves of their colour does not move; the
+naming a color and inheriting one, and `Alt-W` now shows both halves at once.
+The window whose spans name both halves of their color does not move; the
 window whose spans name nothing follows. Same screen, same keystroke.
 
-## The window palette, which was grey because nobody set it
+## The window palette, which was gray because nobody set it
 
-Reviewing predc's colours turned up a bug that had been on screen since the
+Reviewing predc's colors turned up a bug that had been on screen since the
 first window this package ever drew, and had been read as a design decision
 because it was uniform.
 
@@ -3089,33 +3089,33 @@ and `beWindow()` puts back what `TDialog`'s constructor takes out: `wfGrow`,
 `wfZoom`, `gfGrowAll | gfGrowRel`, `ofTileable`. Its comment lists exactly those
 four. There is a fifth. `TWindow`'s constructor sets `palette = wpBlueWindow`
 and `TDialog`'s overwrites it with `dpGrayDialog` (`tdialog.cpp:31`), so every
-window on the desktop was drawn in the *dialog* palette: white on light grey.
+window on the desktop was drawn in the *dialog* palette: white on light gray.
 
-That is the colour of the Find box in tvedit's screenshot at the top of
+That is the color of the Find box in tvedit's screenshot at the top of
 tvision's README rather than of the editor behind it, and it is why nothing
 built on this ever looked like Turbo Vision. One line in `beWindow()` fixes it,
 and the split it restores is the one Turbo Vision has always drawn: windows on
-the desktop are blue, modal dialogs are grey. Dialogs never go through
+the desktop are blue, modal dialogs are gray. Dialogs never go through
 `beWindow()`, so they were right all along.
 
 ### What it cost, which is the interesting half
 
-`Hue` names an absolute colour with nothing between it and the terminal --
+`Hue` names an absolute color with nothing between it and the terminal --
 `examples/palette` argues at length for why -- so **every span in the repo had
-been chosen against a background that was grey by accident.** Changing the
+been chosen against a background that was gray by accident.** Changing the
 ground silently invalidated all of them, and the failure mode is invisible
-rather than loud: a colour that no longer contrasts still draws.
+rather than loud: a color that no longer contrasts still draws.
 
 Three kinds of breakage, and the suite found two of them:
 
   - **Dark on dark.** predc's hex viewer painted its column header and offset
-    column in `ink Blue`, which was right on light grey and is blue-on-blue on
+    column in `ink Blue`, which was right on light gray and is blue-on-blue on
     a window. Measured at `fg=34 bg=44`: perfectly invisible, and *no test
     failed*, because nothing asserted on those cells.
-  - **A highlight the same colour as the text.** `examples/calendar` marked
+  - **A highlight the same color as the text.** `examples/calendar` marked
     today in `ink Yellow` and `examples/puzzle` drew its checkerboard in it --
     and yellow is exactly what a blue window's ordinary text is. Both drivers
-    caught it, because both assert that some cell differs from the body colour.
+    caught it, because both assert that some cell differs from the body color.
   - **A background that matches the ground.** Both of predc's canvases marked
     their selection with `on Blue`, a blue block on a blue window. `drive_ascii`
     and `drive_hex` caught these.
@@ -3124,26 +3124,26 @@ The repaint settles a vocabulary, and it is worth having in one place because
 the next canvas will need it: `LightCyan` for a ruler or a label, `Cyan` for a
 placeholder, `LightRed` for something wrong, `LightGreen` for something marked,
 and `on LightGray (ink Blue)` for a selection -- which is not an invention but
-Turbo Vision's own selected-text colour, app palette entry 15 of a blue window.
+Turbo Vision's own selected-text color, app palette entry 15 of a blue window.
 `Tui.Hue`'s doc comment now says all of this, including the part that reads
 backwards: `Yellow` is not a highlight on a window, it is the default.
 
 `drive_ascii.py`'s comment on this has now been rewritten twice and is worth
-reading as a pair. The first version pinned "dark blue labels, dark grey dots"
-because an earlier attempt had put bright yellow on light grey at about 1.5:1.
-Those are the two colours that disappear on blue. The check is the same check
+reading as a pair. The first version pinned "dark blue labels, dark gray dots"
+because an earlier attempt had put bright yellow on light gray at about 1.5:1.
+Those are the two colors that disappear on blue. The check is the same check
 either way -- *the model is the only thing that can get this wrong, so fail
 here rather than in someone's eyes* -- which is the argument for asserting on
-colour at all in a terminal test.
+color at all in a terminal test.
 
 ## The application palette, described rather than tabulated
 
-`Theme` on a [`Ui`](Tui#Ui) is the rest of the colour work: every colour on the
+`Theme` on a [`Ui`](Tui#Ui) is the rest of the color work: every color on the
 screen that the package draws rather than the model, in seventeen fields.
 
 ### Why it is seventeen and not a hundred and thirty-five
 
-Turbo Vision's application palette is 135 colour attributes and
+Turbo Vision's application palette is 135 color attributes and
 `examples/palette` argues -- correctly -- that the *indirection* into them has
 no Gren equivalent. The table does, and the reason is that the 135 are not 135
 decisions. The layout is fixed and structured:
@@ -3158,12 +3158,12 @@ decisions. The layout is fixed and structured:
     96-127   the cyan dialog set
     128-135  the help viewer
 
-One desktop, one bar, and three coloured surfaces each described the same way
+One desktop, one bar, and three colored surfaces each described the same way
 and written into two blocks apiece. So a `Theme` is a desktop pair, five bar
-colours, and three `ThemePanel`s of nine -- and `buildAppPalette` in `app.cc`
+colors, and three `ThemePanel`s of nine -- and `buildAppPalette` in `app.cc`
 is the expansion, one commented line per slot. That file is the only place the
 thirty-two dialog entries are written down in order, which matters because
-getting one wrong miscolours exactly one kind of control and nothing reports it.
+getting one wrong miscolors exactly one kind of control and nothing reports it.
 
 **`Tui.borland` is Turbo Vision's look rebuilt, not its table reproduced**, and
 the first version of this write-up said otherwise. It claimed the expansion was
@@ -3177,10 +3177,10 @@ twenty lines of Python and should have been the first thing done -- says **82 of
 help viewer, the two slots per set that no view's palette string indexes, and
 the cyan dialog set, which a program gets only by asking for a `CyanWindow`.
 The rest is the model deliberately treating a surface as one surface: stock
-Turbo Vision puts a list box on cyan *inside* a grey dialog and a check box
+Turbo Vision puts a list box on cyan *inside* a gray dialog and a check box
 cluster on cyan too, and the seventeen-field model puts both on the panel's own
 ground. The stock blue dialog set is the largest divergence and the most
-deliberate -- it is a blue-framed grey dialog rather than a blue surface, and a
+deliberate -- it is a blue-framed gray dialog rather than a blue surface, and a
 window drawn in it would not look like the editor it is supposed to look like.
 
 That is a fair thing for a described scheme to be. It was not a fair thing to
@@ -3189,7 +3189,7 @@ call byte-identical.
 ### Three things that were not obvious
 
 **A Gren union constructor takes at most one parameter**, so `Rgb Int Int Int`
-does not compile. `Rgb 0xF08C00` is better anyway: it is how a colour is
+does not compile. `Rgb 0xF08C00` is better anyway: it is how a color is
 written everywhere else, and it is what `TColorRGB`'s own constructor takes.
 The split into three bytes happens in the encoder, once, rather than in C++
 against a number that has already been through a double.
@@ -3197,17 +3197,17 @@ against a number that has already been through a double.
 **`Ansi` and `Rgb` are a real choice and not a convenience.** A theme built out
 of `Ansi` names one of the sixteen and therefore inherits whatever scheme the
 person running the program has set on their terminal -- it belongs to their
-machine and matches the rest of it. `Rgb` pins the colour and looks the same
+machine and matches the rest of it. `Rgb` pins the color and looks the same
 everywhere, including where that is wrong. magiblot's TVision quantises an
 `Rgb` down when the terminal cannot do better, so a 24-bit theme still runs
-over ssh; it just stops being the colour that was picked. A dark theme is the
+over ssh; it just stops being the color that was picked. A dark theme is the
 case that needs `Rgb`, because `Black` and `DarkGray` is the only dark pair the
 sixteen offer and it is simultaneously too far apart to read as one surface and
 too close to be a border.
 
 **Applying it is a whole-screen repaint, so it has to be diffed.** `setTheme`
 overwrites the palette in place and calls `setScreenMode(TScreen::screenMode)`,
-which is what tvdemo's own colour dialog does (`tvdemo2.cpp:349`) and the only
+which is what tvdemo's own color dialog does (`tvdemo2.cpp:349`) and the only
 precedent there is for changing a scheme while a program runs. A `Ui` is
 rendered whole on every update, so a model that renders the same theme thirty
 times a second would repaint the screen thirty times: `tui.js` compares the
@@ -3219,8 +3219,8 @@ the first frame is drawn in the theme rather than repainted into it.
 
 A [`Span`](Tui#Span) that names a [`Hue`](Tui#Hue). That is deliberate and it
 is the same trade `examples/palette` has always been about, one level up: a
-span colour is absolute, so a program with themed canvases keeps its own hues
-in its model beside its choice of `Theme` and paints from them. The colour is
+span color is absolute, so a program with themed canvases keeps its own hues
+in its model beside its choice of `Theme` and paints from them. The color is
 a model decision, made where the decision about what to draw is made.
 
 `examples/palette` now shows all three levels on one screen, which is why the
@@ -3228,7 +3228,7 @@ demonstration belongs there rather than anywhere more convenient. `Alt-W` moves
 one window between the three sets a theme defines. `Alt-T` changes what those
 three sets are, and takes the desktop and the menu bar with it -- which no
 window palette can reach. And through both of them the window whose spans name
-both halves of their colour does not move at all.
+both halves of their color does not move at all.
 
 ## predc's three schemes, and the seam between the two halves of a theme
 
@@ -3240,7 +3240,7 @@ the tools follow a theme meant changing `view : Model -> Tui.Window` to
 
 That is not a gap to close. It is the same trade `examples/palette` has always
 been about, one level up: a span names a `Hue` and there is nothing between it
-and the terminal, deliberately, so the colour is a model decision. What predc
+and the terminal, deliberately, so the color is a model decision. What predc
 adds is the shape that decision takes in a program with more than one scheme --
 `Theme.Inks`, four fields named for what they *mean*:
 
@@ -3253,7 +3253,7 @@ adds is the shape that decision takes in a program with more than one scheme --
 Each theme answers for its own ground, and that is the point rather than an
 inconvenience: the hues that read on Borland's blue are the hues that vanish on
 a light one. The ASCII chart has now been repainted twice by hand for exactly
-this reason -- once when its window's interior turned out to be light grey by
+this reason -- once when its window's interior turned out to be light gray by
 accident, once when fixing that made it blue -- and a program with three
 schemes cannot be repainted a third time.
 
@@ -3261,7 +3261,7 @@ schemes cannot be repainted a third time.
 
 `Tui.Tint` has `Rgb`; `Tui.Hue` has sixteen names. So predc's Midnight theme is
 a hand-picked near-black ground with `LightCyan` painted on it, and the two have
-to be chosen to sit together. That asymmetry is deliberate -- a span colour is
+to be chosen to sit together. That asymmetry is deliberate -- a span color is
 resolved against a view's palette and giving it 24 bits would mean giving up
 `TColorBIOS` in the one place where the point is to agree with whatever the
 window is already using -- but it is the thing to know before writing a theme,
@@ -3293,16 +3293,16 @@ setting that survives only a tidy exit is a setting that gets lost.
 
 ### And the test harness could not see any of it
 
-`drive_theme.py` asserts on colours, and the first version of it reported that
+`drive_theme.py` asserts on colors, and the first version of it reported that
 nothing had changed. The harness's SGR parser understood 30-37, 90-97, 40-47
 and 100-107 and skipped anything else -- so `38;2;240;140;0` was read as four
-separate codes, matched none of them, and left the *previous* colour in place.
+separate codes, matched none of them, and left the *previous* color in place.
 Every cell of a truecolor screen came back as whatever was last set from the
 sixteen, which is indistinguishable from a screen that did not repaint.
 
-It now stores a 24-bit colour as an `(r, g, b)` tuple, which keeps every
+It now stores a 24-bit color as an `(r, g, b)` tuple, which keeps every
 existing `== 34` meaning what it meant and lets a check say
-`isinstance(bg, tuple)` for "this really is the colour that was asked for and
+`isinstance(bg, tuple)` for "this really is the color that was asked for and
 not the nearest of sixteen". The driver sets `COLORTERM=truecolor` for the same
 reason, and `HOME` to a fresh temporary directory so that the first-run case is
 actually a first run.
@@ -3317,33 +3317,33 @@ thirty-two entries were taken from the Turbo Vision Programming Guide's list,
 which is *nearly* right and puts the list viewer at slots 28-31. The authority
 is not the book: it is each view's own palette string, and `cpListViewer` is
 `"\x1A\x1A\x1B\x1C\x1D"`, which is slots 26-29. So a file dialog's rows were
-drawn in the scroll bar's colours -- blue on cyan under Borland, and a
-1.85:1 grey-on-grey under Gren, which is where it was finally noticed.
+drawn in the scroll bar's colors -- blue on cyan under Borland, and a
+1.85:1 gray-on-gray under Gren, which is where it was finally noticed.
 
 Nothing reported it, and nothing could have: no check in the suite asserts on a
-list row's colour, so both the wrong map and the "all 529 checks passed"
+list row's color, so both the wrong map and the "all 529 checks passed"
 argument for it sailed through. `writeDialogSet` now cites the ten palette
 strings it is derived from, one per line, with their file and line numbers --
-`cpCluster`'s fifth colour being `0x1F` and therefore thirteen slots away from
+`cpCluster`'s fifth color being `0x1F` and therefore thirteen slots away from
 its other three is exactly the sort of thing a list written from memory gets
 wrong.
 
 **Buttons and input lines had to become two fields.** They were one, `control`,
-and Turbo Vision has always drawn them differently: in the stock scheme a grey
+and Turbo Vision has always drawn them differently: in the stock scheme a gray
 dialog's buttons are black on green and its fields are white on blue. One
-colour for both makes every text field look like something to press -- and it
+color for both makes every text field look like something to press -- and it
 was also what forced predc's first Gren theme into a corner, because an orange
-button meant an orange text box, so the dialogs had to keep a quiet grey and
+button meant an orange text box, so the dialogs had to keep a quiet gray and
 could not have the orange at all. Split into `button`/`buttonAccent` and
 `input`/`inputAccent`, both problems go away at once: the Gren theme's buttons
 are the logo orange everywhere, its fields are recessed, and predc's dark theme
 can put its fields *below* the window's ground rather than on it.
 
 **Two smaller ones**, both places where a value was structurally in the wrong
-family rather than merely an odd colour: a grey dialog's scroll bar was blue on
+family rather than merely an odd color: a gray dialog's scroll bar was blue on
 cyan when the stock scheme has it cyan on blue, and slot 8 -- the label of the
 field that currently has the focus -- was mapped to `selected`, which put a
-coloured block behind the word "Name" in every dialog. It is emphasis, not a
+colored block behind the word "Name" in every dialog. It is emphasis, not a
 selection, so it is the brightened text now.
 
 ### A light theme is a better test than a dark one
@@ -3352,7 +3352,7 @@ Every one of these had been on screen since the palette work landed, in every
 theme, and the light one is what made three of the four visible. A dark scheme
 that goes wrong is illegible and gets fixed; a light one that goes wrong is
 *nearly* legible and stays that way. `Theme.gren`'s doc comment now records the
-contrast ratio of every colour in it against the ground it lands on, and the
+contrast ratio of every color in it against the ground it lands on, and the
 numbers are the argument: white on the logo orange is 2.8:1 and reads as a
 slightly odd choice rather than as a bug, which is precisely why the focused
 Name field and the selected row of a file list were wrong for as long as they
@@ -3360,11 +3360,11 @@ were.
 
 ### And the suite was not isolated from the user's own config
 
-`drive_ascii` and `drive_hex` assert on colours and read `$HOME`, so once a
+`drive_ascii` and `drive_hex` assert on colors and read `$HOME`, so once a
 scratch script left a `{"theme": "gren"}` in the real `~/.config/predc/`, four
 checks in two suites started failing against a program that was working
 perfectly. Every predc driver now runs with `HOME` set to a fresh temporary
-directory. A suite whose result depends on which colour scheme the person
+directory. A suite whose result depends on which color scheme the person
 running it happens to like is not a suite.
 
 ## The dialog that opened on the wrong view, and the `append` that put it there
@@ -3509,7 +3509,7 @@ at the end of this file -- and the shape above is exactly why it cost one small
 function in `Tool/Hex.gren` when it came: a drag moves the cursor, and the
 cursor is already the far end of the mark.
 
-### A key that picks a colour has to wear it
+### A key that picks a color has to wear it
 
 The line the mode puts on the screen first read `1-6 paint`, which is a range
 of numbers and not an answer to the question somebody in the mode is asking:
@@ -3523,10 +3523,10 @@ can carry the answer instead of describing where to find it.
 
 ### And one off-by-one that only the menu could have
 
-The six colours are a key each (`1`-`6`) and a menu entry each, and the menu
+The six colors are a key each (`1`-`6`) and a menu entry each, and the menu
 entry's `cmd` first carried the *index* while the key carried the number on the
-cap. Both ends went through the same parser, which subtracted one. Every colour
-picked from the menu came out as the one to its left, and every colour picked
+cap. Both ends went through the same parser, which subtracted one. Every color
+picked from the menu came out as the one to its left, and every color picked
 with a key was right. Two ends of the same command have to agree on what the
 number in it means, and the cheapest way to make them agree is to give them the
 same number: `hex.ink3` is what `3` does.
@@ -3615,7 +3615,7 @@ takes the same range as the rows on the screen, and both go out through
 the clipboard, and it found three things.
 
 **With nothing marked, `y` takes the highlight under the cursor.** That rule is
-one line and it is what makes a highlight worth more than its colour: mark a
+one line and it is what makes a highlight worth more than its color: mark a
 range once, paint it, and it stays a range -- something to come back to
 tomorrow and copy without marking it again. Painting stopped being decoration
 the moment reading it back was possible.
@@ -3924,11 +3924,11 @@ one-way protocol.
 ### What predc has to do by hand, and why
 
 `Argparse.Program` is the runner that would normally handle all of this --
-help to stdout, errors to stderr, exit codes, colour. predc cannot use it: it
+help to stdout, errors to stderr, exit codes, color. predc cannot use it: it
 is a `Node.SimpleProgram`, it ends in a process that exits, and predc's ends in
 one that paints. So `Main.init` matches on `CommandParseResult` itself, which
 is the manual shape argparse documents, and copies exactly one rule out of the
-runner -- colour only if `Terminal.initialize` says a terminal is attached and
+runner -- color only if `Terminal.initialize` says a terminal is attached and
 `NO_COLOR` is unset. (`Terminal.initialize` is a read of `process.stdout` and
 touches nothing, so asking it before Turbo Vision starts is safe.)
 
@@ -3971,7 +3971,7 @@ read of its own.
 alternate screen nor mouse tracking nor a clear ever appears, alongside the
 exit code and the text. It then runs the same two through a pipe, which is the
 only way to tell stdout from stderr (a pty is one file) and the case where the
-colour has to come off and the width has to be eighty.
+color has to come off and the width has to be eighty.
 
 ### Eighty was the only width it was right at
 
@@ -4020,7 +4020,7 @@ available -- a tool that appears to hang before it has done anything at all.
 
 `Main.say` refuses to believe a width under twenty now, which is the floor
 `Argparse.Program` applies for exactly this reason. Which is the interesting
-half: predc **copied that runner's rules by hand** -- colour only for a
+half: predc **copied that runner's rules by hand** -- color only for a
 terminal with no `NO_COLOR`, eighty when there is no terminal -- because it
 cannot use the runner itself, and the floor was not among them, having been
 added upstream after the copy was taken. A rule copied is a rule that stops
@@ -4065,7 +4065,7 @@ And it was ours. `JsScrollBar` sets `options |= ofSelectable`, so that a bar
 the model asked for by id is reachable by Tab, and Turbo Vision's own bars --
 the one a `TListViewer` makes for itself -- are not selectable at all and
 therefore never hit that branch. Making the bar keyboard-reachable had quietly
-made it worse with a mouse than the one it was modelled on.
+made it worse with a mouse than the one it was modeled on.
 
 `ofFirstClick` is the option that exists for exactly this, and it is one line:
 
@@ -4090,7 +4090,7 @@ default:            // Otherwise, move the thumb along the mouse cursor.
 
 Every mouse-down that is not on an arrow takes the thumb *to the pointer* and
 drags from there. There is no `sbPageUp`/`sbPageDown` mouse path at all, so
-`pageStep` is reached only from the keyboard. That is the modern behaviour and
+`pageStep` is reached only from the keyboard. That is the modern behavior and
 worth keeping, but it has a consequence nobody expects from a Turbo Vision
 program: **the bar's resolution is the number of cells it is tall.** A
 sixteen-row bar has thirteen usable positions, so on a nine-kilobyte file one
@@ -4379,7 +4379,7 @@ question the one place that knows about calendars already answers.
 
 **The field being typed in is never written back to.** The model holds the id
 of the last field touched and the text put in it; that field renders from
-there and every other renders from the last reply. Without it, normalising a
+there and every other renders from the last reply. Without it, normalizing a
 typed `5` into `05` moves the caret under the user's fingers on the next
 keystroke. It is one `Maybe` and it is load-bearing.
 
@@ -4488,7 +4488,7 @@ Buttons serve the mouse; `Space` on a `ListBox` serves the keyboard.
 functions*. Handing one where the other belongs compiles silently and posts
 Turbo Vision's traffic to the time zone helper. Nothing can catch that -- Gren's
 records are structural -- so the two live in one record with field names,
-`{ intl, tui }`, and the field name is the entire defence.
+`{ intl, tui }`, and the field name is the entire defense.
 
 ### `Maybe (Array String)` in the config, and why not an array
 
@@ -4524,7 +4524,7 @@ two Chicago mornings, year 70 meaning 70, a name node has never heard of.
 
 `TZ` is set for the whole pty run, which is what turns "the machine's own zone"
 from a fact about whoever is running the suite into something a check can
-assert. node honours it and `getZoneName` reports it.
+assert. node honors it and `getZoneName` reports it.
 
 ## The wheel that turned the wrong list
 
@@ -4788,7 +4788,7 @@ that ignore what is typed into them. In a model that re-renders that is barely
 any more code -- one branch in `clockRow` -- and it is the honest version:
 there is nothing to type into, rather than a field that swallows it. It also
 looks right without being styled, because an input line carries its own
-background colour and a static text wears the window's.
+background color and a static text wears the window's.
 
 One column of arithmetic came with it. `TInputLine::draw` writes its text at
 offset 1 inside its own rectangle (`tinputli.cpp:144`), so a static text at the
@@ -5047,7 +5047,7 @@ had to be clicked twice is what finding it cost. Auditing the bit names
 separately found four more gaps that the member walk had missed, including the
 one that turned out to matter most.
 
-### `setEnabled` greys a command, and most views do not have one
+### `setEnabled` grays a command, and most views do not have one
 
 `Tui.setEnabled` disables a *command*, everywhere it appears — a menu entry, a
 status line entry, a button carrying it. An `InputLine`, a `ListBox`, a
@@ -5066,12 +5066,12 @@ overridden) and is now `keepFirst`, which is deliberate. And
 its own and never will, and naming them is what keeps the four-layer walk exact
 for the widgets.
 
-### The check for a disabled view is what it refuses, not what colour it is
+### The check for a disabled view is what it refuses, not what color it is
 
-Turbo Vision greys a disabled view *and* skips it in the tab order *and* hands
+Turbo Vision grays a disabled view *and* skips it in the tab order *and* hands
 it no keystroke and no click (`TGroup::doHandleEvent` tests `sfDisabled` before
-anything else). The first driver check read the foreground colour off the cell
-and could not tell the difference between a greyed field and the same field —
+anything else). The first driver check read the foreground color off the cell
+and could not tell the difference between a grayed field and the same field —
 the palette answers 97 either way at that column. Typing at it and finding the
 characters absent is the assertion that means something, and it is the half a
 screenshot cannot show.
@@ -5114,7 +5114,7 @@ caret, an editor's document and every list highlight in the window. `entries`
 would have rebuilt its window the first time a filter was remembered, because
 that is the moment the history arrow would have appeared.
 
-**Disabled** is `sfDisabled`: drawn grey, skipped by Tab, handed no event.
+**Disabled** is `sfDisabled`: drawn gray, skipped by Tab, handed no event.
 **Hidden** is `sfVisible`: not drawn at all, and the view survives. Neither was
 reachable, and the two are different enough that both are worth having --
 a control that is unavailable should say so, and a control that has nothing
@@ -5169,7 +5169,7 @@ this. A field the user can move is a field the model writes back on the next
 render, which is the exact trap `value` on an input line already documents and
 the reason the runtime records what a view reported before the model is asked.
 Making `overwrite` a field would have re-created that bug in a place with no
-existing defence.
+existing defense.
 
 *Nobody owns it* — it is a fact about the document that changes under both →
 also an event, for a different reason. `canUndo` and `hasSelection` could only
@@ -5178,7 +5178,7 @@ ride on `Edited`, which was already being sent on every keystroke and already
 carried the caret on exactly the same argument.
 
 What that bought is small and precise, and is the sort of thing that had been
-quietly wrong for months: `examples/edit` now greys **Undo** when there is
+quietly wrong for months: `examples/edit` now grays **Undo** when there is
 nothing to undo and **Cut** when nothing is selected. Before this it could not
 know, so both stayed lit and the program offered two actions that would do
 nothing.
@@ -5188,19 +5188,19 @@ nothing.
 `JsEditor` reports only when something changed, which is what stops a burst of
 arrow keys being a burst of events. The three new facts join that comparison —
 and their `last*` members are seeded to `true` rather than to `false`, so that
-the *first* notification always goes out. A model that greys Undo needs to be
+the *first* notification always goes out. A model that grays Undo needs to be
 told it is unavailable before anything has happened, not only once something
 has; seeded the other way, an editor opens with a lit Undo and stays that way
 until the first keystroke.
 
-### And the check that says which grey
+### And the check that says which gray
 
-A disabled *view* is checked by what it refuses, because a colour read off the
+A disabled *view* is checked by what it refuses, because a color read off the
 screen is a claim about the palette. A disabled *menu entry* is the opposite:
 an entry is only ever looked at, so how it looks is what it does. The check
 compares Undo's ink against Cut's rather than against a number -- the claim is
-that the two are in different states -- and only then names the colour of the
-one that is greyed.
+that the two are in different states -- and only then names the color of the
+one that is grayed.
 
 ## The clipboard you cannot read, and the field that replaced it
 
@@ -5254,7 +5254,7 @@ There is a fallback under all of this and it is deliberate: when nothing
 outside answers, the binding hands back **this process's own last copy**
 (`app.cc:2069`), so a copy in one window and a paste in another work on a
 machine with no clipboard at all. The consequence over ssh is a shape worth
-recognising -- `p` does nothing until something has been copied, and pastes
+recognizing -- `p` does nothing until something has been copied, and pastes
 that same thing back for ever afterwards. Nothing is wrong and nothing is
 reaching the desktop.
 
@@ -5320,7 +5320,7 @@ Both cost a check that silently does nothing, and both are `TInputLine`
   - A field selects its whole value when it **gains** the caret, not while it
     has it. `Alt-`its-label is a no-op when it is already focused, so a driver
     that wants a fresh selection has to leave and come back.
-  - `Del` honours a selection; `Backspace` with no selection deletes one
+  - `Del` honors a selection; `Backspace` with no selection deletes one
     character. To empty a field: leave, return, `Del`.
 
 And one about the window: the field is the first selectable view, so it has
@@ -5537,7 +5537,7 @@ case updated the shell's own `desktop` and returned without calling `toTools`.
 `Tool.Hex` had had a `Tui.Resized` branch for months under the same roof, and
 it had never run either: the viewer's `desktop` sat at the `80x23` it was
 seeded with for the life of the process. On a 120-column terminal **Go to
-offset** and **Type bytes** opened nine columns from the left edge, centred for
+offset** and **Type bytes** opened nine columns from the left edge, centered for
 a desktop that was not there.
 
 Nothing reported it, and nothing could: a dialog in the wrong place is still a
@@ -5564,7 +5564,7 @@ right.
 
 Adding one entry to the Help menu moved **About** down two rows, and three
 checks in `drive_shell.py` and one in `drive_ascii.py` failed -- all of them
-about the About box centring itself, none of them about the Help menu. Both
+about the About box centering itself, none of them about the Help menu. Both
 drivers were clicking the *n*-th line of the pull-down.
 
 `drive_hex.py` already had the rule written down, from the last time this
@@ -5580,7 +5580,7 @@ The first version was written by hand and the columns did not line up, because
 with `ljust` now and pasted in. A table nobody can read is worse than a
 paragraph, and in a terminal there is no layout engine to hide behind.
 
-## A config file with comments in it is a config file you cannot serialise
+## A config file with comments in it is a config file you cannot serialize
 
 predc's settings were JSON. They are TOML now, and the reason given for the
 change was one word -- comments -- but the interesting part is what having
@@ -5599,7 +5599,7 @@ the model, encode it, write it out. That is *correct* for JSON, because nothing
 in a JSON file is worth preserving that is not in the model. It is destructive
 for TOML, and the reason is not the format, it is the user: a file with
 comments in it is a file somebody opens in an editor, and predc rewrites that
-file every time somebody picks a colour. Serialising the model over it deletes
+file every time somebody picks a color. Serializing the model over it deletes
 everything the user wrote, silently, on an action that looks unrelated.
 
 So `save` **reads the file back off the disk** and edits the document it
@@ -5618,7 +5618,7 @@ edit, and writing it back is the same data loss by a slower route.
 
 `Toml.Encode.toDocument []` is the empty document, which is how "create the
 file" and "change two values in the file" became one code path instead of two.
-There is no separate serialiser to keep in step with the editor.
+There is no separate serializer to keep in step with the editor.
 
 ### Four outcomes, and only two of them write
 
@@ -5634,7 +5634,7 @@ The third is the one worth arguing about. A syntax error in a config file is
 almost always a half-finished hand edit, and the rest of that page is worth
 more than the setting predc wanted to record. `load` has already fallen back to
 the defaults, so predc runs; the user fixes the typo and picks the theme again.
-Overwriting would have been the tidier-looking behaviour and would have thrown
+Overwriting would have been the tidier-looking behavior and would have thrown
 away the file it was tidying.
 
 ### The key nobody touched is the one that gets destroyed
@@ -5651,13 +5651,13 @@ a reason that took a hand-written file to see. `Toml.Edit.set` replaces a
 came back as `timezones = ["Asia/Seoul", "America/Chicago"]`. That is correct
 for a list that changed -- there is no old formatting to keep for a new value --
 and it is destructive for one that did not, which is the case that actually
-happens: the user arranged that list once, and then picked a colour. The key
+happens: the user arranged that list once, and then picked a color. The key
 they never touched is the key that got flattened, by an action about something
 else.
 
 The rule generalises past this program. **An editing API turns "write the model
 out" into a destructive operation, and the fix is to make each write conditional
-on the value having moved.** A serialiser never had to know which fields
+on the value having moved.** A serializer never had to know which fields
 changed. An editor does.
 
 predc did that itself first, by decoding the document it was about to edit and
@@ -5704,7 +5704,7 @@ correcting somebody's Korean.
 `toKey : Name -> String` and `fromKey : String -> Name` instead, and `Theme`
 does not import any codec at all now.
 
-Which format the config file is in has never been a fact about a colour scheme.
+Which format the config file is in has never been a fact about a color scheme.
 The old signature made `Theme` depend on the answer, so a decision taken in
 `Config.gren` reached two modules; the string is the one thing only `Theme`
 knows, and handing that over is the whole of its business here. The file has
@@ -6209,7 +6209,7 @@ go.
 words appear but that **the row still fits** at each width, because the way
 this breaks leaves nothing on the screen to notice.
 
-### A colour scheme is not a tool
+### A color scheme is not a tool
 
 predc's themes were on **Tools | Colors**, which put a setting inside the menu
 that lists what the program *has*. That reads fine with one setting and stops
@@ -6494,7 +6494,7 @@ setting means adding it once.
 It also **wrote the key into files nobody asked it to**, which was the
 interesting failure. `drive_theme.py` has a check named *"the whole file, byte
 for byte, apart from the one word that moved"*, against a hand-written config
-with comments in it, and appending `weeks = "iso"` on a colour-scheme save
+with comments in it, and appending `weeks = "iso"` on a color-scheme save
 broke it. The test's name is the promise: predc changes what it was asked to
 change. So `weeks` follows `timezones`'s rule rather than `theme`'s — written
 only when it is *not* the default, removed when it goes back — and a file
@@ -6706,7 +6706,7 @@ drawing something plausible rather than by complaining.
 
 ### An input line cannot take a Tab, and a canvas cannot draw one
 
-Both are correct behaviour and together they decide which direction of the
+Both are correct behavior and together they decide which direction of the
 escape transforms is usable at a keyboard. `Tab` moves the focus — that is what
 an input line is *for* — so a control character has to be pasted, never typed;
 and a canvas has no tab stops, so a decoded `\t` is painted as a CP437 glyph.
@@ -6926,13 +6926,13 @@ big the desktop is — cannot have arrived yet: the first render is what starts
 Turbo Vision, and `init` is what produces the first render. So the model was
 using the shell's placeholder, `{ cols = 80, rows = 23 }`, which is a guess
 written to be corrected one frame later. Every other tool got away with it
-because none of them sizes itself; the About box centres itself and *does*, and
-`drive_shell.py` has a check that it re-centres — which is the same bug, tested
+because none of them sizes itself; the About box centers itself and *does*, and
+`drive_shell.py` has a check that it re-centers — which is the same bug, tested
 for and accepted rather than fixed.
 
 The answer was already in `init`, two `await`s up. `Terminal.initialize` reads
 `process.stdout` and touches nothing, so it is safe to ask before Turbo Vision
-has the terminal, and predc already awaited it — to decide whether to colour a
+has the terminal, and predc already awaited it — to decide whether to color a
 `--help` and how wide to wrap it. It carries `columns` and `rows`. The shell now
 seeds `desktop` from that, less two rows for the menu bar and the status line,
 so the first frame is right rather than nearly right.
@@ -7178,7 +7178,7 @@ it, for reasons that section gives.
 
 So it is computed at zoom time instead, and the rule is the failure condition
 itself: **if restoring would leave the window exactly where it is, there is
-nowhere to go — so invent somewhere; otherwise honour what is stored.**
+nowhere to go — so invent somewhere; otherwise honor what is stored.**
 
 ```cpp
     if (size == maxSize)
@@ -7209,7 +7209,7 @@ line to not.
 ### Three-quarters, and why a number had to be picked
 
 The invented rectangle is three-quarters of the desktop in each dimension the
-model left free, centred, floored at `minWinSize` — sixteen by six
+model left free, centered, floored at `minWinSize` — sixteen by six
 (`twindow.cpp:30`), which `TWindow::sizeLimits` already reports, so the floor
 costs nothing.
 
@@ -7419,14 +7419,14 @@ of.**
 
 Every bug predc found is written up above, one section each. Read them
 together and most of them are not "feature X does not work" -- they are a
-property nothing asserted. The colour one is the clearest of them: the hex
+property nothing asserted. The color one is the clearest of them: the hex
 viewer's offset column was `ink Blue` on a blue window, `fg=34 bg=44`,
 perfectly invisible, and it stayed that way for a month with a green suite,
-because no check asserted on cells nobody was looking at. A colour that stops
+because no check asserted on cells nobody was looking at. A color that stops
 contrasting still draws.
 
 So the assertion is now made by the harness rather than by a driver.
-`Screen.invisible_cells` returns every cell holding a glyph drawn in the colour
+`Screen.invisible_cells` returns every cell holding a glyph drawn in the color
 it is drawn on, `Pty.display` runs it over every screen it replays, and
 `Checks.report` -- which every driver in the repo already calls -- fails if
 anything accumulated. Forty-six suites gained the check and none of them had
@@ -7442,18 +7442,18 @@ looked at" is very nearly "every screen the program drew" without a single
 called in the places somebody already suspected, which are the places it is not
 needed.
 
-### Comparing two colours is only possible when they share a vocabulary
+### Comparing two colors is only possible when they share a vocabulary
 
 TVision emits `30`-`37` and `90`-`97` for an ink and `40`-`47` and `100`-`107`
-for a ground, so the same colour is the same number ten apart. A theme sets
+for a ground, so the same color is the same number ten apart. A theme sets
 both halves from one palette and both go out as `38;2;r;g;b`, so equal tuples
 are the whole of that case. A *mixed* pair -- an indexed ink on a 24-bit ground
 -- is not comparable and is not guessed at; it does not arise, because a theme
-colours a window's ground and its text together. `None` is the terminal's own
+colors a window's ground and its text together. `None` is the terminal's own
 default and two defaults are readable by definition.
 
-A space is not a glyph. The desktop outside a window is acres of one colour on
-the same colour and none of it is a defect; a border, a digit or a letter is.
+A space is not a glyph. The desktop outside a window is acres of one color on
+the same color and none of it is a defect; a border, a digit or a letter is.
 
 ### And a sweep of the two grounds nobody was walking
 
@@ -7461,7 +7461,7 @@ The invariant found nothing on the existing suites, which is what it should do:
 every instance it is named after has been fixed. What it needed was screens
 nobody had swept. A fresh `HOME` gets the Borland scheme, so all forty-four
 drivers were walking one ground -- and a scheme change moves the ground out
-from under every ink in the program at once, because a palette recolours what
+from under every ink in the program at once, because a palette recolors what
 gren-tvision draws and cannot reach a `Tui.Span` at all.
 
 `ink_common.py` opens all nine tools under one scheme and asserts almost
@@ -7472,7 +7472,7 @@ every ink the other two use is a bright hue.
 
 Two things the sweep needed to be honest. It counts the distinct `(ink,
 ground)` pairs on each screen, because a driver that opened nine *empty*
-windows and found nothing invisible would pass on a program with no colour in
+windows and found nothing invisible would pass on a program with no color in
 it. And it clicks the tools' entries in the **Tools** pull-down by name rather
 than pressing their `Alt` keys, which is not fussiness: the first version
 pressed `Alt-C` for the time converter with the calculator already open, and
@@ -7545,9 +7545,9 @@ two namespaces make.
 ### The driver reads the promises rather than being told them
 
 `drive_hotkeys.py` hard-codes nothing about predc. Turbo Vision does not
-underline a hot letter -- it draws it in the menu palette's *shortcut* colour --
-so once a menu is rendered, the colour is the only place that information
-exists, and the harness can read colours. `hot_letter` takes the foreground all
+underline a hot letter -- it draws it in the menu palette's *shortcut* color --
+so once a menu is rendered, the color is the only place that information
+exists, and the harness can read colors. `hot_letter` takes the foreground all
 the ordinary text is in and returns the one cell that is not. A title with no
 `~` gives no odd cell, which is a real answer and not a failure.
 
@@ -7670,7 +7670,7 @@ resizing the terminal underneath one does not stop the program.
 The invisible-ink sweep and the hotkey driver both came from asking what
 predc's bugs had in common. This one came from the other half of that list --
 *a rectangle computed against a desktop that is no longer there* -- which has
-now produced four separate defects: the About box that had to re-centre, the
+now produced four separate defects: the About box that had to re-center, the
 hex viewer's dialogs opening nine columns from the left because `Tool.Hex`
 never heard `Resized`, the environment list born at the shell's placeholder
 `80x23`, and the window that opened maximized with nowhere to un-maximize to.
@@ -7812,7 +7812,7 @@ model-owned bar in `predc hex` drives a canvas by exactly this route.
 
 `JsScrollBar` gains the `quiet` flag and the same two entry points the list
 has, `setValueFromModel` and `setParamsFromModel`, with the exception intact:
-a value the bar could not honour -- outside the range the model set in the same
+a value the bar could not honor -- outside the range the model set in the same
 breath -- **is** reported, because that is a disagreement rather than an action.
 
 They are named rather than shadowing `setValue` and `setParams`, which are not
@@ -7997,12 +7997,12 @@ the `midnight` palette that had been sitting there unapplied:
 
 > Recessed rather than raised: a field sits *below* the window's ground and a
 > button sits above it, which is the whole of why Turbo Vision keeps two
-> colours here and this theme keeps two grounds.
+> colors here and this theme keeps two grounds.
 
 That is `Tui.ThemePanel.input`, and no canvas can reach it -- a `Tui.Span` names
 a `Tui.Hue` and a palette entry is a `Tui.Tint`, which is the seam the whole
 `Inks` type exists because of. So `Inks` grew a `field : { fg, bg }`, which is
-the sixteen-colour restatement of the same idea, and `entryLine` paints it.
+the sixteen-color restatement of the same idea, and `entryLine` paints it.
 
 **Full canvas width, not the width of what has been typed.** A box that changes
 size as you type is a highlight; the empty part of a field is the part that says
@@ -8165,7 +8165,7 @@ The measurement is taken against the same made-up model `wholeThing` uses --
 probe answered, both conditionals in -- so the clipboard page's longest case is
 the one measured rather than whichever case this session happens to be.
 
-## A hint in one colour is a sentence; in two it is an instruction
+## A hint in one color is a sentence; in two it is an instruction
 
 Every tool window in predc has a line along its foot saying which keys do what
 -- `Tab base, w width, y copy, v paste` under the calculator, `Tab list /
@@ -8174,7 +8174,7 @@ was a single run of `inks.dim`. Somebody read one and asked why the instructions
 looked like ordinary text.
 
 The answer was on the screen the whole time, one row lower. `TStatusLine` draws
-`Alt-X Exit` in **two** colours, the key in one and its label in another, and
+`Alt-X Exit` in **two** colors, the key in one and its label in another, and
 that is the entire difference between a row of keys and a row of prose. Nothing
 about the status line is cleverer than that; it just does not use one ink for
 both halves.
@@ -8203,18 +8203,18 @@ Turbo Vision's own status line paints a key in, and one hue cannot mean both
 Borland's blue and on Midnight's near-black -- the one hue brighter than
 everything else there and not already spoken for -- and `Brown` on Gren's
 paper, which is the nearest of the sixteen to that scheme's own `barAccent`
-(`0xB85C00`), the colour its status line already draws a key in.
+(`0xB85C00`), the color its status line already draws a key in.
 
-### Two hints had to stop being `StaticText` to get a second colour
+### Two hints had to stop being `StaticText` to get a second color
 
-`TStaticText` draws one run in one colour and has no notion of a hot key, so
+`TStaticText` draws one run in one color and has no notion of a hot key, so
 the ASCII chart's line and the environment list's -- the two somebody actually
 pointed at -- could not be painted at all. Both are one-row `Canvas` views now,
 with `takesFocus = False` so the caret still goes where it went. Notes' foot
 line went the same way, and `Tool.Notes.view` grew an `Inks` parameter to do
 it: it was the last view in the program that took none.
 
-**The environment list's line has three colours and not two**, which is the
+**The environment list's line has three colors and not two**, which is the
 part worth keeping. It reads `126 variables   Tab list   / search ...`, and the
 count is an *answer* while the keys are an instruction -- so the count stays in
 the window's ordinary text and only the keys go through `Theme.hint`. A message
@@ -8228,13 +8228,13 @@ exactly its subject: `key` and `dim` are two entries a *scheme* picks, and a
 scheme that picked one hue twice would draw a hint indistinguishable from the
 flat one -- while contrasting perfectly well with its ground, so the
 invisible-glyph sweep would not say a word. Four tools carry a (key, word) pair
-in its table now and each asserts the two colours differ.
+in its table now and each asserts the two colors differ.
 
 Borland is the default and forty-four drivers walk it, so its copy of the check
 is in `drive_ascii.py` and `drive_env.py`, the two windows that were reported.
 Each asserts three things: the key differs from the words, and neither is the
 window's ordinary text -- which is the actual complaint, since "it looks like
-ordinary text" is a claim about a third colour rather than about two.
+ordinary text" is a claim about a third color rather than about two.
 
 That third assertion is where the first attempt was wrong, and the failure is
 the useful part. It compared the hint against a **list row**, and half the rows
@@ -8290,7 +8290,7 @@ constant. So the first version of this opened the window on `TProgram::deskTop`
 -- and then on `TProgram::application` -- with the rectangle in that group's
 coordinates, so a fourteen-row drop-down could hang over an eleven-row dialog.
 All twelve months appeared. It shipped, and the first person to look at it said
-the list was grey on grey and that choosing a month took two clicks.
+the list was gray on gray and that choosing a month took two clicks.
 
 Both were true and both were the same bug, and the measurement is the useful
 part:
@@ -8362,10 +8362,10 @@ is what they should always have done and what nothing forced until the window
 stopped being one size.
 
 A third driver check went the same way and is worth naming because it failed
-about a screen it was not looking at. The new colour assertion found its rows
+about a screen it was not looking at. The new color assertion found its rows
 with `next(r for r, line in ... if "January" in line)` -- and the calendar
 *behind* the dialog was showing **January 2021**, eight rows higher. It compared
-that heading against the list's February, found both in the window colour, and
+that heading against the list's February, found both in the window color, and
 reported the highlight missing on a build where it was fine. It counts back one
 row from February now, which is unique on that screen.
 
@@ -8380,7 +8380,7 @@ desktop = { cols = 80, rows = 23 }
 
 and waited for a `Tui.Resized` to correct it. `Resized` fires when the size
 *changes*, so on a terminal nobody resized the guess stood for the whole run.
-The only thing that reads it is `gotoDialog`, which centres itself in what it
+The only thing that reads it is `gotoDialog`, which centers itself in what it
 believes the desktop to be -- so on an eighteen-row terminal the dialog was
 placed for a twenty-three-row one and its bottom five rows, `OK` and `Cancel`
 among them, were off the screen.
@@ -8661,7 +8661,7 @@ does three things in an order that matters: put the terminal back, write the
 crash to the tape and to a crash log, then say it out loud. The restore is by
 escape sequence rather than by asking the binding, because the binding's
 `quit()` only sets a flag for the next `step()` and there may not be one --
-`\x1b[?1049l` and its neighbours are each a no-op if the mode was not set, which
+`\x1b[?1049l` and its neighbors are each a no-op if the mode was not set, which
 is what makes them safe to write from a handler that is already unwinding.
 
 **And the crash log is written whether or not anybody asked for a tape**, at
@@ -8717,7 +8717,7 @@ the text is absent would pass just as well on a recorder that wrote nothing at
 all.
 
 Two of the crash checks run in a subprocess, because what they are testing ends
-in `process.exit(1)` and that is the behaviour rather than an accident. They
+in `process.exit(1)` and that is the behavior rather than an accident. They
 assert the escape sequences on stdout, which is the only way to state "the
 user's terminal came back" as a claim rather than a hope.
 
@@ -8950,7 +8950,7 @@ predc named itself and put its config file on the tape inside the object it
 passed as `record`, which is built only when `--record` was *typed*. Recording
 turned on by the environment variable got neither -- so every tape the suite
 recorded lacked the file predc reads its theme, its week rule and its chart
-mode out of, and every one of them replayed into a differently coloured
+mode out of, and every one of them replayed into a differently colored
 program. Four drivers failed on their first render for this reason and it read
 like a bug in the replayer.
 
@@ -8978,7 +8978,7 @@ intercepted for one caller anyway. Both halves were wrong.
 documented in its own source as the thing a `srand(time(0))` in a C++
 constructor forced into the model. **A board is not nearly the same when the
 seed is nearly the same.** Reconstruction gets the millisecond wrong and the
-board is unrecognisable; nothing on the tape said which millisecond it was.
+board is unrecognizable; nothing on the tape said which millisecond it was.
 
 And the interception argument was assumed rather than measured. Measured -- by
 replacing `Date.now` with one that records its caller and running an example
@@ -9706,7 +9706,7 @@ The widget documentation wanted pictures. There were three ways to get them and
 only one of them is any good.
 
 **termshot** renders with `bunt.ParseStream` (`internal/img/output.go:165`): a
-byte stream in, a sequence of coloured runes out, laid down as lines. That is
+byte stream in, a sequence of colored runes out, laid down as lines. That is
 right for `ls -a` and useless here, because a Turbo Vision repaint is nothing
 *but* cursor addressing -- every cell the program ever painted would come out
 in emission order, concatenated. **Xvfb plus xterm plus `import`** works and
@@ -9715,7 +9715,7 @@ stopped painting, and pixels that depend on the machine that took the picture.
 
 The third way was already built. `harness.Screen` is a framebuffer in every
 sense except pixels: a grid of cells, and per cell the `(fg, bg)` in force when
-it was written. So a screenshot is a blit -- 8x16 bitmap per cell, two colours,
+it was written. So a screenshot is a blit -- 8x16 bitmap per cell, two colors,
 integer scale -- and the two hundred lines it took are `tools/cp437.py`,
 `tools/shot.py` and `gren-tvision/docs/shots.py`.
 
@@ -9736,12 +9736,12 @@ shapes one size up. Everything else that misses is drawn `?` **and reported at
 the end of the run**, because a `?` in a screenshot is indistinguishable from a
 program that meant to draw one.
 
-### ANSI's colour order is not VGA's, and the mistake looks deliberate
+### ANSI's color order is not VGA's, and the mistake looks deliberate
 
 SGR counts black, red, green, yellow, blue, magenta, cyan, white. A VGA palette
 entry counts black, blue, green, cyan, red, magenta, brown, white -- the same
 eight with the low and high bits of the index swapped. Reading `44` as "the
-fourth colour" produced red windows on a pink desktop, which does not look like
+fourth color" produced red windows on a pink desktop, which does not look like
 an error; it looks like somebody chose it. The table is six lines and a comment
 in `tools/shot.py`.
 
@@ -9808,7 +9808,7 @@ was clean and `require()` of the addon succeeded on glibc 2.31; `./predc
 tarball at a real pty inside a stock Node image and greps what was drawn.
 
 One trap in the greping, which cost a wrong answer for a few minutes. **A menu
-title reaches the pty as two runs in two colours** -- the hot key is drawn in
+title reaches the pty as two runs in two colors** -- the hot key is drawn in
 an accent -- so `File` arrives as `F`, an SGR, then `ile`, and searching the
 raw stream for the word finds nothing while the program is working perfectly.
 `RPN Calculator` was the only string that matched, because it is the only one

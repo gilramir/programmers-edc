@@ -143,7 +143,7 @@ the model's own writes as `Focused` — so the model stored what it heard and
 wrote it back, and only the values agreeing kept it from looping. A mouse wheel
 is a burst the model is several renders behind, the values stopped agreeing,
 and the list snapped back to a stale index between the eye and the finger. The
-exception is worth keeping too: a write the widget could not honour — a
+exception is worth keeping too: a write the widget could not honor — a
 `focused` past the end of a shortened list — *is* reported, because that is a
 disagreement rather than an action, and it settles in one round.
 
@@ -172,16 +172,16 @@ exactly like the feature not working.
 nothing** (`tvision-node/tvision/source/tvision/tinputli.cpp:380`). A field selects its whole
 value when it *gains* the caret and not while it has it, so `Alt-`its-label is a
 no-op when it is already focused — leave and come back to get a fresh selection.
-And `Del` honours a selection while `Backspace` with none deletes one character,
+And `Del` honors a selection while `Backspace` with none deletes one character,
 so emptying a field is leave, return, `Del`. Also remember that a field which is
 the first selectable view has the caret when the window opens, which takes the
 single-letter commands away from the canvas until `Tab` gets there.
 
 Two rules for checking that something is unavailable, which are opposites for a
 reason. A disabled **view** is checked by what it *refuses* — type at it and
-find the characters absent — because the colour it draws in belongs to the
+find the characters absent — because the color it draws in belongs to the
 palette and reads the same either way. A disabled **menu entry** is checked by
-its colour, compared against an enabled entry's, because an entry is only ever
+its color, compared against an enabled entry's, because an entry is only ever
 looked at, so how it looks is what it does.
 
 **A gesture that missed is quiet, and quiet is what a CPU or liveness check is
@@ -194,10 +194,10 @@ that were simply wrong.
 
 **Every driver already checks that nothing it saw was invisible**, and it costs
 nothing to keep. `Pty.display` scans each screen it replays for a glyph drawn
-in the colour behind it, and `Checks.report` fails on what accumulated — so a
+in the color behind it, and `Checks.report` fails on what accumulated — so a
 span whose ink stopped contrasting with its ground fails here rather than in
 somebody's eyes. Nothing has to be added to a new driver. What *is* worth
-adding, whenever a driver opens a window it is not otherwise asserting colour
+adding, whenever a driver opens a window it is not otherwise asserting color
 about, is a look at the screen: the sweep only sees screens a driver read.
 
 The fastest layer is unit tests, in milliseconds and with no terminal, and

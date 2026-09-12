@@ -382,7 +382,7 @@ def directory():
 def palette():
     """The sixteen colours a `Span` can name, each said in its own colour."""
     app = boot("palette")
-    take(app, "colours", box(app, "Colours, said out loud"))
+    take(app, "colors", box(app, "Colors, said out loud"))
     quit(app)
 
 
@@ -481,7 +481,7 @@ SECTIONS = [
     ("ascii", ascii_chart, ("canvas",)),
     ("edit", editor, ("editor",)),
     ("dir", directory, ("filedialog", "tree")),
-    ("palette", palette, ("colours",)),
+    ("palette", palette, ("colors",)),
     ("demo", demo, ("tile", "popup", "overlay")),
     ("firstprogram", firstprogram, ("firstprogram",)),
 ]

@@ -271,7 +271,7 @@ and says the rest.
 | `Canvas` | you paint it: lines of [`Span`](#Span)s, an optional cursor |
 | `Editor` | a full text editor; its contents do not travel with the render |
 | `Grows` | wraps a view and says which edges follow the window |
-| `Enabled` | wraps a view and greys it out |
+| `Enabled` | wraps a view and grays it out |
 | `Visible` | wraps a view and takes it off the screen |
 
 **Views that follow their window**, all of them a [`Grow`](#Grow)
@@ -283,22 +283,22 @@ and says the rest.
 | [`stretchWidth`](#stretchWidth) [`stretchHeight`](#stretchHeight) | one of the two |
 | [`pinRight`](#pinRight) [`pinBottom`](#pinBottom) | keep the size, slide with that edge |
 
-**Colour on a canvas**
+**Color on a canvas**
 
 | | |
 |---|---|
-| [`Span`](#Span) | a run of characters in one colour |
-| [`Hue`](#Hue) | the sixteen colours a terminal has had since 1981 |
-| [`line`](#line) | a whole line in the window's own colour -- nearly every line |
-| [`plain`](#plain) | one span in the window's own colour |
+| [`Span`](#Span) | a run of characters in one color |
+| [`Hue`](#Hue) | the sixteen colors a terminal has had since 1981 |
+| [`line`](#line) | a whole line in the window's own color -- nearly every line |
+| [`plain`](#plain) | one span in the window's own color |
 | [`ink`](#ink) | one span in a foreground of your choosing |
 | [`on`](#on) | ...and a background too |
 
-**Colour everywhere else**
+**Color everywhere else**
 
 | | |
 |---|---|
-| [`Theme`](#Theme) | every colour this package draws rather than the model |
+| [`Theme`](#Theme) | every color this package draws rather than the model |
 | [`borland`](#borland) | Turbo Vision's own scheme, and the value to start from |
 | [`ThemePanel`](#ThemePanel) | one surface: a window, the alternate window, a dialog |
 | [`Pair`](#Pair) | a foreground and a background |
@@ -352,7 +352,7 @@ and says the rest.
 | [`fileDialog`](#fileDialog) | a file or directory chooser, the same way |
 | [`focus`](#focus) | put the caret on a view |
 | [`bringToFront`](#bringToFront) | put a window in front of the others |
-| [`setEnabled`](#setEnabled) | grey a command out everywhere it appears, or bring it back |
+| [`setEnabled`](#setEnabled) | gray a command out everywhere it appears, or bring it back |
 | [`setDoubleClickDelay`](#setDoubleClickDelay) | how long two clicks may be apart and still be one |
 | [`quit`](#quit) | quit |
 
@@ -426,7 +426,7 @@ would have passed them to the binding and quietly rebuilt the window on every
 change instead of patching it, which is the kind of failure this number exists
 to turn into a sentence.
 
-Version 3 made a canvas line an array of coloured [`Span`](#Span)s rather than
+Version 3 made a canvas line an array of colored [`Span`](#Span)s rather than
 a string, and gave a button `takesFocus`. Version 4 added the scroll bar view,
 its [`Scrolled`](#Event) event, `isDouble` on a click, and `takesFocus` on a
 canvas. Version 5 added [`focus`](#focus), which is the first message this
@@ -459,9 +459,9 @@ how the model finds out that they did. Until then a window's size was a fact
 only Turbo Vision had, and a view that filled one could grow with it -- see
 [`Grows`](#Grow) -- but the model could not know by how much.
 Version 16 added [`WindowPalette`](#WindowPalette), which is the one piece of
-Turbo Vision's palette machinery that survives being asked to name a colour
+Turbo Vision's palette machinery that survives being asked to name a color
 instead of an index into a table. Version 17 added [`Theme`](#Theme) on a
-[`Ui`](#Ui), which is the rest of it: every colour this package draws rather
+[`Ui`](#Ui), which is the rest of it: every color this package draws rather
 than the model, described in seventeen fields instead of the hundred and
 thirty-five attributes Turbo Vision keeps them in. Version 18 split a
 [`ThemePanel`](#ThemePanel)'s `control` into `button` and `input`, which Turbo
@@ -615,10 +615,10 @@ not, exactly as a window's contents are -- which is what lets a clock render
 once a second without repainting the corner every time. Overlays are for
 showing things; put anything the user has to reach in a window.
 
-A [`StaticText`](#View) here draws in [`theme.bar`](#Theme), the colour of the
+A [`StaticText`](#View) here draws in [`theme.bar`](#Theme), the color of the
 menu bar and the status line, because there is no panel behind a view on the
 application to take one from and row 0 is the bar's own row. `TClockView`
-draws in that colour for the same reason.
+draws in that color for the same reason.
 -}
 type alias Ui =
     { menuBar : Array MenuItem
@@ -629,14 +629,14 @@ type alias Ui =
     }
 
 
-{-| Every colour on the screen that this package draws rather than the model.
+{-| Every color on the screen that this package draws rather than the model.
 
-Turbo Vision keeps these as one hundred and thirty-five colour attributes and
-resolves a view's colour through three layers of indirection into them.
+Turbo Vision keeps these as one hundred and thirty-five color attributes and
+resolves a view's color through three layers of indirection into them.
 [`examples/palette`](https://github.com/gilramir/gren-tvision) argues at length
 that the indirection has no Gren equivalent -- and it does not, but the *table*
 does, because the hundred and thirty-five are not a hundred and thirty-five
-decisions. They are one desktop, one bar, and three coloured surfaces, each
+decisions. They are one desktop, one bar, and three colored surfaces, each
 described the same way, repeated across the window and dialog blocks. That is
 what this is.
 
@@ -654,15 +654,15 @@ between, which is the connection worth holding on to: `window` is what
 `GrayWindow` **and** every modal [`dialog`](#dialog).
 
 This is half of what "theme" usually means, and the half that is not here is
-deliberate. A [`Span`](#Span) that names a [`Hue`](#Hue) is an absolute colour
+deliberate. A [`Span`](#Span) that names a [`Hue`](#Hue) is an absolute color
 with nothing in between, so a theme does not reach one. A program with themed
 canvases keeps its own hues in its model beside its choice of `Theme` and
-paints from them -- which is the same principle, one level up: the colour is a
+paints from them -- which is the same principle, one level up: the color is a
 model decision, made where the decision about what to draw is made.
 -}
 type alias Theme =
     { desktop : Pair
-    -- The menu bar and the status line, which share their six colours.
+    -- The menu bar and the status line, which share their six colors.
     , bar : Pair
     , barAccent : Tint
     , barDisabled : Tint
@@ -674,7 +674,7 @@ type alias Theme =
     }
 
 
-{-| One coloured surface: a window, the alternate window, or a dialog.
+{-| One colored surface: a window, the alternate window, or a dialog.
 
 Nine fields, of which three are a foreground alone -- an accent is a hot key
 *in* the body text and a disabled entry is still body text, so both sit on a
@@ -695,13 +695,13 @@ ground already named rather than repeating it.
 
 Buttons and input lines are two fields and not one because Turbo Vision draws
 them differently and is right to: a button is raised and a field is recessed,
-and in the stock scheme a grey dialog's buttons are black on green while its
-fields are white on blue. One colour for both makes every text field look like
+and in the stock scheme a gray dialog's buttons are black on green while its
+fields are white on blue. One color for both makes every text field look like
 something to press.
 
 Turbo Vision has thirty-two slots per dialog and this fills them from nine.
 The expansion is one line per slot in `buildAppPalette` (`app.cc`), which is
-the place to look when a control comes out the wrong colour.
+the place to look when a control comes out the wrong color.
 -}
 type alias ThemePanel =
     { frame : Pair
@@ -723,24 +723,24 @@ type alias Pair =
     { fg : Tint, bg : Tint }
 
 
-{-| One colour in a [`Theme`](#Theme), and the choice between two kinds.
+{-| One color in a [`Theme`](#Theme), and the choice between two kinds.
 
 `Ansi` names one of the sixteen a terminal has always had, and what it actually
 looks like is whatever scheme the person running the program has set -- so a
 theme built out of `Ansi` belongs to their machine and matches the rest of it.
-`Rgb` pins the colour exactly and looks the same everywhere; it takes one
-`0xRRGGBB`, which is how a colour is written down everywhere else and is also
+`Rgb` pins the color exactly and looks the same everywhere; it takes one
+`0xRRGGBB`, which is how a color is written down everywhere else and is also
 what `TColorRGB` itself takes.
 
     , accent = Rgb 0xF08C00
 
 Neither is a requirement: Turbo Vision quantises an `Rgb` down to what the
 terminal says it can do, so a 24-bit theme still runs over ssh -- it just
-stops being the colour you picked. Check a theme at sixteen colours if it is
+stops being the color you picked. Check a theme at sixteen colors if it is
 going anywhere but your own terminal.
 
-Note that this is the *theme's* colour type and [`Hue`](#Hue) is the span's.
-They are separate on purpose: a span colour is resolved against a view's
+Note that this is the *theme's* color type and [`Hue`](#Hue) is the span's.
+They are separate on purpose: a span color is resolved against a view's
 palette and has always been one of the sixteen, and giving it 24 bits would
 mean giving `TColorBIOS` up in a place where the whole point is to agree with
 whatever the window is already using.
@@ -754,7 +754,7 @@ type Tint
 from.
 
 The blue windows and yellow text of every Borland tool from 1990, the light
-grey dialogs with red hot keys, the black-on-cyan menu bar. It is what this
+gray dialogs with red hot keys, the black-on-cyan menu bar. It is what this
 package drew before a theme could be described at all, so a program that
 writes `theme = Tui.borland` gets exactly what it had.
 -}
@@ -822,7 +822,7 @@ grayPanel =
 
 {-| A window on the desktop.
 
-`id` must be stable across renders -- it is how the runtime recognises this as
+`id` must be stable across renders -- it is how the runtime recognizes this as
 the same window. `title` and `rect` can change freely: both are patched in
 place, the second through `TView::locate`, which is also what resolves the
 [`Grows`](#Grow) of everything inside.
@@ -853,7 +853,7 @@ alone. [`WindowResized`](#Event) is how a model that wants to know finds out.
 restores a zoomed window to the rectangle it had before it was zoomed, and a
 window built at the full size of the desktop has none -- so its zoom box would
 do nothing, while its frame drew `[↕]` to say that it would. The runtime
-notices that and restores to three-quarters of the desktop instead, centred, in
+notices that and restores to three-quarters of the desktop instead, centered, in
 whichever dimensions [`Resize`](#Resize) left free. Nothing has to be said for
 this to happen.
 
@@ -881,16 +881,16 @@ type alias Window =
     }
 
 
-{-| Which of Turbo Vision's three window colour sets a window is drawn in.
+{-| Which of Turbo Vision's three window color sets a window is drawn in.
 
 `BlueWindow` is what a window on the desktop has been since 1990 and what
 almost every window here wants: white on blue for the frame, yellow on blue for
 the text inside it. The other two exist because Turbo Vision has always had
 them, and they are how a program says *this window is a different kind of
-thing* without inventing a colour of its own -- Borland's own editor used blue
+thing* without inventing a color of its own -- Borland's own editor used blue
 for source and cyan for a watch window.
 
-`GrayWindow` is the colour a modal [`dialog`](#dialog) is drawn in, and a
+`GrayWindow` is the color a modal [`dialog`](#dialog) is drawn in, and a
 window that wants to look like one is the only reason to reach for it. It is
 also, for one release, what every window in this package was drawn in by
 mistake -- see `beWindow` in `tvnode.h`, which is where the fifth thing it
@@ -901,17 +901,17 @@ ones, and the difference matters for exactly one reason: a window here can hold
 buttons, input lines and list boxes, which ask for palette entries past the
 eight a window palette has. Borland made the first entries of the blue dialog
 agree with the blue window precisely so that the two could look alike, so this
-is the window colours with room for a form in them.
+is the window colors with room for a form in them.
 
 Patched in place, like `title` and `rect` -- but the redraw it needs is
 `TGroup::redraw` and not `drawView`. A group that has a buffer draws by
-blitting it, so asking a recoloured window to draw itself paints the cached
-colours straight back and nothing appears to happen. The caret, the z-order and
+blitting it, so asking a recolored window to draw itself paints the cached
+colors straight back and nothing appears to happen. The caret, the z-order and
 every scroll position survive either way.
 
 Note what this is **not**. It does not reach a [`Span`](#Span) that names a
-[`Hue`](#Hue): those are absolute colours with nothing in between, deliberately
--- `examples/palette` makes the case. Recolouring a window and keeping its
+[`Hue`](#Hue): those are absolute colors with nothing in between, deliberately
+-- `examples/palette` makes the case. Recoloring a window and keeping its
 canvases legible is two jobs, and this is only the first.
 -}
 type WindowPalette
@@ -1097,14 +1097,14 @@ first for a week, because `Array.append fst second` makes `fst` the *postfix*.
     thing that moves the highlight scrolls it back into view of its own accord.
   - `CheckBoxes` -- a group of boxes, ticked with `Space`. `checked` is one
     flag per item, and `available` one *more* flag per item: a box whose flag
-    is `False` is drawn grey, is skipped by the arrow keys and cannot be
+    is `False` is drawn gray, is skipped by the arrow keys and cannot be
     ticked, which is how a form says that a choice does not apply right now
     rather than hiding it and moving everything below it up. `[]` -- the
     ordinary case -- says nothing about any box, and an array shorter than the
     cluster says nothing about the ones past its end.
 
     `available` and [`Enabled`](#View) are different things and both are worth
-    having: this greys one box, and `Enabled` greys the whole cluster, because
+    having: this grays one box, and `Enabled` grays the whole cluster, because
     a cluster is one view however many boxes are in it.
   - `MultiCheckBoxes` -- the same cluster with more than two states per box.
     `marks` is one character per state, in order, drawn between the brackets:
@@ -1150,8 +1150,8 @@ first for a week, because `Array.append fst second` makes `fst` the *postfix*.
     [`Dragged`](#Event) events for the mouse. This is
     the escape hatch for anything the stock controls cannot express: Turbo
     Vision's own calendar and ASCII chart are views of this kind. A line is an
-    array of coloured [`Span`](#Span)s; [`line`](#line) makes the common one,
-    which is a whole row in the window's own colour. `cursor` is the terminal's
+    array of colored [`Span`](#Span)s; [`line`](#line) makes the common one,
+    which is a whole row in the window's own color. `cursor` is the terminal's
     own block cursor, in the canvas's coordinates -- the only piece of a canvas
     that is not made of characters. `Nothing` hides it.
 
@@ -1189,7 +1189,7 @@ first for a week, because `Array.append fst second` makes `fst` the *postfix*.
     *file*: [`setEditorText`](#setEditorText) puts a document in,
     [`readEditor`](#readEditor) asks for it back, and what arrives in between
     is an [`Edited`](#Event) event carrying whether the document is modified,
-    where the caret is, and the three facts a program greys its Edit menu on —
+    where the caret is, and the three facts a program grays its Edit menu on —
     a handful of numbers and booleans, not a file.
     [`insertIntoEditor`](#insertIntoEditor) is the third call, and the one that
     puts text in without replacing what is already there.
@@ -1266,14 +1266,14 @@ Wrapping a wrapper is legal and the outer one wins.
         , view = Button { id = "save", ... }
         }
 
-A view wrapped in `Enabled False` is drawn in the palette's grey, is skipped by
+A view wrapped in `Enabled False` is drawn in the palette's gray, is skipped by
 `Tab`, and is handed no keystroke and no click. It is a wrapper for the same
 reason `Grows` is -- being available is `TView`'s `sfDisabled` and so is true
 of *every* widget rather than of any one of them, and a view that is always
 available should not have to say so.
 
 **This is not [`setEnabled`](#setEnabled), and the difference is the reason it
-exists.** That greys a *command*, everywhere it appears -- a menu entry, a
+exists.** That grays a *command*, everywhere it appears -- a menu entry, a
 status line entry, a button carrying it. A view with no command had no way to
 be unavailable at all, which is every input line, list box, scroll bar and
 canvas in the package. Use `setEnabled` for a command and this for a view; a
@@ -1314,16 +1314,16 @@ type View
     | Visible { visible : Bool, view : View }
 
 
-{-| A run of characters on a [`Canvas`](#View) line, painted in one colour.
+{-| A run of characters on a [`Canvas`](#View) line, painted in one color.
 
-`Nothing` for either half means the colour the window's palette gives this
+`Nothing` for either half means the color the window's palette gives this
 view, which is what you want almost everywhere -- it is how a canvas goes on
-looking like the rest of the program. Name a colour only where the point *is*
-the colour: today on a calendar, a tile that is out of place.
+looking like the rest of the program. Name a color only where the point *is*
+the color: today on a calendar, a tile that is out of place.
 
 The two halves are separate because naming one is the common case. A span with
 a foreground and no background sits on whatever the window is already using,
-so a highlight does not have to know the colour scheme it is highlighting
+so a highlight does not have to know the color scheme it is highlighting
 against.
 
 Build them with [`plain`](#plain), [`ink`](#ink) and [`on`](#on) rather than by
@@ -1339,24 +1339,24 @@ type alias Span =
     }
 
 
-{-| The sixteen colours a terminal has had since 1981, which is also all that
+{-| The sixteen colors a terminal has had since 1981, which is also all that
 Turbo Vision's palettes deal in. The bottom eight are the plain ones and the
 top eight their bright counterparts; `Brown` is bright-shifted into `Yellow`,
 and `LightGray` into `White`, which is why those two names look out of place.
 
 **Pick these against a blue ground.** A [`Window`](#Window) on the desktop is
 Turbo Vision's blue window -- white on blue for the frame, yellow on blue for
-the text inside it -- and a modal [`dialog`](#dialog) is the grey one. A `Hue`
-names an absolute colour with nothing in between, so it is the model and only
+the text inside it -- and a modal [`dialog`](#dialog) is the gray one. A `Hue`
+names an absolute color with nothing in between, so it is the model and only
 the model that can put dark blue on blue, and nothing will report it. The four
 that read well on a blue window are `LightCyan` and `Cyan` for something
 quieter than the text, `LightRed` for something wrong, and `LightGreen` for
-something marked; `Blue`, `Black` and `DarkGray` are for the grey ground of a
+something marked; `Blue`, `Black` and `DarkGray` are for the gray ground of a
 dialog and vanish on a window.
 
 The same applies in reverse to `Yellow`: it is what a window's ordinary text
 already is, so a highlight painted in it is not a highlight. Use
-[`on`](#on) with `LightGray` for a selection -- blue on light grey is what
+[`on`](#on) with `LightGray` for a selection -- blue on light gray is what
 Turbo Vision's own selected text is -- rather than a background of your own.
 -}
 type Hue
@@ -1378,7 +1378,7 @@ type Hue
     | White
 
 
-{-| A whole canvas line in the window's own colour -- the shape of nearly every
+{-| A whole canvas line in the window's own color -- the shape of nearly every
 line on nearly every canvas.
 
     lines = Array.map Tui.line [ "Su Mo Tu We Th Fr Sa" ]
@@ -1389,7 +1389,7 @@ line body =
     [ plain body ]
 
 
-{-| One span in the window's own colour, for the parts of a mixed line that are
+{-| One span in the window's own color, for the parts of a mixed line that are
 not the interesting part.
 -}
 plain : String -> Span
@@ -1397,7 +1397,7 @@ plain body =
     { text = body, fg = Nothing, bg = Nothing }
 
 
-{-| One span in a colour of your choosing, on whatever background the window is
+{-| One span in a color of your choosing, on whatever background the window is
 already using. This is the highlight: `ink Yellow "31"` marks today without
 deciding what today is sitting on.
 -}
@@ -1439,7 +1439,7 @@ Then two prefixed sets, and the prefixes say who answers them.
 
 `"clipboard.cut"`, `"clipboard.copy"` and `"clipboard.paste"` act on whatever
 holds the caret, and **that is an [`InputLine`](#View) as much as an
-[`Editor`](#View)** -- both react to these, both light and grey them by
+[`Editor`](#View)** -- both react to these, both light and gray them by
 themselves as a selection comes and goes. Bind them to keys your users expect
 and cut, copy and paste work in every field in the program:
 
@@ -1579,7 +1579,7 @@ type alias StatusItem =
     editor at the pump, so typing a word is one event.
 
     `canUndo`, `hasSelection` and `isOverwrite` ride along for the same reason
-    the rest does: they are what a program greys **Undo** and **Cut** on and
+    the rest does: they are what a program grays **Undo** and **Cut** on and
     what it puts in the `OVR` corner of a status line, they change for the same
     reasons the caret does, and asking for them would be the synchronous query
     this port has never had. `isOverwrite` is the one of the three the *user*
@@ -1603,7 +1603,7 @@ type alias StatusItem =
     `fromSystem` is `False` when what came back is this program's own last
     copy, because there was no system clipboard to ask.
   - `DialogClosed` -- a [`dialog`](#dialog) was dismissed. `cmd` is the button
-    that closed it (`"cancel"` if it was cancelled or closed from its frame),
+    that closed it (`"cancel"` if it was canceled or closed from its frame),
     and `values` holds every field in it -- read them with [`text`](#text),
     [`number`](#number) and [`flag`](#flag).
   - `WindowResized` -- the user moved, resized, zoomed or tiled a window, and
@@ -1788,7 +1788,7 @@ because it calls `execView`, the nested loop this binding does not have; here
 a message box is fifteen lines of dialog that every program would otherwise
 write for itself, so the package writes them.
 
-`desktop` is what makes it centre, and it is the reason this could not have
+`desktop` is what makes it center, and it is the reason this could not have
 been written before the [`Resized`](#Event) event: a rectangle is in desktop
 coordinates and nothing in a pure `view` function knew how big the desktop was.
 Pass the size the model was last told.
@@ -2110,7 +2110,7 @@ picked with the mouse, with the arrow keys and `Enter`, or by the letter the
 `~` marks underline.
 
 An entry whose command has been turned off with [`setEnabled`](#setEnabled) is
-drawn greyed and cannot be chosen, exactly as it would be on the menu bar --
+drawn grayed and cannot be chosen, exactly as it would be on the menu bar --
 the menu reads the command set once, when it opens.
 -}
 popupMenu :
@@ -2445,7 +2445,7 @@ readClipboard ports =
     ports.toJs (Encode.object [ { key = "type", value = Encode.string "readClipboard" } ])
 
 
-{-| Quit. Any open dialog is cancelled on the way out, and the process exits
+{-| Quit. Any open dialog is canceled on the way out, and the process exits
 once the terminal has been restored.
 
 The built-in command name `"quit"` on a menu entry or status line entry does
@@ -2532,7 +2532,7 @@ setDoubleClickDelay ports ticks =
             ]
 
 
-{-| Grey a command out everywhere it appears -- menu entries, status line
+{-| Gray a command out everywhere it appears -- menu entries, status line
 entries and buttons alike -- or bring it back.
 
     Tui.setEnabled tui "clear" (Array.length model.items > 0)
@@ -2541,7 +2541,7 @@ A disabled command cannot be triggered by any route, including its hotkey.
 
 One limit inherited from Turbo Vision: only the first 146 distinct command
 names in a program can be disabled. Beyond that they are numbered above the
-range Turbo Vision allows to be greyed out, and `setEnabled` has no effect on
+range Turbo Vision allows to be grayed out, and `setEnabled` has no effect on
 them.
 -}
 setEnabled : Ports msg -> String -> Bool -> Cmd msg
@@ -2811,7 +2811,7 @@ encodeRect r =
     Encode.array Encode.int [ r.x1, r.y1, r.x2, r.y2 ]
 
 
-{-| A colour is a number when it is one of the sixteen and a three element
+{-| A color is a number when it is one of the sixteen and a three element
 array when it is not, which is the whole of the wire format: the binding tells
 them apart by type rather than by a tag, exactly as `Value`'s decoder does.
 -}
@@ -2822,7 +2822,7 @@ encodeTint tint =
             Encode.int (hueCode hue)
 
         Rgb value ->
-            -- Split here rather than in the binding: `//` is fine on a colour
+            -- Split here rather than in the binding: `//` is fine on a color
             -- and `Math.modBy` is the only remainder Gren has, so doing it
             -- once in one place beats doing it in C++ against a number that
             -- has already been through a double.
@@ -3106,8 +3106,8 @@ encodeViewFields view =
             ]
 
 
-{-| A span with no colour is sent as `{text}` alone, so a canvas that never
-mentions colour produces the same JSON it produced before colour existed. The
+{-| A span with no color is sent as `{text}` alone, so a canvas that never
+mentions color produces the same JSON it produced before color existed. The
 runtime diffs these as JSON, and two shapes for one meaning would repaint every
 canvas on every render.
 -}

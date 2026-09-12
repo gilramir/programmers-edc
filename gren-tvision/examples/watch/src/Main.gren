@@ -105,7 +105,7 @@ type State
     | Waiting
     | Running
     | Finished Int
-    | Cancelled
+    | Canceled
 
 
 type alias Job =
@@ -315,8 +315,8 @@ update msg model =
                             { job
                                 | child = Nothing
                                 , state =
-                                    if job.state == Cancelled then
-                                        Cancelled
+                                    if job.state == Canceled then
+                                        Canceled
 
                                     else
                                         Finished ended.code
@@ -522,7 +522,7 @@ handleEvent event model =
                                     job
 
                                 else
-                                    { job | state = Cancelled }
+                                    { job | state = Canceled }
                             )
                             model.jobs
                 }
@@ -735,12 +735,12 @@ describe job =
         Finished code ->
             "[exit " ++ String.fromInt code ++ "]"
 
-        Cancelled ->
+        Canceled ->
             "[cancelled]"
 
 
-{-| The slice of the output the pane is showing, in the colour its state
-deserves. Colour is the only thing that says at a glance which of several
+{-| The slice of the output the pane is showing, in the color its state
+deserves. Color is the only thing that says at a glance which of several
 windows is the one that went wrong.
 -}
 paneLines : Int -> Job -> Array (Array Tui.Span)
@@ -748,8 +748,8 @@ paneLines rows job =
     let
         paint =
             when hue job is
-                Just colour ->
-                    Tui.ink colour
+                Just color ->
+                    Tui.ink color
 
                 Nothing ->
                     Tui.plain
@@ -760,11 +760,11 @@ paneLines rows job =
         |> Array.map (\text -> [ paint (String.takeFirst 75 text) ])
 
 
-{-| A window here is grey, because everything the binding makes is a
+{-| A window here is gray, because everything the binding makes is a
 `TDialog` underneath, and the eight bright hues are the half of the sixteen
-that a light background eats: `LightGreen` on grey is barely there and
+that a light background eats: `LightGreen` on gray is barely there and
 `LightGray` is not there at all. So these are the dark half, and a job with
-nothing to say uses no colour at all -- which is `Tui.plain`, the palette's
+nothing to say uses no color at all -- which is `Tui.plain`, the palette's
 own, and stays right if the palette ever changes.
 -}
 hue : Job -> Maybe Hue
@@ -776,7 +776,7 @@ hue job =
         Finished _ ->
             Just Red
 
-        Cancelled ->
+        Canceled ->
             Just DarkGray
 
         _ ->

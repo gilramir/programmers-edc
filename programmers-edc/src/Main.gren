@@ -138,7 +138,7 @@ timeWiring =
 
 
 type alias Model =
-    { -- The About box centres itself, and a rectangle is in desktop
+    { -- The About box centers itself, and a rectangle is in desktop
       -- coordinates, so the shell has to know how big the desktop is. It is
       -- also the only thing here that needs the `Resized` event.
       desktop : { cols : Int, rows : Int }
@@ -177,13 +177,13 @@ type alias Model =
     -- nothing else does. Held here because `Node.getEnvironmentVariables` is
     -- an `Init.Task` -- the same reason the file system permission is.
     , session : Help.Session
-    -- Which colour scheme, and where to write it down. The theme is a shell
+    -- Which color scheme, and where to write it down. The theme is a shell
     -- concern in the same way the menu bar is: it belongs to the program
     -- rather than to any tool, and every tool has to be told.
     , theme : Theme.Name
     -- Which week numbering the calendar shows, which is a setting rather than
     -- the calendar's own state: it is remembered when the window is not open,
-    -- and it is on the Options menu with the colour scheme.
+    -- and it is on the Options menu with the color scheme.
     , weeks : Week.Rule
     -- Which form the ASCII chart opens in. Held here rather than in the tool
     -- for the same reason the converter's zone list is: it has to outlive a
@@ -509,7 +509,7 @@ printing write code =
         }
 
 
-{-| Colour if somebody is looking, and not if the output is a pipe or if
+{-| Color if somebody is looking, and not if the output is a pipe or if
 NO_COLOR is set (<https://no-color.org>). This is `Argparse.Program`'s own rule,
 copied rather than called: predc cannot use that runner, because the runner
 ends in a process that exits and predc's ends in one that paints.
@@ -517,7 +517,7 @@ ends in a process that exits and predc's ends in one that paints.
 say : Maybe Terminal.Configuration -> Dict String String -> Stream.Writable Bytes -> PP.Document -> Task.Task Never {}
 say terminal vars stream doc =
     let
-        colourful =
+        colorful =
             terminal /= Nothing && not (Dict.member "NO_COLOR" vars)
 
         -- A paragraph is a sequence of words until something says where the
@@ -542,7 +542,7 @@ say terminal vars stream doc =
     Stream.Log.line stream
         (PP.toStringWithOptions
             { PP.defaultOptions | maxColumns = width }
-            (if colourful then
+            (if colorful then
                 doc
 
              else
@@ -631,11 +631,11 @@ handleEvent event model =
         -- The shell's own copy first, and then **on to the tools**, which is
         -- the branch that used to stop here.
         --
-        -- Three of them keep a desktop of their own and centre dialogs on it:
+        -- Three of them keep a desktop of their own and center dialogs on it:
         -- `Tool.Hex` and `Help` have a `Tui.Resized` branch each and neither
         -- was ever reached, so both sat on the 80x23 they were seeded with. On
         -- a 120-column terminal the hex viewer's **Go to offset** and **Type
-        -- bytes** opened nine columns from the left edge, centred for a
+        -- bytes** opened nine columns from the left edge, centered for a
         -- desktop that was not there. Nothing reported it: a dialog in the
         -- wrong place is a dialog, and the seed is a plausible size.
         Resized size ->
@@ -877,7 +877,7 @@ handleEvent event model =
             else
                 -- The zone picker is a window of the converter's rather than
                 -- the shell's, so closing it from its frame is the tool's news
-                -- and not this function's. Everything unrecognised goes the
+                -- and not this function's. Everything unrecognized goes the
                 -- same way, which is what stops the shell having to learn the
                 -- id of every window a tool decides to open.
                 toTools event model
@@ -1438,7 +1438,7 @@ menuBar model =
         }
     ]
         ++ toolMenus model
-        -- Colors was under Tools, where it did not belong: a colour scheme is
+        -- Colors was under Tools, where it did not belong: a color scheme is
         -- not a tool, and the menu that lists what predc *has* should not also
         -- be where its settings live. Turbo Vision's own demo answers this --
         -- `tvdemo3.cpp` has an `~O~ptions` menu with `~C~olors...` in it,
@@ -1468,7 +1468,7 @@ menuBar model =
                         }
                     -- The chart's own mode, on the settings menu rather than
                     -- on a menu of the tool's, which is where predc puts a
-                    -- setting: the colour scheme and the week numbering are
+                    -- setting: the color scheme and the week numbering are
                     -- both here and neither is on the window it changes. It
                     -- earns the place twice over -- this is the half that can
                     -- be reached when the chart is closed, and it is where

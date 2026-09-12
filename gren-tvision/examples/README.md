@@ -16,10 +16,10 @@ Build them all with `devbox run gren:build`, run one with
 | `entries` | *(ours)* | list boxes, `Time.every` behind a modal dialog, `WindowClosed`, mutable window titles — and later `Tui.focus`, because "show me that window" is the thing a description of the UI cannot say, `Resized`, because it is the first example that does not assume 80x25, `Grows`, because a window that grows and a list box that does not is worse than neither, `Changed`, because a filter box is a control in an ordinary window, `messageBox`, because Clear should ask first, and `History`, because a filter box worth typing into is one worth remembering |
 | `forms` | `tvision/examples/tvforms` | check boxes, radio buttons, labels, and a list box highlight the model can both read and move — later `allowed`, the filter on its phone field, and `MultiCheckBoxes`, the cluster the other two could not express |
 | `ascii` | `tvision/examples/tvdemo` (ascii.cpp) | the canvas, from Gren: a view the model paints itself, and a cursor to select with |
-| `calendar` | `tvision/examples/tvdemo` (calendar.cpp) | colour on a canvas, as spans; and today as a field, because `Time.now` is a task |
+| `calendar` | `tvision/examples/tvdemo` (calendar.cpp) | color on a canvas, as spans; and today as a field, because `Time.now` is a task |
 | `puzzle` | `tvision/examples/tvdemo` (puzzle.cpp) | nothing in the API -- but the random seed had to move into the model, which is what let a test win the game |
 | `calc` | `tvision/examples/tvdemo` (calc.cpp) | `takesFocus` on a button: a keypad that can be pressed but never holds the caret |
-| `palette` | `tvision/examples/palette` | nothing -- its subject is palette indirection, which a `Span` naming its colour outright does away with, and the write-up says what that costs |
+| `palette` | `tvision/examples/palette` | nothing -- its subject is palette indirection, which a `Span` naming its color outright does away with, and the write-up says what that costs |
 | `mouse` | `tvision/examples/tvdemo` (mousedlg.cpp) | the scroll bar as a view of its own, `isDouble` on a click, `setDoubleClickDelay`, and `takesFocus` on a canvas |
 | `dir` | `tvision/examples/tvdir` | no new widget — the tree view it looked like it needed is a `ListBox` over a fold — but it found a real bug in the diff, moved a list box's scroll bar, and is the first example to use the file system; later `Tui.fileDialog`, which finished the port, the `History` on its field, and `for` on `ScrollBar`, because it is the only window here with two scrollable panes in it |
 | `demo` | `tvision/examples/tvdemo` (the shell) | real windows: zoom, resize, tile and cascade, which every window had silently been unable to do — and later the first `Tui.messageBox`, which is its About box with fifteen lines taken out, `popupMenu`, whose right-click menu is three commands it already had, and `Ui.overlays`, which is where its clock finally belongs |
@@ -106,7 +106,7 @@ harness can now report.
 ## What the calendar and the puzzle changed
 
 Both needed the same thing, and it is the first API change since `ascii` that
-the binding had to make in C++: **a canvas line is an array of coloured spans
+the binding had to make in C++: **a canvas line is an array of colored spans
 rather than a string.**
 
     type alias Span =
@@ -116,7 +116,7 @@ The two halves are separate because naming one is the common case -- today on a
 calendar is a foreground on whatever the window is already using, and a
 highlight that had to name its own background would stop matching the program
 the moment anyone changed the theme. `Tui.line` makes the shape every canvas
-had before colour existed, so `ascii` changed by one word.
+had before color existed, so `ascii` changed by one word.
 
 Beyond the API, each of these ports made the same point from a different
 direction: **state the C++ hides in a constructor has to become a field, and
@@ -162,17 +162,17 @@ canvas doing the reading.
 Nothing, and that is the point worth writing down.
 
 `palette.cpp` is an essay on Turbo Vision's three levels of palette
-indirection. A `Span` names its colour outright, so the essay collapses into a
+indirection. A `Span` names its color outright, so the essay collapses into a
 six-row table of what those three levels resolve to, and the original's last
 line -- the one that "bypasses the palettes" -- becomes indistinguishable from
 the six above it.
 
 The port says what that costs rather than claiming a win. The indirection
 exists so one edit restyles every view in the program; a span that names its
-colour gives that up for itself. (Every widget, and every span that names
+color gives that up for itself. (Every widget, and every span that names
 nothing, got the one-edit restyle back later as `Theme` and `WindowPalette` --
 see "What the palette example changed, the second time".) What comes back is
-that the colour is in the model, next to the branch
+that the color is in the model, next to the branch
 that decides what to draw -- which is how the calendar marks today and the
 puzzle shows a tile out of place, and neither of those is a question a palette
 can answer.
@@ -356,17 +356,17 @@ anything tagged with another. `dir` has the same hazard in one comment — two
 listings in flight, and the late one must not overwrite the recent one — and
 this is that shape at full size.
 
-**Every window this binding made was grey, so half the palette was unusable in
+**Every window this binding made was gray, so half the palette was unusable in
 it.** `JsWindow` derived from `TDialog`, which meant a window's background was
-the light grey a dialog has rather than Turbo Vision's blue — and the eight
+the light gray a dialog has rather than Turbo Vision's blue — and the eight
 *bright* hues are exactly the ones a light background eats. (A window chooses
 its `palette` now, `BlueWindow`, `CyanWindow` or `GrayWindow`; see the palette
-section below. The colour choices here still hold on grey.) The first version
+section below. The color choices here still hold on gray.) The first version
 of this example painted a passing job `LightGreen`, a failing one `LightRed`
 and a running one `LightGray`, which is respectively hard to read, hard to
 read, and invisible. They are `Green`, `Red`, `DarkGray` and — for a job with
-nothing to say — no colour at all, which is `Tui.plain` and stays right if the
-palette ever moves. `drive_watch.py` asserts on the two colour codes, because
+nothing to say — no color at all, which is `Tui.plain` and stays right if the
+palette ever moves. `drive_watch.py` asserts on the two color codes, because
 nothing else on screen would notice.
 
 And one that is about the API rather than about watching: **a scroll bar the
@@ -400,7 +400,7 @@ the ninth row because it lives beside the directory, at `tvision/hello.cpp`.
 | `mmenu` | **done** | it was not about nested menus at all — see above |
 | `palette` | **done** | `examples/palette`; the essay it is written to explain has no Gren equivalent — see above |
 | `tvdemo` | **done** except the help system | `examples/demo` is its shell; the demos inside it are `ascii`, `calendar`, `puzzle`, `calc`, `mouse` and `viewer` |
-| `tvforms` | **done** (the UI half) | see above. Its other half is `.rsc` resource streaming — `opstream`/`ipstream` serialising views to disk — which has no Gren meaning |
+| `tvforms` | **done** (the UI half) | see above. Its other half is `.rsc` resource streaming — `opstream`/`ipstream` serializing views to disk — which has no Gren meaning |
 | `tvdir` | **done** | `examples/dir` — and it turned out to need no new widget at all, Change Dir included; see above |
 | `tvedit` | **ported** | `examples/edit`. `TEditor` is wrapped; `TFileEditor` is not, because reading a file is a `Task`. See the note below |
 | `tvhc` | **no** | a command-line help *compiler*, not a TUI |
@@ -415,13 +415,13 @@ subsystem, not a demo of anything.
 | part | needs |
 |---|---|
 | ASCII chart | **done** — `examples/ascii`; it wanted a cursor, see above |
-| calendar | **done** — `examples/calendar`; it wanted colour, see above |
+| calendar | **done** — `examples/calendar`; it wanted color, see above |
 | puzzle | **done** — `examples/puzzle` |
 | calculator | **done** — `examples/calc`; it wanted `takesFocus`, see above |
 | event viewer | **done** — part of `examples/demo`; it sees what crosses the port and nothing else |
 | mouse settings | **done** — `examples/mouse`; it wanted the scroll bar, see above |
 | file viewer | **done** — `examples/viewer`; `TScroller` went the way of `TOutline` |
-| colours | **done** — part of `examples/demo`, as five radio buttons. A colour dialog is a form, and what it sets is a field |
+| colors | **done** — part of `examples/demo`, as five radio buttons. A color dialog is a form, and what it sets is a field |
 | tile / cascade | **done** — part of `examples/demo`. They were built-in command *names* and not built-in commands; see above |
 | help | `.hlp` files compiled by `tvhc`. Reimplementing help as ordinary windows from the model is a better use of the time than porting a binary format |
 
@@ -584,7 +584,7 @@ Since predc's time zone picker, that is no longer true. A bar a `ListBox` or an
 what makes three lists side by side scroll independently, and a `ScrollBar` the
 model owns takes one **`for`** field to do the same — the id of the view it
 scrolls, listed before the bar, the rule `Label` already follows. `""` keeps
-the window-wide behaviour, which is the right answer for a window whose only
+the window-wide behavior, which is the right answer for a window whose only
 scrollable thing is that bar's and is what four of the five say.
 
 `dir` is the fifth and the reason the field exists: a tree list on the left and
@@ -704,7 +704,7 @@ helper returns a `DialogSpec`, the caller hands it to `dialog` like any other,
 and the answer arrives as an ordinary `DialogClosed` carrying the id.
 
 That establishes the package-helper shape (4) needs. It also could not have
-been written before gap (1): a box centres itself, a dialog's rectangle is in
+been written before gap (1): a box centers itself, a dialog's rectangle is in
 desktop coordinates, and `desktop` is a field on the spec that the model fills
 in from what `Resized` told it.
 
@@ -938,14 +938,14 @@ A fourth thing turned up later, and the way it turned up is the point. **A
 view's palette is a question about the group it is in**, and `TStaticText`
 answered as if that were always a window: `cpStaticText` is the sixth entry of
 the owner's table, which on the application is the menu bar's *selected
-disabled* colour. The clock drew black on green across a grey bar. Turbo
+disabled* color. The clock drew black on green across a gray bar. Turbo
 Vision's own `TClockView` and `THeapView` use `getColor(2)` — the bar's normal
-colour — and `JsStaticText` does the same now when its owner is the
+color — and `JsStaticText` does the same now when its owner is the
 application.
 
-Twelve drivers assert colour and `drive_demo` asserted four things about the
+Twelve drivers assert color and `drive_demo` asserted four things about the
 clock, all of them about its text; the sweep for invisible text passes on
-green-on-grey. It was found by the first screenshot ever taken of the example
+green-on-gray. It was found by the first screenshot ever taken of the example
 (`docs/shots.py`, `img/overlay.png`) and was obvious in it immediately. FINDINGS
 has the rest.
 
@@ -956,7 +956,7 @@ Said plainly, so nobody spends a day on one of these.
 **The `TColorDialog` family** — `TColorSelector`, `TColorDisplay`,
 `TColorGroupList`, `TColorItemList`, `TMonoSelector` — is an editor for the
 palette indirection, and `examples/palette` argues at length that the
-indirection has no Gren equivalent. A colour dialog here is a form, and what it
+indirection has no Gren equivalent. A color dialog here is a form, and what it
 sets is a field, which is what `examples/demo` already does with five radio
 buttons.
 
@@ -1040,7 +1040,7 @@ along with the rule this made concrete: a *view's* rectangle is structural, so
 a layout must be written once and grown by `Grows`, never recomputed from the
 new height.
 
-### The windows were the wrong colour, and had been all along
+### The windows were the wrong color, and had been all along
 
 Not a gap -- a bug, and one that had been on screen since the first window this
 package drew. `JsWindow` derives from `TDialog`; `TDialog`'s constructor
@@ -1048,48 +1048,48 @@ overwrites the `wpBlueWindow` palette `TWindow`'s had just set with
 `dpGrayDialog`; and `beWindow()`, which exists to put back what that
 constructor takes out, put back four things and missed the fifth. So every
 window on every desktop was painted in the *dialog* palette, white on light
-grey, and it looked deliberate because it was uniform.
+gray, and it looked deliberate because it was uniform.
 
-Windows are blue now and dialogs are still grey, which is the distinction Turbo
+Windows are blue now and dialogs are still gray, which is the distinction Turbo
 Vision has always drawn. The cost lands on the spans: `Hue` is an absolute
-colour, so every `ink` in the repo had been chosen against a ground that was
-grey by accident. `examples/calendar` marked today in yellow and
+color, so every `ink` in the repo had been chosen against a ground that was
+gray by accident. `examples/calendar` marked today in yellow and
 `examples/puzzle` drew its checkerboard in it, and yellow is what a blue
 window's text already is; both are repainted, and both drivers caught it
-because both assert that some cell differs from the body colour. The full
-account, and the colour vocabulary that came out of it, is in FINDINGS.
+because both assert that some cell differs from the body color. The full
+account, and the color vocabulary that came out of it, is in FINDINGS.
 
 ### What the palette example changed, the second time
 
 `examples/palette` was written as the one port whose whole subject disappears
 in translation: three layers of indirection replaced by a span that names its
-colour. `WindowPalette` is the piece that came back, and this is where it is
+color. `WindowPalette` is the piece that came back, and this is where it is
 demonstrated, because the example is already an argument about exactly this.
 
-`Alt-W` cycles the lower window through Turbo Vision's three colour sets. The
+`Alt-W` cycles the lower window through Turbo Vision's three color sets. The
 upper window does not move, because every line in it names both halves of its
-colour; the lower one follows, because its lines name nothing. That is the
-whole trade on one screen and a single keystroke -- say the colour and it is
+color; the lower one follows, because its lines name nothing. That is the
+whole trade on one screen and a single keystroke -- say the color and it is
 yours to keep, say nothing and it is the window's to change.
 
 `Alt-T` then changes what those three sets *are*. `Theme` on a `Ui` is the
 application palette -- everything the package draws rather than the model -- in
 seventeen fields rather than the hundred and thirty-five attributes Turbo
 Vision keeps them in, which works because the 135 are not 135 decisions: one
-desktop, one bar, and three coloured surfaces written into two blocks apiece.
+desktop, one bar, and three colored surfaces written into two blocks apiece.
 `Tui.borland` is Turbo Vision's *look* rebuilt from those fields rather than
 its table reproduced: compared byte for byte against `cpAppColor`, 82 of the
 135 slots differ, almost all of them in blocks nothing reaches or in places
 where the model deliberately treats a surface as one surface. The first version
-of this paragraph claimed the expansion was proved correct because every colour
+of this paragraph claimed the expansion was proved correct because every color
 assertion in the suite passed against it, which proves much less -- the suite
 asserts on a few dozen cells, and one genuinely wrong slot (the list viewer,
 two off) survived exactly that argument.
 
 The example's second theme is deliberately `Rgb` throughout where Borland's is
-`Ansi`, because that is a real choice: `Ansi` inherits whatever sixteen colours
+`Ansi`, because that is a real choice: `Ansi` inherits whatever sixteen colors
 the person running the program has set and matches the rest of their machine,
-`Rgb` pins the colour and looks the same everywhere. A dark scheme is the case
+`Rgb` pins the color and looks the same everywhere. A dark scheme is the case
 that needs the second -- `Black` and `DarkGray` is the only dark pair the
 sixteen offer, and it is at once too far apart to read as one surface and too
 close to be a border.
@@ -1097,9 +1097,9 @@ close to be a border.
 Two more things it taught. The three sets a window can have are the *dialog*
 palettes and not the window ones -- a window here can hold a button, and a
 button asks for entries past the eight a window palette has. And a `TGroup`
-with a buffer draws by blitting it, so recolouring a window and calling
-`drawView` paints the cached colours back and looks like nothing happened;
-`redraw` is what asks the children for their colours again. Both are in
+with a buffer draws by blitting it, so recoloring a window and calling
+`drawView` paints the cached colors back and looks like nothing happened;
+`redraw` is what asks the children for their colors again. Both are in
 FINDINGS.
 
 ### What is left, now that the list is empty
@@ -1166,7 +1166,7 @@ the user has only the rectangle it was built at. Build one filling the desktop
 — which is what any window sized from [`Resized`](#Event) does — and restoring
 it puts it exactly where it already is, while `TFrame` goes on drawing `[↕]`
 to say that it will. `JsWindow::zoom` computes a rectangle when the stored one
-would do nothing: three-quarters of the desktop, centred, in whichever
+would do nothing: three-quarters of the desktop, centered, in whichever
 dimensions [`Resize`](#Resize) left free. Nothing in the API changed, because
 the answer turned out to be a default rather than a field.
 
@@ -1174,7 +1174,7 @@ the answer turned out to be a default rather than a field.
 `TScrollBar` notifies through `scrollDraw`, which runs for any change of value
 -- so a bar declared as `value = 5` told the model "the user scrolled to 5"
 before the first frame, and every `setValue` came straight back. Same loop the
-list's highlight had, same fix: silent for a write the bar could honour, and
+list's highlight had, same fix: silent for a write the bar could honor, and
 reported for one it could not. `tvision-node/test/drive_echo.py` asks the same
 question of every widget the model can write to.
 
@@ -1665,7 +1665,7 @@ has the measurement and `drive_hex.py` pins it, which is what keeps a decision
 from being undone by an edit that meant well.
 
 **What it bought the consumer.** predc's hex viewer marks by dragging, in one
-small function, and `v`, `1`-`6`, the colour legend, `y` and the dump copy all
+small function, and `v`, `1`-`6`, the color legend, `y` and the dump copy all
 act on what the mouse drew without knowing a mouse was involved — because the
 far end of a mark is the cursor and a drag moves the cursor. The mark's anchor
 is set on the first motion rather than on the press, which is what leaves a
@@ -1682,8 +1682,8 @@ negative coordinates. Nothing else asserts that the capture is real.
 
 `tools/audit_api.py` walks Turbo Vision's public surface rather than an
 example's needs, and the first thing it said was the one nobody would have
-gone looking for: **`setEnabled` greys a *command*, and a view without one
-could not be greyed at all.** An `InputLine`, a `ListBox`, a `ScrollBar` and a
+gone looking for: **`setEnabled` grays a *command*, and a view without one
+could not be grayed at all.** An `InputLine`, a `ListBox`, a `ScrollBar` and a
 `Canvas` carry no command, so there was no way to say that a control is not
 available — which is what every form does while it is waiting for something.
 
@@ -1694,20 +1694,20 @@ available should not have to say so. That also makes it the second wrapper, so
 `encodeView` walks down through any nesting instead of matching one level, and
 `check_consistency.py`'s exemption list is a set rather than a name.
 
-**A disabled view is not a colour.** Turbo Vision draws it grey, and it also
+**A disabled view is not a color.** Turbo Vision draws it gray, and it also
 skips it in the tab order and hands it no keystroke and no click — which is
 what makes it different from drawing a note beside the control. `entries` puts
 its filter box behind one (nothing to filter, nothing to type) and the check
-that pins it types at the box rather than reading its colour, because the
-colour is the palette's business and the refusal is what the model asked for.
+that pins it types at the box rather than reading its color, because the
+color is the palette's business and the refusal is what the model asked for.
 
 Three more from the same pass, all of them members of classes that were already
 wrapped and none of them reachable before:
 
-**`available` on a cluster**, one flag per box. `sfDisabled` greys a whole
-cluster, because a cluster is one view however many boxes it holds; this greys
+**`available` on a cluster**, one flag per box. `sfDisabled` grays a whole
+cluster, because a cluster is one view however many boxes it holds; this grays
 one box, and `TCluster` then skips it for the arrow keys *and* refuses its
-hotkey (`buttonState` gates both). `tvision-node/examples/form.js` greys
+hotkey (`buttonState` gates both). `tvision-node/examples/form.js` grays
 "Phone" for a record with no phone number, which is the rule every form has,
 and `drive_form.py` checks the arrows stepping over it in both directions.
 
@@ -1727,7 +1727,7 @@ list, so a `top` written first is a `top` undone.
 
 **One mistake worth keeping**, because it looks exactly like the feature not
 working: a caption is `~P~hone`, and matching `phone` against it finds nothing.
-The first version of the check greyed no box at all and the driver was right to
+The first version of the check grayed no box at all and the driver was right to
 fail.
 
 ## Windows that refuse, views that are not there, and z-order on purpose
@@ -1795,7 +1795,7 @@ field the model spends its time writing back, which is the trap an input line's
 document that change under both of them. Asking would have been the synchronous
 query this port has never had, so they ride on `Edited`, which was being sent
 on every keystroke anyway and already carried the caret for the same reason.
-The payoff is small and exact: `examples/edit` greys **Undo** when there is
+The payoff is small and exact: `examples/edit` grays **Undo** when there is
 nothing to undo and **Cut** when nothing is selected, which it previously could
 not know and therefore left lit — offering two actions that would do nothing.
 

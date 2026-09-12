@@ -11,7 +11,7 @@ month, a canvas of a few hundred cells -- all small enough that `view` can
 produce them from scratch on every tick of every subscription, and the differ
 throws away what did not change. A document is the first thing where that is
 false. Not because it is hard, but because `view` runs *often*: a `text` field
-on the editor would serialise the whole file into the render message once per
+on the editor would serialize the whole file into the render message once per
 render, forever. And the model would then have to implement insert, delete,
 word-left, undo and the clipboard, which is to say implement `TEditor`.
 

@@ -302,7 +302,7 @@ lineWidth =
 
 type alias Model =
     { permission : FileSystem.Permission
-    -- Dialogs centre themselves, so a tool that opens one needs the desktop's
+    -- Dialogs center themselves, so a tool that opens one needs the desktop's
     -- size the same way the shell does. It arrives as an event, and every open
     -- tool is handed every event, so this costs nothing but the field.
     , desktop : { cols : Int, rows : Int }
@@ -769,7 +769,7 @@ update ports event model =
             else
                 still model
 
-        -- The six colours are one menu entry each and one key each, so they
+        -- The six colors are one menu entry each and one key each, so they
         -- are one command each with the ink's number on the end rather than
         -- six branches saying the same thing.
         Tui.Command cmd ->
@@ -966,7 +966,7 @@ whenOpen ports key model =
 
                 -- `/` and `n`, where a reader's hands already are. Neither was
                 -- taken: this canvas answers to p, P, v, V, d, y and the six
-                -- colour digits, and nothing else.
+                -- color digits, and nothing else.
                 "/" ->
                     askFind ports model
 
@@ -999,7 +999,7 @@ The number on the end is the one on the *key cap* -- `hex.ink3` is what `3`
 does -- so that both ends of this go through [`inkOf`](#inkOf) and there is
 only one place that knows the six are numbered from one and indexed from zero.
 The first version of this put the index on the end instead, and the menu
-painted every range one colour to the left of the one it named.
+painted every range one color to the left of the one it named.
 -}
 inkCommand : String
 inkCommand =
@@ -1007,7 +1007,7 @@ inkCommand =
 
 
 {-| `"3"` is the third ink, which is index two. Anything else -- a letter, a
-seventh colour -- is not an ink at all, which is what makes this safe to run
+seventh color -- is not an ink at all, which is what makes this safe to run
 over every key the canvas is sent.
 -}
 inkOf : String -> Maybe Int
@@ -1708,7 +1708,7 @@ digitValue char =
 
 {-| vim's key, and vim's meaning: take what is marked. What is different is
 what it takes when *nothing* is marked -- the highlight under the cursor, if
-there is one -- and that is what makes a highlight worth more than its colour.
+there is one -- and that is what makes a highlight worth more than its color.
 Mark it once, paint it, and it is a range you can come back to and copy a day
 later without marking it again.
 
@@ -2154,7 +2154,7 @@ moveTo offset model =
 
 
 {-| The smallest scroll that puts the cursor back on screen, which is what
-every editor does and the only behaviour that survives holding an arrow key
+every editor does and the only behavior that survives holding an arrow key
 down.
 -}
 keepInView : Model -> Source -> Int -> Int -> Int
@@ -2910,7 +2910,7 @@ commands make: `beef` is four characters and two bytes, and only the reader
 knows which was meant. A hex tool that guessed would be silently looking for
 something else.
 
-Modelled on `typeDialog` down to the note about hotkeys -- a cluster item's
+Modeled on `typeDialog` down to the note about hotkeys -- a cluster item's
 `~t~` would be `Alt-T`, which the menu bar takes first even from inside a
 modal, and plain `t`, which the field takes because the caret is there. Tab and
 the arrows are what works.
@@ -3429,12 +3429,12 @@ The cursor is on top because it is the answer to "where am I", and a mode that
 hid it would be a mode you could get lost in. The mark is next because it is
 the thing being decided; the highlights are what has already been decided, and
 a decision in progress is allowed to cover one that is finished. Underneath,
-nothing: plain text, so that most of a dump is the colour of the window and the
+nothing: plain text, so that most of a dump is the color of the window and the
 paint means something.
 
 Both columns read this, which is the point of it being a function rather than
 two similar `if`s -- the hex pair and its printable character being the same
-colour is the only thing that says they are the same byte.
+color is the only thing that says they are the same byte.
 -}
 face : Inks -> Model -> Int -> Maybe { fg : Hue, bg : Hue }
 face inks model offset =
@@ -3583,7 +3583,7 @@ markLine inks marking range =
 
 It said `1-6 paint` before this, which is a range of numbers and not an answer
 to the question somebody in the mode is actually asking -- *which one is
-yellow*. A key cap is the one place a colour can be named by being it, and it
+yellow*. A key cap is the one place a color can be named by being it, and it
 costs eighteen columns on a line that had them.
 
 The order is the array's, so a scheme that reordered its grounds would reorder
@@ -3600,8 +3600,8 @@ swatches inks =
         inks.highlights
 
 
-{-| The swatch is the colour itself rather than its name in the theme's words,
-because the name is what the menu says and the colour is what the screen says,
+{-| The swatch is the color itself rather than its name in the theme's words,
+because the name is what the menu says and the color is what the screen says,
 and the byte under the cursor is the one place both are available at once.
 -}
 inkNote : Inks -> Model -> Array Span

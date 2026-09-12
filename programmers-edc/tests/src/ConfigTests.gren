@@ -44,8 +44,7 @@ configSuite =
         , tearDownSuite = U.noTearDown
         , setUp = \_ -> Task.succeed {}
         , tearDown = U.noTearDown
-        , tests =
-            zoneTests ++ keyTests ++ fileTests ++ readingTests
+        , tests = zoneTests ++ keyTests ++ fileTests ++ readingTests
         }
 
 
@@ -330,7 +329,7 @@ readingTests =
             (Expect.equal { settings | theme = Theme.Midnight }
                 (read (file [ "theme = \"midnight\"", "weeks = 7", "chart = []" ]))
             )
-    , U.test "and a word nobody recognises is its default too" <| \_ ->
+    , U.test "and a word nobody recognizes is its default too" <| \_ ->
         Task.succeed
             (Expect.equal settings
                 (read (file [ "theme = \"chartreuse\"", "weeks = \"lunar\"", "chart = \"pie\"" ]))

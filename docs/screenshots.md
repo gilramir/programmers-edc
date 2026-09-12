@@ -1,4 +1,4 @@
-# predc, in its three colour schemes
+# predc, in its three color schemes
 
 [predc](../programmers-edc/README.md) is the application this binding exists
 for: a desktop of small programmer's tools in one terminal window. Each picture
@@ -32,13 +32,13 @@ in hex.
 
 ## Midnight
 
-A dark scheme, built out of 24-bit colour rather than the sixteen. The hex dump
+A dark scheme, built out of 24-bit color rather than the sixteen. The hex dump
 viewer has four ranges of a PNG header painted in four of its six highlight
-colours — the signature, the chunk length, the chunk type, and the keyword
+colors — the signature, the chunk length, the chunk type, and the keyword
 inside the text chunk. Below it, the Unicode decoder reading the same kind of
 input as bytes.
 
-Those highlight colours come from `Theme.Inks`, not from the palette: a
+Those highlight colors come from `Theme.Inks`, not from the palette: a
 `Tui.Span` names one of sixteen hues and nothing sits between it and the
 terminal. That split is why a scheme here has two halves — see
 [the widget documentation](../gren-tvision/docs/widgets.md) for the palette side
@@ -50,7 +50,7 @@ of it.
 
 A light scheme, in gren-lang.org's paper, slate and orange. The time converter
 showing one instant in five zones, and the encoder below it. A light ground is
-where a colour scheme is either right or quietly wrong — every colour in this
+where a color scheme is either right or quietly wrong — every color in this
 one was chosen as a contrast ratio against the paper it lands on.
 
 ![predc in the Gren scheme, with the time converter and the encoder open](img/predc-gren.png)

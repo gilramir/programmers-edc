@@ -1296,7 +1296,7 @@ menu model =
 of the stack -- the level `y` copies -- is nearest the bottom of the box, as it
 is nearest the entry line on the canvas.
 
-A level holding nothing is left out rather than greyed: the point of the list
+A level holding nothing is left out rather than grayed: the point of the list
 is to show what would be copied, and there is no answer to write beside an
 empty one. An empty stack therefore leaves only **All of it**, which says the
 stack is empty when it is chosen -- and nothing here carries an empty command,
@@ -1512,9 +1512,9 @@ entryLine inks model =
            )
 
 
-{-| The two modes, labelled.
+{-| The two modes, labeled.
 
-They were an unlabelled `dec exact` at the right-hand end of the entry line,
+They were an unlabeled `dec exact` at the right-hand end of the entry line,
 and the first person to look at the calculator asked what they were -- fairly,
 since the only thing that explained them was a hint that `update` wiped on the
 next keystroke. A word that has to be remembered from a message that is gone is

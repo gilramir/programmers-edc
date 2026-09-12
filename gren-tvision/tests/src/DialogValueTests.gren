@@ -6,7 +6,7 @@ JSON the runtime sends back with a `DialogClosed` event.
 What is worth testing about them is not the happy path but the *defaults*. They
 are total functions by design -- a dialog whose field went away should not take
 the program down -- which means a typo in a field name is silently an empty
-string. These tests pin that behaviour down so it stays a decision rather than
+string. These tests pin that behavior down so it stays a decision rather than
 an accident.
 
 @docs dialogValueSuite

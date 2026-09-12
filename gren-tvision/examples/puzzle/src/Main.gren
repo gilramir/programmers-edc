@@ -3,8 +3,8 @@ port module Main exposing (main)
 {-| tvdemo's sliding puzzle (`tvision/examples/tvdemo/puzzle.cpp`), in Gren.
 
 Fifteen lettered tiles and a hole, on a `Canvas` four rows tall. Tiles come in
-two colours in a checkerboard, and the checker is keyed on the *letter* rather
-than the square, so a tile keeps its colour as it slides -- which is what makes
+two colors in a checkerboard, and the checker is keyed on the *letter* rather
+than the square, so a tile keeps its color as it slides -- which is what makes
 the pattern break up while the puzzle is scrambled and come back together when
 it is solved.
 
@@ -422,8 +422,8 @@ row model y =
     tiles ++ beside
 
 
-{-| Two colours in a checkerboard over the alphabet, so a tile carries its
-colour with it. A solved board drops back to one colour, which is the only
+{-| Two colors in a checkerboard over the alphabet, so a tile carries its
+color with it. A solved board drops back to one color, which is the only
 announcement the original makes that you have won.
 -}
 tile : Model -> String -> Tui.Span

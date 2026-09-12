@@ -621,7 +621,7 @@ inventory =
       , blurb =
             [ "Offsets, sixteen bytes a row, the printable rendering beside"
             , "them. It never loads the file, so anything opens at once; six"
-            , "colours are available for marking ranges up."
+            , "colors are available for marking ranges up."
             ]
       }
     , { title = "Time converter"
@@ -630,7 +630,7 @@ inventory =
       , blurb =
             [ "One instant on several wall clocks, all of them editable:"
             , "type into any row and the rest move with it. The zones are the"
-            , "machine's, so daylight saving is right rather than modelled."
+            , "machine's, so daylight saving is right rather than modeled."
             ]
       }
     , { title = "Unicode decoder"
@@ -717,7 +717,7 @@ whatIsInHere =
            , Text "                          Ctrl-F5 resizes, Alt-F3 closes it,"
            , Text "                          and Window | Tile lays them out."
            , Gap
-           , Text "  Settings                Options: the colour scheme, whether"
+           , Text "  Settings                Options: the color scheme, whether"
            , Text "                          weeks are numbered the ISO way or"
            , Text "                          the US way, and the ASCII chart's"
            , Text "                          shape. All three are remembered in"
@@ -835,7 +835,7 @@ same field and the same sentence would fit it.
 `screen` variant already spends all of them, so that is the one to measure
 against when any of this changes. The `~` marks are not part of that count:
 they are the status line's own convention for a key, [`Theme.hint`](Theme#hint)
-turns them into a second colour, and `barWidth` below has skipped them since
+turns them into a second color, and `barWidth` below has skipped them since
 before this line had any.
 
 The order is deliberate. `Ctrl-Shift-V` first because it is the route that

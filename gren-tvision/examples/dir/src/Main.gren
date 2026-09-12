@@ -125,7 +125,7 @@ type Msg
 init : Node.Environment -> Init.Task { model : Model, command : Cmd Msg }
 init env =
     -- The reason `init` is an Init.Task rather than a plain value: a
-    -- subsystem has to be initialised before there is a model to speak of.
+    -- subsystem has to be initialized before there is a model to speak of.
     Init.await FileSystem.initialize <| \permission ->
         Node.startProgram
             { model =

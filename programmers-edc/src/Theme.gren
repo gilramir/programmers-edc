@@ -1,9 +1,9 @@
 module Theme exposing (Inks, Name(..), all, fromKey, highlightNames, hint, inks, next, palette, title, toKey)
 
-{-| predc's colour schemes, and the two halves every one of them has.
+{-| predc's color schemes, and the two halves every one of them has.
 
 A theme here is two things that are not the same thing, and the split is forced
-rather than chosen. `Tui.Theme` is the *application palette*: every colour on
+rather than chosen. `Tui.Theme` is the *application palette*: every color on
 the screen that gren-tvision draws -- frames, titles, the menu bar, the status
 line, buttons, dialogs, scroll bars. `Inks` is what the tools' own canvases
 paint with, and a theme cannot reach those: a `Tui.Span` names a `Tui.Hue` and
@@ -12,7 +12,7 @@ argument `gren-tvision/examples/palette` makes at length.
 
 So the model holds a `Name` and the two functions below turn it into the two
 halves. Which is the same principle one level up from where the package makes
-it: **the colour is a model decision**, made by the thing that decides what to
+it: **the color is a model decision**, made by the thing that decides what to
 draw.
 
 There is a seam in it worth knowing about. A palette can be 24-bit and an ink
@@ -75,8 +75,8 @@ next name =
 
 
 {-| The things every canvas in this program needs to say, named for what they
-mean rather than for what colour they are -- which is the entire point, since
-what colour they are is what a theme changes.
+mean rather than for what color they are -- which is the entire point, since
+what color they are is what a theme changes.
 
   - `ruler` -- a column header, an offset, a label on a value: the scaffolding
     around the data, and quieter than it.
@@ -94,16 +94,16 @@ what colour they are is what a theme changes.
     merely pointed at, because whether a terminal shows its cursor at all is
     the terminal's business.
   - `marking` -- a range the user is dragging out and has not committed to.
-    One colour, and it has to differ from `selected` *and* from all six below,
+    One color, and it has to differ from `selected` *and* from all six below,
     because all three can be on screen at once: the pending range, the cursor
     inside it, and the highlights it is being dragged across.
   - `highlights` -- the six a hex dump range can be painted, in the order the
     number keys pick them and [`highlightNames`](#highlightNames) names them.
 
 The last two are the hex viewer's, and they are here rather than in it for the
-reason the other four are: a colour a *ground* has to be chosen against belongs
+reason the other four are: a color a *ground* has to be chosen against belongs
 beside the ground. Six is a count, not a limit found by trying: it is how many
-backgrounds a sixteen-colour terminal has that a person can still tell apart
+backgrounds a sixteen-color terminal has that a person can still tell apart
 in a glance at a grid, once the ground, the selection and the marker are spoken
 for.
 
@@ -126,9 +126,9 @@ Every tool window in predc has a line along its foot saying which keys do what,
 and until now every one of them was a single run of `dim` -- which is to say it
 looked exactly like a sentence somebody had written, rather than like a row of
 keys. The status line at the bottom of the screen has never had that problem,
-because `TStatusLine` draws the key and its label in two different colours, and
-that is the whole of the difference: **`Alt-X` in one colour and `Exit` in
-another reads as an instruction, and one colour reads as prose.**
+because `TStatusLine` draws the key and its label in two different colors, and
+that is the whole of the difference: **`Alt-X` in one color and `Exit` in
+another reads as an instruction, and one color reads as prose.**
 
 So the hints are marked the way the status line's own entries are, with `~`
 around the parts that are keys:
@@ -143,7 +143,7 @@ greps for one of these sentences goes on finding it.
 
 There is no escape for a literal `~`, and none is needed: it is not a character
 that appears in a key name or in the kind of clause these lines are made of.
-A hint containing one would come out with the tilde gone and the colours
+A hint containing one would come out with the tilde gone and the colors
 alternating from there, which is visible immediately and in the one place
 somebody is already looking.
 -}
@@ -172,7 +172,7 @@ caught by the label rather than by the eye.
 -}
 highlightNames : Array String
 highlightNames =
-    [ "Red", "Green", "Yellow", "Magenta", "Cyan", "Grey" ]
+    [ "Red", "Green", "Yellow", "Magenta", "Cyan", "Gray" ]
 
 
 inks : Name -> Inks
@@ -187,7 +187,7 @@ inks name =
             -- The only hue on this ground brighter than everything else on it
             -- and not already spoken for. `LightRed` is what Turbo Vision's
             -- own status line uses for a key, and it is `alert` here -- one
-            -- colour cannot mean both "press this" and "this went wrong".
+            -- color cannot mean both "press this" and "this went wrong".
             , key = White
             , alert = LightRed
             -- Recessed, which on this ground is easy: every terminal's black
@@ -197,7 +197,7 @@ inks name =
             , selected = { fg = Blue, bg = LightGray }
             -- A lighter blue than the window, so a range being dragged out
             -- reads as part of the same surface until it is committed to a
-            -- colour that does not.
+            -- color that does not.
             , marking = { fg = Black, bg = LightBlue }
             , highlights = darkGrounds
             }
@@ -205,13 +205,13 @@ inks name =
         Midnight ->
             -- On a near-black ground. `Cyan` rather than `DarkGray` for the
             -- placeholders: bright black on a dark ground is the one pair the
-            -- sixteen colours cannot make legible.
+            -- sixteen colors cannot make legible.
             { ruler = LightCyan
             , dim = Cyan
             , key = White
             , alert = LightRed
             -- The one theme where the field is *lifted* instead. Recessed is
-            -- the principle, but at sixteen colours "darker than near-black"
+            -- the principle, but at sixteen colors "darker than near-black"
             -- is a promise the terminal has to keep and this one cannot check,
             -- and a field nobody can see is worse than a field on the wrong
             -- side of the surface.
@@ -219,7 +219,7 @@ inks name =
             , selected = { fg = Black, bg = LightGray }
             -- `Blue` is free here in a way it is not on Borland's blue, and it
             -- is the one dark ground that reads as a marker rather than as one
-            -- more colour in the set.
+            -- more color in the set.
             , marking = { fg = White, bg = Blue }
             , highlights = darkGrounds
             }
@@ -231,12 +231,12 @@ inks name =
             { ruler = Blue
             , dim = DarkGray
             -- The nearest of the sixteen to this scheme's own `barAccent`,
-            -- `0xB85C00`, which is the colour the status line already draws a
+            -- `0xB85C00`, which is the color the status line already draws a
             -- key in. 5.3:1 on paper, and the one warm hue here that is not
             -- the alert.
             , key = Brown
             , alert = Red
-            -- Paper's own answer, and the oldest one: a grey well with black
+            -- Paper's own answer, and the oldest one: a gray well with black
             -- in it.
             , field = { fg = Black, bg = LightGray }
             , selected = { fg = White, bg = Blue }
@@ -295,12 +295,12 @@ orange =
 
 {-| Near-black, and `Rgb` throughout for a reason: a dark scheme built out of
 "whatever this terminal calls black" is at the mercy of a terminal whose black
-is not dark. `Black` and `DarkGray` is the only dark pair the sixteen colours
+is not dark. `Black` and `DarkGray` is the only dark pair the sixteen colors
 offer, and it is at once too far apart to read as one surface and too close to
 be a border.
 
 The window ground is lifted off the desktop rather than equal to it, which is
-the whole trick: the frame is then a change of colour rather than a line drawn
+the whole trick: the frame is then a change of color rather than a line drawn
 around nothing.
 -}
 midnight : Tui.Theme
@@ -329,7 +329,7 @@ midnightPanel ground =
     , buttonAccent = orange
     -- Recessed rather than raised: a field sits *below* the window's ground
     -- and a button sits above it, which is the whole of why Turbo Vision keeps
-    -- two colours here and this theme keeps two grounds.
+    -- two colors here and this theme keeps two grounds.
     , input = { fg = Tui.Rgb 0xE8E8F0, bg = Tui.Rgb 0x14141A }
     , inputAccent = orange
     , scrollBar = { fg = Tui.Rgb 0x4A4A58, bg = Tui.Rgb 0x24242E }
@@ -343,14 +343,14 @@ Borland's.
 It is also the one that proves `Inks` had to exist. Every hue the other two
 paint with is a bright one, and every bright hue is invisible here.
 
-**Every colour below was checked as a contrast ratio against the ground it
+**Every color below was checked as a contrast ratio against the ground it
 lands on**, and that is not fussiness -- it is the only way to get a light
 scheme right, because on a light ground the mistakes are quiet. A dark scheme
 that goes wrong is illegible and you fix it; a light one that goes wrong is
 *nearly* legible, and it stays that way. The first version of this had white
 text on the orange at 2.8:1 in two places that mattered -- the focused Name
 field of the file dialog, and the selected row of its list -- and it read as a
-slightly odd colour rather than as a bug.
+slightly odd color rather than as a bug.
 
 So the orange appears in three places and each one is a different orange,
 chosen for what it sits on:
@@ -362,7 +362,7 @@ chosen for what it sits on:
     `0xB85C00` at 4.3:1.
   - the buttons are the *bright* [`orange`](#orange) with near-black on it, at
     6.3:1 -- the keypad, and the OK and Cancel of every dialog. This is the one
-    place the logo colour appears at full strength, and it can now be used in a
+    place the logo color appears at full strength, and it can now be used in a
     dialog as well as in a window because `button` and `input` are separate
     fields: before they were one, an orange button meant an orange text field,
     which is why the Name box of the file dialog was the thing that looked
@@ -370,7 +370,7 @@ chosen for what it sits on:
 
 And the selection is not orange at all, in either direction. White on slate is
 12.3:1 and reads at a glance, which is what a selection is for. Neither is the
-input line: paper with a hairline of warm grey under it, at 10.5:1, which is a
+input line: paper with a hairline of warm gray under it, at 10.5:1, which is a
 text field that looks like a text field.
 -}
 gren : Tui.Theme
@@ -430,7 +430,7 @@ grenPanel ground =
 
 {-| The name this scheme is written down as, which is a `String` and not a
 `Json.Encode.Value` or a `Toml.Edit.Value`. The config file has been both, and
-which one it is has never been a fact about a colour scheme -- so the encoding
+which one it is has never been a fact about a color scheme -- so the encoding
 lives with the file and this hands over the one thing only `Theme` knows.
 -}
 toKey : Name -> String

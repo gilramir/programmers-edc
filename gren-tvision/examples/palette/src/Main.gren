@@ -3,11 +3,11 @@ port module Main exposing (main)
 {-| tvision's palette example (`tvision/examples/palette`), in Gren -- and the
 one port where the original's whole subject disappears in translation.
 
-`palette.cpp` is an essay on how a Turbo Vision view gets its colours. A view
-asks for colour *1*; its own palette turns that into an index into the window's
+`palette.cpp` is an essay on how a Turbo Vision view gets its colors. A view
+asks for color *1*; its own palette turns that into an index into the window's
 palette; the window's palette turns that into an index into the application's;
 the application's palette holds the byte the terminal finally receives. Three
-layers of indirection, three parallel palettes for colour, black-and-white and
+layers of indirection, three parallel palettes for color, black-and-white and
 monochrome displays, and a comment explaining that the strings are `#define`s
 so that the compiler will concatenate them.
 
@@ -16,20 +16,20 @@ so that the compiler will concatenate them.
     #define cpTestAppC   "\x3E\x2D\x72\x5F\x68\x4E"
 
 The six lines below are what those three lines resolve to. In Gren a
-[`Span`](Tui#Span) names its colour and there is nothing in between, so the
+[`Span`](Tui#Span) names its color and there is nothing in between, so the
 essay becomes a table -- and the original's last line, the one whose comment
 says it "bypasses the palettes", is now indistinguishable from the six above
 it, because there are no palettes to bypass.
 
 That is a real trade and it is worth being clear about which way it goes. The
 indirection existed so that one edit to the application's palette could restyle
-every view in the program at once; say the colour and you give that up. What
-you get back is that the colour is in the model, where the same `if` that
-decides *what* to draw can decide what colour to draw it -- which is how the
+every view in the program at once; say the color and you give that up. What
+you get back is that the color is in the model, where the same `if` that
+decides *what* to draw can decide what color to draw it -- which is how the
 calendar marks today and the puzzle shows a tile out of place, and neither of
 those is a palette question.
 
-The window at the bottom is the middle road: spans that name no colour follow
+The window at the bottom is the middle road: spans that name no color follow
 whatever the window's palette gives them, which is still how nearly every
 canvas in these examples paints.
 
@@ -64,13 +64,13 @@ tui =
 type alias Model =
     { showing : Bool
     , showingPlain : Bool
-    -- Which of Turbo Vision's three window colour sets the second window is
+    -- Which of Turbo Vision's three window color sets the second window is
     -- drawn in. The one piece of the palette machinery that survives into an
-    -- API where a colour is named rather than looked up -- see the note on
+    -- API where a color is named rather than looked up -- see the note on
     -- `plainWindow` -- so this example is where it belongs.
     , tone : Tui.WindowPalette
     -- And the application palette, which is the other hundred and thirty-four
-    -- colours: everything the package draws rather than the model.
+    -- colors: everything the package draws rather than the model.
     , dark : Bool
     }
 
@@ -87,7 +87,7 @@ init _ =
         }
 
 
--- THE COLOURS
+-- THE COLORS
 --
 -- What the three palettes in palette.cpp add up to, byte for byte. The C++
 -- reaches these through cpTestView -> cpTestWindow -> cpTestAppC; here they
@@ -137,7 +137,7 @@ update msg model =
             { model = model, command = Cmd.none }
 
 
-{-| A second scheme, so that this example shows both halves of the colour
+{-| A second scheme, so that this example shows both halves of the color
 story: `Alt-W` moves one window between the three sets a theme defines, and
 `Alt-T` changes what those three sets *are*.
 
@@ -146,7 +146,7 @@ authoring a theme looks like, and seventeen fields is the size of the job. Two
 things are worth noticing in it.
 
 **It is `Rgb` throughout.** Borland's is `Ansi`, so it follows whatever the
-person running it has set their terminal's sixteen colours to; this one does
+person running it has set their terminal's sixteen colors to; this one does
 not, because a dark scheme built out of "whatever this terminal calls black" is
 at the mercy of a terminal whose black is not dark. The cost is that it looks
 the same everywhere including where that is wrong -- Turbo Vision quantises it
@@ -154,7 +154,7 @@ down when the terminal cannot do better, and a 24-bit scheme checked only at
 24 bits is a scheme nobody has checked.
 
 **The window ground is lifted off the desktop rather than equal to it.** That
-is the whole trick of a dark scheme in sixteen colours, and the reason it needs
+is the whole trick of a dark scheme in sixteen colors, and the reason it needs
 `Rgb`: `Black` and `DarkGray` is the only pair the sixteen offer, and it is too
 far apart to read as one surface and too close to be a border.
 -}
@@ -214,7 +214,7 @@ toneName tone =
             "gray"
 
 
-{-| The original's About box, which is a `TStaticText` full of `\003` centring
+{-| The original's About box, which is a `TStaticText` full of `\003` centering
 markers and a default OK button.
 -}
 aboutDialog : Tui.DialogSpec
@@ -252,7 +252,7 @@ view model =
             , items =
                 [ Item { title = "~A~bout...", cmd = "about", key = "Alt-A", shortcut = "Alt-A" }
                 , Item { title = "~P~alette", cmd = "palette", key = "Alt-P", shortcut = "Alt-P" }
-                , Item { title = "~W~indow colour", cmd = "tone", key = "Alt-W", shortcut = "Alt-W" }
+                , Item { title = "~W~indow color", cmd = "tone", key = "Alt-W", shortcut = "Alt-W" }
                 , Item { title = "~T~heme", cmd = "theme", key = "Alt-T", shortcut = "Alt-T" }
                 , Tui.Separator
                 , Item { title = "E~x~it", cmd = "quit", key = "Alt-X", shortcut = "Alt-X" }
@@ -268,7 +268,7 @@ view model =
     , statusLine =
         [ { text = "~Alt-X~ Exit", key = "Alt-X", cmd = "quit" }
         , { text = "~Alt-P~ Palette", key = "Alt-P", cmd = "palette" }
-        , { text = "~Alt-W~ Window colour", key = "Alt-W", cmd = "tone" }
+        , { text = "~Alt-W~ Window color", key = "Alt-W", cmd = "tone" }
         , { text = "~Alt-T~ Theme", key = "Alt-T", cmd = "theme" }
         , { text = "", key = "F10", cmd = "menu" }
         ]
@@ -294,7 +294,7 @@ view model =
 paletteWindow : Tui.Window
 paletteWindow =
     { id = "paletteWin"
-    , title = "Colours, said out loud"
+    , title = "Colors, said out loud"
     , rect = { x1 = 4, y1 = 1, x2 = 46, y2 = 12 }
     , resize = Tui.resizable
     , palette = Tui.BlueWindow
@@ -302,7 +302,7 @@ paletteWindow =
     , canMove = True
     , views =
         [ Canvas
-            { id = "colours"
+            { id = "colors"
             , rect = { x1 = 2, y1 = 1, x2 = 40, y2 = 9 }
             , lines = Array.map entryLine entries ++ [ bypass ]
             , cursor = Nothing
@@ -317,7 +317,7 @@ entryLine entry =
     [ Tui.ink entry.fg
         (" This line uses index "
             ++ entry.index
-            ++ ", colour is "
+            ++ ", color is "
             ++ entry.attr
             ++ " "
         )
@@ -334,20 +334,20 @@ bypass =
     [ Tui.ink Magenta "   This line bypasses the palettes!    " |> Tui.on Black ]
 
 
-{-| ...and this is what a canvas looks like when it says nothing about colour:
-it takes the window's, which is what you want everywhere the colour is not the
+{-| ...and this is what a canvas looks like when it says nothing about color:
+it takes the window's, which is what you want everywhere the color is not the
 point.
 
 `Alt-W` is the proof, and the reason this example is where
 [`WindowPalette`](Tui#WindowPalette) is demonstrated. Turbo Vision's three
-window colour sets are the one part of the palette indirection that survives
-being asked to name a colour rather than an index -- because there are three of
+window color sets are the one part of the palette indirection that survives
+being asked to name a color rather than an index -- because there are three of
 them and they have names, rather than a hundred and thirty-five of them and
 byte offsets. Cycling it repaints every line above **without the lines
-changing**: they say nothing about colour, so they follow.
+changing**: they say nothing about color, so they follow.
 
 The window above it does not follow, because every line in it names both halves
-of its colour. That is the whole trade, on one screen: say the colour and it is
+of its color. That is the whole trade, on one screen: say the color and it is
 yours to keep; say nothing and it is the window's to change.
 -}
 plainWindow : Model -> Tui.Window
@@ -365,7 +365,7 @@ plainWindow model =
             , rect = { x1 = 2, y1 = 1, x2 = 40, y2 = 4 }
             , lines =
                 Array.map Tui.line
-                    [ " A span that names no colour follows"
+                    [ " A span that names no color follows"
                     , " the window, which is how a canvas keeps"
                     , " looking like the rest of the program."
                     ]

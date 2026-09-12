@@ -45,7 +45,7 @@ calls into C++, and nothing in it blocks -- modal dialogs included.
 | subclass `TWindow`, `insert()` children | put a `Window` record in `Ui.windows` |
 | `execView(dialog)` blocks until the user closes it | `Tui.dialog` is a `Cmd`; the result is a `Msg` |
 | override `handleEvent` | handle an `Event` in `update` |
-| override `draw()` with a `TDrawBuffer` | a `Canvas` of coloured spans, from the model |
+| override `draw()` with a `TDrawBuffer` | a `Canvas` of colored spans, from the model |
 | read `list->focused` when you need it | you are *told*, with a `Focused` event |
 | `TCalendarView` calls `localtime()` in its constructor | today is a field, and `Time.now` is a task |
 | `srand(time(0))` in the puzzle's constructor | the seed is in the model, so the board is a pure function |
@@ -114,7 +114,7 @@ so nothing has to assume 80x25.
 ## Ids, and the render cycle
 
 Every window and every view carries an `id`, and **the id is the contract**.
-It is what lets the runtime recognise a view across renders and patch it rather
+It is what lets the runtime recognize a view across renders and patch it rather
 than rebuild it. Keep them stable.
 
 What is patched and what is not:
@@ -168,10 +168,10 @@ you write a dialog.
   - **The mouse wheel already works** -- `TScrollBar` has `evMouseWheel` in its
     own event mask -- but it goes to whatever has *focus* rather than to
     whatever is under the pointer, which is Turbo Vision's own rule.
-  - **Every window this binding makes has a light grey background**, because
-    `JsWindow` derives from `TDialog`. The bright colours were meant for a black
-    background and have too little contrast against light grey; `LightGray` text
-    on it is invisible outright. Use the dark colour instead: `Green` for
+  - **Every window this binding makes has a light gray background**, because
+    `JsWindow` derives from `TDialog`. The bright colors were meant for a black
+    background and have too little contrast against light gray; `LightGray` text
+    on it is invisible outright. Use the dark color instead: `Green` for
     `LightGreen`, `Red` for `LightRed`, `DarkGray` for `LightGray`.
 
 ## The inventory
@@ -410,7 +410,7 @@ index. `Space` or a click chooses the focused one, arrow keys move within the
 group, and each item can have its own `~`*x*~ hotkey. Reported as `Changed`
 carrying `Choice`, and read from a dialog with `Tui.number`.
 
-A colour scheme picker, a units selector, a "sort by" -- in Turbo Vision this
+A color scheme picker, a units selector, a "sort by" -- in Turbo Vision this
 is also what a settings dialog is made of, and `examples/demo` uses five of
 them where the C++ original has an entire `TColorDialog` family.
 
@@ -462,7 +462,7 @@ Canvas
     }
 ```
 
-![examples/ascii: a canvas of coloured spans, with the terminal's own cursor on the selected cell](img/canvas.png)
+![examples/ascii: a canvas of colored spans, with the terminal's own cursor on the selected cell](img/canvas.png)
 
 The escape hatch, and where a C++ program would have subclassed `TView` and
 overridden `draw()`. It paints exactly the lines it is given and reports
@@ -478,20 +478,20 @@ Each entry in `lines` is one row of the canvas, and a row is an array of
 ```gren
 type alias Span = { text : String, fg : Maybe Hue, bg : Maybe Hue }
 
-line  : String -> Array Span   -- a whole row in the window's own colour
+line  : String -> Array Span   -- a whole row in the window's own color
 plain : String -> Span
 ink   : Hue -> String -> Span  -- a foreground, on whatever is behind it
 on    : Hue -> Span -> Span    -- ...and a background too
 ```
 
-`Nothing` for either fg or bg means the colour the window's palette gives this view,
+`Nothing` for either fg or bg means the color the window's palette gives this view,
 which is what you want almost everywhere -- it is how a canvas goes on looking
-like the rest of the program. Name a colour only where the point *is* the
-colour: today on a calendar, a tile that is out of place, a job that failed.
-`Hue` is the sixteen colours a terminal has had since 1981, which is also all
+like the rest of the program. Name a color only where the point *is* the
+color: today on a calendar, a tile that is out of place, a job that failed.
+`Hue` is the sixteen colors a terminal has had since 1981, which is also all
 that Turbo Vision's palettes deal in.
 
-![examples/palette: seven lines, each naming the colour it is drawn in](img/colours.png)
+![examples/palette: seven lines, each naming the color it is drawn in](img/colors.png)
 
 `cursor` is the terminal's own block cursor in the canvas's coordinates -- the
 one piece of a canvas that is not made of characters, and the only way an ASCII
@@ -732,7 +732,7 @@ where the user clicked needs no arithmetic; the menu flips up or left if there
 is no room below or right. **What comes back is an ordinary `Command` event** --
 indistinguishable from the same command on the menu bar, which is the point --
 and choosing nothing sends nothing at all. An entry whose command has been
-greyed out with `setEnabled` is drawn greyed and cannot be chosen.
+grayed out with `setEnabled` is drawn grayed and cannot be chosen.
 
 **A context menu is flat**: `PopupItem` is `Entry` and `Divider`, and there is
 no `SubMenu`. That is a decision, not an omission -- a submenu is a nested event
@@ -767,8 +767,8 @@ a clock render once a second without repainting the corner every time. Overlays
 are for showing things; put anything the user has to reach in a window.
 
 A `StaticText` here draws in `theme.bar` -- the menu bar and status line's own
-colour, which is what `TClockView` uses. There is no panel behind a view on the
-application to take a colour from, and row 0 is the bar's row, so matching it
+color, which is what `TClockView` uses. There is no panel behind a view on the
+application to take a color from, and row 0 is the bar's row, so matching it
 is the only thing that looks deliberate.
 
 *Used by `demo`.*
@@ -778,7 +778,7 @@ is the only thing that looks deliberate.
 Two helpers that are ordinary Gren rather than new kinds of thing. Both return a
 `DialogSpec` you hand to `Tui.dialog` like any other, and both take `desktop`
 -- the size the model was last told by `Resized` -- because a dialog's rectangle
-is in desktop coordinates and a centred box has to know.
+is in desktop coordinates and a centered box has to know.
 
 ### `Tui.messageBox`
 
@@ -844,14 +844,14 @@ for months.
 
 Four commands the model can issue that are not about drawing:
 
-  - **`Tui.setEnabled tui "clear" (Array.length model.items > 0)`** greys a
+  - **`Tui.setEnabled tui "clear" (Array.length model.items > 0)`** grays a
     command out everywhere it appears -- menu entries, status entries and
     buttons alike -- and a disabled command cannot be triggered by any route,
     hotkey included. (Only the first 146 distinct command names in a program
     can be disabled; beyond that they are numbered above the range Turbo Vision
-    allows to be greyed.)
+    allows to be grayed.)
 
-    ![examples/entries: Clear greyed out on the menu after the list was emptied](img/disabled.png)
+    ![examples/entries: Clear grayed out on the menu after the list was emptied](img/disabled.png)
 
   - **`Tui.focus tui "list"`** puts the focus on a view, or raises a window. The
     id is looked up as a window first and then as a view. This is how a program
@@ -896,12 +896,12 @@ stock controls are all here. These were left out, each with a reason:
 | `TOutlineViewer`, `TOutline` | a tree is a model plus a fold plus a `ListBox` -- see `examples/dir` |
 | `TScroller` | what a scroller does is decide which slice to draw, and the model knows |
 | `TTerminal`, `TTextDevice` | the same, for scrolling output: a canvas and a model -- see `examples/watch` |
-| the three levels of palette indirection | a `Span` names its colour outright; `examples/palette` argues what that costs |
-| `TColorDialog` and its five helpers | an editor for that indirection. A colour dialog here is a form, and what it sets is a field |
+| the three levels of palette indirection | a `Span` names its color outright; `examples/palette` argues what that costs |
+| `TColorDialog` and its five helpers | an editor for that indirection. A color dialog here is a form, and what it sets is a field |
 | `TValidator`'s other four subclasses | `allowed` plus one branch in `update`; the rest is a message box inside a nested loop |
 | `TFileEditor` | `TEditor` plus loading and saving, which are `Task`s. Only its growing buffer was wanted, and `JsEditor` has that |
 | `TEditWindow`, `TIndicator` | a window is already a value, and the indicator is a `StaticText` fed by the `Edited` event |
 | `TMemo` | the honest version is an `Editor` in a dialog plus a `readEditor` before it closes; putting a document in every `DialogClosed` is not worth it |
 | `TParamText` | `printf` for a static text. String interpolation is the model's job by construction |
-| the `TCollection` family, `opstream`/`ipstream` | serialising views to disk has no Gren meaning |
+| the `TCollection` family, `opstream`/`ipstream` | serializing views to disk has no Gren meaning |
 | `THelpFile` and `tvhc` | a binary help format compiled by a separate tool. Help screens are windows |

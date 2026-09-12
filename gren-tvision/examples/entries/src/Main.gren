@@ -423,7 +423,7 @@ listWindow model =
             { grow = Tui.stretchWidth
             , view =
                 -- Nothing to filter, so nothing to type: Clear empties the
-                -- list and the box goes grey until something is added again.
+                -- list and the box goes gray until something is added again.
                 --
                 -- `Enabled` and not `setEnabled`, and this is the case that
                 -- shows why the two are different: an input line carries no

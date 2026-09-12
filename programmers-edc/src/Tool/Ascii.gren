@@ -244,7 +244,7 @@ moveTo code model =
 
 {-| Move the list so that the selected code is on it.
 
-The least it can, rather than centring: a `Down` at the bottom edge should
+The least it can, rather than centering: a `Down` at the bottom edge should
 scroll one row, which is what every list on the machine does and what makes the
 position of the selection mean something.
 -}
@@ -475,15 +475,15 @@ click x y model =
 
 
 {-| The header row and eight rows of sixteen. Control codes are drawn in their
-own colour, which is the only way to see at a glance where the unprintable
+own color, which is the only way to see at a glance where the unprintable
 third of the table stops.
 
-Which colours, though, is a question `Hue` makes the model answer, and
+Which colors, though, is a question `Hue` makes the model answer, and
 `examples/palette` in gren-tvision is the essay on what that costs: naming a
-colour outright means knowing what it lands on. Which is why they arrive as
+color outright means knowing what it lands on. Which is why they arrive as
 `Inks` rather than being written here. This chart has now been repainted twice
 for that exact reason -- once when the window's interior turned out to be light
-grey by accident, and again when fixing that made it blue -- and a program with
+gray by accident, and again when fixing that made it blue -- and a program with
 three themes cannot be repainted a third time by hand. `Theme.Inks` names the
 four roles a canvas here needs and every theme answers for its own ground.
 
@@ -862,8 +862,8 @@ words `| ASCII chart` off the end and read as though Options alone did it. The
 driver checks the sentence arrives whole.
 
 The `~` marks are the status line's, and [`Theme.hint`](Theme#hint) is what
-turns them into two colours. They are also why this is a one-row `Canvas` and
-not the `StaticText` it used to be: `TStaticText` draws one run in one colour
+turns them into two colors. They are also why this is a one-row `Canvas` and
+not the `StaticText` it used to be: `TStaticText` draws one run in one color
 and has no notion of a hot key, so a line that wanted `Tab` louder than the
 words around it had to become a line the model paints.
 -}

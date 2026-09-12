@@ -125,7 +125,7 @@ it closed itself.
     optional.
   - Commands are strings on the Gren side and `ushort`s in Turbo Vision.
     `TView::commandEnabled` returns true unconditionally for any command above
-    255, so a command above 255 can never be greyed out. User commands are
+    255, so a command above 255 can never be grayed out. User commands are
     interned from 110 upwards and only spill into the always-enabled range
     when 255 is used up.
   - This is manual memory management against a library from 1994, so there is
@@ -150,7 +150,7 @@ addon, and simply never fires.
 
 A Gren package and an npm package are published separately and will drift
 apart. Every render message carries a `protocol` integer, and the runtime
-refuses a number it does not recognise. Without that check the failure is a UI
+refuses a number it does not recognize. Without that check the failure is a UI
 that renders nothing, or worse, one that renders and quietly stops patching,
 which is what a new field looks like to an older runtime.
 
@@ -293,7 +293,7 @@ Out of Gren, as JSON on `tuiOut`:
 | `popupMenu` | `Tui.popupMenu` | a context menu at a point in a view; the choice comes back as an ordinary `command` |
 | `focus` | `Tui.focus` | moves the caret to one view |
 | `bringToFront` | `Tui.bringToFront` | raises one window |
-| `setEnabled` | `Tui.setEnabled` | greys a command everywhere it appears |
+| `setEnabled` | `Tui.setEnabled` | grays a command everywhere it appears |
 | `setEditorText`, `insertIntoEditor`, `setEditorCaret`, `readEditor` | the editor | the only messages that carry a document; `readEditor` is answered by `editorText` |
 | `searchEditor` | find and replace | answered by `searched` |
 | `copyToClipboard` | `Tui.copyToClipboard` | answered by `copied`, which says whether the system took it |
@@ -369,7 +369,7 @@ The pty harness keeps an 80x25 grid and replays the output stream through a
 small terminal emulator, because Turbo Vision repaints only the cells that
 changed. A counter going from 11 to 12 emits a cursor move and two digits, and
 grepping the raw stream would still see `ticks: 1`. The harness also reads
-colour, which is the only way to assert on a canvas that says what it means
+color, which is the only way to assert on a canvas that says what it means
 with a hue.
 
 Every example is a driver, and there is no list to add one to.

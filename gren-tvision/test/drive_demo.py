@@ -239,10 +239,10 @@ def main():
     # The colours dialog is five radio buttons, because a colour dialog is a
     # form and what it sets is a field.
     menu(app, "Options", 1)
-    check("the colours dialog opened", "Note colour" in app.render(), app.render())
+    check("the colours dialog opened", "Note color" in app.render(), app.render())
     app.send(b"\x1b[B", settle=0.4)
     app.send(b"\r", settle=0.9)
-    check("and it closed", "Note colour" not in app.render(), app.render())
+    check("and it closed", "Note color" not in app.render(), app.render())
 
     # The context menu. Two right clicks and not one: the first is spent
     # activating the window, which is TView::handleEvent's rule for any click
