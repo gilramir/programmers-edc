@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
-"""Photograph predc's desktop, once in each of its three colour schemes.
+"""Photograph predc's desktop: the front page, then each colour scheme.
 
-Three pictures, and what varies between them is deliberately two things at
-once: the scheme, and which tools are open. A colour scheme is not a swatch
-here -- `Theme` is a *palette* the package draws with and a set of *inks* the
-tools' own canvases paint with, and the second half is invisible unless
-something is painted. So each shot opens tools that paint: a hex dump with
-coloured ranges in it, a chart with a selected cell, a converter with rows.
+Four pictures. Three of them are the schemes, and what varies between those is
+deliberately two things at once: the scheme, and which tools are open. A colour
+scheme is not a swatch here -- `Theme` is a *palette* the package draws with and
+a set of *inks* the tools' own canvases paint with, and the second half is
+invisible unless something is painted. So each shot opens tools that paint: a
+hex dump with coloured ranges in it, a chart with a selected cell, a converter
+with rows.
 
-    devbox run -- python3 docs/shots.py             # all three, ~40s
+The fourth is `front`, which the README uses, and it is the one picture with
+three tools open at once -- the calculator, the dump and the converter -- since
+what the front page has to say is that predc is a desktop.
+
+    devbox run -- python3 docs/shots.py             # all four, ~70s
     devbox run -- python3 docs/shots.py midnight    # just this one
 
 **Nothing here touches your config file.** predc keeps its scheme and its zone
@@ -21,7 +26,7 @@ sentence: a scheme chosen from the menu leaves the menu bar highlighted and the
 pull-down's shadow on the desktop for a moment, and a scheme read from a file
 is simply the scheme the program started in.
 
-All three are reproducible byte for byte, which is the reason the time
+All four are reproducible byte for byte, which is the reason the time
 converter is pinned to an instant and given a zone list rather than being
 photographed as it found the machine. `stable=False` exists for the shot that
 cannot be, and none of these is.
@@ -75,7 +80,7 @@ taken = []
 # ------------------------------------------------------------------ running
 
 
-def boot(theme, *args, config="", cwd=None, settle=2.6):
+def boot(theme, *args, config="", cwd=None, settle=2.6, size=None):
     """predc in `theme`, on a HOME nobody else has written to.
 
     `config` is more lines for the file -- the zone list, in the one shot that
@@ -89,7 +94,8 @@ def boot(theme, *args, config="", cwd=None, settle=2.6):
         f.write('theme = "%s"\n%s' % (theme, config))
     env = dict(BASE_ENV, HOME=home, TZ="America/Chicago")
     app = Pty(node_argv(LAUNCHER, *args), env,
-              cwd=cwd or tempfile.mkdtemp(prefix="predc-shot-cwd-"), size=SIZE)
+              cwd=cwd or tempfile.mkdtemp(prefix="predc-shot-cwd-"),
+              size=size or SIZE)
     app.pump(settle)
     return app
 
@@ -305,7 +311,90 @@ def gren():
     quit(app)
 
 
+# --------------------------------------------------------- the front page
+#
+# One picture of three tools at once, which is the thing the README has to say
+# in an image: predc is a desktop and not a program with a mode. The hex dump
+# viewer is eighty columns and cannot be narrower, so it sets the width; the
+# converter goes under it and the calculator over the seam between them, which
+# is the one overlap in the picture and is deliberate -- windows that overlap
+# are what says these are windows.
+#
+# Last in the file and first in the list: it borrows the PNG the midnight shot
+# dumps, its `mark` helper and the instant the Gren shot pins, so it is written
+# after all three and taken before them.
+#
+# Its own desktop size rather than SIZE: three windows want a taller screen
+# than two, and 100x31 is exactly the height the calculator's bottom frame
+# lands on. Borland, because the front page should be the scheme the program
+# starts in.
+
+FRONT_SIZE = (100, 29)
+
+# Three zones rather than the five the Gren shot uses. The name column is as
+# wide as the longest name on it, so the list is also how wide the converter
+# is: `America/Los_Angeles` would push its right frame under the calculator
+# and take `CDT -05:00` with it. Chicago, Berlin and Kolkata keep it at
+# sixty-four columns and still cover a half-hour offset and two directions
+# from UTC.
+FRONT_ZONES = ('timezones = ["America/Chicago", "Europe/Berlin", '
+               '"Asia/Kolkata"]\n')
+
+
+def front():
+    work = tempfile.mkdtemp(prefix="predc-shot-front-")
+    with open(os.path.join(work, "banner.png"), "wb") as out:
+        out.write(PNG)
+    app = boot("borland", "hex", "banner.png", cwd=work, config=FRONT_ZONES,
+               size=FRONT_SIZE)
+
+    # Eighty bytes is five rows, so the dump can lose nine rows of its height
+    # and still show the whole file -- and those nine rows are what the other
+    # two windows are put in.
+    reshape(app, size=SHIFT_UP * 11)
+    # Two marks rather than the midnight shot's four: the signature and the
+    # chunk type, which are the two a person reading a PNG header names out
+    # loud. The cursor finishes inside the second one, so the line under the
+    # dump is the one that says a byte is marked and how to unmark it.
+    mark(app, "0x0", 7, b"1")
+    mark(app, "0xC", 3, b"3")
+
+    app.send(b"\x1bc", settle=2.0)
+    # The same instant the Gren shot pins, and pinned the same way -- typing
+    # into the POSIX box is what stops the clock. It has to happen before the
+    # calculator opens over that corner of the screen.
+    where = None
+    for row, line in enumerate(app.render().split("\n")):
+        found = re.search(r"POSIX\s+(-?\d+)", line)
+        if found:
+            where = (found.start(1) + 1, row + 1)
+            break
+    assert where is not None, app.render()
+    app.click(*where, settle=0.7)
+    app.send(DELETE * 16, wait=0.9)
+    app.send(WHEN, settle=1.4)
+    # Under the dump, and two columns to the right of it rather than flush:
+    # two windows sharing a left edge read as one window with a rule across
+    # it, and the offset is what says they are two.
+    reshape(app, move=RIGHT + DOWN * 10)
+
+    app.send(b"\x1br", settle=1.5)
+    reshape(app, move=RIGHT * 42 + DOWN * 7)
+    # The same stack as the Borland shot below, for the same reason: a value is
+    # read in the base showing, so Tab picks hex before `dead_beef` is typed.
+    app.send(b"\t", settle=0.7)
+    app.send(b"dead_beef\r", settle=0.7)
+    app.send(b"ff00\r", settle=0.7)
+    app.send(b"&", settle=0.7)
+    app.send(b"cafe\r", settle=0.7)
+    app.send(b"10", settle=0.7)
+
+    take(app, "predc-desktop")
+    quit(app)
+
+
 SECTIONS = [
+    ("front", front, ("predc-desktop",)),
     ("borland", borland, ("predc-borland",)),
     ("midnight", midnight, ("predc-midnight",)),
     ("gren", gren, ("predc-gren",)),

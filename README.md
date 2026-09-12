@@ -5,7 +5,7 @@ one terminal window: an RPN calculator, a hex dump viewer, a time zone
 converter, an ASCII chart, base and Unicode encoders, a random value generator,
 an environment variable browser, a calendar, and a pad of notes.
 
-![predc in the Borland scheme, with the ASCII chart and the RPN calculator open](docs/img/predc-borland.png)
+![predc in the Borland scheme, with the hex dump viewer, the time zone converter and the RPN calculator open at once](docs/img/predc-desktop.png)
 
 Underneath it is the rest of this repository: [Turbo Vision][tv] — the framework
 Borland shipped in 1990, revived for modern Unix and Windows by
@@ -64,8 +64,8 @@ fail.
   recorded session.
 - [Building and running](docs/building.md) — the devbox commands, every example
   and what it demonstrates, and the recipe without devbox.
-- [Screenshots](docs/screenshots.md) — predc's desktop in each of its three
-  color schemes, generated from the running program.
+- [Screenshots](docs/screenshots.md) — the picture above, and predc's desktop
+  in each of its three color schemes, generated from the running program.
 
 **How it works**
 

@@ -13,8 +13,9 @@ and -- when the terminal allows it -- with the rest of the machine.
 [What is in here](#what-is-in-here) below is the inventory, and it is the same
 list **Help | What is in here** shows in the program.
 
-[../docs/screenshots.md](../docs/screenshots.md) has a picture of the desktop in
-each of the three color schemes, taken from the running program.
+[../docs/screenshots.md](../docs/screenshots.md) has a picture of three tools
+open at once, and one of the desktop in each of the three color schemes, taken
+from the running program.
 
 The original feature list, version by version -- what was asked for, what was
 dropped, and what was declined -- is [docs/predc-plan.md](../docs/predc-plan.md).
