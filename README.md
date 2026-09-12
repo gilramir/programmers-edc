@@ -106,3 +106,5 @@ built here would load at all, developed during out prototyping.
   feature list, what was dropped, and what was declined.
 - [publishing.md](docs/publishing.md) — what shipping a package with a compiled
   library in it costs, and what it does not.
+- [releasing.md](docs/releasing.md) — the procedure for the next release: what
+  to bump, what to publish, in what order, and what bites.

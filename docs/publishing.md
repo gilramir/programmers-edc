@@ -1,5 +1,10 @@
 # Publishing
 
+**Looking for the procedure rather than the reasoning?
+[releasing.md](releasing.md) is the runbook** — what to bump, what to publish,
+in what order, and what bites. This file is the record of why it is shaped that
+way, and is worth reading once.
+
 Two npm packages and a Gren package, one of which contains a compiled shared
 library and one of which is not on a registry at all. This is what that costs, what it does *not* cost, and how to build for
 the platforms this machine is not.
