@@ -2,9 +2,10 @@
 
 Terminal user interfaces in [Gren][gren], drawn by [Turbo Vision][tv] — the
 framework Borland shipped in 1990, ported to modern Unix and Windows by
-[magiblot][tv], and driven here by the Elm architecture.
+[magiblot][tv], and driven here by the Elm architecture (TEA)-style
+node applications.
 
-You write an ordinary Elm-architecture program — `init`, `update`,
+You write an ordinary TEA program — `init`, `update`,
 `subscriptions` and `view : Model -> Ui` — and the C++ library owns the screen.
 Your `view` describes the windows, menus, dialogs, list boxes and mouse handling
 you want; Turbo Vision draws them, runs its own event loop over them, and sends
@@ -17,21 +18,28 @@ keyboard input without stopping your subscriptions.
 
 ## Where the documentation is
 
-The long-form documents are in [`docs/`](docs/index.md):
+The long-form documents are in [`docs/`][docs]:
 
-- [Turbo Vision, from Gren](docs/widgets.md) — the guided tour: the programming
-  model, the anatomy of the screen and every widget, for people who have never
-  used Turbo Vision.
-- [How a Gren program ends up on Turbo Vision](docs/architecture.md) — the
-  technical half: the four layers, and the event loop that shaped them.
-- [Driving a C or C++ library from Gren](docs/native.md) — the same problem in
-  general, for a reader with some other library in mind.
-- [The clipboard, from a terminal program](docs/clipboard.md) — the one every
-  consumer eventually needs: why a copy reaches the rest of the machine
-  sometimes and not others.
+- [Turbo Vision, from Gren][widgets] — the guided tour: the programming model,
+  the anatomy of the screen and every widget, for people who have never used
+  Turbo Vision.
+- [How a Gren program ends up on Turbo Vision][architecture] — the technical
+  half: the four layers, and the event loop that shaped them.
+- [Driving a C or C++ library from Gren][native] — the same problem in general,
+  for a reader with some other library in mind.
+- [The clipboard, from a terminal program][clipboard] — the one every consumer
+  eventually needs: why a copy reaches the rest of the machine sometimes and
+  not others.
 
-And [`examples/`](examples/) has one runnable application per feature. Its
+And [`examples/`][examples] has one runnable application per feature. Its
 README says what each one was ported for and what it forced into the API.
+
+[docs]: https://github.com/gilramir/gren-tvision/blob/main/docs/index.md
+[widgets]: https://github.com/gilramir/gren-tvision/blob/main/docs/widgets.md
+[architecture]: https://github.com/gilramir/gren-tvision/blob/main/docs/architecture.md
+[native]: https://github.com/gilramir/gren-tvision/blob/main/docs/native.md
+[clipboard]: https://github.com/gilramir/gren-tvision/blob/main/docs/clipboard.md
+[examples]: https://github.com/gilramir/gren-tvision/tree/main/examples
 
 ## Installing
 
@@ -70,7 +78,9 @@ tui =
 
 then `Tui.defineProgram tui { init, update, subscriptions, view, onEvent }`. The
 full version, with a picture of it running, is at the top of the module docs;
-[`examples/hello`](examples/hello) is the next size up.
+[`examples/hello`][hello] is the next size up.
+
+[hello]: https://github.com/gilramir/gren-tvision/tree/main/examples/hello
 
 An application with a command line wants `Tui.defineProgramOrExit` instead,
 whose `init` answers `Tui.Start model` or `Tui.Exit`. `Exit` sends no render,
@@ -96,7 +106,9 @@ back.
 
 Fifteen of them, each a port of a program from the C++ code in  `tvision/examples/`, and each
 chosen because it forced something into the API that staring at the binding did
-not. [`examples/README.md`](examples/README.md) says what each one forced.
+not. [`examples/README.md`][examples-readme] says what each one forced.
+
+[examples-readme]: https://github.com/gilramir/gren-tvision/blob/main/examples/README.md
 
 ```sh
 ./build.sh          # compile them all

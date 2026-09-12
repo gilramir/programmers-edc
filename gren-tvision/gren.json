@@ -2,7 +2,7 @@
     "type": "package",
     "platform": "node",
     "name": "gilramir/gren-tvision",
-    "summary": "Turbo Vision terminal UIs, as the Elm architecture",
+    "summary": "Turbo Vision terminal UIs",
     "license": "ISC",
     "version": "1.0.0",
     "exposed-modules": [

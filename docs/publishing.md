@@ -482,6 +482,14 @@ clone of the export that ran `./build.sh` showed fifteen untracked `main.js`
 files. They are in `gren-tvision/.gitignore` now, which still applies here --
 a nested `.gitignore` works either way round.
 
+**And a link that works in both repositories can still be broken where it is
+read.** `packages.gren-lang.org` renders a package's README and the
+documentation generated from `src/` -- nothing else. So `docs/widgets.md` and
+`examples/` are not there to be linked to relatively, however right the link
+looks on either GitHub page, and `gren-tvision/README.md`'s links into them are
+absolute URLs at `github.com/gilramir/gren-tvision`. The module documentation
+needs nothing: its links are all `#Anchor`s within the page.
+
 None of these stops the package working -- a consumer gets `src/`, `gren.json`
 and the prose, which is the whole of what they install. They are what makes the
 exported repository look abandoned to somebody who clones it, which is a
