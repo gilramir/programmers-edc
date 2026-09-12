@@ -47,9 +47,26 @@ Three pieces, because a Gren package may not declare ports and cannot contain
 JavaScript:
 
 ```sh
+gren package install gren-lang/node          # first -- see below
 gren package install gilramir/gren-tvision   # the Gren API
 npm install gren-tvision-runtime             # the runtime, and the binding it pulls in
 ```
+
+**`gren-lang/node` goes first, and that is not a style preference.** This
+package depends on it, so installing this one into an application that does not
+already have it stops with a list of packages to "try adding to your gren.json"
+-- and it stops *after* printing a tick beside the download, having written
+nothing to `gren.json`, which reads like success. Install `gren-lang/node`
+first and both steps go through.
+
+You need it as a **direct** dependency in any case, whatever the order: your
+own `Main` imports `Node` and `Init` by name, and a module a program imports
+has to be one of that program's own direct dependencies rather than something
+it inherits. Without it the first program below stops at `MODULE NOT FOUND` on
+its own import list.
+
+Your `gren.json` also needs `"platform": "node"`. `gren init` writes
+`"browser"`, and a terminal program is not that.
 
 The npm half brings `tvision-node`, the native addon. On **linux-x64** that is
 a prebuilt binary -- built against glibc 2.28, so it runs on anything from

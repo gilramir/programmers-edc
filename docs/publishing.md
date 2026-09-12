@@ -875,3 +875,55 @@ working: `Cli.version` had to move with `package.json` or
 `tools/prepare-publish.sh` would refuse the publish. `drive_cli.py` and
 `drive_help.py` needed no edit at all, because both read the expected version
 out of `package.json` rather than repeating it.
+
+## Following your own install instructions, 1.0.1 of the Gren package
+
+The package went out at 1.0.0 and the instructions in its README did not work.
+Not subtly: an application that follows them stops at `MODULE NOT FOUND` on its
+own import list.
+
+Found by being the stranger -- an empty directory, the three commands in the
+README, and the hello example's `Main.gren` -- which is a fifteen-minute test
+that had never been run against anything but this repository, where every
+example reaches `../../src` and needs no package at all.
+
+Two things were wrong and the second one is worse.
+
+**`gren-lang/node` was not mentioned.** This package depends on it, but that
+does not put it within reach of the application: a `Main` that says `import
+Node` and `import Init` needs it as one of *its own* direct dependencies.
+Inheriting it through a dependency is not enough, and the failure is at compile
+time rather than install time, which is a long way from the instruction that
+caused it.
+
+**And the order matters, which nothing says.** `gren package install
+gilramir/gren-tvision` into an application without `gren-lang/node` prints a
+tick beside the download, then stops with a list of packages to "try adding to
+your gren.json" -- and writes **nothing** to `gren.json`. A tick and no error
+at the top of the output reads as success, so the next command fails for a
+reason that looks unrelated. Installing `gren-lang/node` first makes both go
+through.
+
+So the README's block is `gren-lang/node`, then `gilramir/gren-tvision`, then
+npm, with a paragraph saying why the first line is first -- and a note that
+`gren init` writes `"platform": "browser"`, which a terminal program is not.
+
+`gren package bump` set the version: it reads the published docs, compares them
+with the current ones, and decided patch by itself, which is the tool working
+as documented and also a check that 1.0.0's docs are readable from the registry.
+
+Verified by running the corrected block verbatim from an empty directory with
+no hand-editing of `gren.json` at any point: both installs write themselves,
+`npm install` adds four packages, `gren make` compiles, and the program then
+runs at a pty and replays. That is the whole of what a new user does, and it is
+now a thing that has been done at least once.
+
+### And `gren package validate` cannot run from here at all
+
+It looks for a bare `1.0.0` tag in the checkout it is run from, and this
+repository tags the export as `gren-tvision/1.0.0` -- the namespacing that lets
+four artifacts share one history. So the post-tag check in the runbook above
+has to happen in a clone of the exported repository, or not at all. The install
+test above is worth more than it anyway: validate checks that the docs and the
+README are present and parse, and the install test checks that a person can use
+the thing.
