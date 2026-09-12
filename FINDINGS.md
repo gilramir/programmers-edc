@@ -7935,9 +7935,10 @@ walks it back into view, which is not a thing anyone would guess. With the
 patch the same runs restore to 40..80, 20..60, 10..50 and 0..40: the same size,
 still flush right, on the screen.
 
-The report is `docs/upstream-zoomrect-origin.md` until it has a number. The
-patch is `fix/zoomrect-origin`, one commit off `master` like the other four,
-cherry-picked onto `patches`.
+The report is [#239][i239], filed with five photographs of tvdemo taken at
+`patches~1` and `patches` -- the patch's own before and after, one commit
+apart. The patch is `fix/zoomrect-origin`, one commit off `master` like the
+other four, cherry-picked onto `patches`.
 
 ### The suite could not see this, which is the part worth keeping
 
@@ -7974,6 +7975,7 @@ lib`, or the addon you are testing is the one you built before. Deleting
 copy step restores it from `obj.target` without relinking.
 
 [i235]: https://github.com/magiblot/tvision/issues/235
+[i239]: https://github.com/magiblot/tvision/issues/239
 
 ## The field that was only a `>`, and the cursor that was on the wrong line
 

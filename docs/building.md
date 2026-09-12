@@ -244,9 +244,7 @@ Five commits sit on `patches` today:
   - and `TWindow::zoom` restoring the rectangle it stored at zoom time without
     checking it against the desktop it is restoring onto, so a window zoomed on
     a wide terminal and un-zoomed on a narrow one comes back beside the desktop
-    rather than on it — often entirely off the screen. Not filed yet;
-    [upstream-zoomrect-origin.md](upstream-zoomrect-origin.md) is the report,
-    and that file goes away once it has a number.
+    rather than on it — often entirely off the screen ([#239][i239]).
 
 FINDINGS has the story of each.
 
@@ -254,13 +252,14 @@ The last two are the only ones with no pull request behind them. For `#235` the
 issue went first on purpose: the fix has a judgement call in it — which views
 the origin may be moved for — that the maintainer may want to make differently,
 and a patch that presumes the answer is a worse way to ask. The same is true of
-the fifth, where the call is *where* the clamp goes: `TView::locate` looks like
+`#239`, where the call is *where* the clamp goes: `TView::locate` looks like
 the obvious place and is the wrong one, because `moveGrow` and `dragView`'s Esc
 path both depend on it leaving the origin alone. The port works around both, in
 `JsWindow::calcBounds` and `JsWindow::zoom`; the first is redundant once
-upstream settles on a shape, and the second stays until the fifth lands.
+upstream settles on a shape, and the second stays until `#239` lands.
 
 [i230]: https://github.com/magiblot/tvision/issues/230
 [i233]: https://github.com/magiblot/tvision/issues/233
 [i234]: https://github.com/magiblot/tvision/issues/234
 [i235]: https://github.com/magiblot/tvision/issues/235
+[i239]: https://github.com/magiblot/tvision/issues/239

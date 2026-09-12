@@ -1197,8 +1197,9 @@ it was over on the right. `TView::locate` looks like where that should be
 clamped and is not: `moveGrow` and `dragView`'s Esc path both need it to leave
 the origin alone, since a window dragged three-quarters off the right-hand edge
 is a position the user asked for. The stale rectangle is `TWindow`'s, so
-`JsWindow::zoom` is where the fit goes. Report in
-`docs/upstream-zoomrect-origin.md`, patch in `fix/zoomrect-origin`. What is
+`JsWindow::zoom` is where the fit goes. Reported upstream as
+[#239](https://github.com/magiblot/tvision/issues/239), patch in
+`fix/zoomrect-origin`. What is
 worth remembering is that the port had this right for weeks with **nothing
 asserting it** -- `drive_drag.py` zoomed, `tiny_common.py` resized, and nothing
 did the two in that order until `restore_checks` was written to be the failing
