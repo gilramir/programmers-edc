@@ -8,6 +8,12 @@ report, and a copy of it here only rots. The reasoning behind it lives in
 FINDINGS, under "The rectangle a window remembers is about a desktop that is
 gone".*
 
+*The five pictures below are files in this repository, under
+`docs/img/upstream-zoomrect/`, and `docs/shots-zoomrect.py` is what took them
+-- tvdemo at a real pty, built twice from the fork one commit apart. Markdown
+cannot carry them into an issue: upload them there and replace each path with
+the URL GitHub hands back.*
+
 ---
 
 **Title:** `TWindow::zoom` restores `zoomRect` without checking it against the desktop it is restoring onto
@@ -29,24 +35,19 @@ $ cd examples/tvdemo && <builddir>/tvdemo fileview.cpp   # from its own source d
 on a 100x30 terminal, then:
 
 1. `Ctrl-F5`, shrink the window to about 40x18 with `Shift-Left`/`Shift-Up`, move it right until it is flush against the right-hand edge, `Enter`. It is now at columns 60..100 — an ordinary place to put a window.
+
+   ![the window at columns 60..100 of a 100-column terminal](img/upstream-zoomrect/1-placed.png)
+
 2. `F5` to zoom it. `zoomRect` is now `(60, 4, 100, 22)`.
 3. Resize the terminal to 60 columns. The window is maximized, so it follows the desktop down to columns 0..60. Everything is still correct here.
+
+   ![the same window maximized on a 60-column terminal, filling the desktop](img/upstream-zoomrect/2-maximized.png)
+
 4. `F5` to un-zoom.
 
 The window is gone. Not clipped — gone:
 
-```
-  ≡  File  Windows  Options                        08:14:01
-░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
-░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
-░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
-░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
-░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
-░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
-░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
-░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
- F1 Help  Alt-X Exit                                 390576
-```
+![the same terminal after un-zooming: menu bar, status line, and an empty desktop](img/upstream-zoomrect/3-gone.png)
 
 It is restored to columns 60..100 of a desktop that is 60 wide, so there is no overlap at all. The window is still alive and still the active one — the Windows menu is fully populated, and `Ctrl-F5` followed by holding `Left` walks it back into view — but there is nothing on the screen and nothing a mouse can reach.
 
@@ -60,6 +61,8 @@ Same run at four terminal widths:
 | 40x20 | 0..40 | 60..100 | 0..40 |
 
 At 80 columns half the window is off the right-hand side; at 60 and below it is entirely outside.
+
+![the same run on an 80-column terminal: the window starts at column 60 and its right-hand half, frame corner included, is off the screen](img/upstream-zoomrect/4-half.png)
 
 ### Why
 
@@ -130,8 +133,27 @@ void TWindow::zoom()
 
 With that, the four runs above restore to 40..80, 20..60, 10..50 and 0..40: the same size the window was, still flush against the right-hand edge, on the screen.
 
+The 60-column run with the patch applied — the same forty columns, still flush right, and on the desktop:
+
+![the window restored to columns 20..60 of the 60-column desktop, whole](img/upstream-zoomrect/5-patched.png)
+
 ### Relationship to #235
 
 Same shape, different route. #235 is the terminal resize itself — `TView::calcBounds` scaling or shifting an origin it never checks. This one is a rectangle *remembered* across a resize. Fixing #235 does not fix this, and vice versa; I have them as separate commits.
 
 (The closing note on my #235 patch guessed that `TView::locate` wanted the same treatment as `calcBounds`. Having looked at its callers, I no longer think so, for the reason above.)
+
+### How the pictures were made
+
+All five are of `examples/tvdemo` built from this fork's `patches` branch, at
+two commits one apart: 1 through 4 at `patches~1`, which carries every other
+fix here — including #235's `calcBounds` clamp, without which the terminal
+resize itself would move the window and the pictures would be arguing about two
+bugs at once — and 5 at `patches`, which adds the patch above and nothing else.
+
+They are photographs rather than mock-ups: `docs/shots-zoomrect.py` runs tvdemo
+at a real pseudo-terminal, types the steps above at it, replays everything the
+program drew into a grid of cells and blits that to a PNG. The window's
+rectangle is read back off each screen and asserted before the shutter — the
+placement really is 60..100, and the empty desktop in 3 really has no frame
+anywhere on it.
