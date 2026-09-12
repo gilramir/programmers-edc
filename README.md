@@ -1,17 +1,17 @@
-# programmers-edc
+# The Programmer's Every-day Carry
 
-**predc** — the programmer's every-day carry — is a desktop of small tools in
-one terminal window: an RPN calculator, a hex dump viewer, a time zone
+**predc** — the programmer's every-day carry — is a desktop of small tools that a programmer often needs, in
+one nostalgic terminal window: an RPN calculator, a hex dump viewer, a time zone
 converter, an ASCII chart, base and Unicode encoders, a random value generator,
-an environment variable browser, a calendar, and a pad of notes.
+an environment variable browser, a calendar, and a notepad.
 
 ![predc in the Borland scheme, with the hex dump viewer, the time zone converter and the RPN calculator open at once](docs/img/predc-desktop.png)
 
 Underneath it is the rest of this repository: [Turbo Vision][tv] — the framework
 Borland shipped in 1990, revived for modern Unix and Windows by
 [magiblot][tv] — bound to Node, and driven from [Gren][gren] as an
-Elm-architecture program. Three packages, which anybody can build a terminal
-application on, and predc is the application that proves they are enough.
+Elm-architecture (TEA) program. Three packages, which anybody can build a terminal
+application on, and predc as the big example app..
 
 ```sh
 git clone --recurse-submodules https://github.com/gilramir/programmers-edc
@@ -29,10 +29,10 @@ running, including doing it without devbox.
 
 | | | |
 |---|---|---|
-| [`programmers-edc/`](programmers-edc/) | **predc**, the application. Gren, and an ordinary consumer of the package: it depends on gren-tvision through `gren.json` the way anybody else's program would | npm `predc` |
+| [`programmers-edc/`](programmers-edc/) | **predc**, the application. Gren, and an ordinary consumer of the package: it depends on gren-tvision through `gren.json`  | npm `predc` |
 | [`gren-tvision/`](gren-tvision/) | the Gren API. `init`, `update`, `subscriptions` and `view : Model -> Ui`; windows, menus, dialogs, widgets and mouse handling described as data. Pure Gren — nothing in it calls into C++ | Gren `gilramir/gren-tvision` |
 | [`gren-tvision-runtime/`](gren-tvision-runtime/) | the JavaScript half: takes the UI description off the port, diffs it against the last one, and drives the binding. Also `gren-tui`, and the session recorder a bug report is made of | npm `gren-tvision-runtime` |
-| [`tvision-node/`](tvision-node/) | the native addon. Turbo Vision through Node-API, with the library's blocking `run()` inverted into a `step()` that Node pumps, so timers, promises and I/O keep running — modal dialogs included. Carries the C++ library as a submodule | not published on its own |
+| [`tvision-node/`](tvision-node/) | the native add-on. Turbo Vision through Node-API, with the library's blocking `run()` inverted into a `step()` that Node pumps, so timers, promises and I/O keep running — modal dialogs included. Carries the C++ library as a submodule | not published on its own |
 
 The split is forced: **Gren packages may not declare ports**, so the package can
 describe a UI but cannot reach a terminal. The application declares the two
@@ -48,9 +48,8 @@ there.
 
 And two supporting directories: `tools/` holds the cross-language consistency
 checks, the API coverage audit, the parallel pty test runner and the packaging
-scripts; `m0-load-test/` is the two-function addon that proved a Node addon
-built here would load at all, kept because it is the smallest thing that can
-fail.
+scripts; `m0-load-test/` is the two-function add-on that proved a Node addon
+built here would load at all, developed during out prototyping.
 
 ## The documentation
 
@@ -58,7 +57,7 @@ fail.
 
 - [Turbo Vision, from Gren](gren-tvision/docs/widgets.md) — the guided tour:
   the programming model, the anatomy of the screen, and every widget, with a
-  photograph of each. Start here to write a program.
+  screenshot of each. Start here to write a program.
 - [predc's README](programmers-edc/README.md) — the application: what each tool
   does, its command line, its config file, and how to report a bug with a
   recorded session.
@@ -76,7 +75,7 @@ fail.
 - [The clipboard, from a terminal program](gren-tvision/docs/clipboard.md) — why
   a copy reaches the rest of the machine sometimes and not others, and why a
   paste over ssh is the harder half.
-- [`tvision-node/README.md`](tvision-node/README.md) — the addon's own API, what
+- [`tvision-node/README.md`](tvision-node/README.md) — the add-on's own API, what
   it deliberately is not, and the inverted event loop in detail.
 
 **Why it is the way it is**
@@ -91,21 +90,3 @@ fail.
   feature list, what was dropped, and what was declined.
 - [publishing.md](docs/publishing.md) — what shipping a package with a compiled
   library in it costs, and what it does not.
-
-## License
-
-ISC, in `LICENSE` at the root and beside each package that is meant to be
-published. `gren-tvision/gren.json` and the three `package.json`s say the same.
-
-**What ships alongside it is not ours and does not become ours.** `tvision-node`
-links `libtvision.a` statically, so anything built from it carries Turbo Vision
-with it, and Turbo Vision is three layers of terms in one file
-(`tvision-node/tvision/COPYRIGHT`, 119 lines): Borland's 1994 public-source
-disclaimer on the original code, magiblot's MIT license on everything since, and
-the MIT notices of the third-party pieces vendored into it — Milo Yip's `utoa`,
-Bjoern Hoehrmann's UTF-8 decoder, and the rest. All of them require the notice
-to travel with the binary. **A published `tvision-node` has to include
-`tvision/COPYRIGHT` in its tarball.** How the C++ gets to a consumer is settled
-now — the submodule lives inside the package and `npm pack` carries its files —
-so this is one line in the `files` list rather than an open question. See
-[docs/publishing.md](docs/publishing.md).

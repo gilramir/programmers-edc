@@ -128,18 +128,19 @@ diverged, 2 if it could not be run.
   --trace            print every message, both ways, as it goes
 ```
 
-**The tape drives itself, through the program's own output.** This is the whole
-design and it took a wrong one to find it. The obvious driver feeds a message,
-waits, checks what came back, and feeds the next — and it cannot reproduce a
-tape, because a tape's order is not the program's. `predc time` proved it in
-four lines: the terminal's first `resized` arrived *between* two steps of
-`init`'s own chain, after its first render and before it asked node for the
-time zones. Feeding that resize a moment later — which is all "wait, then
-send" can do — puts the program in a state the recording never had, and every
-render after it differs for a reason that is not a bug. So there is one cursor
-over the tape: an outbound message is matched against what it points at and
-steps it forward, and an inbound message is sent the instant the cursor reaches
-it, from inside the subscription that moved it there.
+**The tape drives itself, through the program's own output.** There is one
+cursor over the tape. Each outbound message the program sends is matched
+against what the cursor points at and steps it forward; when the cursor then
+lands on an inbound message, that message is sent immediately, from inside the
+subscription that moved it there.
+
+The obvious alternative — send a message, wait, check the reply, send the next
+— cannot reproduce a tape, because the timing it feeds is its own and not the
+program's. In `predc time` the terminal's first `resized` arrived *between* two
+steps of `init`'s chain, after its first render and before it asked node for
+the time zones. Sending it a moment later puts the program in a state the
+recording never had, and every render after that differs for a reason that is
+not a bug.
 
 **A replay is the program, so a replay writes what the program writes.** That
 is obvious once it has happened to you: replaying a session in which somebody
@@ -150,10 +151,10 @@ launcher recorded in `extra` seeded inside it. That is safer and also *more*
 faithful — `init` then decides from the recording's config rather than from the
 config of whoever is reading the tape. `--in-place` turns it off and says so.
 
-What goes back before the program starts: the arguments (which for predc decide
-whether there is a program to run at all), the working directory, the time
-zone, the four numbers `Terminal.initialize` answers with, the flags `init` was
-given, and the clock. `Time.every` is driven rather than waited for, so a tape
+What goes back before the program starts: the arguments (in predc, for one,
+they decide whether there is a program to run at all), the working directory,
+the time zone, the four numbers `Terminal.initialize` answers with, the flags
+`init` was given, and the clock. `Time.every` is driven rather than waited for, so a tape
 with a clock in it replays in milliseconds rather than in the minute it took to
 record.
 
@@ -189,11 +190,13 @@ message lands in between — but never over an unmet expectation on its own
 port, since a request and its reply share one and that would be answering a
 question nobody asked.
 
-**A message goes in on a microtask**, and getting that right is what made the
-replay a function of its tape. Feeding it from inside the subscription that
-brought the cursor to it re-enters the Gren scheduler mid-dispatch, where
-`_Scheduler_enqueue` queues rather than runs, and one update's two effects come
-back in either order depending on how busy the machine is. Feeding it a turn
+**A message goes in on a microtask** — `queueMicrotask`, which runs the callback
+once the current JavaScript call stack has unwound but before node takes any
+timer or I/O callback. Getting that right is what made the replay a function of
+its tape. Feeding it from inside the subscription that brought the cursor to it
+re-enters the Gren scheduler mid-dispatch, where `_Scheduler_enqueue` queues
+rather than runs, and one update's two effects come back in either order
+depending on how busy the machine is. Feeding it a turn
 later instead is deterministic and wrong, because a recording's messages are
 coupled to the program's own progress: Turbo Vision's pump delivers the next
 event only once the last render has been applied, and a free turn lets the
