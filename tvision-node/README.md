@@ -99,7 +99,7 @@ Views are named by ids the caller chooses, not held as objects. A window is
 described whole; the callbacks are global and say which id they are about.
 
 ```js
-const tv = require('..');   // from examples/; this package is not published
+const tv = require('tvision-node');   // from examples/, require('..')
 
 tv.start({
   menuBar: [{ title: '~F~ile', items: [{ title: 'E~x~it', cmd: 'quit', key: 'Alt-X' }] }],
@@ -155,8 +155,12 @@ Turbo Vision owns the terminal and `console.log` draws over the app.
   system; `THelpFile` reads a binary format produced by `tvhc` and porting the
   compiler buys nothing. `gren-tvision/examples/README.md` records what was
   left out and why.
-- **Not stable.** `private: true`, version 0.0.1, no `.d.ts`, no changelog. The
-  API changes whenever gren-tvision needs it to.
+- **Not a stable API in the semver sense you might hope for.** It is 1.0.0 on
+  npm because it is published and the thing above it is, but there is no
+  `.d.ts` and no changelog, and this layer changes whenever gren-tvision needs
+  it to. It is the binding, not the interface: write against
+  [`gilramir/gren-tvision`](https://github.com/gilramir/gren-tvision), or
+  against this one knowing that it moves.
 - **Not multi-instance.** `TProgram::application`, `deskTop`, `menuBar` and
   `statusLine` are statics, so there is one application per process and a
   second `start()` is an error.

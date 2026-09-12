@@ -1,9 +1,25 @@
 {
   "name": "gren-tvision-runtime",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "license": "ISC",
-  "private": true,
+  "author": "Gilbert Ramirez <gram@alumni.rice.edu>",
   "description": "Runs a Gren program's UI on Turbo Vision: the diff layer between the Tui port protocol and the native binding.",
+  "keywords": [
+    "gren",
+    "turbo-vision",
+    "tvision",
+    "tui",
+    "terminal",
+    "console",
+    "elm-architecture"
+  ],
+  "homepage": "https://github.com/gilramir/programmers-edc/tree/main/gren-tvision-runtime",
+  "bugs": "https://github.com/gilramir/programmers-edc/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gilramir/programmers-edc.git",
+    "directory": "gren-tvision-runtime"
+  },
   "main": "tui.js",
   "bin": {
     "gren-tui": "bin/gren-tui.js",
@@ -16,13 +32,15 @@
     "record.js",
     "tape.js",
     "replay.js",
-    "bin"
+    "bin",
+    "pty"
   ],
   "dependencies": {
-    "tvision-node": "file:../tvision-node"
+    "tvision-node": "^1.0.0"
   },
   "scripts": {
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "prepublishOnly": "node -e \"if(!require('fs').existsSync('pty/harness.py')){console.error('the pty harness is missing -- run tools/prepare-publish.sh');process.exit(1)}\""
   },
   "engines": {
     "node": ">=18.17"

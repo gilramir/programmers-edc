@@ -1,21 +1,43 @@
 {
   "name": "tvision-node",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "license": "ISC",
-  "private": true,
+  "author": "Gilbert Ramirez <gram@alumni.rice.edu>",
   "description": "Turbo Vision (magiblot/tvision) bound to Node through Node-API, with its blocking event loop inverted so Node keeps running. The native half of gren-tvision.",
+  "keywords": [
+    "turbo-vision",
+    "tvision",
+    "tui",
+    "terminal",
+    "ncurses",
+    "curses",
+    "console",
+    "node-api",
+    "napi",
+    "native"
+  ],
+  "homepage": "https://github.com/gilramir/programmers-edc/tree/main/tvision-node",
+  "bugs": "https://github.com/gilramir/programmers-edc/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gilramir/programmers-edc.git",
+    "directory": "tvision-node"
+  },
   "main": "index.js",
   "scripts": {
+    "install": "node-gyp-build",
     "build": "node-gyp rebuild",
     "hello": "node examples/hello.js",
     "demo": "node examples/demo.js",
     "test": "python3 test/drive_regress.py && python3 test/drive.py && python3 test/drive_demo.py && python3 test/drive_ascii.py && python3 test/drive_form.py",
     "test:asan": "TVNODE_ASAN=1 node-gyp rebuild && python3 test/drive_regress.py; node-gyp rebuild",
     "ascii": "node examples/ascii.js",
-    "form": "node examples/form.js"
+    "form": "node examples/form.js",
+    "prepublishOnly": "node -e \"if(!require('fs').existsSync('prebuilds/linux-x64/tvision.node')){console.error('the prebuilt addon is missing -- run tools/prepare-publish.sh');process.exit(1)}\""
   },
   "dependencies": {
-    "node-addon-api": "^8.5.0"
+    "node-addon-api": "^8.5.0",
+    "node-gyp-build": "^4.8.4"
   },
   "devDependencies": {
     "node-gyp": "^11.0.0"
@@ -29,6 +51,7 @@
     "tvision-sources.gypi",
     "src",
     "scripts",
+    "prebuilds",
     "tvision/source",
     "tvision/include",
     "tvision/COPYRIGHT"

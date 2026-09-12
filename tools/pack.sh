@@ -9,12 +9,8 @@
 # there is one -- docs/publishing.md has the real plan, and step 5 of it (the
 # prebuild container) is what this script grew out of.
 #
-# THE ADDON IS BUILT IN A CONTAINER, AND THAT IS THE WHOLE POINT. A .node built
-# in devbox links nix's glibc, libstdc++ and ncurses by absolute /nix/store
-# path and needs GLIBC_2.38 besides; it runs on this machine and on nothing
-# else. tools/pack/Containerfile is AlmaLinux 8 -- glibc 2.28 -- with a static
-# wide ncurses in it, and `--portable` link flags take libstdc++ and libgcc out
-# too, so what comes out needs glibc, libm, libdl and a terminfo database.
+# The addon is built in a container -- see tools/portable-addon.sh, which is
+# that half and is shared with the npm prebuild.
 #
 # `--here` skips the container and copies the addon this checkout already
 # built. It is for checking the *packaging* -- that the tree unpacks and node
@@ -23,7 +19,6 @@
 set -euo pipefail
 
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-IMAGE=${PREDC_BUILD_IMAGE:-predc-build}
 HERE_ONLY=0
 [ "${1:-}" = "--here" ] && HERE_ONLY=1
 
@@ -53,52 +48,11 @@ if [ "$HERE_ONLY" = "1" ]; then
     [ -f "$ADDON" ] || { echo "pack: $ADDON is not built" >&2; exit 1; }
     say "addon: reusing this checkout's build (NOT redistributable)"
 else
-    command -v podman >/dev/null || command -v docker >/dev/null || {
-        echo "pack: needs podman or docker to build a portable addon." >&2
-        echo "      tools/pack.sh --here skips it, for a tarball that only runs here." >&2
-        exit 1
-    }
-    OCI=$(command -v podman || command -v docker)
-
-    if ! "$OCI" image exists "$IMAGE" 2>/dev/null && \
-       ! "$OCI" image inspect "$IMAGE" >/dev/null 2>&1; then
-        say "image: building $IMAGE (once, a few minutes)"
-        "$OCI" build -t "$IMAGE" "$ROOT/tools/pack"
-    fi
-
-    # A scratch copy rather than the checkout itself: the container writes
-    # build/ and node_modules/, and neither belongs in the working tree of the
-    # machine that ran this. The submodule's sources come along because that is
-    # what gets compiled -- everything else in tvision/ is tests and docs.
     WORK=$(mktemp -d)
     trap 'rm -rf "$WORK"' EXIT
-    mkdir -p "$WORK/tvision-node/tvision"
-    cp "$ROOT/tvision-node"/{binding.gyp,tvision-sources.gypi,index.js,package.json} \
-       "$WORK/tvision-node/"
-    cp -r "$ROOT/tvision-node"/{src,scripts} "$WORK/tvision-node/"
-    cp -r "$ROOT/tvision-node/tvision"/{source,include} "$WORK/tvision-node/tvision/"
-    cp "$ROOT/tvision-node/tvision/COPYRIGHT" "$WORK/tvision-node/tvision/"
-
-    say "addon: compiling in $IMAGE"
-    "$OCI" run --rm \
-        -v "$WORK:/work:z" -w /work/tvision-node \
-        -e HOME=/work -e TVNODE_PORTABLE=1 \
-        --userns=keep-id --user "$(id -u):$(id -g)" \
-        "$IMAGE" bash -euo pipefail -c '
-            npm install --no-audit --no-fund --silent node-addon-api node-gyp
-            npx node-gyp configure --silent
-            npx node-gyp build --silent
-        '
-    ADDON=$WORK/tvision-node/build/Release/tvision.node
+    "$ROOT/tools/portable-addon.sh" "$WORK/tvision.node"
+    ADDON=$WORK/tvision.node
 fi
-
-# What it ended up needing, printed rather than assumed. `ldd` here is the
-# builder's, which is fine: the question is which sonames are in the file, not
-# whether this machine can satisfy them.
-say "addon: $(du -h "$ADDON" | cut -f1), needs$(
-    readelf -d "$ADDON" | sed -n 's/.*Shared library: \[\(.*\)\]/ \1/p' | tr -d '\n')"
-say "addon: highest glibc symbol $(
-    objdump -T "$ADDON" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)"
 
 
 # --------------------------------------------------------------- the tree
@@ -122,6 +76,11 @@ cp "$ROOT/gren-tvision-runtime"/{package.json,LICENSE}                       "$R
 cp "$ROOT/gren-tvision-runtime/bin"/*.js                                     "$RT/bin/"
 
 cp "$ROOT/tvision-node"/{index.js,package.json} "$TV/"
+# index.js loads the addon through node-gyp-build, and nothing here runs `npm
+# install` to fetch it, so it travels. It is one dependency-free file plus a
+# bin, which is the only reason this is reasonable.
+mkdir -p "$TV/node_modules/node-gyp-build"
+cp -r "$ROOT/node_modules/node-gyp-build/." "$TV/node_modules/node-gyp-build/"
 cp "$ROOT/tvision-node/LICENSE"                 "$TV/"
 # Turbo Vision travels with the binary because its licence says so: Borland's
 # 1994 disclaimer, magiblot's MIT, and the MIT notices of the pieces vendored

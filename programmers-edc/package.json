@@ -1,16 +1,45 @@
 {
-  "name": "predc",
-  "version": "0.1.0",
+  "name": "programmers-edc",
+  "version": "1.0.0",
   "license": "ISC",
-  "private": true,
+  "author": "Gilbert Ramirez <gram@alumni.rice.edu>",
   "description": "The programmer's every-day carry: small tools, one terminal window.",
+  "keywords": [
+    "tui",
+    "terminal",
+    "console",
+    "calculator",
+    "rpn",
+    "hexdump",
+    "timezone",
+    "ascii",
+    "unicode",
+    "turbo-vision",
+    "gren"
+  ],
+  "homepage": "https://github.com/gilramir/programmers-edc",
+  "bugs": "https://github.com/gilramir/programmers-edc/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gilramir/programmers-edc.git",
+    "directory": "programmers-edc"
+  },
   "bin": {
     "predc": "bin/predc.js"
   },
+  "files": [
+    "main.js",
+    "bin",
+    "LICENSE",
+    "README.md"
+  ],
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
-    "gren-tvision-runtime": "file:../gren-tvision-runtime"
+    "gren-tvision-runtime": "^1.0.0"
+  },
+  "scripts": {
+    "prepublishOnly": "node -e \"if(!require('fs').existsSync('main.js')){console.error('main.js is not built -- run programmers-edc/build.sh');process.exit(1)}\""
   }
 }

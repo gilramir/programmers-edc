@@ -18,3 +18,14 @@ rec.[0-9][0-9][0-9]
 
 # Redistributable tarballs, built by tools/pack.sh.
 dist/
+
+# The prebuilt addon that travels inside the npm tarball, built into place by
+# tools/prepare-publish.sh just before `npm publish`. Not committed: it is a 1.3 MB
+# binary that is reproducible from the container in two minutes, and a stale
+# one in the tree is worse than none.
+tvision-node/prebuilds/
+
+# The consumer's copy of the pty harness, copied in by the same script from
+# tvision-node/test/harness.py, which is the master. Committing it would be
+# two files to keep in step and nothing to notice when they were not.
+gren-tvision-runtime/pty/

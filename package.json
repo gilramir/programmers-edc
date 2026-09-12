@@ -1,0 +1,12 @@
+{
+  "name": "programmers-edc-workspace",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Not published. The workspace root exists so that the three packages can depend on each other by version range -- which is what npm publishes -- while a checkout still links them to each other locally. `file:../tvision-node` was the previous answer and npm ships that string verbatim, so an installed gren-tvision-runtime looked for a sibling directory on the user's disk.",
+  "license": "ISC",
+  "workspaces": [
+    "tvision-node",
+    "gren-tvision-runtime",
+    "programmers-edc"
+  ]
+}

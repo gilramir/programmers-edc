@@ -1,0 +1,97 @@
+# The source build, which is the path every user who is not on linux-x64 takes.
+#
+# There is a prebuilt binary in the tvision-node tarball for linux-x64 and for
+# nothing else, so everybody on a Mac, on Windows, on arm, or installing with
+# --ignore-scripts compiles 206 C++ sources at `npm install` time. That path
+# has no prebuild to fall back to, it is the one this repository never
+# exercises -- devbox pins its own toolchain and its own ncurses -- and it
+# breaks silently: nothing here would notice a header that stopped being
+# included or a flag the distribution compiler stopped taking.
+#
+# So this job is deliberately NOT devbox. It is a stock Ubuntu runner with
+# apt's ncurses and the Node that ships with the setup action, which is as
+# close to a user's machine as a runner gets. gren is not installed and is not
+# wanted: nothing here compiles Gren, and the pty drivers that need it stay in
+# `devbox run test`.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  source-build:
+    name: source build, node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+
+    env:
+      # A runner has no terminal, so TERM is unset, and a Turbo Vision program
+      # started at a pty with no TERM has no terminfo entry to look up. Most
+      # drivers set it themselves; this is so that the ones that do not are not
+      # a first-run failure that looks like a code problem.
+      TERM: xterm-256color
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # 20 is predc's floor -- Gren emits Array.prototype.toSpliced, which is
+        # Node 20 -- and 24 is what a new install gets. The addon itself is
+        # Node-API 9 and goes back to 18.17, which is a contract rather than
+        # something a matrix has to prove.
+        node: ['20', '24']
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Turbo Vision is a submodule and its 206 sources are what gets
+          # compiled. Without this the build fails on a missing include and
+          # the reason is two directories away.
+          submodules: recursive
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install ncurses
+        # A hard requirement, not a nicety: source/platform/ncurdisp.cpp calls
+        # newterm(), so the library is needed at link time. binding.gyp asks
+        # pkg-config for `ncursesw` by name on Linux, so pkg-config has to be
+        # here too -- and `libncurses-dev` is the package that ships
+        # `ncursesw.pc`, which is not the name you would guess.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libncurses-dev pkg-config
+
+      - name: npm install (this is the compile)
+        # No prebuild is checked in, so node-gyp-build finds nothing and falls
+        # through to `node-gyp rebuild`. That fallback is the whole point of
+        # the job.
+        run: npm install --no-audit --no-fund
+
+      - name: The addon loads
+        run: node -e "const t = require('tvision-node'); if (typeof t.start !== 'function') { throw new Error('no start export'); } console.log('addon loads, start is a function');"
+
+      - name: It compiled from source and not from a prebuild
+        run: |
+          test -f tvision-node/build/Release/tvision.node
+          test ! -e tvision-node/prebuilds
+          echo "built from source"
+
+      - name: Cross-language consistency, API audit, source list
+        # The three checks that need only Python. They are what `devbox run
+        # check` runs first, and a stale tvision-sources.gypi after a submodule
+        # bump is exactly the kind of thing a contributor's pull request has.
+        run: |
+          python3 tools/check_consistency.py
+          python3 tools/audit_api.py
+          python3 tvision-node/scripts/gen-tvision-sources.py --check
+
+      - name: Unit tests
+        run: npm test -w gren-tvision-runtime
+
+      - name: The addon's own pty drivers
+        # These drive JavaScript examples, so they need node and python and no
+        # Gren compiler. The rest of the suite does need one and stays local.
+        run: npm test -w tvision-node

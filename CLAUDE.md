@@ -69,6 +69,17 @@ devbox run -- python3 tools/run_tests.py -j1       # one at a time
 anything that touches C++. After editing `tvision-node/src/`, rebuild with
 `(cd tvision-node && npx node-gyp build)` inside devbox.
 
+**The three npm packages are one npm workspace**, rooted at the `package.json`
+at the top of the repository, which is published nowhere and exists only for
+that. So it is one `npm install` at the root and not three in three
+directories, and `node_modules/` is at the root with the three packages
+symlinked into it. The reason is that they depend on each other by version
+range (`^1.0.0`) now rather than by `file:../`, which npm publishes verbatim --
+and npm resolves a range to the local copy when its version satisfies it, which
+is what keeps a checkout building against itself. `docs/publishing.md` has the
+rest, including the two files that are staged into the tarballs by
+`tools/prepare-publish.sh` and are in git nowhere.
+
 **Turbo Vision is a gyp target now, not a separate cmake build.** There is no
 `devbox run lib` and no `build-tvision/`: `tvision-node/binding.gyp` has two
 targets, `tvision_lib` (the submodule's 206 sources, from the generated

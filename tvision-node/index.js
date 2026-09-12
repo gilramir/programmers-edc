@@ -5,7 +5,13 @@
 
 const fs = require('fs');
 
-const addon = require('./build/Release/tvision.node');
+// node-gyp-build rather than a direct path to build/Release: a published
+// tarball carries a prebuilt binary under prebuilds/<platform>-<arch>/, and
+// this is what finds it. The order it looks in is build/Release first and the
+// prebuild second, which is the right way round -- a checkout that has
+// compiled its own addon uses that one, so editing src/ is never silently
+// overridden by a binary that shipped.
+const addon = require('node-gyp-build')(__dirname);
 
 // How long to wait before looking for input again when nothing is happening.
 // TVision's own loop wakes 50 times a second by default (eventTimeoutMs = 20);

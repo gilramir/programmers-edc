@@ -52,7 +52,12 @@ type Command
 parser : Parser.App Command
 parser =
     { name = "predc"
-    , version = "0.1.0"
+    -- Kept in step with package.json by hand, and checked by
+    -- tools/prepare-publish.sh, which is the only moment it matters and the
+    -- only moment anybody would notice. `predc --version` reporting the
+    -- version before the one that was published is the exact shape of bug
+    -- that survives a release.
+    , version = "1.0.0"
     , intro =
         PP.verticalBlock
             [ PP.words

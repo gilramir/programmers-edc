@@ -14,6 +14,7 @@ have reached through the file dialog, and `predc` on its own is still the empty
 desktop it always was.
 """
 
+import json
 import os
 import re
 import subprocess
@@ -226,10 +227,19 @@ def main():
     check("and prints the text rather than looping on it",
           b"every-day" in app.buf, repr(app.buf[:80]))
 
+    # Read from package.json rather than written here, because the version is
+    # a literal in Cli.gren -- argparse wants one and a Gren program cannot
+    # read a package.json at build time -- and a third copy of a number is a
+    # third thing to forget. What this pins is that the program agrees with the
+    # package it ships as; `tools/prepare-publish.sh` pins the same pair before
+    # a publish, which is the other moment it can be wrong.
+    with open(os.path.join(ROOT, "package.json")) as f:
+        want = json.load(f)["version"]
     app = Pty(node_argv(LAUNCHER, "--version"), env, cwd=work)
     code = app.wait(timeout=8)
-    check("--version is the version and nothing else",
-          code == 0 and app.render().strip() == "0.1.0", app.render().strip())
+    check("--version is the version in package.json and nothing else",
+          code == 0 and app.render().strip() == want,
+          f"{app.render().strip()!r} != {want!r}")
 
     # NO_COLOR is the rule argparse's own runner follows, and predc has to
     # follow it by hand: it cannot use that runner, because that runner ends

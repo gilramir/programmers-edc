@@ -21,6 +21,31 @@ The original feature list, version by version -- what was asked for, what was
 dropped, and what was declined -- is [docs/predc-plan.md](../docs/predc-plan.md).
 This file is what predc turned into.
 
+## Installing it
+
+    npm install -g programmers-edc
+    predc
+
+The npm package is `programmers-edc` and the command it installs is `predc`.
+They differ because `predc` was already taken on npm by somebody else, and the
+repository is called programmers-edc anyway.
+
+You need **Node 20 or newer**. That floor is Gren's rather than Turbo Vision's:
+the compiler emits `Array.prototype.toSpliced`, which arrived in Node 20, so on
+18 everything installs and loads and then the first array operation fails.
+
+On **linux-x64** nothing is compiled -- a prebuilt binary is inside the
+`tvision-node` tarball, built against glibc 2.28, so it runs on anything from
+CentOS 7's era onward. **Everywhere else** npm compiles 206 C++ sources at
+install time, which takes about a minute and needs a C++ compiler, ncurses
+headers and Python -- node-gyp's usual requirements, and no cmake.
+
+There is also a tarball on the [releases page][rel] that needs no npm and no
+compiler at all: unpack it, run `./predc`, and the only thing the machine
+needs is `node`.
+
+[rel]: https://github.com/gilramir/programmers-edc/releases
+
 ## Building and running
 
     devbox run predc                    # build and run
@@ -31,15 +56,13 @@ predc is written as an ordinary, independent application: it depends on
 gren-tvision the way anybody else's program would, through `gren.json`, and it
 has its own launcher rather than borrowing the package's `gren-tui` bin.
 
-Two things about it are temporary, and both are temporary for the same reason
--- nothing is published yet:
-
-  - `gren.json` names the package as `"local:../gren-tvision"`, and
-    `package.json` names the runtime as `"file:../gren-tvision-runtime"`. Those
-    become version ranges the day the two are released.
-  - the pty tests borrow `harness.py` and the parallel runner from the repo
-    predc happens to sit in, because there is not yet a distributable way for a
-    consumer to drive a Turbo Vision program through a pty.
+`gren.json` names the package as `"local:../gren-tvision"` rather than as a
+version, and that one stays: this repository holds the master copy of the
+package, so building against the published tag would build against the last
+release instead of against what is here. `package.json` used to say
+`"file:../gren-tvision-runtime"` for the same reason and no longer does --
+that one npm publishes verbatim, so it is a version range now and a workspace
+at the repository root is what keeps the local copies linked.
 
 ## The command line
 

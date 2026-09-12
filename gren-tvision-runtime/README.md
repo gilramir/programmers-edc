@@ -1,9 +1,9 @@
 # gren-tvision-runtime (the JavaScript half)
 
-The Gren package [`gilramir/gren-tvision`](../gren-tvision) is pure Gren: it can
+The Gren package [`gilramir/gren-tvision`](https://github.com/gilramir/gren-tvision) is pure Gren: it can
 describe a UI but cannot touch a terminal, because **Gren packages may not
 declare ports**. This npm package is the other half — it takes the description
-off the port and drives [`tvision-node`](../tvision-node) with it.
+off the port and drives [`tvision-node`](https://www.npmjs.com/package/tvision-node) with it.
 
 The npm name is `gren-tvision-runtime` and the Gren name is
 `gilramir/gren-tvision`. Two registries, so nothing collides, but they are two
@@ -25,6 +25,70 @@ run(require('./main.js'));           // options: {flags, moduleName, outPort, in
 The program must declare ports named `tuiOut` and `tuiIn` (override with
 `outPort` / `inPort`). `TUI_DEBUG=/tmp/trace` logs the port conversation, which
 is the only way to watch it — the terminal belongs to Turbo Vision.
+
+## Testing your own program at a pty
+
+A Turbo Vision program cannot be tested by piping stdin: the addon refuses to
+start unless stdin and stdout are a terminal, and it draws with cursor
+addressing rather than lines of text. So this package ships the harness the
+project's own fifty-odd drivers use, as
+
+    node_modules/gren-tvision-runtime/pty/harness.py
+
+It is one Python file, standard library only. It allocates a pty, gives it a
+size, types at it, strips the escape sequences back out of what comes off the
+other end, and hands you the screen as text to make assertions against:
+
+```python
+import os, sys
+sys.path.insert(0, os.path.join("node_modules", "gren-tvision-runtime", "pty"))
+from harness import Pty, Checks, node_argv
+
+GREN_TUI = os.path.join("node_modules", "gren-tvision-runtime", "bin", "gren-tui.js")
+
+check = Checks()
+app = Pty(node_argv(GREN_TUI, "main.js"), dict(os.environ, TERM="xterm-256color"))
+
+app.pump(2.0)                             # let it start and draw
+check("the title is drawn", "ASCII Chart" in app.render())
+
+app.send(b"\x1b[B", settle=0.3)           # Down, then wait for the repaint
+app.click(10, 3, settle=0.5)              # column then row, both from one
+check("the chart is drawn", "ABCDEFGH" in app.screen())
+
+sys.exit(check.report(app))
+```
+
+**The program is started through `gren-tui.js` and not by node directly.** A
+Gren program compiled with `--output=main.js` is a module that exports
+`Gren.Main.init`; it does not run itself, and handing it straight to `node` gets
+you a pty that draws nothing and two failing checks that say nothing about why.
+
+Four things are worth knowing before you write the second test.
+
+**`send` settles rather than sleeps.** `settle=n` is an upper bound: it returns
+as soon as the terminal has been quiet for 200ms, so a generous number costs
+nothing. What it cannot wait for is anything the screen does not show -- a
+debounced save, a megabyte being copied -- and those pass `wait=n` instead and
+get the whole of it. So does a burst of the same key: sixty Downs is sixty
+events, the pump chews through them in batches, and the screen is perfectly
+still between two of them.
+
+**`render()` is the screen as it stands and `screen()` is everything ever
+drawn.** The first answers "what does this say now", the second "did this ever
+appear".
+
+**`click` takes column then row, and both count from one.** Row 1 is the menu
+bar, so a window's top frame is row 2.
+
+**`check.report(app)` fails on any glyph drawn in the colour behind it**, across
+every screen the test looked at. It costs nothing, needs no setting up, and
+catches the palette mistake that eyes slide over.
+
+`node_argv` has a branch for running under AddressSanitizer that looks for an
+`asan.sh` beside the harness. There is none in this package and there does not
+need to be: it is reached only when `TVNODE_ASAN=1`, which is this project's
+own variable for testing the addon.
 
 ## Recording a session
 
@@ -217,9 +281,12 @@ looks exactly like a bug in the program.
 
 ## Every driver as a replay
 
-`tvision-node/test/harness.py` points `TUI_RECORD_VERBATIM` at a scratch file
+The `pty/harness.py` above points `TUI_RECORD_VERBATIM` at a scratch file
 for every session a pty driver runs, and `Checks.report` runs each tape back
-through the program with no terminal. There is nothing to add to a driver: the
+through the program with no terminal. **You get this too**: the harness finds
+`gren-replay.js` beside itself in this package, so a test written the way the
+section above shows is also a replay test, with nothing declared and nothing
+installed. There is nothing to add to a driver: the
 variable is the runtime's own, so fifty-odd drivers became fifty-odd replay
 tests for nothing. It is **on by default** — `TVNODE_TAPES=0` turns it off — because all 37
 reproduce, run after run, and it costs nothing on the clock: a replay is

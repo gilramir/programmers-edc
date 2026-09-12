@@ -14,10 +14,26 @@ Elm-architecture (TEA) program. Three packages, which anybody can build a termin
 application on, and predc as the big example app..
 
 ```sh
+npm install -g programmers-edc
+predc
+```
+
+The npm package is `programmers-edc` and the command is `predc` -- `predc` was
+taken on npm by somebody else. Node 20 or newer; on linux-x64 there is a
+prebuilt binary in the tarball and nothing is compiled, and everywhere else npm
+compiles Turbo Vision at install time, which needs node-gyp's usual C++
+toolchain and about a minute. The [releases page][rel] also has a tarball that
+needs neither npm nor a compiler.
+
+Or from here:
+
+```sh
 git clone --recurse-submodules https://github.com/gilramir/programmers-edc
 cd programmers-edc
 devbox run predc
 ```
+
+[rel]: https://github.com/gilramir/programmers-edc/releases
 
 [docs/building.md](docs/building.md) is the whole of building, testing and
 running, including doing it without devbox.
@@ -29,10 +45,10 @@ running, including doing it without devbox.
 
 | | | |
 |---|---|---|
-| [`programmers-edc/`](programmers-edc/) | **predc**, the application. Gren, and an ordinary consumer of the package: it depends on gren-tvision through `gren.json`  | npm `predc` |
+| [`programmers-edc/`](programmers-edc/) | **predc**, the application. Gren, and an ordinary consumer of the package: it depends on gren-tvision through `gren.json`  | npm `programmers-edc` |
 | [`gren-tvision/`](gren-tvision/) | the Gren API. `init`, `update`, `subscriptions` and `view : Model -> Ui`; windows, menus, dialogs, widgets and mouse handling described as data. Pure Gren — nothing in it calls into C++ | Gren `gilramir/gren-tvision` |
 | [`gren-tvision-runtime/`](gren-tvision-runtime/) | the JavaScript half: takes the UI description off the port, diffs it against the last one, and drives the binding. Also `gren-tui`, and the session recorder a bug report is made of | npm `gren-tvision-runtime` |
-| [`tvision-node/`](tvision-node/) | the native add-on. Turbo Vision through Node-API, with the library's blocking `run()` inverted into a `step()` that Node pumps, so timers, promises and I/O keep running — modal dialogs included. Carries the C++ library as a submodule | not published on its own |
+| [`tvision-node/`](tvision-node/) | the native add-on. Turbo Vision through Node-API, with the library's blocking `run()` inverted into a `step()` that Node pumps, so timers, promises and I/O keep running — modal dialogs included. Carries the C++ library as a submodule | npm `tvision-node` |
 
 The split is forced: **Gren packages may not declare ports**, so the package can
 describe a UI but cannot reach a terminal. The application declares the two

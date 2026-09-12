@@ -51,9 +51,14 @@ gren package install gilramir/gren-tvision   # the Gren API
 npm install gren-tvision-runtime             # the runtime, and the binding it pulls in
 ```
 
-The npm half brings `tvision-node`, the native addon. On a supported platform
-that is a prebuilt binary; otherwise it compiles Turbo Vision from source and
-needs a C++ compiler and ncurses headers.
+The npm half brings `tvision-node`, the native addon. On **linux-x64** that is
+a prebuilt binary -- built against glibc 2.28, so it runs on anything from
+CentOS 7's era onward -- and nothing is compiled. Everywhere else npm compiles
+Turbo Vision from source at install time, which takes about a minute and needs
+node-gyp's usual C++ toolchain plus ncurses headers, and no cmake.
+
+Node 20 or newer. The addon itself goes back to 18.17, but the Gren compiler
+emits `Array.prototype.toSpliced`, which is 20.
 
 ## A first program
 

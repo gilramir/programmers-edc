@@ -5,9 +5,10 @@ library and one of which is not on a registry at all. This is what that costs, w
 the platforms this machine is not.
 
 Written down because the answers took a morning to establish and would take
-another one to establish again. **Steps 1 to 4 of the order at the end are
-done** (2026-09-08) and are marked below. What is left is the prebuild
-container and dropping `"private": true`.
+another one to establish again. **Steps 1 to 6 of the order at the end are
+done** (2026-09-12) and are marked below. What is left is the publishing
+itself, which is a runbook rather than a decision and is the last section of
+this file.
 
 ## Decided, 2026-09-05
 
@@ -509,12 +510,18 @@ different and slower kind of damage.
    was checked instead.
 5. prebuildify for `linux-x64-gnu` in a manylinux container, with the
    `objdump` check in CI so a glibc regression fails the build rather than a
-   user's install. **The container is built and works, 2026-09-08** --
-   `tools/pack/Containerfile` and `tools/pack.sh`, see below. What is left is
-   prebuildify's own layout and the CI job; the compiling half is done and the
-   `objdump` line is in the script.
+   user's install. **Done, 2026-09-12.** Not prebuildify itself, in the end --
+   see below -- but its layout, which is the part that matters: the container
+   build is `tools/portable-addon.sh`, shared with `tools/pack.sh`, and it
+   writes `tvision-node/prebuilds/linux-x64/tvision.node`. The `objdump` check
+   is in that script and **fails the build** rather than printing a number.
 6. Add `macos-latest` and `windows-latest` to the matrix when there is somebody
-   on either.
+   on either. **Deliberately not for 1.0.0** (2026-09-12): neither arm has ever
+   been compiled, and debugging an unverified `binding.gyp` through a CI log is
+   not work to do with a release half out of the door. Everybody not on
+   linux-x64 compiles from source, which is one `npm install` and no cmake --
+   and `.github/workflows/ci.yml` exists to keep *that* path working, which is
+   the one that actually protects them.
 7. Export `gren-tvision` to `gilramir/gren-tvision` and tag it. Independent of
    everything above -- it needs no binary and no container -- but the empty
    repository has to be created before `gren package validate` will run at all.
@@ -591,3 +598,166 @@ the addon loaded; `./predc --help` is what failed. That is the argument for
 in a stock Node image and greps what it drew, and the escapes have to be
 stripped first, because a menu title is two runs in two colors and a search
 for `File` otherwise finds nothing while everything is working.
+
+## Publishing for real, 2026-09-12
+
+The decisions above held. What the doing added is below, and most of it is
+things that could not have been known from reading.
+
+### `predc` was taken on npm
+
+By somebody else, at 0.0.1, ISC, published over a year ago and depending on
+`tslib`. So the application's npm name is **`programmers-edc`**, matching the
+repository, and the **command it installs is still `predc`** -- that is the
+`bin` field and has nothing to do with the package name. `tvision-node` and
+`gren-tvision-runtime` were both free.
+
+The general lesson is cheap and worth repeating: **check the name before
+writing it into the documentation**, not after. `npm view <name> version`
+returning E404 is the whole test.
+
+### `file:../` is published verbatim, and a workspace is the fix
+
+`gren-tvision-runtime` depended on `"tvision-node": "file:../tvision-node"` and
+predc on the runtime the same way. npm does **not** rewrite those at publish
+time -- `npm pack` and read the `package.json` inside the tarball, which is how
+this was settled rather than argued about. An installed
+`gren-tvision-runtime` would have looked for a sibling directory on the user's
+disk and found whatever was there.
+
+They are version ranges now (`^1.0.0`), and a **workspace root** -- a
+`package.json` at the top of the repository listing the three directories, and
+published nowhere -- is what keeps a checkout linked to its own copies: npm
+resolves a dependency to the local workspace package whenever its version
+satisfies the range, which `1.0.0` against `^1.0.0` does. One `npm install` at
+the root replaces the three that `devbox run build` used to do, and
+`node_modules/` at the root has the three symlinks in it.
+
+### node-gyp-build, and why not prebuildify
+
+The delivery decision said prebuildify, and the layout is prebuildify's --
+`prebuilds/<platform>-<arch>/<name>.node`, found at `require` time by
+`node-gyp-build`. But prebuildify itself is a build driver for building
+locally, and the build here happens **inside a container**, where prebuildify
+would be one more thing to install to rename a file. So `tools/portable-addon.sh`
+writes the path directly and prebuildify is not a dependency.
+
+`node-gyp-build` is, and `index.js` loads through it now:
+
+```js
+const addon = require('node-gyp-build')(__dirname);
+```
+
+**Its search order is the right way round, and that is not an accident worth
+relying on unchecked**: `build/Release` first, `build/Debug`, *then*
+`prebuilds/`. A checkout that has compiled its own addon uses that one, so
+editing `src/` is never silently overridden by a binary that shipped -- which
+would have been exactly the trap the cmake split used to set.
+
+Two consequences:
+
+  - **`"install": "node-gyp-build"` is required in `scripts`.** npm runs
+    `node-gyp rebuild` automatically for any package with a `binding.gyp` and no
+    install script, so without this every linux-x64 user would compile
+    Turbo Vision *and then ignore the result*. With it, the bin looks for a
+    usable binary and only compiles when there is none.
+  - **The tarball from `tools/pack.sh` carries `node-gyp-build` with it**, in
+    `node_modules/` beside the addon. Nothing in that tarball runs `npm
+    install`, and `index.js` requires it now. It is one dependency-free file,
+    which is the only reason this is reasonable.
+
+### Two files are staged into the tarballs and are in neither git nor npm's way
+
+`tools/prepare-publish.sh` is the whole of it: it builds the prebuild, copies
+the harness, checks that `main.js` exists, and then **names the files it
+expects to find in each tarball** rather than counting them.
+
+```
+tvision-node/prebuilds/linux-x64/tvision.node   the container's addon
+gren-tvision-runtime/pty/harness.py             the pty test harness
+```
+
+Both are gitignored, because both are copies of something the repository
+already has and a stale copy committed beside the original is worse than no
+copy at all. Both are in `files`, which is what gets them past the `.gitignore`
+-- the same rule that `tvision/COPYRIGHT` found the hard way, and it holds for
+files ignored from the repository root as well as from inside the package.
+
+The check is worth the six lines. A release missing the prebuild still works --
+everybody just compiles -- and a release missing the harness still works, and
+**nothing else in the world would notice either one**.
+
+### The harness ships, which answers the question this file said would be asked
+
+"How does a consumer pty-test their own TUI app?" It is
+`node_modules/gren-tvision-runtime/pty/harness.py`, documented in that
+package's README with an example that was **run before it was written down**,
+against a tree containing nothing but installed tarballs.
+
+Running it found the thing the example had wrong: a Gren program compiled with
+`--output=main.js` is a module and does not run itself, so the harness has to
+start it through `gren-tui.js` and not hand it to `node`. What that looks like
+when you get it wrong is a pty that draws nothing and two failed checks that
+say nothing about why -- which is exactly the hour a reader would have lost.
+
+And one thing fell out for free. `harness.py` finds `gren-replay.js` at
+`<itself>/../../gren-tvision-runtime/bin/`, which resolves correctly in the
+repository (`tvision-node/test/` → root) *and* in an install
+(`node_modules/gren-tvision-runtime/pty/` → `node_modules/`). So a consumer's
+pty test is also a replay test, with nothing declared, exactly as ours are.
+
+The master copy stays at `tvision-node/test/harness.py`: forty drivers import
+it from there and `asan.sh` sits beside it, and moving it on release day to
+save a `cp` would have been the wrong trade.
+
+### The CI that was worth writing
+
+`.github/workflows/ci.yml`, and it is **deliberately not devbox**: a stock
+Ubuntu runner, apt's ncurses, the Node the setup action installs. It compiles
+`tvision-node` from source on Node 20 and 24, loads the addon, runs the three
+Python checks, the JS unit tests and the addon's own pty drivers -- which need
+node and python and no Gren compiler, so the job needs no toolchain that a
+contributor's machine would not have.
+
+The source build is the path every user not on linux-x64 takes, it is the one
+this repository never exercises -- devbox pins its own gcc and its own ncurses
+-- and it breaks silently. That is the job. It is also, not incidentally, the
+thing a pull request from a stranger can be judged by.
+
+Verified from this end before it was written: `npm pack` the tarball, install
+it somewhere else with no prebuild in it, and it compiles in 40s and loads.
+
+### The runbook
+
+`devbox run check`, `devbox run test`, and `test:asan` if any C++ moved. Then:
+
+```sh
+tools/prepare-publish.sh          # container prebuild + harness + file lists
+npm login                         # the token in ~/.npmrc expires
+npm publish -w tvision-node
+npm publish -w gren-tvision-runtime
+npm publish -w programmers-edc
+```
+
+In that order, because each depends on the one above it by version range and a
+consumer may install the third the moment it lands.
+
+Then the tarball and the release:
+
+```sh
+tools/pack.sh                     # dist/predc-1.0.0-linux-x64.tar.gz
+tools/pack-verify.sh              # runs it on Debian 11 and Debian 12
+git tag predc/1.0.0 && git push origin predc/1.0.0
+gh release create predc/1.0.0 dist/predc-1.0.0-linux-x64.tar.gz
+```
+
+**And the Gren package last, on purpose.** Tagging
+`gilramir/gren-tvision` is what tells `packages.gren-lang.org` the package
+exists, and that notifies the Gren Discord -- so it is the one step that brings
+people, and everything they would look at should already be there when it does:
+
+```sh
+tools/export-gren-tvision.sh --tag     # split, push, tag 1.0.0 (bare, no v)
+git tag gren-tvision/1.0.0 && git push origin gren-tvision/1.0.0
+gren package validate                  # only works once a tag exists
+```

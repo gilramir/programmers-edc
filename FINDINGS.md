@@ -9853,3 +9853,66 @@ starts the desktop one row down, so with no menu bar row 0 belongs to nobody
 and keeps whatever the terminal had. In a terminal that is the terminal's own
 background and nobody notices. In a screenshot it is a black band, which is how
 it was noticed at all.
+
+## What npm publishes verbatim, and the name that was already taken
+
+Publishing was meant to be mechanical -- the decisions had been made and
+written down in `docs/publishing.md` a week earlier -- and three of the things
+it turned up could not have come from reading.
+
+**`file:../tvision-node` is published exactly as written.** Two of the packages
+depended on their siblings that way, because that is what makes a monorepo
+build, and the assumption was that npm would resolve it at pack time the way
+pnpm resolves `workspace:`. It does not. The test is fifteen seconds long --
+`npm pack`, then read the `package.json` inside the tarball -- and it is the
+only way to be sure, because nothing about the dependency looks wrong from
+inside the repository. An installed `gren-tvision-runtime` would have gone
+looking for a sibling directory on the user's disk.
+
+The fix is an **npm workspace**: a `package.json` at the root listing the three
+directories and published nowhere. The packages then depend on each other by
+range, `^1.0.0`, and npm resolves a range to the local copy whenever its
+version satisfies it. So the published manifest and the local one are the same
+file, which is the property that was actually wanted -- the previous
+arrangement had a manifest that was *correct locally and wrong once shipped*,
+and that class of thing has no failure mode short of a user reporting it.
+
+**The name `predc` was taken on npm**, by an unrelated package from over a year
+ago. The check is `npm view predc version` and it costs nothing, and it had
+never been run -- the name was in six documents by then. The application's
+package is `programmers-edc` now and the *command* is still `predc`, which is
+the `bin` field and was never at stake. Check a name before writing it down.
+
+**And the loader's search order was the thing to verify, not assume.** The
+addon now loads through `node-gyp-build`, which picks between a compiled
+`build/Release` and a shipped `prebuilds/linux-x64`. Had it preferred the
+prebuild, every edit to `tvision-node/src/` in a checkout with a staged
+prebuild would have compiled fine and changed nothing -- the exact shape of the
+cmake trap that cost a session once. It prefers `build/Release`. Reading forty
+lines of its source was the cheapest thing in this whole exercise.
+
+### The documented example that did not run
+
+`gren-tvision-runtime` now ships the pty harness, at
+`node_modules/gren-tvision-runtime/pty/harness.py`, which answers the question
+`docs/publishing.md` had predicted would be the first one anybody asks. Its
+README example was written from memory of the drivers and got the constructor,
+the argument order of `click` and the meaning of `settle` wrong -- and running
+it found something worse than all three: **a Gren program compiled with
+`--output=main.js` does not run itself**, so the harness has to start it
+through `gren-tui.js`. Handed straight to `node` it produces a pty that draws
+nothing and failed checks that say nothing about why.
+
+The example in that README was run, from a directory containing nothing but
+unpacked tarballs, before it was written down. That is the same rule the
+`firstprogram` screenshot enforces on `src/Tui.gren`'s doc comment, arrived at
+independently and for the same reason: **a code block is the only code nobody
+compiles**, and the way to fix that is never to proofread it harder.
+
+One thing fell out for free. `harness.py` looks for `gren-replay.js` at
+`<itself>/../../gren-tvision-runtime/bin/`, which is correct in this repository
+(`tvision-node/test/` up to the root) and *also* correct in an install
+(`node_modules/gren-tvision-runtime/pty/` up to `node_modules/`). So a
+consumer's pty test is a replay test too, with nothing declared and nothing
+installed, exactly as ours are. That was luck, but it is checked luck: the
+example run above reported `every session this driver recorded replays (1 of 1)`.

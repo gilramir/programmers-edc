@@ -156,12 +156,23 @@ the package that ships `ncursesw.pc`.
 
 ```sh
 git submodule update --init                        # fills tvision-node/tvision/
-(cd tvision-node         && npm install && npx node-gyp rebuild)
-(cd gren-tvision-runtime && npm install)
-(cd programmers-edc      && npm install)
+npm install                                        # one, at the root: see below
+(cd tvision-node && npx node-gyp configure && npx node-gyp build)
 gren-tvision/build.sh
 programmers-edc/build.sh
 ```
+
+**One `npm install`, at the root, and not one per package.** The three npm
+directories are an npm workspace, so the root install is what creates
+`node_modules/` and symlinks the three into it -- which is what makes
+`gren-tvision-runtime`'s dependency on `tvision-node@^1.0.0` resolve to the
+copy in this checkout instead of to the registry. Installing inside one of them
+on its own does not do that.
+
+The `npm install` also compiles the addon, through `node-gyp-build`, so the
+`node-gyp` line after it is normally a no-op -- it is there because it is what
+to run after editing `tvision-node/src/`, and because `configure && build` is
+seconds where `rebuild` is 46 of them.
 
 That is `devbox run build` with the nix part taken out. `check` and `test` are
 the same:
