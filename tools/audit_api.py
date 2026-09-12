@@ -144,7 +144,7 @@ def flag_names():
 # `TEditor` does (tinputli.cpp:470), which meant the binding shipped them under
 # names beginning `editor.` for months: the one name that made a *field* copy
 # and paste announced that it was for something else, so nobody tried it, and
-# nothing anywhere could report that. See `doc/clipboard.md`.
+# nothing anywhere could report that. See `docs/clipboard.md`.
 #
 # The commands are audited by name, under the pseudo-class `commands`. Turbo
 # Vision declares them as enumerators rather than constants, in six headers.

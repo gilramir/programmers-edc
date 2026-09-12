@@ -2,7 +2,7 @@
 # here rather than in the repository root because this directory is exported
 # to gilramir/gren-tvision as a repository of its own -- a rule at the root
 # does not travel, and a clone of the export that runs ./build.sh would
-# otherwise show fifteen untracked main.js files. See doc/publishing.md.
+# otherwise show fifteen untracked main.js files. See docs/publishing.md.
 .gren/
 gren_packages/
 examples/*/.gren/

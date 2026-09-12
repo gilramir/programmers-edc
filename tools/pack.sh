@@ -6,7 +6,7 @@
 #   tools/pack.sh --here          # quick and NOT redistributable; see below
 #
 # This is not the published package. It is the thing to hand a colleague before
-# there is one -- doc/publishing.md has the real plan, and step 5 of it (the
+# there is one -- docs/publishing.md has the real plan, and step 5 of it (the
 # prebuild container) is what this script grew out of.
 #
 # THE ADDON IS BUILT IN A CONTAINER, AND THAT IS THE WHOLE POINT. A .node built

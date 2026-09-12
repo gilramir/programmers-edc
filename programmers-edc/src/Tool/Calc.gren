@@ -42,7 +42,7 @@ only.
 have is pasted into what you are typing with `v`, and a result is copied off
 the stack with `y` -- because a calculator whose answers can only be read and
 retyped is one you stop using for the numbers that matter, which are the long
-ones. Both go through the one clipboard `gren-tvision/doc/clipboard.md`
+ones. Both go through the one clipboard `gren-tvision/docs/clipboard.md`
 describes, so a copy here and a paste in the hex viewer are the same text even
 over ssh, where no terminal will hand a clipboard over.
 

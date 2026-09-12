@@ -15,7 +15,7 @@ are the reference and are more precise; this is the part that says what the
 things *are*.
 
 > Each widget entry ends with the examples that use it, and every picture in
-> this document is a photograph of one of them: `doc/shots.py` boots the
+> this document is a photograph of one of them: `docs/shots.py` boots the
 > example at a pty, keys it into the state being described, and crops the
 > screen to it. So the pictures cannot drift from the code -- and
 > [`../examples/`](../examples) is the worked source, every line of which is
@@ -547,7 +547,7 @@ both are things only the model can produce.
 **The first three are not the editor's.** `TInputLine` reacts to `cmCut`,
 `cmCopy` and `cmPaste` exactly as `TEditor` does, so those three names act on
 whichever of the two holds the focus -- which is why they carry a different
-prefix. `doc/clipboard.md` has what they share underneath and why it took a
+prefix. `docs/clipboard.md` has what they share underneath and why it took a
 while to notice.
 
 **One sharp edge, and it is the price of a view whose contents are not in the

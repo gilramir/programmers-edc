@@ -1,7 +1,8 @@
 # Upstream report: un-zooming after a terminal resize puts the window outside the desktop
 
 *To file at <https://github.com/magiblot/tvision/issues>. Delete this file once
-it has an issue number, the way `doc/upstream-calcbounds-origin.md` went after
+it has an issue number. The `calcBounds` report that used to sit beside it went
+that way when it became
 [#235](https://github.com/magiblot/tvision/issues/235) — the issue is the
 report, and a copy of it here only rots. The reasoning behind it lives in
 FINDINGS, under "The rectangle a window remembers is about a desktop that is

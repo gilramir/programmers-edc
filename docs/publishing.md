@@ -403,7 +403,7 @@ nothing else. The only footprint is `.git/subtree-cache/`, 1.5 MB. Use only
 repository's history and make merge commits here.
 
 Measured rather than sketched. The split takes 1.3s over 173 commits, of which
-84 touch the directory, and it is the same cold as warm. Its tree is `src doc
+84 touch the directory, and it is the same cold as warm. Its tree is `src docs
 examples test tests gren.json build.sh run.sh README.md LICENSE .gitignore` --
 the directory and nothing above it. Two runs back to back give the identical
 hash, so a second export is a fast-forward carrying only what changed, and a
@@ -473,7 +473,7 @@ The exported repository is the directory and nothing above it, so anything in
   - **`run.sh`** execs `../gren-tvision-runtime/bin/gren-tui.js`. In the export
     that is the installed `gren-tui`, so the line wants to become one that
     prefers a sibling checkout and falls back to the npm bin.
-  - ~~**Links out of `doc/` and `README.md`**~~ -- fixed, and they point at
+  - ~~**Links out of `docs/` and `README.md`**~~ -- fixed, and they point at
     this repository by URL now.
 
 A fourth is fixed rather than listed: the ignore rules for this directory were

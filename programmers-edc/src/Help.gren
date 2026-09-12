@@ -52,7 +52,7 @@ way it is a measurement rather than a table lookup.
 **What to press comes first and why comes second**, which is the opposite of
 how the subject is usually written down. Somebody in front of a terminal that
 will not paste wants three lines; the page-long version is
-`gren-tvision/doc/clipboard.md`, and the last line here says so.
+`gren-tvision/docs/clipboard.md`, and the last line here says so.
 
 **One window and two pages, rather than two windows.** Both are prose that
 scrolls, and everything but the text -- the layout, the scroll bar, `PgDn`,
@@ -1090,7 +1090,7 @@ stores =
     , Text "  instead, with Shift and middle-click."
     , Gap
     , Text "  The long version, with the measurements behind all of this, is"
-    , Text "  gren-tvision/doc/clipboard.md."
+    , Text "  gren-tvision/docs/clipboard.md."
     ]
 
 

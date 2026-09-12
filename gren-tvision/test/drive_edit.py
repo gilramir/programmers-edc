@@ -164,7 +164,7 @@ def main():
         #    It went nowhere until the binding stopped letting views reach
         #    `TClipboard`: that class keeps a fallback store of its own, so a
         #    field and the model filled and read different clipboards on any
-        #    machine without a system one. `doc/clipboard.md` has the whole of
+        #    machine without a system one. `docs/clipboard.md` has the whole of
         #    it. The Alt keys work from inside a modal dialog because a menu
         #    bar is `ofPreProcess` and is offered every keystroke first.
         app.send(b"\x1bs", settle=0.7)          # Search menu

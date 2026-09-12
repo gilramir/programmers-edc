@@ -1,133 +1,26 @@
-This is a small TUI tool that has little tools that a programmer needs now
-and then.
+# predc
 
-[../doc/screenshots.md](../doc/screenshots.md) has a picture of the desktop in
+The programmer's every-day carry: ten small tools a programmer reaches for
+weekly, in one terminal window instead of ten browser tabs. An RPN calculator,
+a hex dump viewer whose ranges can be highlighted and searched, a time zone
+converter, an ASCII chart, a Unicode decoder, base64/percent/C/HTML encoding in
+both directions, a random value generator, an environment variable browser, a
+monthly calendar, and a pad of notes.
+
+Each tool is a window on one desktop: they stay open while you work, any of them
+is one Alt-key away from anywhere, and they share a clipboard with each other
+and -- when the terminal allows it -- with the rest of the machine.
+[What is in here](#what-is-in-here) below is the inventory, and it is the same
+list **Help | What is in here** shows in the program.
+
+[../docs/screenshots.md](../docs/screenshots.md) has a picture of the desktop in
 each of the three colour schemes, taken from the running program.
 
-# v1
+The original feature list, version by version -- what was asked for, what was
+dropped, and what was declined -- is [docs/predc-plan.md](../docs/predc-plan.md).
+This file is what predc turned into.
 
-## RPN Calculator
-
-RPN (reverse polish notation) calculator
-integers can be given in decimal, hex, or binary.
-integer results can be shown in decimal, hex, or binary
-handles exact decimals (base 10)
-
-## Hex dump viewer
-
-Not a hex editor; just a viewer, but one that the user can
-highlight ranges for being able to distinguish different ranges
-of bytes during investigation.
-User can paste bytes/text, or read af file.
-Contents are shown in class hex dump format, with offsets, hex, and printable
-ASCII rendering.
-User may highlight sections a different color; useful if they are studying the
-hex dump and need to highlight
-
-## Time conversion
-enter time as posix timestamp, or different rfc formats
-convert posix to rfc
-show same times in multiple timezones
-user can choose which timezones to always display by default
-options are save to a config file
-(e.g., myself I need to use Austin, Seoul, San Jose (California), and Bangalore
-timezones)
-
-## ASCII chart
-
-exactly what it says, ASCII only. control characters should also have their
-proper ASCII name.
-
-# i8n support
-Menus and dialogues support i18n. My default is English. I need to supply
-Korean too.
-
-# v2
-
-## Watcher/Alarm/Timer
-
-**Dropped, 2026-09-05.** Run a command every N seconds, or at time T, and run
-another when it exits with some value. Not wanted after all; `cron`, `systemd`
-timers and `watch` all do it, and none of the reasons the other tools exist --
-one window, no shelling out, a thing you can look at while you work -- were
-true of this one.
-
-## Unicode encodings
-
-Decodes bytes (or, string representation of hex bytes)
-as utf-8 or utf-16
-
-**Done** -- see "Reading bytes as Unicode" below.
-
-
-## Calender view
-
-I want to be able to see a small monthly calendar, so I can see
-what days of the week each date falls on.
-It should also show the work week number for that month/year.
-
-**Done** -- see "A month, and which week it is" below.
-
-
-
-# v3
-
-Three small things, none of them a tool's worth on its own and all of them
-things a person reaches for weekly.
-
-## Finding bytes in a dump
-
-Search the dump for text or for hex digits, and again for the next one.
-
-**Done** -- see "Finding bytes" below.
-
-## Encoding and decoding
-
-base64, percent-encoding, C string escapes, HTML entities, both directions.
-
-**Done** -- see "Encoding and decoding" below.
-
-## Random values
-
-A v4 UUID, or N random bytes as hex or base64.
-
-**Done** -- see "Random values" below. An integer spelling was added later, on
-the same bytes.
-
-## Environment variables
-
-Every variable predc's own process has, one per line, with a search box and a
-case-sensitivity toggle.
-
-**Done** -- see "Environment variables" below.
-
-**Not wanted:** hashes (md5/sha) and a `chmod` bit calculator, both suggested
-and both declined.
-
-
-# v4
-
-## The ASCII chart's long form
-
-The concise grid, and a second mode: the long list `man ascii` prints, one code
-per line with dec/hex/oct and a name for everything unprintable. A toggle
-between them, and the list as tall as the screen allows.
-
-**Done** -- see "The ASCII chart has two of it" below.
-
-## Notes
-
-Many independent free-form notes, each with a name: a list down the left and an
-editor pane beside it. A very small OneNote, and no more than that -- no
-folders, no tags, no formatting, no search across notes.
-
-Plus a key that reformats the paragraph the caret is in to 80 columns,
-regardless of the size of the window.
-
-**Done** -- see "Notes" below.
-
-
-# Building and running
+## Building and running
 
     devbox run predc                    # build and run
     devbox run predc -- hex dump.bin    # ... on a file, straight into the viewer
@@ -911,7 +804,7 @@ Unicode decoder puts `U+0048 U+00E9` on predc's clipboard; `Shift-Ins` in the
 hex viewer's **Type bytes** field takes them straight back out. That works on a
 machine with no clipboard of any kind, which is what a remote host is, and it
 did not work until the binding stopped letting Turbo Vision's own views keep a
-second clipboard nobody could see -- `gren-tvision/doc/clipboard.md` has the
+second clipboard nobody could see -- `gren-tvision/docs/clipboard.md` has the
 whole of that, and it is the best explanation of this subject in the repo.
 
 and, on the terminal at the other end, whatever it calls permission to write
@@ -923,7 +816,7 @@ whole point of `OSC 52` and the only route that can work over ssh.
 Either way predc keeps the text itself, so `y` here and `p` in another of its
 tools always work.
 
-gren-tvision's [`doc/clipboard.md`](../gren-tvision/doc/clipboard.md) is the
+gren-tvision's [`docs/clipboard.md`](../gren-tvision/docs/clipboard.md) is the
 long version: every environment, what each terminal calls its permission, and a
 one-line test that says whether the terminal or tmux is the one eating it.
 

@@ -145,7 +145,7 @@ Build and run it with:
 
 which is this:
 
-![the program above, running](https://raw.githubusercontent.com/gilramir/gren-tvision/main/doc/img/firstprogram.png)
+![the program above, running](https://raw.githubusercontent.com/gilramir/gren-tvision/main/docs/img/firstprogram.png)
 
 That picture is taken by compiling the program above -- the actual text of it,
 lifted out of this comment -- and photographing it at a real terminal, so it
@@ -2413,7 +2413,7 @@ terminal did not confirm rather than that the copy failed. The text is kept
 inside the program either way, so a copy and a paste between two of its own
 windows always work, and [`readClipboard`](#readClipboard) gives it back.
 
-`doc/clipboard.md` has the whole of it -- every environment, what each terminal
+`docs/clipboard.md` has the whole of it -- every environment, what each terminal
 calls its permission, and a one-line test that answers "is it me or is it the
 terminal" without a program involved.
 

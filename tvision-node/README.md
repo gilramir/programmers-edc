@@ -203,4 +203,4 @@ exactly like the feature not working.
 
 ISC, in `LICENSE`. Turbo Vision itself is under its own licence and is linked
 statically, so anything shipping this binary has to carry the library's notice
-files too. `doc/publishing.md` at the repository root has the rest.
+files too. `docs/publishing.md` at the repository root has the rest.

@@ -17,16 +17,16 @@ keyboard input without stopping your subscriptions.
 
 ## Where the documentation is
 
-The long-form documents are in [`doc/`](doc/index.md):
+The long-form documents are in [`docs/`](docs/index.md):
 
-- [Turbo Vision, from Gren](doc/widgets.md) — the guided tour: the programming
+- [Turbo Vision, from Gren](docs/widgets.md) — the guided tour: the programming
   model, the anatomy of the screen and every widget, for people who have never
   used Turbo Vision.
-- [How a Gren program ends up on Turbo Vision](doc/architecture.md) — the
+- [How a Gren program ends up on Turbo Vision](docs/architecture.md) — the
   technical half: the four layers, and the event loop that shaped them.
-- [Driving a C or C++ library from Gren](doc/native.md) — the same problem in
+- [Driving a C or C++ library from Gren](docs/native.md) — the same problem in
   general, for a reader with some other library in mind.
-- [The clipboard, from a terminal program](doc/clipboard.md) — the one every
+- [The clipboard, from a terminal program](docs/clipboard.md) — the one every
   consumer eventually needs: why a copy reaches the rest of the machine
   sometimes and not others.
 

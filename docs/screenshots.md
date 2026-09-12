@@ -9,8 +9,8 @@ through the same harness the tests use, keys it into the state described, and
 writes a PNG:
 
 ```sh
-devbox run -- python3 doc/shots.py             # all three, ~45s
-devbox run -- python3 doc/shots.py midnight    # just this one
+devbox run -- python3 docs/shots.py             # all three, ~45s
+devbox run -- python3 docs/shots.py midnight    # just this one
 ```
 
 They are reproducible byte for byte — the time converter is pinned to a fixed
@@ -41,7 +41,7 @@ input as bytes.
 Those highlight colours come from `Theme.Inks`, not from the palette: a
 `Tui.Span` names one of sixteen hues and nothing sits between it and the
 terminal. That split is why a scheme here has two halves — see
-[the widget documentation](../gren-tvision/doc/widgets.md) for the palette side
+[the widget documentation](../gren-tvision/docs/widgets.md) for the palette side
 of it.
 
 ![predc in the Midnight scheme, with the hex dump viewer and the Unicode decoder open](img/predc-midnight.png)

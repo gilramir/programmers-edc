@@ -432,7 +432,7 @@ because one of the packages contains a compiled shared object.
   - The library's licence travels with the binary. If you link it statically,
     its notice files have to be in your tarball.
 
-[`doc/publishing.md`](https://github.com/gilramir/programmers-edc/blob/main/doc/publishing.md), in the repository
+[`docs/publishing.md`](https://github.com/gilramir/programmers-edc/blob/main/docs/publishing.md), in the repository
 this package is developed in, has the platform-by-platform detail for
 gren-tvision, including what a manylinux build is for.
 

@@ -278,7 +278,7 @@ def main():
           paged == text(app), f"{on_screen} rows: {paged[0]!r} vs {text(app)[0]!r}")
     app.send(END, settle=0.7)
     check("End reaches the last line, which points at the long version",
-          "doc/clipboard.md" in page(app), page(app))
+          "docs/clipboard.md" in page(app), page(app))
     check("and the six stores are named on the way there",
           "X11 PRIMARY" in page(app) and "X11 CLIPBOARD" in page(app), page(app))
 

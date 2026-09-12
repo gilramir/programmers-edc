@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "license": "ISC",
   "private": true,
-  "description": "Turbo Vision (magiblot/tvision) bound to Node through N-API. Experiment, milestones 1-2.",
+  "description": "Turbo Vision (magiblot/tvision) bound to Node through Node-API, with its blocking event loop inverted so Node keeps running. The native half of gren-tvision.",
   "main": "index.js",
   "scripts": {
     "build": "node-gyp rebuild",

@@ -2587,7 +2587,7 @@ answer at exactly the moment it is asked.
 colour, `drive_demo` asserted four separate things about the clock, and the
 sweep every driver runs for text drawn in the colour behind it passes on
 green-on-grey because that contrasts fine. All of them were about the *text*.
-It was found by `doc/shots.py` — the first time anything in this repo produced
+It was found by `docs/shots.py` — the first time anything in this repo produced
 a picture — and it was obvious in the picture instantly. `drive_demo` now
 compares the clock's ink against a plain letter of the menu bar, which is a
 comparison rather than a constant so that it holds under any theme, and not
@@ -5410,7 +5410,7 @@ from two copies ago rather than nothing. Ours stores first, unconditionally.
 Ours became the single store, and the rule became **no view may reach
 `TClipboard` either**. `JsInputLine` and `JsEditor` answer `cmCut`, `cmCopy` and
 `cmPaste` themselves and never delegate them, which finally makes true a
-sentence `doc/clipboard.md` had been asserting for months.
+sentence `docs/clipboard.md` had been asserting for months.
 
 The delete inside `cmCut` was the only awkward part: `TInputLine::deleteSelect`,
 `saveState` and `checkValid` are all private. It is asked for in the vocabulary
@@ -5464,7 +5464,7 @@ to want there: what you search for is usually something you are looking at.
 
 ## The window that measures instead of explaining
 
-Two commits of clipboard work left `doc/clipboard.md` correct and predc's users
+Two commits of clipboard work left `docs/clipboard.md` correct and predc's users
 no better off, because a user in front of a terminal that will not paste does
 not read a repository. So **Help | Copying and pasting** (`F1`), which is the
 same subject in the program.
@@ -5494,7 +5494,7 @@ just changed one is exactly the person a cached answer would mislead.
 ### What to press first, why second
 
 Written the opposite way round from every explanation of this subject,
-including the one in `doc/clipboard.md`. Somebody whose paste did nothing wants
+including the one in `docs/clipboard.md`. Somebody whose paste did nothing wants
 three lines. The background is real and is underneath, where it belongs: the
 two different mechanisms both called pasting, what the tmux line does and does
 not fix, a row per environment, and the six stores.
@@ -7935,7 +7935,7 @@ walks it back into view, which is not a thing anyone would guess. With the
 patch the same runs restore to 40..80, 20..60, 10..50 and 0..40: the same size,
 still flush right, on the screen.
 
-The report is `doc/upstream-zoomrect-origin.md` until it has a number. The
+The report is `docs/upstream-zoomrect-origin.md` until it has a number. The
 patch is `fix/zoomrect-origin`, one commit off `master` like the other four,
 cherry-picked onto `patches`.
 
@@ -9715,7 +9715,7 @@ The third way was already built. `harness.Screen` is a framebuffer in every
 sense except pixels: a grid of cells, and per cell the `(fg, bg)` in force when
 it was written. So a screenshot is a blit -- 8x16 bitmap per cell, two colours,
 integer scale -- and the two hundred lines it took are `tools/cp437.py`,
-`tools/shot.py` and `gren-tvision/doc/shots.py`.
+`tools/shot.py` and `gren-tvision/docs/shots.py`.
 
 ### The repertoire is exactly one code page, which decides the font
 
@@ -9784,7 +9784,7 @@ besides -- Ubuntu 24.04 and newer. glibc symbol versioning is forward-only, so
 there is no flag and no fix at this end: the binary has to be *compiled*
 against an old glibc. AlmaLinux 8 in a container is glibc 2.28, and with
 `-static-libstdc++ -static-libgcc` and a static wide ncurses the result needs
-libc, libm, libpthread and a terminfo database. `doc/publishing.md` had planned
+libc, libm, libpthread and a terminfo database. `docs/publishing.md` had planned
 exactly this; what it had wrong was that AlmaLinux has no `ncurses-static`
 package, so the container builds ncurses from source -- with `CFLAGS=-fPIC`,
 because an archive of non-PIC objects cannot be linked into a shared object,
@@ -9827,12 +9827,12 @@ none of them; and the audit walks Turbo Vision's members rather than our prose.
 The only way to find out is to compile it, and the only reason anybody did was
 wanting a screenshot of it.
 
-So the screenshot is how it is checked from now on. `doc/shots.py` grew a
+So the screenshot is how it is checked from now on. `docs/shots.py` grew a
 `firstprogram` section that reads `src/Tui.gren`, lifts the block out of the
 comment with a regular expression, writes it into a temp directory under
-`doc/`, compiles it and photographs it running. If the documented program stops
+`docs/`, compiles it and photographs it running. If the documented program stops
 compiling, the shot run fails with the compiler's own message. The temp
-directory has to be *inside* `doc/` rather than in `/tmp`, because
+directory has to be *inside* `docs/` rather than in `/tmp`, because
 `source-directories` in a `gren.json` may not be absolute and this one has to
 reach `../../src`.
 

@@ -1,7 +1,7 @@
 // The pump: Node's event loop as the host, one turn of Turbo Vision's own
 // loop as the guest inside it. Regenerate img/pump.png with:
 //
-//     devbox run doc:diagrams
+//     devbox run docs:diagrams
 //
 digraph pump {
   rankdir=TB;

@@ -1310,7 +1310,7 @@ view model =
             -- them straight out of it again -- one program, one clipboard, no
             -- terminal involved. That is a round trip predc could not make until
             -- the binding stopped letting views keep a second clipboard of their
-            -- own; `gren-tvision/doc/clipboard.md` has the story.
+            -- own; `gren-tvision/docs/clipboard.md` has the story.
             ++ [ { text = "", key = "Shift-Del", cmd = "clipboard.cut" }
                , { text = "", key = "Ctrl-Ins", cmd = "clipboard.copy" }
                , { text = "", key = "Shift-Ins", cmd = "clipboard.paste" }

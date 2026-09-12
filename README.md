@@ -1,298 +1,96 @@
-# tvision-experiment
+# programmers-edc
 
-Binding [magiblot/tvision](https://github.com/magiblot/tvision) — a modern port of
-Borland's Turbo Vision — into Node, and eventually into
-[Gren](https://gren-lang.org).
+**predc** — the programmer's every-day carry — is a desktop of small tools in
+one terminal window: an RPN calculator, a hex dump viewer, a time zone
+converter, an ASCII chart, base and Unicode encoders, a random value generator,
+an environment variable browser, a calendar, and a pad of notes.
 
-The `tvision-node/tvision/` checkout is a **git submodule** pointing at
-[gilramir/tvision](https://github.com/gilramir/tvision), a fork of upstream that
-carries the fixes upstream has not taken yet. Clone with
-`--recurse-submodules`, or run `git submodule update --init` in an existing
-clone.
+![predc in the Borland scheme, with the ASCII chart and the RPN calculator open](docs/img/predc-borland.png)
 
-## Milestones
+Underneath it is the rest of this repository: [Turbo Vision][tv] — the framework
+Borland shipped in 1990, revived for modern Unix and Windows by
+[magiblot][tv] — bound to Node, and driven from [Gren][gren] as an
+Elm-architecture program. Three packages, which anybody can build a terminal
+application on, and predc is the application that proves they are enough.
+
+```sh
+git clone --recurse-submodules https://github.com/gilramir/programmers-edc
+cd programmers-edc
+devbox run predc
+```
+
+[docs/building.md](docs/building.md) is the whole of building, testing and
+running, including doing it without devbox.
+
+[gren]: https://gren-lang.org
+[tv]: https://github.com/magiblot/tvision
+
+## The components
 
 | | | |
 |---|---|---|
-| **0** | Does a Node addon built here load, and can it reach a system library? | done |
-| **1** | `hello.cpp` as a Node app, with the menus and dialog described in JS | done |
-| **2** | A larger demo on a non-blocking event pump, with addressable views | done |
-| **2.5** | Modal dialogs that do not stop Node, and more ported demos | done |
-| **3** | Gren on top, through ports | done |
-| **4** | Every C++ example ported, one at a time, each forcing an API change | done except `tvedit` |
-| **5** | A program written *for* the API rather than translated into it | done: `watch` |
+| [`programmers-edc/`](programmers-edc/) | **predc**, the application. Gren, and an ordinary consumer of the package: it depends on gren-tvision through `gren.json` the way anybody else's program would | npm `predc` |
+| [`gren-tvision/`](gren-tvision/) | the Gren API. `init`, `update`, `subscriptions` and `view : Model -> Ui`; windows, menus, dialogs, widgets and mouse handling described as data. Pure Gren — nothing in it calls into C++ | Gren `gilramir/gren-tvision` |
+| [`gren-tvision-runtime/`](gren-tvision-runtime/) | the JavaScript half: takes the UI description off the port, diffs it against the last one, and drives the binding. Also `gren-tui`, and the session recorder a bug report is made of | npm `gren-tvision-runtime` |
+| [`tvision-node/`](tvision-node/) | the native addon. Turbo Vision through Node-API, with the library's blocking `run()` inverted into a `step()` that Node pumps, so timers, promises and I/O keep running — modal dialogs included. Carries the C++ library as a submodule | not published on its own |
 
-See [FINDINGS.md](FINDINGS.md) for what we learned doing it, including the
-things that were not what we expected, and
-[doc/publishing.md](doc/publishing.md) for what shipping a package with a
-compiled shared library in it costs -- and what it does not: the addon is
-Node-API, so one binary works on every Node version, and glibc rather than
-`node` is the thing that decides where it runs.
-
-[doc/screenshots.md](doc/screenshots.md) is what it all looks like: predc's
-desktop, once in each of its three colour schemes, generated from the running
-program by `doc/shots.py`.
-
-`tools/pack.sh` builds a redistributable predc for linux-x64 --
-`dist/predc-<version>-linux-x64.tar.gz`, which untars and runs with nothing on
-the machine but node 20. The addon in it is compiled in a container against
-glibc 2.28 with libstdc++ and ncurses linked in statically, because a binary
-built in devbox runs nowhere but here; `tools/pack-verify.sh` runs the result
-on Debian 11 and 12 to say so. This is not the published package -- see
-[doc/publishing.md](doc/publishing.md) -- it is what to hand somebody before
-there is one.
-
-## Layout
-
-```
-devbox.json        node 22, gren, ncurses (with its dev output)
-m0-load-test/      milestone 0: a two-function addon that calls into ncursesw
-tvision-node/      the binding
-  src/tvnode.h       shared declarations, widgets, the id registry
-  src/keys.h         "Alt-X" -> TVision key codes
-  src/app.cc         application, event pump, module entry
-  src/views.cc       widgets, the id registry, mutation
-  examples/hello.js  hello.cpp, with the C++ moved to JS
-  examples/demo.js   a clock and a directory browser driven by Node
-  examples/ascii.js  tvdemo's ASCII chart: a view painted from JavaScript
-  examples/form.js   tvforms/mmenu: clusters, nested submenus, command enabling
-  test/harness.py    pty driver + a small terminal emulator
-  test/drive*.py     type at the app, assert on what it drew
-  test/asan.sh       run node with AddressSanitizer preloaded
-gren-tvision/      the Gren package: gilramir/gren-tvision
-  src/Tui.gren       Ui types, encoders, the program wrapper. Pure Gren.
-  examples/          one directory per example, each its own application
-                     hello, mmenu, entries, forms, ascii, calendar, puzzle,
-                     calc, palette, mouse, dir, demo, viewer, watch -- and a
-                     README that is the plan of record for what gets ported next
-  test/              a pty driver per example
-gren-tvision-runtime/  the npm half: the diff layer + the `gren-tui` bin
-  diff.js            one UI description -> calls on the binding (unit tested)
-  record.js          --record: the session, on a file, for a bug report
-  test/              node:test, against a fake binding
-tools/             cross-language consistency checks
-```
-
-The split is forced: **Gren packages may not declare ports**, so the package
-can describe a UI but cannot reach a terminal. The application declares the two
+The split is forced: **Gren packages may not declare ports**, so the package can
+describe a UI but cannot reach a terminal. The application declares the two
 ports and hands them over; the npm runtime takes the description off the port
 and drives the binding. See FINDINGS.
 
-## Running it
+`gren-tvision/` is the master copy of a package that also has to exist as a
+repository of its own, because a Gren package is a GitHub repository with
+semver tags and nothing else.
+[`gilramir/gren-tvision`](https://github.com/gilramir/gren-tvision) is an export
+of that directory, made by `tools/export-gren-tvision.sh`, and is never edited
+there.
 
-Everything happens inside devbox — the addon must be compiled by the same
-toolchain that will load it (see FINDINGS.md). It does not have to: nothing in
-the repo shells out to `devbox`, and [Building without devbox](#building-without-devbox)
-below is the same recipe with the five packages installed by hand.
+And two supporting directories: `tools/` holds the cross-language consistency
+checks, the API coverage audit, the parallel pty test runner and the packaging
+scripts; `m0-load-test/` is the two-function addon that proved a Node addon
+built here would load at all, kept because it is the smallest thing that can
+fail.
 
-```sh
-devbox run build    # libtvision.a (PIC) + the addon
-devbox run check    # fast: consistency, docs, unit tests. No terminal, ~5s
-devbox run test     # the above plus the pty drivers
-devbox run test:asan  # the pty drivers under AddressSanitizer
-devbox run hello    # each of these runs one example in your terminal
-devbox run demo
-devbox run ascii
-devbox run form
-devbox run gren           # the entries example, in Gren
-devbox run gren -- hello  # or any other example
-devbox run gren -- forms
-devbox run gren -- ascii
-```
+## The documentation
 
-In `hello`: `Alt-G` or the Hello menu opens the greeting, `Tab` moves between
-buttons, `Space` presses one, `Alt-X` quits.
+**Using it**
 
-In `demo`: `Alt-C` opens a clock painted by `setInterval`, `Alt-D` a directory
-listing produced by `await fs.readdir()`; `Space` on an entry stats it
-asynchronously, `../` walks up. `Alt-G` opens a modal dialog — it takes all the
-input, as a modal dialog should, but the clock behind it keeps ticking.
-Modality was hoisted out of `execView`'s nested loop; see FINDINGS.
+- [Turbo Vision, from Gren](gren-tvision/docs/widgets.md) — the guided tour:
+  the programming model, the anatomy of the screen, and every widget, with a
+  photograph of each. Start here to write a program.
+- [predc's README](programmers-edc/README.md) — the application: what each tool
+  does, its command line, its config file, and how to report a bug with a
+  recorded session.
+- [Building and running](docs/building.md) — the devbox commands, every example
+  and what it demonstrates, and the recipe without devbox.
+- [Screenshots](docs/screenshots.md) — predc's desktop in each of its three
+  colour schemes, generated from the running program.
 
-In `ascii`: arrows and Home/End move the selection, any printable key jumps to
-that character — every keystroke is handled in JavaScript, and the chart itself
-is painted from a JS array of strings.
+**How it works**
 
-In `form`: `Alt-N` opens a record form with check boxes and radio buttons;
-`File ▸ Samples ▸ More` is a submenu inside a submenu; `List records` and
-`Clear` are greyed out until there is something to list.
+- [How a Gren program ends up on Turbo Vision](gren-tvision/docs/architecture.md)
+  — the four layers, and the event loop problem that shaped them.
+- [Driving a C or C++ library from Gren](gren-tvision/docs/native.md) — the same
+  problem in general, for a reader with some other library in mind.
+- [The clipboard, from a terminal program](gren-tvision/docs/clipboard.md) — why
+  a copy reaches the rest of the machine sometimes and not others, and why a
+  paste over ssh is the harder half.
+- [`tvision-node/README.md`](tvision-node/README.md) — the addon's own API, what
+  it deliberately is not, and the inverted event loop in detail.
 
-In `gren`: `Alt-A` adds an entry through a modal dialog, the clock is a
-`Time.every` subscription, and closing the entries window tells the Gren model
-so it stays closed until `Alt-L` puts it back.
+**Why it is the way it is**
 
-In `gren -- forms` (tvision's `tvforms`): arrow keys move through a sorted
-collection of records and the window on the right follows, because the model is
-told where the highlight is. `F3` edits the highlighted record in a form with
-labelled fields, check boxes and radio buttons; `F2` adds one; `F8` deletes one,
-and with none left both `F3` and its menu entry go grey. Saving a renamed record
-re-sorts the list and the highlight follows it there.
-
-In `gren -- ascii` (tvdemo's chart): the same chart as `devbox run ascii`, but
-the eight rows of code page 437 come out of a Gren array and the selected cell
-is `cursor = Just { x, y }` on the canvas. Arrows and Home/End move it, any
-printable key jumps to that character, and a click lands where you clicked.
-
-The rest of the Gren examples are every remaining C++ one:
-
-| | |
-|---|---|
-| `gren -- calendar` | tvdemo's calendar. Up/Down change the month; today is the one thing on the canvas painted in a colour of its own |
-| `gren -- puzzle` | tvdemo's sliding puzzle. `--seed=` and `--scramble=` make the board a pure function of two numbers, which is how the test wins the game |
-| `gren -- calc` | tvdemo's calculator. Type at it or click the keys — the keypad can be pressed but never holds the caret |
-| `gren -- palette` | tvision's palette example, whose entire subject the port removes |
-| `gren -- mouse` | tvdemo's mouse dialog. The scroll bar sets the double-click delay; double-click the strip to feel where the boundary is |
-| `gren -- dir` | tvdir. A directory tree with no tree widget: the rows are a fold over the model |
-| `gren -- demo` | tvdemo's shell. `Windows ▸ Tile` and `Cascade` are Turbo Vision's; the event viewer lists what crosses the port |
-| `gren -- viewer` | tvdemo's file viewer, with both scroll bars. Takes a path |
-| `gren -- edit` | tvedit. A text editor: takes a path, F2 saves. The one view whose contents do not travel with the render |
-
-And one that is not a port at all. In `gren -- watch`: give it a directory and
-some commands, and it runs them whenever anything in there changes --
-`run.sh watch src 'npm test' 'npm run lint'`, one window per command. This is
-the example that says what the binding is for. A Turbo Vision program has one
-source of events and it is the user; `FileSystem.watchRecursive` is a `Sub`, so
-the outside world can send this one a message. The children run at once and
-none of them blocks, and a change arriving mid-run kills that run and starts
-again -- `ChildProcess.spawn` hands the model a `Process.Id`. `Alt-R` runs now,
-`Alt-C` stops.
-
-[`gren-tvision/examples/README.md`](gren-tvision/examples/README.md) is the plan
-of record: what each port forced into the API, and what is left.
-
-`Enter` does not press buttons, select list items, or tick check boxes in Turbo
-Vision; `Space` does. See FINDINGS.
-
-## Building without devbox
-
-devbox supplies four things and nothing else — **node 22**, **gren 0.6**,
-**pkg-config** and **ncurses with its dev output**. Every script here (the two
-`build.sh`, `run.sh`, `tools/run_tests.py`) is plain and only wants those on
-`PATH`.
-
-**cmake is no longer one of them.** Turbo Vision used to be a separate cmake
-build producing `build-tvision/libtvision.a`; it is a target inside
-`tvision-node/binding.gyp` now, so node-gyp is the whole build. That is for the
-sake of whoever installs the published package on a platform with no prebuilt
-binary: node-gyp they already have, cmake they may not.
-
-| | |
-|---|---|
-| node 22 | what this is pinned to and developed against |
-| `gren` 0.6.6 | `npm i -g gren-lang@0.6.6` — npm's `gren-lang` is that version and its bin is `gren` |
-| a C++17 compiler and make | Turbo Vision and the addon, both through node-gyp |
-| pkg-config and the ncursesw dev files | `binding.gyp` calls `pkg-config --cflags/--libs ncursesw` for both of its targets |
-| python3 | node-gyp wants it, and every test driver is written in it — standard library only, nothing to `pip install` |
-
-On Debian and Ubuntu the system half is
-`build-essential pkg-config libncurses-dev python3`; `libncurses-dev` is
-the package that ships `ncursesw.pc`.
-
-```sh
-git submodule update --init                        # fills tvision-node/tvision/
-(cd tvision-node         && npm install && npx node-gyp rebuild)
-(cd gren-tvision-runtime && npm install)
-(cd programmers-edc      && npm install)
-gren-tvision/build.sh
-programmers-edc/build.sh
-```
-
-That is `devbox run build` with the nix part taken out. `check` and `test` are
-the same:
-
-```sh
-python3 tools/check_consistency.py
-(cd gren-tvision && gren docs --output=/dev/null)
-(cd gren-tvision-runtime && node --test test/*.test.js)
-(cd gren-tvision/tests && ./run.sh)
-python3 tools/run_tests.py
-```
-
-`devbox run gren -- entries` is `gren-tvision/run.sh entries`, and
-`devbox run predc` is `programmers-edc/run.sh`.
-
-Four things that will bite:
-
-**Do not copy `tvision-node/build/` from another machine.** Build it there. A
-`.node` and the Turbo Vision objects linked into it have to come from one
-toolchain and one libc, and inside devbox that is nix's gcc rather than the
-system's. Either host is fine; mixing them is not — and a binary built inside
-devbox links against nix's glibc and will not load anywhere else, which is why
-`doc/publishing.md` says prebuilds have to come out of a container.
-
-**The `tvision-node/tvision/` checkout is a submodule, pinned to a revision** of the
-`patches` branch of [gilramir/tvision](https://github.com/gilramir/tvision) —
-upstream master plus the fixes that have not landed upstream yet, one commit
-each. The pin is a fact recorded in this repo's history, which is the point:
-"which tvision was this built against" has an answer afterwards. Moving it
-forward is `git submodule update --remote tvision-node/tvision` and a commit
-here — plus `tvision-node/scripts/gen-tvision-sources.py`, because the list of
-files node-gyp compiles is committed rather than globbed and `check` fails if
-it is stale. A clone that skipped `--init` fails in ways that look like this
-repo's fault.
-
-**The fork's branches**, and what each is for:
-
-| | |
-|---|---|
-| `master` | tracks `upstream/master` untouched |
-| `patches` | what this repo builds — `master` plus every unlanded fix |
-| `fix/…` | one per upstream issue, one commit off `master`, PR-shaped |
-
-Inside `tvision/`, `origin` is the fork and `upstream` is
-`magiblot/tvision`. A fix starts as a `fix/…` branch off `master`, gets
-cherry-picked onto `patches`, and both are deleted once it lands upstream and
-`master` moves past it. There is no patch directory: what the submodule is
-checked out at is what gets built. Note that `git submodule update` leaves the
-checkout on a detached HEAD, which is a poor place to write the next fix —
-`(cd tvision && git checkout patches)` first. `.gitmodules` uses the https URL
-so a clone needs no key; the checkout's own `origin` is the ssh one, and
-`git submodule sync` will overwrite that if you ever run it.
-
-Five commits sit on `patches` today:
-
-  - a `delete`/`delete[]` mismatch that kills any AddressSanitizer build
-    ([#230][i230]);
-  - a double-width character that TVision draws and then erases
-    ([#233][i233]);
-  - `TMenuView::findHotKey` following a null `subMenu`, which segfaults on
-    the next keystroke after a menu gains an item with no command
-    ([#234][i234]);
-  - `TView::calcBounds` clamping a view's size against the desktop and
-    never its origin, so shrinking a terminal and growing it back can leave a
-    window hanging off the right or the bottom edge ([#235][i235]);
-  - and `TWindow::zoom` restoring the rectangle it stored at zoom time without
-    checking it against the desktop it is restoring onto, so a window zoomed on
-    a wide terminal and un-zoomed on a narrow one comes back beside the desktop
-    rather than on it — often entirely off the screen. Not filed yet;
-    `doc/upstream-zoomrect-origin.md` is the report, and that file goes away
-    once it has a number.
-
-FINDINGS has the story of each.
-
-The last two are the only ones with no pull request behind them. For `#235` the
-issue went first on purpose: the fix has a judgement call in it — which views
-the origin may be moved for — that the maintainer may want to make differently,
-and a patch that presumes the answer is a worse way to ask. The same is true of
-the fifth, where the call is *where* the clamp goes: `TView::locate` looks like
-the obvious place and is the wrong one, because `moveGrow` and `dragView`'s Esc
-path both depend on it leaving the origin alone. The port works around both, in
-`JsWindow::calcBounds` and `JsWindow::zoom`; the first is redundant once
-upstream settles on a shape, and the second stays until the fifth lands.
-
-[i230]: https://github.com/magiblot/tvision/issues/230
-[i233]: https://github.com/magiblot/tvision/issues/233
-[i234]: https://github.com/magiblot/tvision/issues/234
-[i235]: https://github.com/magiblot/tvision/issues/235
-
-**The first build needs network twice**: `gren make` fills `~/.cache/gren` with
-`gren-lang/core`, `gren-lang/node`, `gren-lang/url`, `gilramir/gren-argparse`
-and `gilramir/gren-bignum`, and node-gyp downloads node's headers.
-
-**The layout is load-bearing.** predc's `gren.json` names the package as
-`local:../gren-tvision`, each example's lists `"../../src"`, and the two npm
-packages depend on each other by `file:` path — so `programmers-edc/` cannot be
-built on its own, and the directories have to keep their relative positions.
+- [FINDINGS.md](FINDINGS.md) — the running record of what turned out to be true,
+  including the things that were not what we expected.
+- [The plan of record](gren-tvision/examples/README.md) — what each ported
+  example forced into the API, and what was left out.
+- [How this got here](docs/history.md) — the milestones, and why the API was
+  built by porting.
+- [What predc was going to be](docs/predc-plan.md) — the application's original
+  feature list, what was dropped, and what was declined.
+- [publishing.md](docs/publishing.md) — what shipping a package with a compiled
+  library in it costs, and what it does not.
 
 ## Licence
 
@@ -302,12 +100,12 @@ published. `gren-tvision/gren.json` and the three `package.json`s say the same.
 **What ships alongside it is not ours and does not become ours.** `tvision-node`
 links `libtvision.a` statically, so anything built from it carries Turbo Vision
 with it, and Turbo Vision is three layers of terms in one file
-(`tvision-node/tvision/COPYRIGHT`, 119 lines): Borland's 1994 public-source disclaimer on the
-original code, magiblot's MIT licence on everything since, and the MIT notices
-of the third-party pieces vendored into it — Milo Yip's `utoa`, Bjoern
-Hoehrmann's UTF-8 decoder, and the rest. All of them require the notice to
-travel with the binary. **A published `tvision-node` has to include
+(`tvision-node/tvision/COPYRIGHT`, 119 lines): Borland's 1994 public-source
+disclaimer on the original code, magiblot's MIT licence on everything since, and
+the MIT notices of the third-party pieces vendored into it — Milo Yip's `utoa`,
+Bjoern Hoehrmann's UTF-8 decoder, and the rest. All of them require the notice
+to travel with the binary. **A published `tvision-node` has to include
 `tvision/COPYRIGHT` in its tarball.** How the C++ gets to a consumer is settled
 now — the submodule lives inside the package and `npm pack` carries its files —
 so this is one line in the `files` list rather than an open question. See
-`doc/publishing.md`.
+[docs/publishing.md](docs/publishing.md).

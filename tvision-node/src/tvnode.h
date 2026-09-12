@@ -1220,7 +1220,7 @@ public:
     // deliberately be dragged off three of the four edges -- and `dragView`'s
     // Esc path restores exactly such a rectangle. The stale rectangle is the
     // window's, so the fit is the window's. Upstream has the same hole;
-    // reported in doc/upstream-zoomrect-origin.md and patched on the fork's
+    // reported in docs/upstream-zoomrect-origin.md and patched on the fork's
     // `fix/zoomrect-origin`, and this stays until that lands.
     //
     // `drive_drag.py`'s `restore_checks` is what says this still matters: it

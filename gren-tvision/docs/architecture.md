@@ -161,7 +161,7 @@ This is the part that shaped everything else.
 ![Node's event loop as the host, with one turn of Turbo Vision's loop as a guest inside each tick, beside the blocking run() it replaced](img/pump.png)
 
 That picture is generated from [pump.dot](pump.dot) by `devbox run
-doc:diagrams`.
+docs:diagrams`.
 
 `TApplication::run()` is a blocking loop around `getEvent`, which waits for the
 next keystroke, mouse report or timer tick and hands it to the view that should

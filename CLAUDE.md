@@ -218,12 +218,12 @@ is the worst failure there is, so the module is `Tests`.
 
 ## The widget documentation has screenshots, and they are generated
 
-`gren-tvision/doc/widgets.md` has a picture of every widget, and every one of
+`gren-tvision/docs/widgets.md` has a picture of every widget, and every one of
 them is a photograph of an example rather than a mock-up:
 
 ```sh
-devbox run -- python3 gren-tvision/doc/shots.py            # all 31, 52s
-devbox run -- python3 gren-tvision/doc/shots.py listbox    # just these
+devbox run -- python3 gren-tvision/docs/shots.py            # all 31, 52s
+devbox run -- python3 gren-tvision/docs/shots.py listbox    # just these
 ```
 
 It boots the example at a pty through the same harness the drivers use, keys it
@@ -234,7 +234,7 @@ nothing to install.
 
 **One shot has no example behind it**, and is the exception that proves the
 rule: `firstprogram` lifts the "A complete program" block out of
-`src/Tui.gren`'s own doc comment, compiles it in a temp directory under `doc/`
+`src/Tui.gren`'s own doc comment, compiles it in a temp directory under `docs/`
 and photographs it. Doing that found the documented program did not compile --
 `Ui` had grown `theme` and `Window` four fields since it was written, and
 nothing had ever fed it to a compiler. A code block in a doc comment is the
@@ -283,4 +283,4 @@ anywhere. The export is one-directional -- never edit or commit to it -- and
 the one thing that breaks it is **amending or rebasing a commit that has
 already gone out**, which changes its split hash and orphans everything after
 it. A rewrite outside `gren-tvision/` is invisible to the export.
-`doc/publishing.md` has the rest, including why a tag must be bare `1.0.1`.
+`docs/publishing.md` has the rest, including why a tag must be bare `1.0.1`.

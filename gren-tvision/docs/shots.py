@@ -6,8 +6,8 @@ drivers use -- keys it into the state the documentation is describing, and
 crops the screen to what it is describing. Nothing here is a mock-up. If a
 widget stops drawing, its picture stops drawing too.
 
-    devbox run -- python3 gren-tvision/doc/shots.py            # all of them
-    devbox run -- python3 gren-tvision/doc/shots.py listbox    # just these
+    devbox run -- python3 gren-tvision/docs/shots.py            # all of them
+    devbox run -- python3 gren-tvision/docs/shots.py listbox    # just these
 
 Windows are **found rather than counted**: `box(app, "Edit record")` returns
 the screen rectangle of the innermost frame containing that text, so a shot
@@ -431,7 +431,7 @@ def firstprogram():
     if at is None:
         raise AssertionError("no 'A complete program' block in src/Tui.gren")
 
-    # A temp directory *inside* doc/, because gren.json's source-directories
+    # A temp directory *inside* docs/, because gren.json's source-directories
     # have to be relative and this one has to reach `../../src`.
     where = tempfile.mkdtemp(dir=HERE, prefix="_firstprogram-")
     try:

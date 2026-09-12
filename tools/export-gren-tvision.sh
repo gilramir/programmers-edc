@@ -9,7 +9,7 @@
 #     tools/export-gren-tvision.sh --dry-run
 #
 # The master copy is here. The export is one-directional and nothing is ever
-# committed to it by hand. doc/publishing.md has the reasoning; this is the
+# committed to it by hand. docs/publishing.md has the reasoning; this is the
 # procedure.
 #
 # `git subtree split` is deterministic -- the same history always produces the
@@ -110,7 +110,7 @@ else
 $REMOTE is at $remote_head, which is not an ancestor of $sha.
 Either somebody committed to the export by hand -- nobody should -- or a
 commit that had already been exported was amended or rebased here. See
-doc/publishing.md."
+docs/publishing.md."
 fi
 
 # ------------------------------------------------------------------ the push

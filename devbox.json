@@ -43,8 +43,8 @@
       "gren:build": [
         "gren-tvision/build.sh"
       ],
-      "doc:diagrams": [
-        "(cd gren-tvision/doc && dot -Tpng -Gdpi=140 pump.dot -o img/pump.png)"
+      "docs:diagrams": [
+        "(cd gren-tvision/docs && dot -Tpng -Gdpi=140 pump.dot -o img/pump.png)"
       ],
       "predc": [
         "programmers-edc/run.sh \"$@\""

@@ -701,7 +701,7 @@ flags	wfZoom	used	Resize
 # member list never mentions. TInputLine answering cmCut, cmCopy and
 # cmPaste is the one that cost something: the binding named them
 # "editor.*" for months, so the only name that made a *field* copy and
-# paste said it was for something else. See doc/clipboard.md.
+# paste said it was for something else. See docs/clipboard.md.
 commands	cmQuit	bound	the built-in command name "quit"
 commands	cmClose	bound	"close"
 commands	cmZoom	bound	"zoom"
@@ -718,7 +718,7 @@ commands	cmTile	bound	"tile" -- TApplication handles it, not TProgram, which is 
 commands	cmCascade	bound	"cascade", same
 commands	cmCut	bound	"clipboard.cut" -- and it is an InputLine's as much as an Editor's, which is what the name says now and did not before
 commands	cmCopy	bound	"clipboard.copy", both views
-commands	cmPaste	bound	"clipboard.paste", both views; answered by the binding rather than by TClipboard -- see doc/clipboard.md
+commands	cmPaste	bound	"clipboard.paste", both views; answered by the binding rather than by TClipboard -- see docs/clipboard.md
 commands	cmClear	bound	"editor.clear" -- TEditor only, TInputLine has no branch for it
 commands	cmUndo	bound	"editor.undo", TEditor only
 commands	cmSelectAll	bound	"editor.selectAll", TEditor only

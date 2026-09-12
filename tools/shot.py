@@ -12,7 +12,7 @@ Cropping is the reason to do it this way rather than photographing a terminal.
 A documentation screenshot wants the widget, not the eighty columns around it,
 and the widget's rectangle is written down in the example's source.
 
-    shot(app, "doc/img/entries.png", rect={"x1": 4, "y1": 2, "x2": 52, "y2": 14})
+    shot(app, "docs/img/entries.png", rect={"x1": 4, "y1": 2, "x2": 52, "y2": 14})
 
 Rectangles are the same convention as `Tui.Rect`: `x2,y2` is one past the last
 cell, so `{x1=0,y1=0,x2=80,y2=25}` is the whole screen.

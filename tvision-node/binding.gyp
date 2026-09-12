@@ -18,7 +18,7 @@
   # written from `tvision/CMakeLists.txt` and `tvision/source/CMakeLists.txt`,
   # which do support all three, and they are HERE RATHER THAN IN A BRANCH
   # because a CI matrix cannot be started without them. Treat them as a first
-  # draft that has never been compiled: see doc/publishing.md.
+  # draft that has never been compiled: see docs/publishing.md.
   #
   # What the cmake files say, and what each arm below is copying:
   #

@@ -8,8 +8,8 @@ tools' own canvases paint with, and the second half is invisible unless
 something is painted. So each shot opens tools that paint: a hex dump with
 coloured ranges in it, a chart with a selected cell, a converter with rows.
 
-    devbox run -- python3 doc/shots.py             # all three, ~40s
-    devbox run -- python3 doc/shots.py midnight    # just this one
+    devbox run -- python3 docs/shots.py             # all three, ~40s
+    devbox run -- python3 docs/shots.py midnight    # just this one
 
 **Nothing here touches your config file.** predc keeps its scheme and its zone
 list in `$XDG_CONFIG_HOME/predc/config.toml`, falling back to
