@@ -12,8 +12,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)                       # the Gren package
 EXAMPLE = os.path.join(ROOT, "examples", "entries")
-RUNTIME = os.path.join(ROOT, "..", "gren-tvision-runtime", "bin", "gren-tui.js")
-sys.path.insert(0, os.path.join(ROOT, "..", "tvision-node", "test"))
+from harness_path import RUNTIME  # finds harness.py and gren-tui.js, here or in an install
 
 from harness import Pty, Checks, latest_int, node_argv
 

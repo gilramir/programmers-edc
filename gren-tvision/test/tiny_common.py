@@ -44,9 +44,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 EXAMPLES = os.path.join(ROOT, "examples")
-RUNTIME = os.path.join(ROOT, "..", "gren-tvision-runtime", "bin", "gren-tui.js")
 PREDC = os.path.join(ROOT, "..", "programmers-edc", "bin", "predc.js")
-sys.path.insert(0, os.path.join(ROOT, "..", "tvision-node", "test"))
+from harness_path import RUNTIME  # finds harness.py and gren-tui.js, here or in an install
 
 from harness import Pty, Checks, node_argv
 
@@ -65,7 +64,12 @@ def apps():
         example = os.path.join(EXAMPLES, name)
         if os.path.isfile(os.path.join(example, "main.js")):
             found.append((name, node_argv(RUNTIME, "main.js"), example))
-    found.append(("predc", node_argv(PREDC), ROOT))
+    # predc lives in this repository and not in the package, so in the
+    # exported package repository it is not there at all. The examples above
+    # are found by looking for a main.js; this is the same rule applied to the
+    # one program that is not an example.
+    if os.path.isfile(PREDC):
+        found.append(("predc", node_argv(PREDC), ROOT))
     return found
 
 

@@ -32,8 +32,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 EXAMPLE = os.path.join(ROOT, "examples", "dir")
-RUNTIME = os.path.join(ROOT, "..", "gren-tvision-runtime", "bin", "gren-tui.js")
-sys.path.insert(0, os.path.join(ROOT, "..", "tvision-node", "test"))
+from harness_path import RUNTIME  # finds harness.py and gren-tui.js, here or in an install
 
 from harness import Pty, Checks, node_argv
 

@@ -349,11 +349,12 @@ notices of the pieces vendored into it -- has to be in the tarball. It is one
 entry in `files`, and as the section above found, it is **excluded by default**
 and will not get there on its own.
 
-**"How does a consumer pty-test their own TUI app?"** predc borrows
-`harness.py` and `tools/run_tests.py` from the repo it happens to sit in. An
-independent application would have neither, and the answer is not "copy the
-file". This is a publishing blocker in the sense that it is the first question
-anybody who likes the package will ask.
+**~~"How does a consumer pty-test their own TUI app?"~~ Answered, 2026-09-12.**
+`harness.py` ships inside `gren-tvision-runtime`, at `pty/harness.py`, and that
+package's README documents it with an example that was run before it was
+written down. `tools/run_tests.py` does *not* ship: it is this repository's
+parallel runner, with its own opinions about which suites exist, and one file
+that drives a pty is the part nobody can write for themselves.
 
 ## The Gren half: a package is a repository, and this one is a subdirectory
 
@@ -467,13 +468,20 @@ it. From the second release on it works normally.
 The exported repository is the directory and nothing above it, so anything in
 `gren-tvision/` that reaches outside it is broken there. Three do:
 
-  - **`test/drive_*.py`** put `../tvision-node/test` on `sys.path` for
-    `harness.py`. The pty drivers do not run in the export. That is the same
-    hole as "how does a consumer pty-test their own TUI app?" below, and it
-    should be answered once, for both.
-  - **`run.sh`** execs `../gren-tvision-runtime/bin/gren-tui.js`. In the export
-    that is the installed `gren-tui`, so the line wants to become one that
-    prefers a sibling checkout and falls back to the npm bin.
+  - ~~**`test/drive_*.py`** put `../tvision-node/test` on `sys.path` for
+    `harness.py`.~~ **Fixed, 2026-09-12**, and it was the same hole as "how
+    does a consumer pty-test their own TUI app?" below, answered once for both.
+    `test/harness_path.py` resolves both `harness.py` and `gren-tui.js`,
+    trying the monorepo's siblings first and an installed
+    `gren-tvision-runtime` second, and the sixteen drivers import it instead of
+    naming a path. The sibling goes first on purpose: here it is the copy being
+    worked on, and an installed one would test the last release.
+    `tiny_common.py` also looked for predc, which is in this repository and not
+    in the package, and now includes it only if it is there -- the same rule
+    the examples were already discovered by.
+  - ~~**`run.sh`** execs `../gren-tvision-runtime/bin/gren-tui.js`.~~ **Fixed
+    the same day**, the same three places in the same order, then `gren-tui` on
+    the `PATH`.
   - ~~**Links out of `docs/` and `README.md`**~~ -- fixed, and they point at
     this repository by URL now.
 

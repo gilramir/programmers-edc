@@ -14,12 +14,12 @@ shift || true
 # directory and nothing above it. Prefer the sibling: in this repository that
 # is the copy being worked on, and running the installed one instead would
 # test the last release against the current package.
-runtime=../gren-tvision-runtime/bin/gren-tui.js
-if [ -f "$runtime" ]; then
-    exec node "$runtime" "examples/$name/main.js" "$@"
-elif command -v gren-tui >/dev/null 2>&1; then
-    exec gren-tui "examples/$name/main.js" "$@"
-else
-    echo "no gren-tvision-runtime found: npm install -g gren-tvision-runtime" >&2
-    exit 1
-fi
+for runtime in ../gren-tvision-runtime/bin/gren-tui.js \
+               node_modules/gren-tvision-runtime/bin/gren-tui.js \
+               ../node_modules/gren-tvision-runtime/bin/gren-tui.js; do
+    [ -f "$runtime" ] && exec node "$runtime" "examples/$name/main.js" "$@"
+done
+command -v gren-tui >/dev/null 2>&1 && exec gren-tui "examples/$name/main.js" "$@"
+echo "no gren-tvision-runtime found. Install it here with" >&2
+echo "    npm install gren-tvision-runtime" >&2
+exit 1
