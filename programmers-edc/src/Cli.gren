@@ -1,4 +1,4 @@
-module Cli exposing (Command(..), parser)
+module Cli exposing (Command(..), parser, version)
 
 {-| predc's command line.
 
@@ -49,15 +49,27 @@ type Command
     | Hex (Maybe Path)
 
 
+{-| What `predc --version` prints, and what the About box shows.
+
+A literal, because a Gren program cannot read its own `package.json` at build
+time -- there is no such thing to read once it is compiled to a `main.js`. So
+it is kept in step with `package.json` by hand, and the hand is checked twice:
+`tools/prepare-publish.sh` refuses to publish when the two disagree, and
+`test/drive_cli.py` reads the version out of `package.json` rather than
+repeating it. Both of those exist because the version *had* drifted -- 0.1.0
+here against a 1.0.0 package -- and the only symptom was a program politely
+reporting the release before the one somebody had just installed.
+
+-}
+version : String
+version =
+    "1.0.0"
+
+
 parser : Parser.App Command
 parser =
     { name = "predc"
-    -- Kept in step with package.json by hand, and checked by
-    -- tools/prepare-publish.sh, which is the only moment it matters and the
-    -- only moment anybody would notice. `predc --version` reporting the
-    -- version before the one that was published is the exact shape of bug
-    -- that survives a release.
-    , version = "1.0.0"
+    , version = version
     , intro =
         PP.verticalBlock
             [ PP.words

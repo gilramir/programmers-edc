@@ -32,6 +32,7 @@ an ssh session inside tmux, one dressed as a local X11 session.
 """
 
 import base64
+import json
 import os
 import re
 import subprocess
@@ -383,6 +384,61 @@ def main():
           "This machine, no multiplexer." in page(app), page(app))
     app.send(b"\x1bx", settle=1.0)
     check("that session exits cleanly too", app.wait() == 0)
+
+    # 6. The About box, which is the one window that says which predc this is.
+    #
+    #    The version is a literal in `Cli.gren`, because a compiled Gren
+    #    program has no package.json left to read. So what is checked is that
+    #    it agrees with the package it ships as -- read out of package.json
+    #    here rather than repeated, the same way `drive_cli.py` pins
+    #    `--version` against it. Two places show the number and both come from
+    #    the one constant; this is the one a person actually looks at.
+    with open(os.path.join(ROOT, "package.json")) as f:
+        version = json.load(f)["version"]
+
+    app = start(base_env())
+    open_menu(app, "Help")
+    check("the Help menu offers About", click_entry(app, "About"), app.render())
+    about = app.render()
+    check("the About box names the program and the version together",
+          f"predc {version}" in about, about)
+    check("and still credits Turbo Vision and Gren",
+          "Turbo Vision" in about and "gren-lang.org" in about, about)
+    #    Enter first, and that is not politeness: the About box is modal, so
+    #    Alt-X while it is up goes to the dialog and not to the program, and
+    #    the wait below would sit out its timeout looking like a hang.
+    app.send(b"\r", settle=0.6)
+    app.send(b"\x1bx", settle=1.0)
+    check("the About session exits cleanly", app.wait() == 0)
+
+    #    And the shortest rung, which is where a version on a line of its own
+    #    would have been dropped. `aboutLines` is a ladder -- it takes the
+    #    longest block that fits `rows` -- and at fourteen rows that is the one
+    #    with no URLs in it at all. The version rides on the name's line
+    #    exactly so that it survives every rung, and this is the rung that
+    #    proves it rather than the one that would have anyway.
+    app = Pty(node_argv(LAUNCHER), base_env(),
+              cwd=tempfile.mkdtemp(prefix="predc-about-"), size=(80, 14))
+    app.pump(2.5)
+    open_menu(app, "Help")
+    click_entry(app, "About")
+    shown = app.render()
+    check("a fourteen-row terminal gets the shortest About",
+          "Turbo Vision, and Gren" in shown, shown)
+    check("and the version is on that one too",
+          f"predc {version}" in shown, shown)
+    #    The failure this ladder exists to prevent is not a truncated dialog:
+    #    a messageBox clamps to the desktop and does not scroll, so the OK
+    #    button is placed relative to the dialog and lands *on top of* the
+    #    text. It showed up once as `https     OK    \u2584.org`. So the check
+    #    is that the button's row carries no other letters.
+    ok_row = next((r for r in shown.split("\n") if " OK " in r), "")
+    check("with the button on a row of its own, not over the text",
+          bool(ok_row) and re.sub(r"[^A-Za-z]", "", ok_row.replace("OK", "")) == "",
+          repr(ok_row))
+    app.send(b"\r", settle=0.6)
+    app.send(b"\x1bx", settle=1.0)
+    check("and the short About session exits cleanly too", app.wait() == 0)
 
     return check.report(app)
 

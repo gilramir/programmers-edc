@@ -1685,6 +1685,13 @@ a mess rather than by saying so.
 and button -- so the rungs are measured against it rather than guessed. The
 floor is the chrome: below about twelve rows no dialog with a button in it
 fits, and that is `Tui`'s to answer rather than something to word around.
+
+**The version shares the name's line rather than taking one of its own**, which
+is the whole reason it survives every rung including the last. A row is the
+scarce thing here -- that is what this ladder is for -- and "predc 1.0.0" is
+shorter than every URL above it, so it costs nothing in width either. It comes
+from `Cli.version`, the same constant `--version` prints, because a second copy
+of a version number is a second thing to forget.
 -}
 aboutLines : Int -> Array String
 aboutLines rows =
@@ -1694,7 +1701,7 @@ aboutLines rows =
     in
     [ -- Everything: what it is, what it is for, and both credits in full.
       [ ""
-      , "\u{0003}predc"
+      , "\u{0003}predc " ++ Cli.version
       , " "
       , "\u{0003}the programmer's every-day carry"
       , " "
@@ -1711,7 +1718,7 @@ aboutLines rows =
     -- The taglines go first: they are the part a reader can get from the
     -- README, and the credits are the part that is only here.
     , [ ""
-      , "\u{0003}predc"
+      , "\u{0003}predc " ++ Cli.version
       , " "
       , "\u{0003}Powered by Turbo Vision"
       , "\u{0003}https://github.com/magiblot/tvision"
@@ -1723,7 +1730,7 @@ aboutLines rows =
     -- And at the bottom, the two names without their links, because a URL
     -- nobody can read all of is worse than a name they can search for.
     , [ ""
-      , "\u{0003}predc"
+      , "\u{0003}predc " ++ Cli.version
       , " "
       , "\u{0003}Turbo Vision, and Gren"
       , ""
@@ -1732,7 +1739,7 @@ aboutLines rows =
         |> Array.keepIf fits
         |> Array.first
         |> Maybe.withDefault
-            [ "", "\u{0003}predc", "" ]
+            [ "", "\u{0003}predc " ++ Cli.version, "" ]
 
 
 -- PROGRAM

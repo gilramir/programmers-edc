@@ -71,7 +71,7 @@ say "the version predc reports"
 # disagree with the package, and the only symptom is a released binary claiming
 # to be the release before it.
 pkg_version=$(node -p "require('./programmers-edc/package.json').version")
-cli_version=$(sed -n 's/^    , version = "\(.*\)"/\1/p' programmers-edc/src/Cli.gren)
+cli_version=$(sed -n '/^version =$/{n;s/^ *"\(.*\)"/\1/p;}' programmers-edc/src/Cli.gren)
 if [ "$pkg_version" != "$cli_version" ]; then
     echo "   MISMATCH: package.json says $pkg_version, Cli.gren says $cli_version" >&2
     exit 1

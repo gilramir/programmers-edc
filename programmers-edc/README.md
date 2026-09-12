@@ -358,6 +358,12 @@ boundary. `drive_calendar.py` pins both dates.
 ported by [magiblot](https://github.com/magiblot/tvision) — and
 [Gren](https://gren-lang.org), which every line of predc is written in.
 
+It also says which predc this is: the version sits on the name's line, `predc
+1.0.0`, which is the same string `predc --version` prints and comes from the
+same constant. On the name's line rather than below it because a row is the
+scarce thing in that box — see the paragraph below — so that way it survives
+even the shortest version of it.
+
 The box shortens itself on a small terminal rather than overflowing. A
 `messageBox` clamps to the desktop and does not scroll, and its OK button is
 placed relative to the dialog, so a box with more text than room draws the
