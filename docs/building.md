@@ -67,7 +67,7 @@ is painted from a JS array of strings.
 
 In `form`: `Alt-N` opens a record form with check boxes and radio buttons;
 `File ▸ Samples ▸ More` is a submenu inside a submenu; `List records` and
-`Clear` are greyed out until there is something to list.
+`Clear` are grayed out until there is something to list.
 
 ### The Gren examples
 
@@ -81,8 +81,8 @@ so it stays closed until `Alt-L` puts it back.
 In `gren -- forms` (tvision's `tvforms`): arrow keys move through a sorted
 collection of records and the window on the right follows, because the model is
 told where the highlight is. `F3` edits the highlighted record in a form with
-labelled fields, check boxes and radio buttons; `F2` adds one; `F8` deletes one,
-and with none left both `F3` and its menu entry go grey. Saving a renamed record
+labeled fields, check boxes and radio buttons; `F2` adds one; `F8` deletes one,
+and with none left both `F3` and its menu entry go gray. Saving a renamed record
 re-sorts the list and the highlight follows it there.
 
 In `gren -- ascii` (tvdemo's chart): the same chart as `devbox run ascii`, but
@@ -94,7 +94,7 @@ The rest:
 
 | | |
 |---|---|
-| `gren -- calendar` | tvdemo's calendar. Up/Down change the month; today is the one thing on the canvas painted in a colour of its own |
+| `gren -- calendar` | tvdemo's calendar. Up/Down change the month; today is the one thing on the canvas painted in a color of its own |
 | `gren -- puzzle` | tvdemo's sliding puzzle. `--seed=` and `--scramble=` make the board a pure function of two numbers, which is how the test wins the game |
 | `gren -- calc` | tvdemo's calculator. Type at it or click the keys — the keypad can be pressed but never holds the caret |
 | `gren -- palette` | tvision's palette example, whose entire subject the port removes |
@@ -248,8 +248,17 @@ Five commits sit on `patches` today:
 
 FINDINGS has the story of each.
 
+**`tools/build-tvdemo.sh` builds the fork's own `examples/tvdemo`**, which
+nothing else here does — node-gyp compiles the library into the addon and stops
+there. It is for upstream reports: a bug is worth more to the maintainer as a
+picture of his own demo than as a description of ours, and the script plus
+`tvision-node/test/harness.py` and `tools/shot.py` is how the screenshots in
+`#239` were made. Build in a worktree, and take the baseline from `patches~1`
+rather than `master` so that the only difference is the commit being argued
+about; the script's header has the rest.
+
 The last two are the only ones with no pull request behind them. For `#235` the
-issue went first on purpose: the fix has a judgement call in it — which views
+issue went first on purpose: the fix has a judgment call in it — which views
 the origin may be moved for — that the maintainer may want to make differently,
 and a patch that presumes the answer is a worse way to ask. The same is true of
 `#239`, where the call is *where* the clamp goes: `TView::locate` looks like
