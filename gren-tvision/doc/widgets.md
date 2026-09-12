@@ -43,7 +43,7 @@ calls into C++, and nothing in it blocks -- modal dialogs included.
 | in Turbo Vision | here |
 |---|---|
 | subclass `TWindow`, `insert()` children | put a `Window` record in `Ui.windows` |
-| `execView(dialog)` blocks until answered | `Tui.dialog` is a `Cmd`; the answer is a `Msg` |
+| `execView(dialog)` blocks until the user closes it | `Tui.dialog` is a `Cmd`; the result is a `Msg` |
 | override `handleEvent` | handle an `Event` in `update` |
 | override `draw()` with a `TDrawBuffer` | a `Canvas` of coloured spans, from the model |
 | read `list->focused` when you need it | you are *told*, with a `Focused` event |
@@ -53,8 +53,8 @@ calls into C++, and nothing in it blocks -- modal dialogs included.
 
 That last row is the one that keeps coming back. Almost every difference in
 this package is the same move applied to a different class: **state that C++
-hides inside a view becomes a field in the model, and the field is worth more
-than the hiding was.** It is what makes the calendar able to show any month,
+hides inside a view becomes a field in the model, where the program can read it,
+set it, and save it.** It is what makes the calendar able to show any month,
 the puzzle reproducible from a seed, and a history drop-down something you can
 save to a file -- which Borland's, kept in one process-wide buffer behind the
 program's back, never could.
@@ -144,7 +144,7 @@ you write a dialog.
 
   - **`Enter` does not press the focused button**, select a list item, or tick
     a check box. `Space` does all three. `Enter` means "the default action of
-    this dialog", and only a button with `isDefault = True` answers it.
+    this dialog", and only a button with `isDefault = True` responds to it.
 
     ![examples/hello: four buttons and no default one, so Enter presses none of them](img/buttons.png)
 
@@ -159,18 +159,20 @@ you write a dialog.
     control that can take focus and has not got it spends the first click
     taking it. A scroll bar beside a focused canvas therefore needs two clicks,
     which looks exactly like a scroll bar that has stopped working.
-  - **The first focusable view in a window's list gets the caret** when the
-    window opens. Turbo Vision itself focuses the *last* view inserted, which
+  - **The first focusable view in a window's list gets the focus** when the
+    window opens -- Turbo Vision's own documentation and source call that having
+    *the caret*, after the cursor drawn in whichever view is focused. Turbo
+    Vision itself focuses the *last* view inserted, which
     in a list written top to bottom is the Cancel button; this package diverges
     on purpose.
   - **The mouse wheel already works** -- `TScrollBar` has `evMouseWheel` in its
     own event mask -- but it goes to whatever has *focus* rather than to
     whatever is under the pointer, which is Turbo Vision's own rule.
   - **Every window this binding makes has a light grey background**, because
-    `JsWindow` derives from `TDialog`. The eight *bright* hues are exactly the
-    ones a light background eats: `LightGreen`, `LightRed` and `LightGray` are
-    respectively hard to read, hard to read and invisible. Use `Green`, `Red`
-    and `DarkGray`.
+    `JsWindow` derives from `TDialog`. The bright colours were meant for a black
+    background and have too little contrast against light grey; `LightGray` text
+    on it is invisible outright. Use the dark colour instead: `Green` for
+    `LightGreen`, `Red` for `LightRed`, `DarkGray` for `LightGray`.
 
 ## The inventory
 
@@ -203,9 +205,11 @@ Label { id : String, rect : Rect, text : String, for : String }
 ```
 
 A static text that names another view by id: `Alt-`*x* on the label's hotkey
-moves the caret to the control, and clicking the label does too. **List the
+moves the focus to the control, and clicking the label does too. **List the
 control before its label** -- the binding has to have built the view the label
-names, and it throws if it has not.
+names. If it has not, the addon throws `tvision: label for unknown id 'x' (list
+it before the label)`; nothing catches it, so the program stops there with that
+message.
 
 ![examples/forms: three labels, each naming the field beside it, hot letter in red](img/label.png)
 
@@ -231,9 +235,9 @@ conventional size and what the package's own helpers use.
 ![examples/forms: the default Save button and Cancel, each with its drop shadow](img/button.png)
 
 `takesFocus = False` makes a button that can be pressed but never holds the
-caret. That is what a keypad or a toolbar wants when something else in the
+focus. That is what a keypad or a toolbar wants when something else in the
 window is reading the keyboard: `TCalculator` clears `ofSelectable` on all
-twenty of its buttons, because otherwise typing `7` would move the caret to the
+twenty of its buttons, because otherwise typing `7` would move the focus to the
 button captioned 7 instead of entering a digit.
 
 **Inside a modal dialog, only four command names close it**: `"ok"`,
@@ -304,8 +308,8 @@ Two things about it are unusual:
     oldest when it fills, written to behind your back when a field loses focus.
     None of that is used here: `items` arrives with the render like a list box's
     does, and nothing is remembered until the model decides to remember it --
-    usually one `Array.pushFirst` when a dialog is answered. Which also means
-    it can be saved to a file.
+    usually one `Array.pushFirst` when a dialog comes back. The program decides
+    what goes in, what comes out, and how long it lasts.
 
 *Used by `entries`, and by `Tui.fileDialog` under the fixed id
 `"fileHistory"`.*
@@ -333,9 +337,9 @@ rename a record and it moves, and the model needs the last word about where the
 highlight lands.
 
 It gets **a scroll bar of its own, in the single column immediately to the
-right of its rectangle**, so leave one. Turbo Vision puts a list's bar on the
-window frame instead, which is right for a window that is a list and nothing
-else and wrong for anything with two panes in it.
+right of its rectangle**, so leave that column free. Turbo Vision puts a list's
+bar on the window frame instead, which is right for a window that is a list and
+nothing else and wrong for anything with two panes in it.
 
 There is no tree widget, and none is needed. `TOutlineViewer` exists in C++
 because the view has to own the node chain and work out which rows are visible;
@@ -362,7 +366,7 @@ input line's `value` it is written to the screen only when the model changes
 it.
 
 The user's ticks arrive as a `Changed` event carrying `Flags`, and are also
-collected in a dialog's answer, where `Tui.flags` reads the whole group and
+collected in a dialog's result, where `Tui.flags` reads the whole group and
 `Tui.flag` reads one box by index.
 
 *Used by `forms`, `edit`.*
@@ -423,9 +427,9 @@ ScrollBar
 
 ![examples/mouse: a horizontal scroll bar used as a slider, with its labels above it](img/scrollbar.png)
 
-A list box makes its own; this is one you put in a window and ask about. Moving
-it -- arrow, page, drag, wheel or key -- sends a `Scrolled` event, and `value`
-written back from the model moves it.
+A list box builds its own scroll bar; this is a standalone one, placed in a
+window and read by the model. Moving it -- arrow, page, drag, wheel or key --
+sends a `Scrolled` event, and `value` written back from the model moves it.
 
 **Which way it points is not a field.** `TScrollBar` decides from its own
 rectangle: one column wide is vertical, one row tall is horizontal. A second
@@ -435,7 +439,7 @@ A drag reports only where it *ended*; the intermediate positions are collapsed,
 because a model that re-rendered on each of them would redraw the window a
 dozen times per gesture.
 
-Two things inherited from magiblot's port: **it does not page on a click** --
+Two things inherited from [magiblot's port][tv]: **it does not page on a click** --
 Borland's steps by `pageStep` when you click past the thumb, this one takes the
 thumb to the pointer -- so `pageStep` is reached only from the keyboard, and on
 a horizontal bar that is `Ctrl-Left` and `Ctrl-Right`.
@@ -468,7 +472,8 @@ every scrolling output pane here -- `TTerminal` and `TScroller` went the same
 way `TOutline` did, because deciding which slice to draw is something the model
 already knows.
 
-A line is an array of `Span`s:
+Each entry in `lines` is one row of the canvas, and a row is an array of
+`Span`s:
 
 ```gren
 type alias Span = { text : String, fg : Maybe Hue, bg : Maybe Hue }
@@ -479,7 +484,7 @@ ink   : Hue -> String -> Span  -- a foreground, on whatever is behind it
 on    : Hue -> Span -> Span    -- ...and a background too
 ```
 
-`Nothing` for either half means the colour the window's palette gives this view,
+`Nothing` for either fg or bg means the colour the window's palette gives this view,
 which is what you want almost everywhere -- it is how a canvas goes on looking
 like the rest of the program. Name a colour only where the point *is* the
 colour: today on a calendar, a tile that is out of place, a job that failed.
@@ -494,7 +499,7 @@ chart can show which cell is selected. `Nothing` hides it.
 
 `takesFocus` matters more here than on a button: **a focused canvas consumes
 every key it receives, `Tab` included**, so a canvas that is only there to be
-looked at or clicked should say `False` or it will trap the caret. Clicks still
+looked at or clicked should say `False` or it will trap the focus. Clicks still
 arrive either way.
 
 *Used by `ascii`, `calendar`, `puzzle`, `calc`, `mouse`, `viewer`, `dir`,
@@ -534,14 +539,14 @@ every edit; the document crosses twice per file.
 
 The commands `"clipboard.cut"`, `"clipboard.copy"`, `"clipboard.paste"`,
 `"editor.clear"`, `"editor.undo"` and `"editor.selectAll"` are built in -- put
-one on a menu and it reaches whichever view has the caret without passing
+one on a menu and it reaches whichever view has the focus without passing
 through `update` at all. There is deliberately no `"editor.save"` and no
 `"editor.find"`: writing a file is a `Task` and searching needs a string, and
 both are things only the model can produce.
 
 **The first three are not the editor's.** `TInputLine` reacts to `cmCut`,
 `cmCopy` and `cmPaste` exactly as `TEditor` does, so those three names act on
-whichever of the two holds the caret -- which is why they carry a different
+whichever of the two holds the focus -- which is why they carry a different
 prefix. `doc/clipboard.md` has what they share underneath and why it took a
 while to notice.
 
@@ -627,10 +632,11 @@ Tui.dialog tui { id = "add", title = "Add entry", rect = ..., views = [ ... ] }
 
 ![examples/entries: a modal dialog, its field being typed into, OK and Cancel](img/dialogtyped.png)
 
-A `DialogSpec` is the same shape as a `Window`, plus the fact that it is
-*answered* rather than merely shown. `Tui.dialog` is a `Cmd`; the answer arrives
-as a `DialogClosed` event carrying the `id`, the `cmd` of the button that closed
-it, and `values` -- every field in the dialog, read out with `Tui.text`,
+A `DialogSpec` is the same shape as a `Window`. The difference is that a window
+is just displayed, while a dialog comes back with a result when the user closes
+it. `Tui.dialog` is a `Cmd`; the result arrives as a `DialogClosed` event
+carrying the `id`, the `cmd` of the button that closed it, and `values` --
+every field in the dialog, read out with `Tui.text`,
 `Tui.number`, `Tui.flag`, `Tui.flags` and `Tui.marks`.
 
 **Modal means input goes to this dialog and nowhere else. It does not mean
@@ -644,7 +650,7 @@ modal, so a dialog gets at most four buttons; and closing one from its frame or
 with `Esc` reports `"cancel"` whether or not there is a Cancel button.
 
 A dialog is *not* part of `view`, so nothing patches one while it is up.
-"Navigate into a directory" is therefore an answer like any other: list the new
+"Navigate into a directory" is therefore a result like any other: list the new
 path in `update` and open another dialog.
 
 ### The menu bar (`TMenuBar`, `TSubMenu`, `TMenuItem`)
@@ -678,12 +684,14 @@ swap -- so `menuBar` lives in `Ui` next to the windows and
 `menuBar = menuBarFor model.current` is an ordinary model change. The C++
 original of that spends 124 lines across three files.
 
-**One known limitation, and it is the menu bar's rather than this package's**:
-`TMenuView::execute` runs an event loop of its own, so for as long as a
-pull-down is open the program is stopped -- no timers, no subscriptions, no
-renders. Nothing is lost (a `Time.every` that should have fired arrives when the
-menu closes) and a menu is open for a second at a time. It is why `popupMenu` is
-not built on Turbo Vision's own machinery.
+**One known limitation, still present, and it is the menu bar's rather than this
+package's**: `TMenuView::execute` runs an event loop of its own, so for as long
+as a pull-down is open the program is stopped -- no timers, no subscriptions, no
+renders. That is Turbo Vision's own code and this package leaves it alone.
+Nothing is lost (a `Time.every` that should have fired arrives when the menu
+closes) and a menu is open for a second at a time. `popupMenu` does *not* have
+the problem: it is built on the pump instead, precisely so that nothing new sits
+on top of that loop.
 
 ### The status line (`TStatusLine`)
 
@@ -700,7 +708,8 @@ An entry with an empty `cmd` is a hint: drawn, not clickable.
 
 Like the menu bar it is part of `Ui` and can change with the model. It is
 replaced whole rather than patched, which is cheap for a line of text and is
-why a clock does not belong in it.
+why a clock does not belong in it. Put one in `Ui.overlays` instead, on the menu
+bar's own row, where it is patched in place like any other view.
 
 ### Context menus (`TMenuBox`, as a popup)
 
@@ -793,7 +802,7 @@ names are the only ones that close a modal, so use them. Turbo Vision's own
 is fifteen lines of dialog that every program would otherwise write for itself.
 
 Closing a box from its frame or with `Esc` reports `"cancel"` even when it has
-no Cancel button, so a Yes/No box has three answers to handle rather than two.
+no Cancel button, so a Yes/No box has three results to handle rather than two.
 
 ### `Tui.fileDialog`
 
@@ -821,8 +830,8 @@ some are handled by Turbo Vision itself and never reach you at all:
 | `quit`, `close`, `zoom`, `resize`, `next`, `prev`, `menu`, `help` | window and application management |
 | `ok`, `cancel`, `yes`, `no` | close a modal dialog |
 | `tile`, `cascade` | arrange the desktop |
-| `clipboard.cut`, `clipboard.copy`, `clipboard.paste` | reach whichever `Editor` **or `InputLine`** has the caret |
-| `editor.clear`, `editor.undo`, `editor.selectAll` | reach whichever `Editor` has the caret |
+| `clipboard.cut`, `clipboard.copy`, `clipboard.paste` | reach whichever `Editor` **or `InputLine`** has the focus |
+| `editor.clear`, `editor.undo`, `editor.selectAll` | reach whichever `Editor` has the focus |
 
 **That list is also a set of names your program may not use for anything
 else.** Calling a command `"cancel"` because there is a Cancel entry on your
@@ -844,10 +853,10 @@ Four commands the model can issue that are not about drawing:
 
     ![examples/entries: Clear greyed out on the menu after the list was emptied](img/disabled.png)
 
-  - **`Tui.focus tui "list"`** puts the caret on a view, or raises a window. The
+  - **`Tui.focus tui "list"`** puts the focus on a view, or raises a window. The
     id is looked up as a window first and then as a view. This is how a program
     answers "show me that window" for a window that is already open and buried,
-    or puts the caret back in the field an error was about.
+    or puts the focus back in the field an error was about.
   - **`Tui.setDoubleClickDelay tui 8`** in PC timer ticks, 1/18.2 of a second,
     because that is what `TEventQueue::doubleDelay` has always counted in.
   - **`Tui.quit tui`** cancels any open dialog, restores the terminal and exits.
@@ -864,10 +873,10 @@ Four commands the model can issue that are not about drawing:
 | `Scrolled { id, value }` | a scroll bar moved; a drag reports where it ended |
 | `Resized { cols, rows }` | how big the desktop is: once at startup, then on every change |
 | `Changed { id, value }` | the *user* moved a value: `Text`, `Flags`, `Choice` or `Marks` |
-| `Edited { id, isModified, line, column }` | an editor was edited or its caret moved |
+| `Edited { id, isModified, line, column }` | an editor was edited or its cursor moved |
 | `EditorText { id, text }` | the answer to `readEditor` -- the only event carrying a document |
 | `Searched { id, matches }` | the answer to `findInEditor` / `replaceInEditor`; `0` is "not found" |
-| `DialogClosed { id, cmd, values }` | a dialog was answered |
+| `DialogClosed { id, cmd, values }` | a dialog was closed; `cmd` says how |
 | `WindowClosed String` | the user closed a window from its frame. **Handle it** |
 | `Unknown String` | an event this version of the package does not understand |
 
@@ -896,13 +905,3 @@ stock controls are all here. These were left out, each with a reason:
 | `TParamText` | `printf` for a static text. String interpolation is the model's job by construction |
 | the `TCollection` family, `opstream`/`ipstream` | serialising views to disk has no Gren meaning |
 | `THelpFile` and `tvhc` | a binary help format compiled by a separate tool. Help screens are windows |
-
-## Where to go next
-
-  - [`Tui.gren`](../src/Tui.gren) -- the API reference, in doc comments.
-  - [`../examples/README.md`](../examples/README.md) -- the plan of record: what
-    every port forced into the API, and why each decision went the way it did.
-  - [architecture.md](architecture.md) -- how the four layers fit together, and
-    the event loop that shaped them.
-  - [`FINDINGS.md`](https://github.com/gilramir/programmers-edc/blob/main/FINDINGS.md) -- the long version of
-    everything above, in the repository this package is developed in.

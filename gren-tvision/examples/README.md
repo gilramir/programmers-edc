@@ -2,9 +2,10 @@
 
 Every example here is also a test (`../test/drive_<name>.py`). That is
 deliberate: driving the real thing through a pty has caught every bug in this
-project so far, and a demo nobody runs rots.
+project so far.
 
-Build them all with `../build.sh`, run one with `../run.sh <name>`.
+Build them all with `devbox run gren:build`, run one with
+`devbox run gren -- <name>`, from the repository root.
 
 ## Ported
 
@@ -18,30 +19,37 @@ Build them all with `../build.sh`, run one with `../run.sh <name>`.
 | `calendar` | `tvision/examples/tvdemo` (calendar.cpp) | colour on a canvas, as spans; and today as a field, because `Time.now` is a task |
 | `puzzle` | `tvision/examples/tvdemo` (puzzle.cpp) | nothing in the API -- but the random seed had to move into the model, which is what let a test win the game |
 | `calc` | `tvision/examples/tvdemo` (calc.cpp) | `takesFocus` on a button: a keypad that can be pressed but never holds the caret |
-| `palette` | `tvision/examples/palette` | nothing -- it is the example whose entire subject the port removes, and the write-up says what that costs |
+| `palette` | `tvision/examples/palette` | nothing -- its subject is palette indirection, which a `Span` naming its colour outright does away with, and the write-up says what that costs |
 | `mouse` | `tvision/examples/tvdemo` (mousedlg.cpp) | the scroll bar as a view of its own, `isDouble` on a click, `setDoubleClickDelay`, and `takesFocus` on a canvas |
-| `dir` | `tvision/examples/tvdir` | no widget at all — but it found a real bug in the diff, moved a list box's scroll bar, and is the first example to use the file system; later `Tui.fileDialog`, which finished the port, the `History` on its field, and `for` on `ScrollBar`, because it is the only window here with two scrollable panes in it |
+| `dir` | `tvision/examples/tvdir` | no new widget — the tree view it looked like it needed is a `ListBox` over a fold — but it found a real bug in the diff, moved a list box's scroll bar, and is the first example to use the file system; later `Tui.fileDialog`, which finished the port, the `History` on its field, and `for` on `ScrollBar`, because it is the only window here with two scrollable panes in it |
 | `demo` | `tvision/examples/tvdemo` (the shell) | real windows: zoom, resize, tile and cascade, which every window had silently been unable to do — and later the first `Tui.messageBox`, which is its About box with fifteen lines taken out, `popupMenu`, whose right-click menu is three commands it already had, and `Ui.overlays`, which is where its clock finally belongs |
-| `viewer` | `tvision/examples/tvdemo` (fileview.cpp) | nothing — `TScroller` went the way of `TOutline`; but it is the first horizontal scroll bar doing its own job |
+| `viewer` | `tvision/examples/tvdemo` (fileview.cpp) | nothing — but it is the first horizontal scroll bar doing its own job |
 | `edit` | `tvision/examples/tvedit` | the editor: the first view whose contents do not travel with the render, and the first time the state is not the model's — plus find and replace, where a command needs a string only the program can ask for |
 | `watch` | *(ours)* | not a port: a subscription from outside the program, several children at once, and a run that can be killed. It found a name the binding was silently swallowing |
 
 ## What mmenu changed
 
-It was expected to be the cheap one. It turned out to be about swapping the
-whole menu bar at runtime, which the API had documented as impossible — Turbo
-Vision builds the menu bar in the application constructor, so that looked
-settled. It is not: `TMenuView` keeps its menu in a member a subclass can
-replace, which is exactly what Borland's `TMultiMenu` does.
+`mmenu` is a small C++ example whose whole subject is a menu bar that is not
+fixed: a command swaps the bar for a different one. Menus already worked here,
+so this was expected to be the cheap port. It was not, because this API had
+documented that swap as impossible — Turbo Vision builds the menu bar in the
+application constructor, so a bar that changes looked settled. It is not:
+`TMenuView` keeps its menu in a member a subclass can replace, which is exactly
+what Borland's `TMultiMenu` does.
 
-So the menu bar and the status line moved out of the program's configuration
-and into `Ui`, next to the windows. The C++ original needed a `TMenuBar`
-subclass, an array of menus, a new broadcast command and a `handleEvent`
-override; the Gren version is `menuBar = menuBarFor model.current`.
+That made the menu bar something the model decides rather than something the
+program is configured with. A Gren program describes the whole screen in a `Ui`
+record returned from `view`, and until this port the menu bar and the status
+line sat outside it, given once when the program started. Both moved into `Ui`,
+next to the windows, so a different bar is just a different `view` result. The
+C++ original needed a `TMenuBar` subclass, an array of menus, a new broadcast
+command and a `handleEvent` override; the Gren version is
+`menuBar = menuBarFor model.current`.
 
 It also turned the menu bar into an `Array MenuItem` rather than an array of
-pull-downs, because the original puts a plain command ("Next menu") directly on
-the bar and the API could not say that.
+pull-downs. A bar is normally a row of pull-downs, but the original puts a
+plain command ("Next menu") directly on the bar — clicking it runs something
+rather than opening a menu — and the API could not say that.
 
 Both were API improvements that no amount of staring at the binding would have
 produced. Which is the argument for porting the rest.
@@ -55,7 +63,7 @@ expected.
 **A label makes the order of `views` mean something.** A label names another
 view by id, and the binding has to have built that view already, so a control
 has to come before the label that names it. Until this port the order of the
-array decided one thing only — who gets focus when the window opens.
+array decided only where the caret starts and where `Tab` takes it.
 
 **The model could watch the highlight but not move it.** `listdlg.cpp` reads
 `list->focused` at the moment Edit is pressed. Gren cannot: it has no way to
@@ -63,7 +71,7 @@ ask, and the only thing a list box reported was `Selected`, which fires on
 `Space` and not on the arrow keys. Edit would have opened whatever record was
 last committed rather than the one the user is looking at.
 
-The answer runs in both directions, and both halves are load-bearing:
+The solution handles both directions:
 
   - a `Focused` event as the highlight moves, so the model can act on it;
   - `focused` as a field on `ListBox`, so the model can put the highlight
@@ -78,9 +86,9 @@ collection is what exposed it.
 ## What the ASCII chart changed
 
 The canvas was in the API from the start and no Gren example used one, which
-turned out to be hiding something: the chart shows which character is selected
-with the terminal's own cursor, and there was no way to say where it should
-go.
+turned out to be hiding something. The chart marks the selected character by
+putting the terminal's blinking cursor on it, and a Gren program had no way to
+say where that cursor belongs.
 
 So a canvas takes `cursor : Maybe { x : Int, y : Int }`, patched in place like
 its lines. What made it more than a one-line addition is *when* it can be
@@ -109,9 +117,6 @@ calendar is a foreground on whatever the window is already using, and a
 highlight that had to name its own background would stop matching the program
 the moment anyone changed the theme. `Tui.line` makes the shape every canvas
 had before colour existed, so `ascii` changed by one word.
-
-`FINDINGS.md` has the rest of it, including why a span with no colour has to
-encode to exactly what a string used to.
 
 Beyond the API, each of these ports made the same point from a different
 direction: **state the C++ hides in a constructor has to become a field, and
@@ -143,8 +148,9 @@ and **wins the game** -- which is not a test the original could have.
 
 `TCalculator` makes twenty buttons and clears `ofSelectable` on every one of
 them, with no comment. The reason is the window's other child: `TCalcDisplay`
-reads the keyboard, and a keypad whose buttons could take focus would eat every
-digit typed at it -- `7` would move the caret to the button captioned 7.
+reads the keyboard, and a keypad whose buttons could take focus would take it
+away with one click -- the caret would leave the display for the button, and
+every digit typed after that would land on a button that ignores it.
 
 So `Button` grew `takesFocus`. It is the first field added here for a reason
 that is invisible until a window has two kinds of input in it, and it is not
@@ -162,8 +168,11 @@ line -- the one that "bypasses the palettes" -- becomes indistinguishable from
 the six above it.
 
 The port says what that costs rather than claiming a win. The indirection
-exists so one edit restyles every view in the program; naming the colour gives
-that up. What comes back is that the colour is in the model, next to the branch
+exists so one edit restyles every view in the program; a span that names its
+colour gives that up for itself. (Every widget, and every span that names
+nothing, got the one-edit restyle back later as `Theme` and `WindowPalette` --
+see "What the palette example changed, the second time".) What comes back is
+that the colour is in the model, next to the branch
 that decides what to draw -- which is how the calendar marks today and the
 puzzle shows a tile out of place, and neither of those is a question a palette
 can answer.
@@ -230,9 +239,11 @@ over itself, and nowhere else.
 
 **And, long afterwards, it wanted `for` on `ScrollBar`.** Two scrollable panes
 in one window is the shape Turbo Vision's wheel routing gets wrong, and this is
-the only example that has it: the file pane's bar was in front and took every
-turn, so the tree could not be wheeled from anywhere on the screen. `for =
-"files"` on that bar is the whole fix. See the wheel note under tvdemo.
+the only example that has it. The tree's bar is the pane-local kind above, made
+by its `ListBox`; the file pane's is a `ScrollBar` the model owns, and a bar of
+that kind answered for the whole window. It was in front and took every turn,
+so the tree could not be wheeled from anywhere on the screen. `for = "files"`
+on that bar is the whole fix. See the wheel note under tvdemo.
 
 There is no "Please Wait" window, either. The original scans the whole drive in
 a constructor and has to put one up; `FileSystem.listDirectory` is a task, a
@@ -248,9 +259,10 @@ could be zoomed, resized or grown with the terminal, and `ofTileable` (set by
 exactly one class in all of Turbo Vision) was never set at all, so `Tile` and
 `Cascade` had nothing to arrange. A non-modal window now puts all four back.
 
-Their child views still do not grow with the window, because their rectangles
-are what the model said they are. That is a known gap rather than an oversight:
-growing a view would put its size somewhere the model cannot see.
+Their child views did not grow with the window at the time, because their
+rectangles were what the model said they were. That was gap 2 below, and
+`Grows` closed it: a view that wraps itself in `Grows` follows the window's
+edges, and one that does not stays where the model put it.
 
 **`"tile"` and `"cascade"` were documented and not implemented.** Both have
 been on `Tui`'s built-in list since the first commit and neither was interned,
@@ -263,15 +275,19 @@ only symptom is that nothing happens.
 **The first click is spent twice.** The docs said an inactive window spends the
 first click being activated. `TView` applies the same rule one level down: a
 control that can take focus and has not got it spends the first click taking
-it. A scroll bar beside a focused canvas therefore needs two clicks, which
-looks exactly like a scroll bar that has stopped working.
+it. A scroll bar beside a focused canvas therefore needed two clicks, which
+looked exactly like a scroll bar that had stopped working. That was right for
+a window and a canvas and wrong for a widget; the bar sets `ofFirstClick` now
+and moves on the first click — see "The scroll bar that had to be clicked
+twice" below.
 
 The other two findings are about where the line is. A Gren event viewer sees
 what crossed the port and nothing Turbo Vision handled itself — which is the
-bargain, and the viewer window is a fair way to show it. And the clock is a
-status item because `TClockView` is a view on the *application* and `Ui` has
-nowhere to put one; it works, at the cost of rebuilding the status line every
-second, which is precisely why Borland made it a view.
+bargain, and the viewer window is a fair way to show it. And the clock was a
+status item at first because `TClockView` is a view on the *application* and
+`Ui` then had nowhere to put one; it worked, at the cost of rebuilding the
+status line every second, which is precisely why Borland made it a view. It is
+a `StaticText` in `Ui.overlays` now -- see below.
 
 ## What the watcher changed
 
@@ -303,8 +319,9 @@ API has made thirteen times already — state C++ keeps somewhere the model
 cannot see becomes a field — applied to a thing Turbo Vision never had one of.
 
 **The API did not have to change, and one thing in it did.** No new view type,
-no new event: three windows, three canvases, three scroll bars. What the
-example found instead was a hole in the documentation with teeth in it.
+no new event: the example opens one window per command on its command line,
+and each is a canvas and a scroll bar, both of which it already had. What it
+found instead was a hole in the documentation with teeth in it.
 
 ### The built-in command names are a reserved vocabulary
 
@@ -339,10 +356,12 @@ anything tagged with another. `dir` has the same hazard in one comment — two
 listings in flight, and the late one must not overwrite the recent one — and
 this is that shape at full size.
 
-**Every window this binding makes is grey, so half the palette is unusable in
-it.** `JsWindow` derives from `TDialog`, which means a window's background is
+**Every window this binding made was grey, so half the palette was unusable in
+it.** `JsWindow` derived from `TDialog`, which meant a window's background was
 the light grey a dialog has rather than Turbo Vision's blue — and the eight
-*bright* hues are exactly the ones a light background eats. The first version
+*bright* hues are exactly the ones a light background eats. (A window chooses
+its `palette` now, `BlueWindow`, `CyanWindow` or `GrayWindow`; see the palette
+section below. The colour choices here still hold on grey.) The first version
 of this example painted a passing job `LightGreen`, a failing one `LightRed`
 and a running one `LightGray`, which is respectively hard to read, hard to
 read, and invisible. They are `Green`, `Red`, `DarkGray` and — for a job with
@@ -372,7 +391,8 @@ program from another.
 ## The C++ examples, triaged
 
 `tvision/examples/` has eight entries. Two of them are not Turbo Vision
-applications at all, and one of them is really eight applications.
+applications at all, and one of them is really eight applications. `hello` is
+the ninth row because it lives beside the directory, at `tvision/hello.cpp`.
 
 | C++ example | verdict | what it needs |
 |---|---|---|
@@ -387,6 +407,10 @@ applications at all, and one of them is really eight applications.
 | `avscolor` | **no** | an AviSynth plugin |
 
 ### tvdemo is eight demos
+
+The first eight rows are the demos, each a window the shell opens. The last two
+are the shell's own: tile and cascade are desktop commands, and help is a
+subsystem, not a demo of anything.
 
 | part | needs |
 |---|---|
@@ -509,8 +533,8 @@ that class is, so `JsEditor` has the same one with the file half left out. And
 `cmCancel`), which is the best possible default here: every prompt it would
 otherwise raise is a `messageBox`, which is an `execView`, which is the nested
 loop the menu bar already has too much of. Nothing had to be done to avoid it —
-and it also means Find and Replace are inert until something hands the editor
-a search string, which is the next piece of work rather than a bug.
+and it is why Find and Replace go through the model, as `findInEditor` and
+`replaceInEditor` above, rather than through a prompt the editor raises itself.
 
 **The help system.** `THelpFile` reads a binary format produced by `tvhc`.
 Porting the compiler buys nothing a Gren program wants; help screens are just
@@ -578,10 +602,11 @@ None of them is reported by `tools/check_consistency.py` any more, which is
 what closing four of these looks like from that end. The port is the only way
 into the binding, so an exported function no runtime call site reaches is a
 capability no Gren program can use — and the check named four when it was
-written. `focus` was carried by protocol 5. `screenSize`, `getValue` and
-`messageBox` are in its exempt list now, one written reason each: the first two
-superseded by `Resized` and `Changed`, the third deliberately a JavaScript-only
-convenience because the Gren package builds its own.
+written. `focus` was carried by protocol 5. `log`, `screenSize`, `getValue` and
+`messageBox` are in its exempt list now, one written reason each: `log` is the
+runtime's own debugging and not a Gren capability at all, the next two are
+superseded by `Resized` and `Changed`, and the last is deliberately a
+JavaScript-only convenience because the Gren package builds its own.
 
 The first two were listed here as one design with two symptoms. They were two,
 and neither needed the new layout language this list proposed: the first is an
@@ -639,10 +664,12 @@ This was the prerequisite for anything editor-shaped: `TEditor` sets
 
 **3. ~~The model cannot move focus.~~ Done — `Tui.focus`, protocol 5.** It was
 the cheapest item on the list and it was not quite plumbing: two things had to
-be decided and one C++ bug had to be fixed. `examples/entries` uses it in both
-directions — Alt-L raises the list window, which is a menu entry that used to
+be decided and one C++ bug had to be fixed. `examples/entries` used it in both
+directions — Alt-L raised the list window, which is a menu entry that used to
 do nothing at all when the window was already open, and adding an entry puts
-the caret back on the list the entry went into. FINDINGS has the write-up.
+the caret back on the list the entry went into. The first half is
+`Tui.bringToFront` now, for the reason given under that command below; the
+second is still `Tui.focus`. FINDINGS has the write-up.
 
 **4. ~~The standard file and directory dialogs.~~ Done —
 [`Tui.fileDialog`](#fileDialog), and no protocol change.** The guess this entry
@@ -855,10 +882,12 @@ count. Both come from something the model was going to give anyway: `marks`,
 one character per state, drawn between the brackets. So the Gren side says
 `marks = " ?X"` and `states = [ 2, 0 ]` and never sees either number.
 
-The packing is a real ceiling — *items* × *bits per state* must fit in 32,
-so eight boxes of four states or sixteen of three — and the builder throws
-with both numbers in the message rather than letting the shift drop the boxes
-that do not fit.
+The packing is a real ceiling. Each box gets the smallest number of bits that
+can count its states — one bit for two states, two bits for three or four,
+four bits for five to sixteen — and *boxes* × *bits per box* must fit in 32.
+So a cluster holds 32 boxes of two states, 16 of three or four, or 8 of
+anything up to sixteen. The builder throws with both numbers in the message
+rather than letting the shift drop the boxes that do not fit.
 
 [`Value`](#Value) gained a fourth shape, `Marks`, and [`marks`](#marks) reads
 the same thing out of a dialog's answer beside `text`, `number` and `flags`.
@@ -869,15 +898,16 @@ the same thing out of a dialog's answer beside `text`, `number` and `flags`.
 after [#229](https://github.com/magiblot/tvision/issues/229), and the first in
 the library rather than in a demo. `TMultiCheckBoxes` allocates its `states`
 string with `newStr()` — `new char[]` — and frees it with plain `delete`
-(`tmulchkb.cpp:62`). ASAN does not warn about an alloc/dealloc mismatch, it
+(upstream `tmulchkb.cpp:62`). ASAN does not warn about an alloc/dealloc mismatch, it
 stops the process, so the first `test:asan` run failed at every check after the
 dialog was closed while `test` stayed green throughout. The same shape turns up
 in six more places in the library; FINDINGS lists them, and all seven are
 reported as
-[#230](https://github.com/magiblot/tvision/issues/230). The subclass passes a
-null `states` and draws the marks itself, and goes on doing so until the fix
-lands upstream — `tvision/` is gitignored, so a fresh checkout does not have
-it.
+[#230](https://github.com/magiblot/tvision/issues/230). The fix is on the
+fork's `patches` branch that `tvision-node/tvision/` is pinned to, so the line
+a fresh checkout builds reads `delete[]`. The subclass still passes a null
+`states` and draws the marks itself, and comes out when the fix lands upstream
+and the pin moves past it.
 
 **10. ~~A view on the application rather than the desktop.~~ Done —
 [`Ui.overlays`](#Ui), protocol 12.** `TClockView` and `THeapView` are inserted
@@ -897,8 +927,9 @@ second — precisely why Borland made the clock a view. It is now one
 did**: `TClockView` sets its own `growMode`, and here that is
 `Grows { grow = Tui.pinRight, ... }` on a view that is not in a window, with
 nothing added to make it work. And **screen coordinates are not desktop
-coordinates** — the same width, two rows shorter, so row 0 is the menu bar's
-row and that is where a clock goes.
+coordinates** — the desktop is the screen minus the menu bar and status line,
+the same width and two rows shorter, so in screen coordinates row 0 is the
+menu bar's row and that is where a clock goes.
 
 `watch` still puts its counters in the status line, which is a fair place for
 counters that are text; the point is that it is now a choice.
@@ -1195,9 +1226,9 @@ at all.
 
 ## What predc's command line changed
 
-The one API change since the list emptied, and it came from the application
-rather than from an example: **a program built on this package can now decide,
-in `init`, that it is not a program this time.**
+This one came from the application rather than from an example: **a program
+built on this package can now decide, in `init`, that it is not a program this
+time.**
 
 `predc hex dump.bin` wanted a CLI, and a CLI has answers that are not a screen
 -- `--help`, `--version`, a word that is not a command. `Tui.defineProgram`
@@ -1339,10 +1370,12 @@ window by one.
 `TInputLine`'s constructor takes a **limit** and stores `maxLen = limit - 1`
 (`tinputli.cpp`), with a buffer of `maxLen + 1` bytes. `views.cc` passed the
 model's `maxLen` straight through as that limit, so the field held one fewer
-character than the model asked for. Nothing had caught it because the only
-`maxLen` in the package is `fileDialog`'s 255, where a filename losing its
-254th character is invisible, and because the field still *looks* right until
-the value is exactly as long as the field.
+character than the model asked for. Nothing had caught it because the field
+still *looks* right until the value is exactly as long as the field, and no
+driver types a field full: `forms`, `entries` and `edit` all set `maxLen` and
+none of their drivers fills one, and the only `maxLen` in `src/Tui.gren` itself
+is `fileDialog`'s 255,
+where a filename losing its 254th character is invisible.
 
 The fix is `maxLen + 1` at the one construction site, so the name on the Gren
 side means what it says: how many characters the user may type.
@@ -1360,9 +1393,9 @@ through fifteen examples and three tools.
 The zone picker wanted a filter box that narrows a list of 418 as you type.
 That is not expressible: `Tui.dialog` is a `Cmd`, `tv.dialog()` builds the
 views once and returns a promise, and the differ has no path into an open
-modal. The established alternative is `Tool.Hex`'s -- close it and reopen it
-one directory down -- which resets the caret and is fine for a directory and
-useless for a keystroke.
+modal. The established alternative is `Tui.fileDialog`'s -- close it and
+reopen it one directory down -- which resets the caret and is fine for a
+directory and useless for a keystroke.
 
 predc's picker is therefore an **ordinary window** of the tool's. Nothing was
 lost: a modal is for a question and this is a workspace, it blocks nothing, and
@@ -1438,15 +1471,17 @@ control, which no amount of remembering rectangles fixes.
 
 `TButton::title` is a public `const char *` that the view allocates with
 `newStr` and frees in its destructor, so changing one is a delete, a `newStr`
-and a redraw -- and `Tui.setText`'s button half is those three lines.
+and a redraw -- and the binding's `tv.setText`, which `diff.js` calls when a
+caption changes, has those three lines as its button half.
 `skeleton()` treats `title` as mutable from here, so a toggling button costs
 its window nothing at all.
 
 **The hot key moves with the caption for free**, which is the part worth
 knowing: `TButton::handleEvent` calls `hotKey(title)` when a key arrives rather
-than caching it at construction (`tbutton.cpp:191`), so `~S~top` becoming
-`~S~tart` moves the shortcut and nothing has to be told. `examples/demo`'s
-event viewer is where this is exercised -- `drive_demo.py` stops it with Alt-S,
+than caching it at construction (`tbutton.cpp:191`), so predc's `~L~ive clock`
+becoming `~S~top clock` moves the shortcut from L to S and nothing has to be
+told. `examples/demo`'s event viewer exercises the caption changing in place,
+with the key staying put -- `drive_demo.py` stops it with Alt-S,
 presses the space bar to prove the caret never left the Clear button beside it,
 and starts it again with the same Alt-S.
 
@@ -1481,15 +1516,15 @@ it.
 **The column inside the field comes back too**, and it has to: focusing a field
 is what makes `TInputLine` select its whole value, so a caret put back by focus
 alone sits at the end with everything selected and the user's next keystroke
-replaces the lot. `movedCaret` answers `{id, pos}` and `Tui.setInputCaret` puts
-the offset back after the focus.
+replaces the lot. `movedCaret` answers `{id, pos}` and the binding's
+`tv.setInputCaret` puts the offset back after the focus.
 
 **And a caret the rebuild had nowhere to put waits for its field.** predc's
 converter has static text where its fields are while its clock runs, so the
 caret cannot go back on the way in -- and should be there when the fields
-return. The runtime remembers the last place the user put the caret in each
-window rather than only asking at the moment of the rebuild, and a view that
-declines the caret changes nothing about what is remembered.
+return. The runtime keeps the last answer it got for each window across
+rebuilds rather than asking afresh and forgetting, and a rebuild whose views
+decline the caret changes nothing about what is kept.
 
 What is still Turbo Vision's own and not this: a window that *loses* focus and
 gets it back selects the whole value of whatever field has its caret, so the
@@ -1505,13 +1540,13 @@ the bug that came of it is worth this package's attention rather than only that
 program's: **Add** added the first row of the zone list however far down the
 highlight had been clicked, arrowed or wheeled.
 
-The event's own doc comment has said the rule since the day it was added:
+The event's own doc comment says the rule:
 
-> `Focused` — the highlight in a list box moved, by arrow key, mouse or a
-> render that replaced the list. **This is how the model learns which entry an
-> "Edit" or "Delete" button should act on**; Turbo Vision's own examples read
-> the list's `focused` member at the moment they need it, which a program that
-> cannot call into C++ has no way to do.
+> `Focused` -- the highlight in a list box moved, **because the user moved it**
+> -- an arrow key, a click, the mouse wheel. This is how the model learns which
+> entry an "Edit" or "Delete" button should act on; Turbo Vision's own examples
+> read the list's `focused` member at the moment they need it, which a program
+> that cannot call into C++ has no way to do.
 
 So nothing here is wrong and nothing needs changing. What is worth writing down
 is the *shape of the mistake*, because it will happen again to anyone with more
@@ -1564,8 +1599,7 @@ from a package where a view's own rectangle is structural.
 
 ## The drag, which is a capture and not a loop
 
-The consumer gap from the section above is closed. `Tui.Event` has
-`Dragged { id, x, y, isDone }`, protocol **21**: the pointer moved on a canvas
+`Tui.Event` has `Dragged { id, x, y, isDone }`, protocol **21**: the pointer moved on a canvas
 with a button held, or the button came up and ended the gesture. It is always
 preceded by the `Clicked` that began it, and always on that canvas.
 
@@ -1588,8 +1622,9 @@ release sends one only if there was motion to end. Reporting every release
 would have made every click on every canvas two events, and clicking is what a
 canvas is mostly for.
 
-**The coordinates are not clamped.** A drag above a canvas reports row `-1` and
-below it reports `rows`. A model that wants only the cells it owns clamps in one
+**The coordinates are not clamped.** A drag one row above a canvas reports
+`y = -1`, and one row below it reports `y` equal to the canvas's height — the
+first row the canvas does not have. A model that wants only the cells it owns clamps in one
 line; a model that wants to scroll needs to know how far past. Nobody can
 un-clamp a clamped coordinate. `examples/ascii` is the demonstration and needed
 one line, because the `moveTo` that Home and End already went through clamps.
@@ -1717,10 +1752,10 @@ it. `entries` hides its history arrow until there is something behind it — an
 arrow that opens an empty list is an offer of nothing — and the check that pins
 it is that the window is still there and still focused afterwards.
 
-Three wrappers is where the design starts to earn itself: `encodeView` walks
-down through any nesting now instead of matching one level, and
-`WRAPPER_VARIANTS` in `check_consistency.py` is a set with a sentence beside it
-saying why a wrapper never has a wire type.
+The third wrapper is where that work starts to earn itself: `Enabled` had
+already made `encodeView` walk down through any nesting and turned
+`WRAPPER_VARIANTS` in `check_consistency.py` into a set, so `Visible` added a
+name to the set and nothing else.
 
 **`Tui.bringToFront`.** Until now the only way to raise a window was to change
 something *structural* about it so that the differ rebuilt it in front. That
