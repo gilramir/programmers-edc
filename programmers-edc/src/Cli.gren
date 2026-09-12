@@ -63,7 +63,7 @@ reporting the release before the one somebody had just installed.
 -}
 version : String
 version =
-    "1.0.0"
+    "1.0.1"
 
 
 parser : Parser.App Command

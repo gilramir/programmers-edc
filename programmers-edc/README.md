@@ -13,12 +13,17 @@ and -- when the terminal allows it -- with the rest of the machine.
 [What is in here](#what-is-in-here) below is the inventory, and it is the same
 list **Help | What is in here** shows in the program.
 
-[../docs/screenshots.md](../docs/screenshots.md) has a picture of three tools
-open at once, and one of the desktop in each of the three color schemes, taken
-from the running program.
+![predc in the Borland scheme, with the hex dump viewer, the time zone converter and the RPN calculator open at once](https://raw.githubusercontent.com/gilramir/programmers-edc/main/docs/img/predc-desktop.png)
+
+The picture is an absolute URL rather than a repository path, because this file
+is also the npm package's page and that page is one page: `docs/` is not in the
+tarball and nothing relative to it resolves there.
+[docs/screenshots.md](https://github.com/gilramir/programmers-edc/blob/main/docs/screenshots.md)
+has this one and the desktop in each of the three color schemes, all taken from
+the running program.
 
 The original feature list, version by version -- what was asked for, what was
-dropped, and what was declined -- is [docs/predc-plan.md](../docs/predc-plan.md).
+dropped, and what was declined -- is [docs/predc-plan.md](https://github.com/gilramir/programmers-edc/blob/main/docs/predc-plan.md).
 This file is what predc turned into.
 
 ## Installing it
@@ -101,7 +106,7 @@ than to describe can be sent rather than explained. It works because the port
 boundary is total: predc is a pure function of what `init` read and what
 arrived on `tuiIn`, so the file is the *input* that produced the failure and
 not an account of it. What is on it, and what deliberately is not, is in
-[the runtime's README](../gren-tvision-runtime/README.md#recording-a-session)
+[the runtime's README](https://github.com/gilramir/programmers-edc/blob/main/gren-tvision-runtime/README.md#recording-a-session)
 and in FINDINGS.md.
 
 The short version, because a person deciding whether to send a file deserves
@@ -846,7 +851,7 @@ whole point of `OSC 52` and the only route that can work over ssh.
 Either way predc keeps the text itself, so `y` here and `p` in another of its
 tools always work.
 
-gren-tvision's [`docs/clipboard.md`](../gren-tvision/docs/clipboard.md) is the
+gren-tvision's [`docs/clipboard.md`](https://github.com/gilramir/programmers-edc/blob/main/gren-tvision/docs/clipboard.md) is the
 long version: every environment, what each terminal calls its permission, and a
 one-line test that says whether the terminal or tmux is the one eating it.
 

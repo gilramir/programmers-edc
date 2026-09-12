@@ -841,3 +841,37 @@ libc, libm, libpthread and terminfo, and anything naming `libncursesw`,
 `libstdc++` or `libgcc_s` is the local one. The sonames are plain strings in
 the dynamic string table, so it needs no ELF parser and no `readelf` -- which
 matters, because it has to run wherever `npm publish` runs.
+
+## The npm page is one page, and predc's README was not written for it
+
+`programmers-edc@1.0.0` went to npm with no screenshot on its page. The
+diagnosis offered at the time was a missing repository URL; the actual cause
+was that **`programmers-edc/README.md` had never had an image in it** -- the
+desktop picture lives in the repository's root README, which npm never sees.
+The `repository` field was set correctly, `directory` and all.
+
+Worth separating, because the two have different fixes and only one of them
+was needed. And worth checking before believing: the registry's stored readme
+is `npm view programmers-edc readme`, and it had no `![` in it at all.
+
+**A published version's README cannot be changed.** npm serves it from that
+version's tarball, a version cannot be republished over, and there is no
+editor on the site. So the fix is a new version or it is nothing, which is why
+it was worth doing *now* -- before the Gren tag brings anybody, a patch bump
+for a README costs nothing, and a month later the same change is churn.
+
+So `programmers-edc@1.0.1` is a README-only release. The picture is an
+absolute `raw.githubusercontent.com` URL, and the three links that pointed at
+`../docs/`, `../gren-tvision-runtime/` and `../gren-tvision/` are absolute now
+too: `docs/` is not in the tarball and nothing relative to it resolves on the
+package page. That is the same rule the Gren package's README already follows,
+arrived at here the second time by finding a page with a hole in it.
+
+All four URLs were fetched before the release rather than after -- the picture
+came back 200 and byte-for-byte identical to the local file.
+
+**And the version bump was two files, not one**, which is the arrangement
+working: `Cli.version` had to move with `package.json` or
+`tools/prepare-publish.sh` would refuse the publish. `drive_cli.py` and
+`drive_help.py` needed no edit at all, because both read the expected version
+out of `package.json` rather than repeating it.

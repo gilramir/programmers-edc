@@ -1,6 +1,6 @@
 {
   "name": "programmers-edc",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "license": "ISC",
   "author": "Gilbert Ramirez <gram@alumni.rice.edu>",
   "description": "The programmer's every-day carry: small tools, one terminal window.",
