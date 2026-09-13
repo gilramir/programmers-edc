@@ -7,6 +7,13 @@ an environment variable browser, a calendar, and a notepad.
 
 ![predc in the Borland scheme, with the hex dump viewer, the time zone converter and the RPN calculator open at once](docs/img/predc-desktop.png)
 
+It has three color schemes. Besides Borland, there is Midnight, a dark scheme
+in 24-bit color, and Gren, a light one in gren-lang.org's colors:
+
+![predc in the Midnight scheme, with the hex dump viewer and the Unicode decoder open](docs/img/predc-midnight.png)
+
+![predc in the Gren scheme, with the time converter and the encoder open](docs/img/predc-gren.png)
+
 Underneath it is the rest of this repository: [Turbo Vision][tv] — the framework
 Borland shipped in 1990, revived for modern Unix and Windows by
 [magiblot][tv] — bound to Node, and driven from [Gren][gren] as an
@@ -79,8 +86,8 @@ built here would load at all, developed during out prototyping.
   recorded session.
 - [Building and running](docs/building.md) — the devbox commands, every example
   and what it demonstrates, and the recipe without devbox.
-- [Screenshots](docs/screenshots.md) — the picture above, and predc's desktop
-  in each of its three color schemes, generated from the running program.
+- [Screenshots](docs/screenshots.md) — the pictures above, plus the Borland
+  scheme on two other tools, all generated from the running program.
 
 **How it works**
 
